@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
   "status": "CURRENT_MAINLINE_REBUILT_SOURCE_BOUND_NOT_INSTALLED",
-  "builtAtUtc": "2026-11-05T18:49:27.7163482Z",
-  "helperSha256": "6ea6aa973dc788b325082f02d1f0748224de8df2b3e5a2e1129b0f9236e73ee7",
+  "builtAtUtc": "2026-11-24T04:27:40.6672979Z",
+  "helperSha256": "f5ee44488dfeb34948f90f93b0daa4b41b6b43f38fecb84f5e6eeca844cb2402",
   "pythonVersion": "3.13.14",
   "pyinstallerVersion": "6.13.0",
   "source": {
-    "path": "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\Workspace\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\pawnio\\YeManTdpCtl.py",
-    "sha256": "d4d3128e826be07bd2092976662b2bb9dfd9ea449145cacf49f40f1f586c4d05",
-    "bytes": 245085
+    "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\pawnio\\YeManTdpCtl.py",
+    "sha256": "e15c980118a9f5a4cd1720fe3660e81c6f9a478af3468a7f792600e331d19734",
+    "bytes": 258187
   },
   "recipe": {
-    "path": "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\Workspace\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\pawnio\\YeManTdpCtl.spec",
+    "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\pawnio\\YeManTdpCtl.spec",
     "sha256": "00a502b154896f6f1fc4848f3ff0ee881da66f715107d30da3f2e1539f087e43",
     "bytes": 1018
   },
@@ -25,73 +25,72 @@
     "-m",
     "PyInstaller",
     "--noconfirm",
-    "--clean",
     "--distpath",
-    "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\TdpHelperRebuild\\dist",
+    "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\OptiGameCrossTest-20261124\\build-r5\\dist",
     "--workpath",
-    "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\TdpHelperRebuild\\work",
-    "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\Workspace\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\pawnio\\YeManTdpCtl.spec"
+    "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\OptiGameCrossTest-20261124\\build-r5\\work",
+    "YeManTdpCtl.spec"
   ],
-  "buildLog": {
-    "path": "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\tdp-helper-rebuild.log",
-    "sha256": "b689573b4a4cea36ec5dcefd002a44f7533ad00198544f1ac4710551f3506e6b",
-    "bytes": 5250
-  },
   "analysisToc": {
-    "path": "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\TdpHelperRebuild\\work\\YeManTdpCtl\\Analysis-00.toc",
-    "sha256": "fe0e62ddc95d996afd00cd9026d290de4ae644661b60c08dde3e81fdac1e0d2f",
-    "bytes": 32022
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\OptiGameCrossTest-20261124\\build-r5\\work\\YeManTdpCtl\\Analysis-00.toc",
+    "sha256": "e65055674bca427478da58ba42f8c0a1949d38b833f5b339251db7d7cf9100d0",
+    "bytes": 31281
   },
   "sourceBinding": {
-    "path": "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\TDP-HELPER-EMBEDDED-SOURCE-BINDING.json",
-    "sha256": "7d777bef2e70e019d834e73c927e05e0acb2af074fd93221aee630ae7711954e",
-    "bytes": 870
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\OptiGameCrossTest-20261124\\build-r5\\TDP-HELPER-EMBEDDED-SOURCE-BINDING.json",
+    "sha256": "72ffc9ab2baa55eda51127ffe3179308a48be3634e8e27d6b9c40b33d80d91a5",
+    "bytes": 241
+  },
+  "fixtureResults": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\OptiGameCrossTest-20261124\\evidence-hardened\\REPORT.json",
+    "sha256": "4a56595f9d2581c51d195fc50a4cc91f25a17a5ffb011e6b55d91b5f2d143981",
+    "bytes": 1809
   },
   "files": [
     {
-      "name": "YeManTdpCtl.exe",
-      "path": "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\TdpHelperRebuild\\dist\\YeManTdpCtl\\YeManTdpCtl.exe",
-      "sha256": "6ea6aa973dc788b325082f02d1f0748224de8df2b3e5a2e1129b0f9236e73ee7",
-      "bytes": 1922665
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\OptiGameCrossTest-20261124\\build-r5\\dist\\YeManTdpCtl\\YeManTdpCtl.exe",
+      "sha256": "f5ee44488dfeb34948f90f93b0daa4b41b6b43f38fecb84f5e6eeca844cb2402",
+      "bytes": 1932008,
+      "name": "YeManTdpCtl.exe"
     },
     {
-      "name": "_internal/base_library.zip",
-      "path": "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\TdpHelperRebuild\\dist\\YeManTdpCtl\\_internal\\base_library.zip",
-      "sha256": "e140fea9bcf4a58b066481401c65416fe23708b8c03e81db8cacea60704d96c7",
-      "bytes": 1409329
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\OptiGameCrossTest-20261124\\build-r5\\dist\\YeManTdpCtl\\_internal\\base_library.zip",
+      "sha256": "6b87fb61f62adf00bc36454cc7100c885ebf4732d1d926ef7397dd331c0a80f8",
+      "bytes": 1409329,
+      "name": "_internal/base_library.zip"
     },
     {
-      "name": "_internal/python313.dll",
-      "path": "G:\\YeManCC-Work\\Build\\GitRelease\\20261106-024323-formal039\\TdpHelperRebuild\\dist\\YeManTdpCtl\\_internal\\python313.dll",
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\OptiGameCrossTest-20261124\\build-r5\\dist\\YeManTdpCtl\\_internal\\python313.dll",
       "sha256": "3a7a6170ea840bf2a2a76d05b687b946fcdc8d0cfedfe159012b38f1e8959a7c",
-      "bytes": 6132448
+      "bytes": 6132448,
+      "name": "_internal/python313.dll"
     }
   ],
   "changed": [
     {
       "releasePath": "pawnio/YeManTdpCtl.exe",
       "relative": "YeManTdpCtl.exe",
-      "beforeSha256": "9c25f45dab9a1d87d2b7babcdbbc4e52140513607e33790f2f2b607327cd1240",
-      "afterSha256": "6ea6aa973dc788b325082f02d1f0748224de8df2b3e5a2e1129b0f9236e73ee7",
-      "bytes": 1922665,
-      "lockOldSha256": "9C25F45DAB9A1D87D2B7BABCDBBC4E52140513607E33790F2F2B607327CD1240"
+      "beforeSha256": "0b954f0a554edc5e2c591ec76c1d3de608ee9763a02f8b1bc82f4029b61972d7",
+      "afterSha256": "f5ee44488dfeb34948f90f93b0daa4b41b6b43f38fecb84f5e6eeca844cb2402",
+      "bytes": 1932008,
+      "lockOldSha256": "0B954F0A554EDC5E2C591EC76C1D3DE608EE9763A02F8B1BC82F4029B61972D7"
     },
     {
       "releasePath": "pawnio/_internal/base_library.zip",
       "relative": "_internal/base_library.zip",
-      "beforeSha256": "3a5727c1612992dbebff97edbd5c4256677facb3612519188958069a43444310",
-      "afterSha256": "e140fea9bcf4a58b066481401c65416fe23708b8c03e81db8cacea60704d96c7",
+      "beforeSha256": "3f8e8c4f1d848230565daff8b1e5427ada4f8f603555461c9ff3defe86c961fa",
+      "afterSha256": "6b87fb61f62adf00bc36454cc7100c885ebf4732d1d926ef7397dd331c0a80f8",
       "bytes": 1409329,
-      "lockOldSha256": "3A5727C1612992DBEBFF97EDBD5C4256677FACB3612519188958069A43444310"
+      "lockOldSha256": "3F8E8C4F1D848230565DAFF8B1E5427ADA4F8F603555461C9FF3DEFE86C961FA"
     }
   ],
   "sourceToBuiltCandidateBound": true,
   "driverOrModuleBytesChanged": false,
   "canonicalSourceRelativePath": "PowerControl/pawnio/YeManTdpCtl.py",
-  "canonicalSourceSha256": "d4d3128e826be07bd2092976662b2bb9dfd9ea449145cacf49f40f1f586c4d05",
+  "canonicalSourceSha256": "e15c980118a9f5a4cd1720fe3660e81c6f9a478af3468a7f792600e331d19734",
   "originalReleaseFileSetRetained": true,
   "newBinaryDependenciesAdded": false,
-  "helperExecuted": false,
+  "helperExecuted": true,
   "hardwareAcceptance": false,
-  "fixtureValidation": "NOT_RUN"
+  "fixtureValidation": "COMPILED_OPTISCALER_ACTUAL_GAME_SHARED_CROSS_PASS"
 }

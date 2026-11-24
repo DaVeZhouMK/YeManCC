@@ -2,7 +2,14 @@
 import fs from 'node:fs';import path from 'node:path';import vm from 'node:vm';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
 import {root,validation} from './fixtures/decky_task_paths.mjs';
 const {transformSync}=createRequire(path.join(root,'package.json'))('esbuild');
-function load(file,modules={},globals={}){const module={exports:{}};vm.runInNewContext(transformSync(fs.readFileSync(file,'utf8'),{loader:file.endsWith('tsx')?'tsx':'ts',format:'cjs',jsxFactory:'SP_REACT.createElement',jsxFragment:'SP_REACT.Fragment'}).code,{module,exports:module.exports,structuredClone,console,...globals,require:n=>{assert(Object.hasOwn(modules,n),'Unexpected import '+n);return modules[n];}});return module.exports;}
+let activeCloneObservation;
+function countClone(value){if(activeCloneObservation&&value&&typeof value==='object'){
+ if('connected' in value&&'busy' in value&&'snapshot' in value)activeCloneObservation.clientState++;
+ if('runId' in value&&'revision' in value&&'fan' in value)activeCloneObservation.fullSnapshot++;
+ if('view' in value&&'patch' in value)activeCloneObservation.intentDraft++;
+ if('performanceProjection' in activeCloneObservation&&'sourceRevision' in value&&Array.isArray(value.controls))activeCloneObservation.performanceProjection++;
+}return structuredClone(value);}
+function load(file,modules={},globals={}){const module={exports:{}};vm.runInNewContext(transformSync(fs.readFileSync(file,'utf8'),{loader:file.endsWith('tsx')?'tsx':'ts',format:'cjs',jsxFactory:'SP_REACT.createElement',jsxFragment:'SP_REACT.Fragment'}).code,{module,exports:module.exports,structuredClone:countClone,console,...globals,require:n=>{assert(Object.hasOwn(modules,n),'Unexpected import '+n);return modules[n];}});return module.exports;}
 const allowedSelectors=new Set(['--speed-only','--background-only','--entry-focus-only','--menu-actions-only','--fan-observers-only']);
 const selectors=[],selectedFanNames=new Set();
 for(let i=2;i<process.argv.length;i++){const value=process.argv[i];if(value==='--case'){const name=process.argv[++i];if(!name||selectedFanNames.has(name))throw new Error('Unsupported or combined slider regression selection');selectedFanNames.add(name);}else if(allowedSelectors.has(value))selectors.push(value);else throw new Error('Unsupported or combined slider regression selection');}
@@ -23,9 +30,10 @@ const entryDoc={defaultView:entryHost,addEventListener(name,fn){const listeners=
 const entryDom={ownerDocument:entryDoc,isConnected:true,displayed:true,visibility:'visible',getClientRects(){return this.displayed?[{}]:[];},getBoundingClientRect(){return {width:250,height:50};}};
 const entryNav={TakeFocus(){entryCalls.push('tdp-row');}};
 const attachEntryRefs=(type,props)=>{if(!withEntryFocus)return;if(type==='PerformanceControls'){if(props.entryElementRef)props.entryElementRef.current=entryDom;if(props.entryNavRef)props.entryNavRef.current=entryNav;}if(type==='div'&&props?.className?.startsWith('ymcc-decky-sidebar')&&props.ref)props.ref.current=entryDom;};
-const react={Fragment:'Fragment',createElement:(type,props,...children)=>{attachEntryRefs(type,props);return {type,props:props||{},children};},useState(initial){const i=cursor++;if(!(i in hooks))hooks[i]=initial;const ownerHooks=hooks;return[ownerHooks[i],v=>{ownerHooks[i]=typeof v==='function'?v(ownerHooks[i]):v;}];},useRef(initial){const i=cursor++;return hooks[i]??={current:initial};},useEffect(fn,deps){const i=cursor++,old=hooks[i];if(!old||!deps||deps.some((v,i)=>v!==old[i])){hooks[i]=deps;effects.push(()=>{cleanups.get(i)?.();const cleanup=fn();if(typeof cleanup==='function')cleanups.set(i,cleanup);else cleanups.delete(i);});}}};
+const react={Fragment:'Fragment',createElement:(type,props,...children)=>{attachEntryRefs(type,props);return {type,props:props||{},children};},useState(initial){const i=cursor++;if(!(i in hooks))hooks[i]=typeof initial==='function'?initial():initial;const ownerHooks=hooks;return[ownerHooks[i],v=>{ownerHooks[i]=typeof v==='function'?v(ownerHooks[i]):v;}];},useRef(initial){const i=cursor++;return hooks[i]??={current:initial};},useEffect(fn,deps){const i=cursor++,old=hooks[i];if(!old||!deps||deps.some((v,i)=>v!==old[i])){hooks[i]=deps;effects.push(()=>{cleanups.get(i)?.();const cleanup=fn();if(typeof cleanup==='function')cleanups.set(i,cleanup);else cleanups.delete(i);});}}};
 const schedule=function(fn,ms){if(this!==undefined)throw TypeError('Illegal invocation');timers.set(++id,{fn,at:now+ms});return id;},cancel=function(i){if(this!==undefined)throw TypeError('Illegal invocation');timers.delete(i);};
-class Client{setPassiveDemand(){}waitForBootstrap(){return()=>{};}snapshot(){return state;}subscribe(fn){listeners.add(fn);fn(state);return()=>listeners.delete(fn);}setVisible(){}setIntentPending(){}bootstrapChanged(){}dispose(){}mutate(command,args,expected){assert.equal(expected.revision,state.snapshot.revision,'stale transport receipt');mutations.push({command,args:structuredClone(args),revision:expected.revision});return Promise.resolve();}}
+react.useLayoutEffect=react.useEffect;
+class Client{setPassiveDemand(){}waitForBootstrap(){return()=>{};}snapshot(){return state;}performanceIntentSnapshot(){return state.connected&&state.snapshot?.ready?state.snapshot:null;}isBusy(){return state.busy;}subscribe(fn){listeners.add(fn);fn(state);return()=>listeners.delete(fn);}subscribePerformanceIntent(fn,when){return this.subscribe(()=>{if(when())fn(this.performanceIntentSnapshot());});}setVisible(){}setIntentPending(){}bootstrapChanged(){}dispose(){}mutate(command,args,expected){assert.equal(expected.revision,state.snapshot.revision,'stale transport receipt');mutations.push({command,args:structuredClone(args),revision:expected.revision});return Promise.resolve();}}
 const fanQueues=[];const observedFan={...fan,FanChoiceDebounce:class extends fan.FanChoiceDebounce{constructor(deps){super(deps);fanQueues.push(this);}}};
 const sockets=[];class Socket{constructor(){this.listeners=new Map();this.opened=false;this.closed=false;sockets.push(this);}addEventListener(name,fn){const a=this.listeners.get(name)||[];a.push(fn);this.listeners.set(name,a);}emit(name,data){if(name==='open')this.opened=true;for(const fn of this.listeners.get(name)||[])fn(name==='message'?{data:JSON.stringify(data)}:{});}send(raw){const v=JSON.parse(raw);requests.push(v);if(v.command!=='snapshot')mutations.push({command:v.command,args:v.args,revision:v.revision,id:v.id});}close(){this.closed=true;this.emit('close');}}
 const steamModel=real?load(path.join(root,'decky-plugin/src/steamRunningContext.ts')):null;const nativeClient=real?load(process.env.YMCC_MIRROR_CLIENT_SOURCE_OVERRIDE||path.join(root,'decky-plugin/src/mirrorClient.ts'),{'./performanceModel':model,'./steamRunningContext':steamModel,'../../src/bridge/gameSteamContextModel':load(path.join(root,'src/bridge/gameSteamContextModel.ts'))}):null;
@@ -41,6 +49,7 @@ function show(){visible=true;render();if(real){if(!sockets.at(-1).opened)sockets
 if(real){render();sockets.at(-1).emit('open');sockets.at(-1).emit('message',{type:'snapshot',runId:state.snapshot.runId,snapshot:state.snapshot});render();}
 const api={state,mutations,requests,timers,fanQueues,teardownState:{calls:teardownCalls,warnings:teardownWarnings,events:windowEvents,sockets,unload:()=>plugin.onDismount(),pagehide:()=>{for(const fn of [...(windowEvents.get('pagehide')??[])])fn();}},entry:{dom:entryDom,nav:entryNav,calls:entryCalls,frames:entryFrames,listeners:()=>[...entryListeners.values()].reduce((n,set)=>n+set.size,0),input(name){for(const fn of entryListeners.get(name)??[])fn({type:name});},flush(){for(const [id,fn]of [...entryFrames]){entryFrames.delete(id);fn();}}},clientState:()=>real?realClient.snapshot():structuredClone(state),disconnect(){sockets.at(-1).emit('close');},nodes:render,reply(ok=true,request=mutations.at(-1),fields={}){sockets.at(-1).emit('message',{type:'reply',runId:state.snapshot.runId,id:request.id,ok,result:{saved:true,applied:true},notice:'性能调度已记忆并提交 YMCC',...fields});},find(type,label=''){return render().find(n=>n.type===type&&text(n.props.label).startsWith(label));},publish(){if(real)sockets.at(-1).emit('message',{type:'snapshot',runId:state.snapshot.runId,snapshot:state.snapshot});else for(const f of listeners)f(state);},hide(){visible=false;render();},show,unmount,advance(ms){now+=ms;for(const[i,t]of [...timers])if(t.at<=now){timers.delete(i);t.fn();}},close(){for(const key of views.keys())withView(key,unmount);unmount();plugin.onDismount();}};
 function withView(key,fn){if(key===activeView)return fn();const prior={key:activeView,hooks,effects,cleanups,cursor,visible},next=views.get(key)??{hooks:[],effects:[],cleanups:new Map(),cursor:0,visible:false};activeView=key;({hooks,effects,cleanups,cursor,visible}=next);try{return fn();}finally{views.set(key,{hooks,effects,cleanups,cursor,visible});activeView=prior.key;({hooks,effects,cleanups,cursor,visible}=prior);}}
+api.showCached=()=>{visible=true;render();};
 api.view=key=>new Proxy(api,{get(target,prop){const value=Reflect.get(target,prop);return typeof value==='function'?(...args)=>withView(key,()=>value(...args)):value;}});return api;
 }
 // A bounded invocation of this existing consumer; skipped cases are never PASS.
@@ -48,6 +57,39 @@ const speedOnly=process.argv.includes('--speed-only'),backgroundOnly=process.arg
 const cases=[];async function check(name,fn){if(fanObserversOnly?!name.startsWith('fan observer: ')||selectedFanNames.size&&!selectedFanNames.has(name):name.startsWith('fan observer: ')||speedOnly&&!name.startsWith('speed ack: ')||backgroundOnly&&!name.startsWith('background intent: ')||entryOnly&&!name.startsWith('entry focus: ')||menuOnly&&!name.startsWith('menu actions: ')){skipped.push(name);return;}try{await fn();cases.push(name);if(fanObserversOnly)observerResults.push({name,status:'passed'});}catch(error){if(fanObserversOnly){observerResults.push({name,status:'failed',error:String(error.stack??error)});return;}throw new Error(name+": "+error.message,{cause:error});}}
 // Execute shipped TSX, fan queue and MirrorClient; only display subscriptions fail.
 await check('fan observer: choosing isolates a failed display subscriber',async()=>{
+ const updates=24,observations=[];
+ for(const control of ['fan','tdp']){
+  const display=harness(true),isFan=control==='fan';
+  const hasIntent=()=>isFan?display.fanQueues[0].hasWork():display.find('PerformanceControls').props.draft.tdp===25;
+  try{
+   if(isFan)display.find('SliderField','风扇控制').props.onChange(2);
+   else {const power=display.find('PerformanceControls').props;power.begin();power.change('tdp',25);}
+   assert(hasIntent());
+   const requestCount=display.requests.length,timerIds=[...display.timers.keys()],socket=display.teardownState.sockets.at(-1);
+   const counts={clientState:0,fullSnapshot:0,intentDraft:0,performanceProjection:0};
+   const repeated={clientState:0,fullSnapshot:0,intentDraft:0,performanceProjection:0};
+   activeCloneObservation=counts;
+   try{for(let i=0;i<updates;i++){
+    display.state.snapshot.losslessProgram={known:true,running:i%2===1};
+    socket.emit('message',{type:'snapshot',runId:display.state.snapshot.runId,displayOnly:true,snapshot:display.state.snapshot});
+   }}finally{activeCloneObservation=undefined;}
+   activeCloneObservation=repeated;
+   try{for(let i=0;i<updates;i++)socket.emit('message',{type:'snapshot',runId:display.state.snapshot.runId,displayOnly:true,snapshot:display.state.snapshot});}
+   finally{activeCloneObservation=undefined;}
+   console.log(JSON.stringify({control,displayOnlyIntentCopies:counts,updates}));
+   observations.push(counts);
+   console.log(JSON.stringify({control,duplicateDisplayCopies:repeated,updates}));
+   assert.deepEqual(repeated,{clientState:0,fullSnapshot:0,intentDraft:0,performanceProjection:0},'Identical display updates must not copy or notify the sidebar again');
+   assert.equal(display.clientState().snapshot.losslessProgram.running,true);
+   assert.equal(display.requests.length,requestCount);assert.deepEqual([...display.timers.keys()],timerIds);assert(hasIntent());
+   // A real new revision must still notify the queue about source revocation.
+   display.state.snapshot.revision++;
+   if(isFan)display.state.snapshot.fan.preset='soft';else display.state.snapshot.performance.side='dc';
+   display.publish();
+   assert.equal(hasIntent(),false);assert.equal(display.mutations.length,0);
+  }finally{display.close();}
+ }
+ for(const counts of observations)assert.deepEqual(counts,{clientState:updates,fullSnapshot:0,intentDraft:0,performanceProjection:0},'Cosmetic updates should copy only the visible UI state');
  const h=harness(true),choice=h.fanQueues[0];let later=0;
  const stop=choice.subscribe(()=>{throw Error('injected display failure');});choice.subscribe(()=>later++);
  try{assert.doesNotThrow(()=>h.find('SliderField','风扇控制').props.onChange(2));assert.equal(later,1);h.hide();h.advance(1999);assert.equal(h.mutations.length,0);h.advance(1);assert.equal(h.mutations.length,1);h.reply();await new Promise(r=>setImmediate(r));assert.equal(choice.hasWork(),false);assert.equal(h.clientState().snapshot,null);assert.equal(h.timers.size,0);}finally{stop();h.close();}
@@ -124,7 +166,33 @@ for(const boundary of ['hide','unmount'])await check('background intent: '+bound
  h.reply();await new Promise(r=>setImmediate(r));h.state.snapshot.revision++;h.state.snapshot.performance.controls[0].value=25;h.state.snapshot.performance.sourceRevision='background';h.publish();assert.equal(h.clientState().busy,false);assert.equal(h.clientState().snapshot,null,'no hidden business stream after settlement');h.advance(60000);assert.equal(h.mutations.length,1);h.close();assert.equal(h.timers.size,0);
 });
 await check('background intent: closing a held TDP gesture commits its last explicit value without accepting stale callbacks',async()=>{
- const h=harness(true),p=h.find('PerformanceControls').props;p.begin();p.change('tdp',25);h.hide();p.change('tdp',29);p.end();h.advance(1999);assert.equal(h.mutations.length,0);h.advance(1);assert.equal(h.mutations.length,1);assert.equal(h.mutations[0].args.patch.tdp,25);h.reply();await new Promise(r=>setImmediate(r));h.close();assert.equal(h.timers.size,0);
+ const h=harness(true),clones={clientState:0,fullSnapshot:0,intentDraft:0},steps=121;
+ h.state.snapshot.generation++;h.state.snapshot.revision++;h.publish();
+ const p=h.find('PerformanceControls').props;p.begin();
+ let row=p;
+ try{activeCloneObservation=clones;for(let i=0;i<steps;i++){
+   const value=25+i%2;row.change('tdp',value);row=h.find('PerformanceControls').props;
+   assert.equal(row.draft.tdp,value,'each mounted render reflects the current drag value');
+ }}finally{activeCloneObservation=undefined;}
+ assert.equal(h.find('PerformanceControls').props.draft.tdp,25);
+ const refreshClones={clientState:0,fullSnapshot:0,intentDraft:0},updates=100;
+ try{activeCloneObservation=refreshClones;for(let i=0;i<updates;i++){h.state.snapshot.revision++;h.publish();}}finally{activeCloneObservation=undefined;}
+ h.hide();p.change('tdp',29);p.end();
+ const hiddenClones={clientState:0,fullSnapshot:0,intentDraft:0},requests=h.requests.length;
+ try{activeCloneObservation=hiddenClones;for(let i=0;i<updates;i++){h.state.snapshot.revision++;h.publish();}}finally{activeCloneObservation=undefined;}
+ assert.equal(h.requests.length,requests,'Hidden rendering must not create snapshot demand');
+ h.advance(1999);assert.equal(h.mutations.length,0);h.advance(1);assert.equal(h.mutations.length,1);assert.equal(h.mutations[0].args.patch.tdp,25);assert.equal(h.mutations[0].revision,h.state.snapshot.revision);assert.equal(h.requests.at(-1).generation,h.state.snapshot.generation);
+ h.reply();await new Promise(r=>setImmediate(r));h.close();assert.equal(h.timers.size,0);
+ console.log('TDP_CLONE_OBSERVATION '+JSON.stringify({steps,...clones}));
+ console.log('TDP_ACTIVE_REFRESH_CLONE_OBSERVATION '+JSON.stringify({updates,...refreshClones}));
+ console.log('HIDDEN_QAM_REFRESH_CLONE_OBSERVATION '+JSON.stringify({updates,...hiddenClones}));
+ assert.equal(clones.clientState,0,'Checking a performance gesture must not clone the complete sidebar state');
+ assert.equal(clones.fullSnapshot,0,'The pending gesture must not copy unrelated controls');
+ assert.equal(clones.intentDraft,0,'rendering a draft must not deep-copy the queued source view');
+ assert.equal(refreshClones.clientState,updates,'Only the mounted view may clone full client state during TDP refresh');
+ assert.equal(refreshClones.fullSnapshot,0,'TDP refresh must not retain a whole sidebar snapshot');
+ assert.equal(hiddenClones.clientState,0,'A hidden QAM view must not clone background TDP snapshots');
+ assert.equal(hiddenClones.fullSnapshot,0);
 });
 await check('background intent: reopening before submission edits the retained intent rather than duplicating it',async()=>{
  const h=harness(true),p=h.find('PerformanceControls').props;p.change('tdp',25);h.unmount();h.advance(500);h.show();const fresh=h.find('PerformanceControls').props;assert.equal(fresh.draft.tdp,25);fresh.change('tdp',24);h.advance(1999);assert.equal(h.mutations.length,0);h.advance(1);assert.equal(h.mutations.length,1);assert.equal(h.mutations[0].args.patch.tdp,24);h.reply();await new Promise(r=>setImmediate(r));h.close();assert.equal(h.timers.size,0);
@@ -145,7 +213,25 @@ for(const kind of ['frame','monitor','power','input','lossless','audio','trainer
  if(kind==='lossless'){h.state.snapshot.game={label:'A',identity:'app:480:pid101:birthA',fields:{losslessScaling:{value:'off',nextValue:'on',supported:true,choices:[{data:'on',label:'开启'},{data:'off',label:'关闭'}]}}};h.state.snapshot.actions.game=true;h.publish();h.find('ButtonItem','小黄鸭').props.onClick();}
  assert.equal(h.mutations.length,1);h.unmount();assert.equal(h.clientState().busy,true);h.reply();await new Promise(r=>setImmediate(r));assert.equal(h.clientState().busy,false);h.advance(60000);assert.equal(h.mutations.length,1);h.close();assert.equal(h.timers.size,0);
 });
-await check('background intent: idle hidden view keeps no business stream or timer',()=>{const h=harness(true);h.hide();assert.equal(h.clientState().snapshot,null);assert.equal(h.timers.size,0);assert.equal(h.mutations.length,0);h.advance(60000);assert.equal(h.mutations.length,0);h.close();});
+await check('background intent: idle hidden view keeps no business stream or timer',()=>{
+ const h=harness(true),clones={clientState:0,fullSnapshot:0,intentDraft:0},updates=100;
+ try{
+  const requests=h.requests.length;
+  try{activeCloneObservation=clones;for(let i=0;i<updates;i++){h.state.snapshot.revision++;h.publish();}}finally{activeCloneObservation=undefined;}
+  assert.equal(h.requests.length,requests);assert.equal(h.mutations.length,0);
+  assert.equal(h.find('PerformanceControls').props.view.controls[0].value,20);
+  h.hide();assert.equal(h.clientState().snapshot,null);assert.equal(h.timers.size,0);assert.equal(h.mutations.length,0);h.advance(60000);assert.equal(h.mutations.length,0);
+  console.log('IDLE_QUEUE_CLONE_OBSERVATION '+JSON.stringify({updates,...clones}));
+  assert.equal(clones.clientState,updates,'Only the mounted view needs the snapshot while the intent queues are idle');
+  // Another mounted page still owns demand while this one is hidden.
+  const other=h.view('visible-peer');other.show();
+  h.state.snapshot.revision++;h.state.snapshot.performance.controls[0].value=21;h.publish();
+  const before=h.requests.length;
+  h.showCached();
+  assert.equal(h.find('PerformanceControls').props.view.controls[0].value,21,'Re-entry must immediately consume the current authenticated client snapshot');
+  assert.equal(h.requests.length,before,'Re-entry must not request an extra snapshot while another owner is active');
+ }finally{h.close();}
+});
 await check('background intent: pending hidden fan is canceled when the native fan source changes',()=>{const h=harness(true),p=h.find('SliderField','风扇控制').props;p.onChange(2);h.hide();h.state.snapshot.fan.enabled=true;h.state.snapshot.fan.preset='soft';h.publish();h.advance(60000);assert.equal(h.mutations.length,0);h.close();assert.equal(h.timers.size,0);});
 await check('background intent: stale hidden fan callbacks cannot end the replacement page drag',async()=>{const h=harness(true),old=h.find('SliderField','风扇控制').props;h.hide();h.show();const fresh=h.find('SliderField','风扇控制').props;fresh.onChangeStart();fresh.onChange(2);old.onChange(3);old.onChangeComplete();h.advance(10000);assert.equal(h.mutations.length,0);fresh.onChangeComplete();h.hide();h.advance(2000);assert.equal(h.mutations.length,1);assert.equal(h.mutations[0].args.choice,'balanced');h.reply();await new Promise(r=>setImmediate(r));h.close();assert.equal(h.timers.size,0);});
 await check('background intent: a stale frame release cannot clear the new page frame gesture',async()=>{const h=harness(true),old=h.find('SliderField','锁帧率').props;h.hide();h.show();const fresh=h.find('SliderField','锁帧率').props;fresh.onChangeStart();fresh.onChange(55);old.onChangeComplete(90);assert.equal(h.mutations.length,0);h.find('SliderField','锁帧率').props.onChangeComplete(55);assert.equal(h.mutations.length,1);assert.equal(h.mutations[0].args.value,'55');h.unmount();h.reply();await new Promise(r=>setImmediate(r));h.close();assert.equal(h.timers.size,0);});

@@ -65,7 +65,7 @@ interface DownloadPorts {
 }
 export class MediaDownloads {
   state:MediaDownloadState={};
-  private listeners=new Set<()=>void>();private pause='capacity-unavailable';
+  private listeners=new Set<()=>void>();private pause='capacity-unavailable';private playback30Idle=false;private submittedPlayback30Idle=false;
   private configurationInterrupted=false;
   private active=false;private suspended=false;private syncing=false;private again=false;private epoch=0;
   private applied='';private submitted='';private failures=0;
@@ -100,12 +100,12 @@ export class MediaDownloads {
   private reconcileInterruptedConfiguration(state:MediaDownloadState){
     if(!this.configurationInterrupted||!this.active||this.suspended||!this.port.workAllowed()||downloadReadUnavailable(state))return;
     if(!Number.isSafeInteger(state.statusRevision)||Number(state.statusRevision)<=0||Number(state.statusRevision)<this.authoritativeRevision||typeof state.enabled!=='boolean'||typeof state.pauseReason!=='string'||typeof state.cpuThreshold!=='number')return;
-    const args={enabled:this.port.enabled(),pauseReason:this.pause,cpuThreshold:this.port.threshold(),catalog:false};
+    const args={enabled:this.port.enabled(),pauseReason:this.pause,cpuThreshold:this.port.threshold(),catalog:false,playback30Idle:this.playback30Idle};
     const signature=JSON.stringify(args);
     // Only current Native truth for the same submitted idempotent policy can
     // acknowledge an interrupted return. A different newer preference still
     // passes through the original serial sync owner after the old local wait.
-    if(signature===this.submitted&&state.enabled===args.enabled&&state.pauseReason===args.pauseReason&&state.cpuThreshold===args.cpuThreshold){
+    if(!this.submittedPlayback30Idle&&signature===this.submitted&&state.enabled===args.enabled&&state.pauseReason===args.pauseReason&&state.cpuThreshold===args.cpuThreshold){
       this.applied=signature;this.configurationInterrupted=false;this.failures=0;this.cancelRetry();return;
     }
     this.applied='';this.sync();
@@ -140,17 +140,17 @@ export class MediaDownloads {
   }
   subscribe(listener:()=>void){this.listeners.add(listener);return()=>{this.listeners.delete(listener);};}
   watchCompleted(refresh:()=>void){let completed=Number(this.state.completed||0);return this.subscribe(()=>{if(downloadReadUnavailable(this.state))return;const next=Number(this.state.completed||0);if(next!==completed){completed=next;refresh();}});}
-  policy(reason:string){if(this.pause===reason)return;this.pause=reason;if(!this.port.workAllowed()){this.cancelStartupCheck();this.cancelRetry();}this.sync();}
+  policy(reason:string,playback30Idle=false){if(this.pause===reason&&this.playback30Idle===playback30Idle)return;this.pause=reason;this.playback30Idle=playback30Idle;if(!this.port.workAllowed()){this.cancelStartupCheck();this.cancelRetry();}this.sync();}
   private cancelRetry(){if(this.retry!==null)this.port.cancel(this.retry);this.retry=null;}
   sync(){
     if(!this.active||!this.port.ready())return;
-    const args={enabled:this.port.enabled(),pauseReason:this.pause,cpuThreshold:this.port.threshold(),catalog:false};
+    const args={enabled:this.port.enabled(),pauseReason:this.pause,cpuThreshold:this.port.threshold(),catalog:false,playback30Idle:this.playback30Idle};
     const signature=JSON.stringify(args);
     if(this.syncing){this.again=true;return;}
     if(signature===this.applied)return;
     if(this.retry!==null&&signature===this.submitted)return;
     if(signature!==this.submitted)this.failures=0;
-    this.cancelRetry();this.submitted=signature;this.syncing=true;const epoch=this.epoch,generation=this.readGeneration,observation=this.acceptedNativeStates;
+    this.cancelRetry();this.submitted=signature;this.submittedPlayback30Idle ||= args.playback30Idle;this.syncing=true;const epoch=this.epoch,generation=this.readGeneration,observation=this.acceptedNativeStates;
     void this.port.invoke<MediaDownloadState>('gameMedia.background',args,{timeoutMs:5000}).then(state=>{
       if(!this.active||epoch!==this.epoch||generation!==this.readGeneration)return;
       this.applied=signature;this.configurationInterrupted=false;this.failures=0;this.accept(state,observation);
@@ -200,14 +200,14 @@ export class MediaDownloads {
     });
     const settings=()=>{this.sync();this.armStartupCheck();};
     const visible=()=>{if(typeof document==='undefined'||document.visibilityState!=='hidden')void this.refresh();};
-    let powerPhase='',powerGeneration=0,powerKnown:boolean|undefined,powerAdmitted:boolean|undefined,powerNotificationSequence:number|undefined;
+    let powerPhase='',powerGeneration=0,powerKnown:boolean|undefined,powerAdmitted:boolean|undefined,powerNotificationSequence:number|undefined,powerSuspendSerial:number|undefined;
     const lifecycle=onSharedPowerLifecycle(state=>{
       const admitted=isSharedPowerLifecycleAdmitted(state);
-      if(!this.active||epoch!==this.epoch||powerPhase===state.phase&&powerGeneration===state.generation&&powerKnown===state.known&&powerAdmitted===admitted&&powerNotificationSequence===state.observedNotificationSequence)return;
-      powerPhase=state.phase;powerGeneration=state.generation;powerKnown=state.known;powerAdmitted=admitted;powerNotificationSequence=state.observedNotificationSequence;
+      if(!this.active||epoch!==this.epoch||powerPhase===state.phase&&powerGeneration===state.generation&&powerKnown===state.known&&powerAdmitted===admitted&&powerNotificationSequence===state.observedNotificationSequence&&powerSuspendSerial===state.suspendSerial)return;
+      powerPhase=state.phase;powerGeneration=state.generation;powerKnown=state.known;powerAdmitted=admitted;powerNotificationSequence=state.observedNotificationSequence;powerSuspendSerial=state.suspendSerial;
       this.suspended=!admitted;this.retireReadScope();
       if(!this.suspended)void this.refresh();
-    },{observeNotificationSequence:true});
+    },{observeNotificationSequence:true,observeSuspendSerial:true});
     window.addEventListener('pageshow',visible);window.addEventListener('focus',visible);
     if(typeof document!=='undefined')document.addEventListener('visibilitychange',visible);
     window.addEventListener('ui-settings:changed',settings);window.addEventListener('ui-settings:loaded',settings);settings();

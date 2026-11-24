@@ -19,9 +19,18 @@ const BASELINE23_SHA256='0fdd87e8578789f1235c7b13b1e63d50f38592af2c582474393a9ad
 const CONTRACT='current105-terminal26-sdk-lifetime-compact-v1';
 export const TERMINAL26_CURRENT_NATIVE_SOURCE_PROFILE='current105-terminal26-current-capture-20261117a';
 const CURRENT_PROFILE_RELATIVE='tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-compile-source-profile-current-20261117a.json';
+const NEXT_CURRENT_ID="current105-terminal26-current-capture-20261121-c391";
+const NEXT_CURRENT_PROFILE=Object.freeze({"relative":"tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-compile-source-profile-current-20261121-c391.json","bytes":16443,"sha256":"5f7c94eb031c65bec9f617761b9eb3d3024fb65e1bb0a3261e52d61359fe371b","root":"G:/YeManCC-Work/Testing/YMCC/Workspace/C391-managed/Mainline/YeManCC-source/YeManCC"});
+const FIXED_SOURCE_ID='current105-terminal26-current-capture-20261121-c392';
+const FIXED_SOURCE_PROFILE=Object.freeze({relative:'tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-compile-source-profile-current-20261121-c392.json',bytes:16443,sha256:'8c799a7e39cbb072cad4090e9e2ad13230e18dc4a76a5f28c06a4a1814bad3af',root:'G:/YeManCC-Work/Testing/YMCC/Workspace/C392-managed/Mainline/YeManCC-source/YeManCC'});
+const CURRENT_SUCCESSOR_ID="current105-terminal26-current-capture-20261121-c417";
+const CURRENT_SUCCESSOR_PROFILE=Object.freeze({"relative":"tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-compile-source-profile-current-20261121-c417.json","bytes":16443,"sha256":"f7e494d76bf4fe4170d0ee9415f48637600998c52aa0ec681691fcfff5048b9a","root":"G:/YeManCC-Work/Testing/YMCC/Workspace/C417-managed/Mainline/YeManCC-source/YeManCC"});
 export function terminal26NativeSourceProfileFiles(selection){
  if(selection===undefined)return [];
  assert.equal(typeof selection,'string','TERMINAL26_NATIVE_SOURCE_PROFILE_STRING_REQUIRED');
+ if(selection===NEXT_CURRENT_ID)return [path.join(repo,NEXT_CURRENT_PROFILE.relative)];
+ if(selection===CURRENT_SUCCESSOR_ID)return [path.join(repo,CURRENT_SUCCESSOR_PROFILE.relative)];
+ if(selection===FIXED_SOURCE_ID)return [path.join(repo,FIXED_SOURCE_PROFILE.relative)];
  assert.equal(selection,TERMINAL26_CURRENT_NATIVE_SOURCE_PROFILE,'TERMINAL26_UNKNOWN_NATIVE_SOURCE_PROFILE');
  return [path.join(repo,CURRENT_PROFILE_RELATIVE)];
 }
@@ -139,7 +148,7 @@ function readPinned(root,row){
 export function terminal26CompileSourceProfile(sourceRoot,{nativeSourceProfile}={}){
  if(nativeSourceProfile!==undefined){
   terminal26NativeSourceProfileFiles(nativeSourceProfile);
-  return currentTerminal26CompileSourceProfile(sourceRoot);
+  return currentTerminal26CompileSourceProfile(sourceRoot,nativeSourceProfile);
  }
  assert(typeof sourceRoot==='string'&&path.isAbsolute(sourceRoot),'TERMINAL26_ABSOLUTE_CAPTURE_SOURCE_REQUIRED');
  const bytes=fs.readFileSync(profileFile);
@@ -181,15 +190,16 @@ export function terminal26CompileSourceProfile(sourceRoot,{nativeSourceProfile}=
 const CURRENT_PROFILE_SHA256='66c18e7ebed3f4ae0bae8725daa4ee97e9ff04bde3162dc7b9bd56d57fca66fe';
 const CURRENT_CAPTURE_ROOT='G:/YeManCC-Work/Testing/YMCC/Workspace/R105CP-20261117A/Mainline/YeManCC-source/YeManCC';
 const CURRENT_INPUT_RELATIVES=Object.freeze(["native/steam_original_recovery_runtime.h","native/steam_original_recovery_policy.h","native/steam_original_recovery_dual_route.h","native/steam_original_recovery_config.h","native/steam_original_recovery_wake_watch.h","native/steam_original_recovery_storage.h","native/steam_original_recovery_worker.h","native/steam_original_recovery_engine.cpp","native/steam_original_recovery_engine.h","tools/fixtures/input_coordinator_lifecycle/fixture.cpp","tools/input_coordinator_lifecycle_selftest.mjs","native/main.cpp","tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc","tools/fixtures/input_coordinator_lifecycle/prepare_ack_cases.inc","tools/fixtures/input_coordinator_lifecycle/tuple_recovery_cases.inc"]);
-function currentTerminal26CompileSourceProfile(sourceRoot){
+function currentTerminal26CompileSourceProfile(sourceRoot,selectionId){
+ const selected=selectionId===CURRENT_SUCCESSOR_ID?CURRENT_SUCCESSOR_PROFILE:selectionId===FIXED_SOURCE_ID?FIXED_SOURCE_PROFILE:selectionId===NEXT_CURRENT_ID?NEXT_CURRENT_PROFILE:{relative:CURRENT_PROFILE_RELATIVE,bytes:16442,sha256:CURRENT_PROFILE_SHA256,root:CURRENT_CAPTURE_ROOT};
  assert(typeof sourceRoot==='string'&&path.isAbsolute(sourceRoot),'TERMINAL26_CURRENT_ABSOLUTE_CAPTURE_REQUIRED');
- const file=path.join(repo,CURRENT_PROFILE_RELATIVE),bytes=readPinned(repo,{relative:CURRENT_PROFILE_RELATIVE,bytes:16442,sha256:CURRENT_PROFILE_SHA256});
+ const file=path.join(repo,selected.relative),bytes=readPinned(repo,selected);
  const profile=JSON.parse(bytes.toString('utf8'));
  assert.equal(profile.schemaVersion,1);assert.equal(profile.kind,'CURRENT105_TERMINAL26_CURRENT_CAPTURE_COMPILE_SOURCE_GUARD_V1');
- assert.equal(profile.id,TERMINAL26_CURRENT_NATIVE_SOURCE_PROFILE);assert.equal(profile.managedInputContract,CONTRACT);
- assert.equal(profile.sourceCapture.root,CURRENT_CAPTURE_ROOT);
- assert.equal(path.resolve(sourceRoot),path.resolve(CURRENT_CAPTURE_ROOT),'TERMINAL26_CURRENT_CAPTURE_ROOT_REQUIRED');
- assert.equal(fs.realpathSync(sourceRoot),fs.realpathSync(CURRENT_CAPTURE_ROOT),'TERMINAL26_CURRENT_CAPTURE_REAL_ROOT_REQUIRED');
+ assert.equal(profile.id,selectionId);assert.equal(profile.managedInputContract,CONTRACT);
+ assert.equal(profile.sourceCapture.root,selected.root);
+ assert.equal(path.resolve(sourceRoot),path.resolve(selected.root),'TERMINAL26_CURRENT_CAPTURE_ROOT_REQUIRED');
+ assert.equal(fs.realpathSync(sourceRoot),fs.realpathSync(selected.root),'TERMINAL26_CURRENT_CAPTURE_REAL_ROOT_REQUIRED');
  assert.equal(profile.predecessorProfile.sha256,PROFILE_SHA256);assert.equal(profile.predecessorProfile.relative,profileRelative);
  readPinned(repo,profile.predecessorProfile);assert.equal(profile.baselineCompileProfile.sha256,BASELINE23_SHA256);
  readPinned(repo,profile.baselineCompileProfile);for(const row of profile.baselineProfiles)readPinned(repo,row);
@@ -226,11 +236,11 @@ function currentTerminal26CompileSourceProfile(sourceRoot){
  assert.equal(profile.review.sourceApprovalGranted,false);assert.equal(profile.review.publicRuntimeAccepted,false);assert.equal(profile.review.actualCompilerLedgerStillRequired,true);
  assert.equal(profile.review.fullParentAccepted,false);assert.equal(profile.review.currentPrimaryAccepted,false);
  readLifecycleLogData(sourceRoot,profile.producerData);
- const selection={id:profile.id,kind:profile.kind,profile:{path:file,bytes:bytes.length,sha256:CURRENT_PROFILE_SHA256},
+ const selection={id:profile.id,kind:profile.kind,profile:{path:file,bytes:bytes.length,sha256:selected.sha256},
   sourceCapture:{root:sourceRoot,manifest:{...capture.manifest,path:path.join(sourceRoot,capture.manifest.relative)},nodeToolsBinding:{...capture.nodeToolsBinding,path:path.join(sourceRoot,capture.nodeToolsBinding.relative)}},
   inputCount:inputs.length,compileOnly:true,sourceReady:false,sourceApprovalGranted:false,publicRuntimeAccepted:false,currentPrimaryAccepted:false,fullParentAccepted:false};
  return {...profile,nativeSourceProfile:selection,
-  nativeGuardProvenance:{actualManagedInputContract:CONTRACT,nativeSpecManagedInputContract:CONTRACT,nativeSpecKind:profile.kind,nativeSpecPath:file,nativeSpecSha256:CURRENT_PROFILE_SHA256,
+  nativeGuardProvenance:{actualManagedInputContract:CONTRACT,nativeSpecManagedInputContract:CONTRACT,nativeSpecKind:profile.kind,nativeSpecPath:file,nativeSpecSha256:selected.sha256,
    baselineCompileProfileSha256:profile.baselineCompileProfile.sha256,predecessorCompileProfileSha256:profile.predecessorProfile.sha256,baselineNativeSpecSha256:profile.baselineProfiles[0].sha256,reusedNativeSpec:false,nativeSourceProfile:selection,
    scope:'Only the exact current capture and fifteen compile-source roles; three throw-only entries and pinned fixture mappings. No full source or runtime qualification.',
    compileOnly:true,runtimeAuthorityGranted:false,sourceReady:false,sourceApprovalGranted:false,publicRuntimeAccepted:false},

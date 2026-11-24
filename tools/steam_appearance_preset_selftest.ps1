@@ -1,8 +1,8 @@
-﻿param([string]$Out='G:\YeManCC-Work\Mainline\Temp\steam-appearance-validation\preset-v2',[string]$ComponentRoot='',[ValidateSet('All','DirectoryPathGuards')][string]$Case='All')
+﻿param([string]$Out='G:\YeManCC-Work\Mainline\Temp\steam-appearance-validation\preset-v2',[string]$ComponentRoot='',[ValidateSet('All','DirectoryPathGuards','ForeignBounded')][string]$Case='All')
 $ErrorActionPreference='Stop';if(!$ComponentRoot){$ComponentRoot=Join-Path (Split-Path -Parent $PSScriptRoot) 'PowerControl'};$source=Join-Path $ComponentRoot 'steam-appearance.ps1';# Offline fixtures must not query live Steam/CSS ownership.
 function Get-Process {param($Name,$Id) @()}
 function Get-NetTCPConnection {param($State,$LocalPort) @()}
-if($Case -eq 'DirectoryPathGuards'){. (Join-Path $PSScriptRoot 'ymcc_sim\global\decky-update-recovery\appearance-library-fixture.ps1') -ComponentRoot $ComponentRoot -EvidenceRoot $Out}else{. $source -Action Library}
+if($Case -ne 'All'){. (Join-Path $PSScriptRoot 'ymcc_sim\global\decky-update-recovery\appearance-library-fixture.ps1') -ComponentRoot $ComponentRoot -EvidenceRoot $Out}else{. $source -Action Library}
 function Get-AppearanceSteamSession {$null} # Explicit offline public Steam facts for this owned fixture.
 New-Item -ItemType Directory -Path $Out -Force|Out-Null
 $script:ThemeRoot=Join-Path $Out ('other-user-'+[guid]::NewGuid().ToString('N'));$script:PresetStateBase=Join-Path $Out 'states'
@@ -61,6 +61,68 @@ foreach($entry in $baseline.GetEnumerator()){Assert ((Get-ConfigHash $entry.Key)
 Write-Output "PASS: $($cases.Count) bundled preset / other-user / reset / restore checks"
 }
 
+if($Case -eq 'ForeignBounded'){
+ $limit=262144
+ $bom=[Text.UTF8Encoding]::new($true)
+ function Write-SizedJson([string]$Path,[string]$Json,[int]$Size){
+  $padding=$Size-$bom.GetPreamble().Length-$bom.GetByteCount($Json)
+  [IO.File]::WriteAllText($Path,($Json+(' '*$padding)),$bom)
+ }
+ $foreignName='Boundary '+[char]0x754c
+ $valid=FixtureTheme 'exact' $foreignName '{"active":true}'
+ $bigManifest=FixtureTheme 'large-manifest' 'Large Manifest' '{"active":false}'
+ $bigConfig=FixtureTheme 'large-config' 'Large Config' '{"active":true}'
+ $badActive=FixtureTheme 'bad-active' 'Bad Active' '{"active":"true"}'
+ $missing=FixtureTheme 'missing-config' 'Missing Config' '{"active":false}'
+ $live=FixtureTheme 'backend-only' 'Backend Only' '{"active":false}'
+ [IO.File]::Delete((Join-Path $missing 'config_USER.json'))
+ Write-SizedJson (Join-Path $valid 'theme.json') (@{name=$foreignName}|ConvertTo-Json -Compress) $limit
+ Write-SizedJson (Join-Path $valid 'config_USER.json') '{"active":true}' $limit
+ Write-SizedJson (Join-Path $bigManifest 'theme.json') '{"name":"Large Manifest"}' ($limit+1)
+ Write-SizedJson (Join-Path $bigConfig 'config_USER.json') '{"active":true}' ($limit+1)
+
+ $script:ForeignMetadataQueries=0
+ function Get-Item([string]$LiteralPath){
+  if([IO.Path]::GetFileName($LiteralPath) -in @('theme.json','config_USER.json')){$script:ForeignMetadataQueries++}
+  Microsoft.PowerShell.Management\Get-Item -LiteralPath $LiteralPath
+ }
+ $rows=@{}
+ try{
+  foreach($row in (Get-ForeignThemeRows @([pscustomobject]@{name='Backend Only';enabled=$true}))){$rows[$row.folder]=$row}
+ }finally{Remove-Item -LiteralPath Function:\Get-Item}
+ Assert ($rows.Count -eq 6) 'ForeignBounded returns all six fixture rows'
+ $row=$rows['exact'];Assert ($row.name -ceq $foreignName -and $row.active -and $row.needsDisable -and !$row.invalid -and !$row.manifestInvalid) 'ForeignBounded preserves BOM decoding and accepts both JSON files at the inclusive limit'
+ $row=$rows['large-manifest'];Assert ($row.name -ceq 'large-manifest' -and $row.manifestInvalid -and $row.needsDisable -and !$row.invalid) 'ForeignBounded oversized manifest gets the normal invalid-manifest fallback'
+ $row=$rows['large-config'];Assert ($row.invalid -and !$row.active -and $row.needsDisable -and !$row.manifestInvalid) 'ForeignBounded oversized config is invalid rather than parsed as active'
+ $row=$rows['bad-active'];Assert ($row.invalid -and !$row.active -and $row.needsDisable) 'ForeignBounded rejects string active values'
+ $row=$rows['missing-config'];Assert (!$row.invalid -and !$row.active -and !$row.needsDisable) 'ForeignBounded missing config remains inactive and valid'
+ $row=$rows['backend-only'];Assert ($row.live -and !$row.active -and $row.needsDisable) 'ForeignBounded backend-only conflict is still detected'
+
+ $backendOnly=[pscustomobject]@{name='bAcKeNd OnLy';enabled=$true}
+ $disabled=[pscustomobject]@{name='Backend Only';enabled=$false}
+ $otherFlags=@(1..40 | ForEach-Object {[pscustomobject]@{name="Other $_";enabled=$false}})
+ foreach($example in @(
+   @{label='singleton backend object';themes=$backendOnly;expected=$true},
+   @{label='large case-insensitive response with a disabled duplicate';themes=$otherFlags+@($disabled,$backendOnly);expected=$true},
+   @{label='large response with entirely disabled rows';themes=$otherFlags+@($disabled);expected=$false},
+   @{label='large response containing a legacy array name';themes=$otherFlags+@([pscustomobject]@{name=@('Other','Backend Only');enabled=$true});expected=$true},
+   @{label='large response containing a legacy truthy flag';themes=$otherFlags+@([pscustomobject]@{name='Backend Only';enabled='false'});expected=$true}
+ )){
+  $probe=@(Get-ForeignThemeRows $example.themes|Where-Object folder -ceq 'backend-only')
+  Assert ($probe.Count -eq 1 -and $probe[0].live -eq $example.expected -and $probe[0].needsDisable -eq $example.expected) ('ForeignBounded preserves backend conflict detection: '+$example.label)
+ }
+
+ $hint=Join-Path $Out 'bounded-hint.json'
+ Write-SizedJson $hint '{}' $limit
+ Assert ((Read-PresetTargetHintText $hint).TrimEnd() -ceq '{}') 'ForeignBounded target hint accepts the same inclusive byte limit'
+ Write-SizedJson $hint '{}' ($limit+1)
+ $hintError=''
+ try{Read-PresetTargetHintText $hint|Out-Null}catch{$hintError=$_.Exception.Message}
+ Assert ($hintError -ceq 'Invalid target hint file') 'ForeignBounded target hint preserves oversize rejection and message'
+ Assert ($script:ForeignMetadataQueries -eq 0) ('ForeignBounded removes detached Get-Item length queries (observed '+$script:ForeignMetadataQueries+')')
+ [pscustomobject]@{ok=$true;selectedCase=$Case;cases=@($cases);foreignRows=$rows.Count;metadataQueries=$script:ForeignMetadataQueries}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $Out 'preset-result.json') -Encoding UTF8
+ Write-Output ('PASS: '+$cases.Count+' preset ForeignBounded checks')
+}
 if($Case -eq 'DirectoryPathGuards'){
  $guardLinks=New-Object Collections.Generic.List[object]
  $guardTarget=Join-Path $Out 'guard-link-target';New-Item -ItemType Directory -Path $guardTarget -Force|Out-Null

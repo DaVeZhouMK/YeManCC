@@ -745,6 +745,29 @@ static unsigned abnormalConservativeProductionTests() {
         check(!g_sgAbnormalLastHumanIntent,"rejected production notices do not acquire the original human watermark");
     }
     testReset();testAt(10000);sgAbnormalArm(1,testEpoch);assertPolicy(1,"power-button-506");
+    for(const bool owned:{false,true}) {
+        testReset();
+        if(owned){testAt(2038);check(g_sgAutomaticSleepBudget.consume(),"parent authorizes one retry");sgMarkInternalSleepRequest(SgRetryKind::UnexpectedWake);}
+        const auto marker=g_sgInternalSleepRequest;
+        runtimeFactObserver=[](const char* name,const json&){
+            if(std::string_view(name)=="abnormal-sleep-conservative-policy")throw std::runtime_error("injected conservative fact failure");
+        };
+        bool escaped=false;
+        try {
+            if(owned)(void)sgAbnormalObserveOwnedRetry(testEpoch,testFileTime);
+            else sgAbnormalArm(1,testEpoch);
+        } catch(const std::runtime_error&) {escaped=true;}
+        check(!escaped,"conservative fact failure must not escape the original sleep transaction");
+        assertPolicy(1,owned?"legacy-owned-retry":"power-button-506");
+        check(g_sgInternalSleepRequest.kind==marker.kind&&g_sgInternalSleepRequest.dispatchFileTime==marker.dispatchFileTime&&
+            g_sgAutomaticSleepBudget.requests()==(owned?1u:0u),"observer failure preserves original marker and budget");
+        runtimeFactObserver=nullptr;
+        if(owned)(void)sgAbnormalObserveOwnedRetry(testEpoch,testFileTime);
+        else sgAbnormalArm(1,testEpoch);
+        check(factCount()==1,"duplicate failed observation does not retry the journal");
+        testAt(4038);sgAbnormalArm(1,testFileTime);assertPolicy(2,"power-button-506");
+        assertIdle("later intent can still be observed without enabling staged work");
+    }
     testReset();testAt(10001);sgAbnormalArm(1,testEpoch);testAt(10002);sgAbnormalArm(1,testFileTime);
     assertPolicy(1,"power-button-506");
     check(g_sgAbnormalLastHumanIntent==testFileTime,"stale notice cannot suppress a subsequent real current human intent");

@@ -10,7 +10,7 @@ check('YMCC startup CSS checks the existing backend and delegates only CSS use, 
 check('waiting-manual CSS enters event-only wait with no repeated spawn checks',guard.includes('result.phase == "waiting-steam-ui") budget.pause()')&&guard.includes('result.phase != "waiting-manual-steam"'));
 check('only explicit Steam mode action renews manual CSS recovery',(main.match(/g_steamCssGuard\.requestManualRecovery\(/g)||[]).length===1&&mode.includes('g_steamCssGuard.requestManualRecovery()'));
 const startup=runtime.indexOf('if(enabled && known && steam && !process && config_.launchAdmission)');
-const initialRead=runtime.indexOf('readAdmission();if(enabled&&known&&steam&&!process&&!launchAllowed(intent))continue;'),preparation=runtime.indexOf('if(enabled && known && !process && !context && !retainedFrontend'),launchBranch=runtime.indexOf('}else if(!process&&(launchIntent!=launchAttempted||loaderRecoveryDue||(resourcePending&&resourceDue)))');
+const initialRead=runtime.indexOf('if(!sampledAdmission)readAdmission();'),preparation=runtime.indexOf('if(enabled && known && !process && !context && !retainedFrontend'),launchBranch=runtime.indexOf('if(!beginPending(intent))continue;failure=runLaunchPreflight(intent);');
 check('sidebar admission happens before any preparation or bootstrap injection',startup>0&&startup<initialRead&&initialRead<preparation&&preparation<launchBranch&&runtime.includes('if(preparationRan){readAdmission();if(enabled&&known&&steam&&!process&&!launchAllowed(intent))continue;}'));
 const admissionStart=main.indexOf('    config.launchAdmission='),admissionEnd=main.indexOf('    config.connectionHealth=',admissionStart);
 assert(admissionStart>=0&&admissionEnd>admissionStart,'missing Decky launch admission');

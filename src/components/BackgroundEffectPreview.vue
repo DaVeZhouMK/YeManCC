@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
+import { computed, inject, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue';
 import { focusGamepadElement } from '@/gamepad/focus';
 import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
+import { videoPreviewBackgroundHoldKey } from '@/bridge/backgroundPolicy';
 import { dragBackgroundPosition, normalizeBackgroundPosition, type BackgroundPosition } from '@/bridge/backgroundPosition';
 
 const props = defineProps<{ opacity: number; blur: number; theme: string; mediaUrl?: string; mediaKind?: string; position?: BackgroundPosition }>();
@@ -23,6 +24,27 @@ const centered = computed(() => position.value.x === 50 && position.value.y === 
 let intersection: IntersectionObserver | undefined, stopVisibility: (() => void) | undefined;
 let drag: { id: number; x: number; y: number; origin: BackgroundPosition; latest: BackgroundPosition; viewport: { width: number; height: number }; media: { width: number; height: number } } | null = null;
 let keyboardDraft = false;
+const holdBackground = inject(videoPreviewBackgroundHoldKey, null);
+let releaseBackground: (() => void) | undefined;
+function previewPlaying(event: Event) {
+  const element = video.value;
+  if (element && event.target === element && running.value && hasMedia.value && !element.paused && !releaseBackground) {
+    releaseBackground = holdBackground?.();
+  }
+}
+function releasePreviewHold() {
+  releaseBackground?.();
+  releaseBackground = undefined;
+}
+function previewStopped(event: Event) {
+  const element = video.value;
+  if (element && event.target === element && (element.paused || element.ended)) releasePreviewHold();
+}
+function previewError(event: Event) {
+  if (event.target !== video.value) return;
+  releasePreviewHold();
+  mediaError.value = true;
+}
 function playback() {
   const element = video.value;
   if (!element) return;
@@ -118,10 +140,10 @@ function pageCommand(event: Event) {
   }
 }
 function focusout(event: FocusEvent) { if (!root.value?.contains(event.relatedTarget as Node | null)) finishEdit(false); }
-function suspend() { finishEdit(false); cancelDrag(); commitKeyboard(); video.value?.pause(); }
+function suspend() { finishEdit(false); cancelDrag(); commitKeyboard(); video.value?.pause(); releasePreviewHold(); }
 watch(hasMedia, value => { if (!value) suspend(); });
 watch(running, () => { if (!running.value) suspend(); playback(); });
-watch(() => [props.mediaUrl, props.mediaKind], async () => { finishEdit(false); cancelDrag(); mediaError.value = false; await nextTick(); playback(); });
+watch(() => [props.mediaUrl, props.mediaKind], async () => { releasePreviewHold(); finishEdit(false); cancelDrag(); mediaError.value = false; await nextTick(); playback(); });
 onMounted(() => {
   intersection = new IntersectionObserver(entries => { onScreen.value = entries.some(entry => entry.isIntersecting); });
   if (root.value) intersection.observe(root.value);
@@ -141,7 +163,8 @@ onBeforeUnmount(() => { active.value = false; suspend(); intersection?.disconnec
       @pointerdown="startDrag" @pointermove="moveDrag" @pointerup="endDrag" @pointercancel="cancelDrag" @lostpointercapture="cancelDrag"
       @keydown="keydown" @keyup="commitKeyboard" @blur="commitKeyboard()">
       <video v-if="hasMedia && mediaKind === 'video'" ref="video" class="wallpaper-preview-media" :src="mediaUrl" :style="mediaStyle"
-        muted loop playsinline preload="metadata" disablepictureinpicture tabindex="-1" aria-hidden="true" @canplay="playback" @error="mediaError = true" />
+        muted loop playsinline preload="metadata" disablepictureinpicture tabindex="-1" aria-hidden="true"
+        @canplay="playback" @playing="previewPlaying" @pause="previewStopped" @ended="previewStopped" @error="previewError" />
       <img v-else-if="hasMedia" ref="image" class="wallpaper-preview-media" :src="mediaUrl" :style="mediaStyle" alt="" draggable="false" @error="mediaError = true" />
       <div v-else class="wallpaper-preview-ambient" :style="{ opacity: mediaStyle.opacity, filter: mediaStyle.filter }" aria-hidden="true"><span /></div>
       <button ref="entry" type="button" class="wallpaper-preview-label" :disabled="!hasMedia" :aria-pressed="editing" aria-label="动态预览，按 A 调整壁纸位置" @click="toggleEdit">动态预览</button>

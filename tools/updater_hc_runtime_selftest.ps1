@@ -71,7 +71,7 @@ Check 'runtime target junction rejected and unrelated bytes preserved' {
 }
 Check 'HC is excluded from ordinary restore and uses incoming sync' {
  $text=Get-Content -LiteralPath (Join-Path $repo 'native/main.cpp') -Raw
- Need ($text.Contains("Register-TreeForRollback `$powerControlSource `$pcDir 'PowerControl' @('pawnio','fan-host-v2','decky','handheldcompanion-runtime','ymcc-shared-runtime')")) 'HC may be restored from old ordinary files'
+ Need ($text.Contains("`$powerControlExclusions=@('pawnio','fan-host','fan-host-v2','decky','handheldcompanion-runtime','ymcc-shared-runtime'") -and $text.Contains("Copy-YmccManagedTree `$powerControlSource `$pcDir 'PowerControl' `$powerControlExclusions")) 'HC may be restored from old ordinary files'
  Need ($text.Contains('Sync-YmccImmutableFanPayload $fanHostRuntimeSource $fanHostSource $pcDir')) 'incoming HC sync disconnected'
 }
 Check 'actual source manifest stayed unchanged' {Need ((Get-FileHash -LiteralPath $manifest).Hash -eq $sourceHash) 'source changed during test'}

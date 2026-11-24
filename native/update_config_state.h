@@ -231,6 +231,23 @@ inline Json exportInstallTrace(const Image& image,const Json& journal) {
         }
         if (!counts.empty()) out["issues"]=std::move(counts);
     }
+    // Optional diagnostics from the updater that actually handled this package.
+    // An unknown field or reason cannot invalidate the existing trace or add authority.
+    const auto kinds=row.find("deckyIssueKinds");
+    const auto counts=out.find("issues");
+    if (kinds!=row.end()&&kinds->is_object()&&counts!=out.end()) {
+        Json reasons=Json::object();
+        for (const auto* step:{"plan-decky","apply-decky"}) {
+            const auto count=counts->find(step);
+            const auto reason=kinds->find(step);
+            if (count==counts->end()||*count==0||reason==kinds->end()||!text(*reason,32)) continue;
+            for (const auto* allowed:{"backend-unavailable","preparation-lease-invalid","maintenance-busy","package-invalid",
+                    "target-changed","path-refused","write-verification-failed","file-busy","access-denied","unclassified"}) {
+                if (*reason==allowed) { reasons[step]=allowed; break; }
+            }
+        }
+        if (!reasons.empty()) out["deckyIssueKinds"]=std::move(reasons);
+    }
     if (row["outcome"]=="failed") {
         if (!label("errorKind",{"step-failed","startup-launch","startup-exited","handshake-timeout","handshake-check"})||
             !row.contains("immutableRepairPending")||!row["immutableRepairPending"].is_boolean()) return status("damaged");

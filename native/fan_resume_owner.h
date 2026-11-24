@@ -45,6 +45,7 @@ struct RequestSnapshot {
     unsigned attempts=0,posts=0,continuations=0;
     std::uint64_t lastGrantRun=0;
     bool mayPost=true,postUnclassified=false,finished=false,awaitingGrant=false;
+    bool launchRetried=false;
     ObserveCounters observations;
 };
 // One original recovery owner. Legacy and ticketed callers share its gate;
@@ -77,10 +78,15 @@ class RequestOwner {
         return t&&owner_&&business_&&t.request==business_->ticket.request&&
             t.run==business_->ticket.run&&t.generation==owner_;
     }
-    RequestTicket start(std::uint64_t now) noexcept {
+    // The caller destroys retired bindings after unlocking: they can own a
+    // remote offer whose destructor settles an unclaimed publication.
+    RequestTicket start(std::uint64_t now,std::shared_ptr<RequestAttachment>& retired) noexcept {
         if(closed_||!business_||business_->finished||expired(*business_,now)||
            runs_==(std::numeric_limits<std::uint64_t>::max)()){
-            if(business_)business_->finished=true;
+            if(business_){
+                business_->finished=true;
+                if(business_->attachment)retired=std::move(business_->attachment);
+            }
             owner_=0;return {};
         }
         business_->ticket.run=++runs_;
@@ -116,6 +122,7 @@ public:
     // here includes dispatch/thread-start waiting in the FIRST deadline.
     RequestTicket offer(std::uint64_t generation,const PowerStamp& power,
                         std::uint64_t now,std::uint64_t manualOperation=0,std::uint64_t intentRevision=0,std::uint64_t writeRevision=0,bool sessionOnly=false) {
+        std::shared_ptr<RequestAttachment> retired;
         std::lock_guard<std::mutex> lock(mutex_);
         if(closed_||!generation||!power.generation||power.phase>3||!(power.flags&1u)||(power.flags&4u)||
            (sessionOnly&&!manualOperation))return {};
@@ -129,7 +136,11 @@ public:
                 (!manualOperation||manualOperation==business_->manualOperation))same=&*business_;
         if(manualOperation&&manualOperation<=lastManual_&&(!same||same->manualOperation!=manualOperation))return {};
         if(same){
-            if(same->finished||expired(*same,now)){same->finished=true;return {};}
+            if(same->finished||expired(*same,now)){
+                same->finished=true;
+                if(!owner_)retired=std::move(same->attachment);
+                return {};
+            }
             if(writeRevision<same->writeRevision)return {};
             if(samePending){same->power=power;same->writeRevision=writeRevision;return {};}
             if(owner_){
@@ -143,7 +154,7 @@ public:
             if(same->power.same(power))return {}; // publication/duplicate cannot reopen a run
             same->power=power;
             same->writeRevision=writeRevision;
-            return start(now);
+            return start(now,retired);
         }
         if(manualOperation&&manualOperation<=lastManual_)return {};
         if(now>(std::numeric_limits<std::uint64_t>::max)()-windowMs_||
@@ -153,8 +164,9 @@ public:
         fresh.startedTick=now;fresh.deadlineTick=now+windowMs_;fresh.manualOperation=manualOperation;fresh.intentRevision=intentRevision;
         if(manualOperation)lastManual_=manualOperation;
         if(owner_){pendingBusiness_=fresh;pendingPower_.reset();pending_=generation;return {};}
+        if(business_)retired=std::move(business_->attachment);
         business_=fresh;pendingPower_.reset();pending_=0;
-        return start(now);
+        return start(now,retired);
     }
     // Read-only command receipt. Registered is not Host acceptance, completion,
     // power Ready or resource return, including when the original worker ended.
@@ -164,6 +176,23 @@ public:
         const auto matches=[&](const std::optional<RequestSnapshot>& b){return b&&b->ticket.generation==generation&&
             b->manualOperation==manualOperation&&b->intentRevision==intentRevision&&b->writeRevision==writeRevision;};
         return !closed_&&(matches(business_)||matches(pendingBusiness_));
+    }
+    // A first click can own a session before any curve is active. Locate only
+    // that live request; a revoked write revision must not regain authority.
+    std::uint64_t retainedSessionManual(std::uint64_t fan,std::uint64_t shared,
+            std::uint64_t intent,std::uint64_t write,std::uint64_t now) {
+        std::shared_ptr<RequestAttachment> retired;
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto& latest=pendingBusiness_?pendingBusiness_:business_;
+        if(latest&&!owner_&&expired(*latest,now)){
+            latest->finished=true;
+            retired=std::move(latest->attachment);
+            return 0;
+        }
+        if(closed_||!write||!latest||latest->finished||expired(*latest,now)||!latest->sessionOnly||
+           latest->ticket.generation!=fan||latest->power.generation!=shared||
+           latest->intentRevision!=intent||latest->writeRevision!=write)return 0;
+        return latest->manualOperation;
     }
     std::optional<RequestSnapshot> snapshot(const RequestTicket& ticket) const {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -228,25 +257,45 @@ public:
         return remaining<originalLimit?static_cast<std::uint32_t>(remaining):originalLimit;
     }
     RequestTicket finishRequest(const RequestTicket& ticket,std::uint64_t now,bool terminal) {
+        return releaseRun(ticket,now,terminal ? RunEnd::Terminal : RunEnd::Returned);
+    }
+    RequestTicket finishUnstartedRequest(const RequestTicket& ticket,std::uint64_t now) {
+        return releaseRun(ticket,now,RunEnd::Unstarted);
+    }
+private:
+    enum class RunEnd { Returned, Terminal, Unstarted };
+    RequestTicket releaseRun(const RequestTicket& ticket,std::uint64_t now,RunEnd end) {
+        std::shared_ptr<RequestAttachment> retired;
         std::lock_guard<std::mutex> lock(mutex_);
         if(!owns(ticket))return {};
-        business_->finished=business_->finished||terminal||expired(*business_,now);
+        const bool retryLaunch=end==RunEnd::Unstarted&&!business_->launchRetried;
+        if(retryLaunch)business_->launchRetried=true;
+        business_->finished=business_->finished||end==RunEnd::Terminal||
+            (end==RunEnd::Unstarted&&!retryLaunch)||expired(*business_,now);
         owner_=0;pending_=0;
         if(pendingBusiness_){
+            retired=std::move(business_->attachment);
             business_=pendingBusiness_;pendingBusiness_.reset();pendingPower_.reset();
-            return start(now);
+            return start(now,retired);
         }
         if(pendingPower_){
             business_->power=pendingPower_->power;
             business_->writeRevision=pendingPower_->writeRevision;
             pendingPower_.reset();
-            return start(now);
+            return start(now,retired);
         }
+        if(retryLaunch&&!business_->finished)return start(now,retired);
+        if(business_->finished)retired=std::move(business_->attachment);
         return {};
     }
+public:
     void close() {
+        std::shared_ptr<RequestAttachment> retired;
         std::lock_guard<std::mutex> lock(mutex_);closed_=true;
-        if(business_)business_->finished=true;
+        if(business_){
+            business_->finished=true;
+            if(!owner_)retired=std::move(business_->attachment);
+        }
         pendingBusiness_.reset();pendingPower_.reset();pending_=0;
     }
     // Existing authenticated descriptor.Request can carry this key; only the

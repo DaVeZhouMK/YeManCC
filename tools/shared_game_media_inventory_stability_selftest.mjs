@@ -27,6 +27,10 @@ for(const [name,sourceFacts,expected]of [
  }
  checks++;results.push({name:'shared-installation-never-reads-private-registry',ok:globalThis.__inventoryPrivateReads===0});
  checks++;results.push({name:'shared-installation-never-requests-presence',ok:sharedCalls.length>0&&sharedCalls.every(call=>call.command==='steamInformation.get'&&call.args.mask===1)});
+ const timeout=Object.assign(Error('fixture directory response timed out'),{code:'IPC_TIMEOUT'});
+ globalThis.__inventoryFixture={get entries(){throw timeout;},files:{}};
+ let incomplete=false;try{await api.installedSteamWallpaperTargets(new AbortController().signal);}catch(error){incomplete=error===timeout;}
+ checks++;results.push({name:'inventory-timeout-is-not-an-empty-complete-scan',ok:incomplete});
  for(const id of[570,2147483648,4294967296,Number.MAX_SAFE_INTEGER]){globalThis.__inventoryInvoke=async()=>({verified:true,appId:id,name:'cached game'});try{const target=await api.resolveSteamWallpaperIdentity({path:'C:/Game/game.exe',name:'same title'});checks++;if((target.appId>0)!==(id<=0x7fffffff))throw Error('cached identity outside Steam AppID range');results.push({name:'cache-id-'+id,ok:true});}catch(error){results.push({name:'cache-id-'+id,ok:false,error:error.message});}}
 checks++;results.push({name:'inventory-never-uses-remote-worker',ok:calls===0});
 const report={ok:results.every(v=>v.ok),cases:results.length,checks,results,scope:'production inventory and local identity, injected local files/registry/IPC only; network forbidden'};fs.writeFileSync(out+'/inventory-results.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report));if(!report.ok)process.exitCode=1;
@@ -98,7 +102,7 @@ async function sharedSteamInventoryProbe(){
    else if(args.path==='./gameMediaPreparationPolicy')contents='export class GameMediaPreparationPolicy{game(){}request(){}demand(){}suspend(){}resume(){}stop(){}}';
    else if(args.path==='./uiSettings')contents=`export const getUiSetting=()=>true,setUiSettings=async()=>{},uiSettingsLoaded=()=>${ref}.loaded;`;
    else if(args.path==='./steamMediaSource')contents=`export const installedSteamWallpaperTargets=async()=>{${ref}.installed++;return[];},resolveSteamWallpaperIdentity=async()=>{throw Error('not selected');},steamWallpaperCandidates=async()=>{throw Error('network forbidden');},normalizeSteamMediaUrl=v=>v;`;
-   else if(args.path==='./powerLifecycleState')contents=powerAdmissionFunction+`;export const onSharedPowerLifecycle=fn=>{${ref}.lifecycle=fn;fn({phase:'ready',generation:1,known:true,hardwareWritesAllowed:true,notificationPending:false});return()=>{${ref}.lifecycle=null;}};`;
+   else if(args.path==='./powerLifecycleState')contents=powerAdmissionFunction+`;export const onSharedPowerLifecycle=(fn,options)=>{${ref}.lifecycle=fn;${ref}.observeSuspendSerial=options?.observeSuspendSerial===true;fn({phase:'ready',generation:1,suspendSerial:0,known:true,hardwareWritesAllowed:true,notificationPending:false});return()=>{${ref}.lifecycle=null;}};`;
    else if(args.path==='./wallpaperPowerPolicy')contents=`export const wallpaperPowerBlocked=()=>${ref}.blocked,wallpaperPowerReason=()=>'wallpaper-on-battery',subscribeWallpaperPowerChanged=fn=>{${ref}.powerChanged=fn;return()=>{${ref}.powerChanged=null;}},captureWallpaperPower=()=>${ref}.powerEpoch,wallpaperPowerCurrent=epoch=>epoch===${ref}.powerEpoch;`;
    else if(args.path==='./yeman')contents='export const steamRunning=async()=>{throw Error("Private/legacy running read forbidden");};';
    else contents='export const requestSteamHttp=async()=>{throw Error("network forbidden");},parseHlsAsset=()=>{throw Error("network forbidden");};';
@@ -115,15 +119,16 @@ async function sharedSteamInventoryProbe(){
  const check=(ok,label)=>{checks++;assert.ok(ok,label);};
  const origins=(f,bits)=>{checks++;assert.deepEqual(f.inventoryArgs.at(-1),{originMask:bits},'inventory request includes only the expected bounded origin mask');};
  async function fixture(beforeBoot){
-  const f={enabled:true,loaded:true,blocked:false,powerEpoch:1,installed:0,inventories:0,inventoryArgs:[],holdInventory:false,submissions:[],events:new Map(),reads:[],hold:false,state:state(),lifecycle:null,powerChanged:null,downloadState:{},downloadListeners:new Set(),
+  const f={enabled:true,loaded:true,blocked:false,powerEpoch:1,installed:0,inventories:0,inventoryArgs:[],holdInventory:false,inventoryFlights:[],holdSnapshot:false,snapshots:[],submissions:[],events:new Map(),reads:[],hold:false,state:state(),lifecycle:null,powerChanged:null,downloadState:{},downloadListeners:new Set(),
    on(name,fn,includeDispatch){const list=f.events.get(name)||new Set(),listener=event=>includeDispatch?fn(event.detail,event):fn(event.detail);f.events.set(name,list);list.add(listener);return()=>list.delete(listener);},
    emit(){const event=new CustomEvent('ipc:steam.uiStateChanged',{detail:{}});for(const fn of f.events.get('steam.uiStateChanged')||[])fn(event);},
    inventoryNotice(){const event=new CustomEvent('ipc:gameMedia.inventoryChanged',{detail:{}});for(const fn of f.events.get('gameMedia.inventoryChanged')||[])fn(event);},
+   snapshotNotice(){const event=new CustomEvent('ipc:gameMedia.changed',{detail:{}});for(const fn of f.events.get('gameMedia.changed')||[])fn(event);},
    manualRequest(id){f.downloadState={manualUntil:clock+30000,inventoryRequestId:id};for(const fn of f.downloadListeners)fn();},
    invoke:async(command,args,options)=>{
     if(command==='steam.uiState'){check(JSON.stringify(args)==='{}','shared UI reads must remain automatic/cache-only');const r={args,options};f.reads.push(r);if(f.hold)return new Promise((resolve,reject)=>Object.assign(r,{resolve,reject}));return structuredClone(f.state);}
-    if(command==='gameMedia.inventory'){f.inventories++;f.inventoryArgs.push(structuredClone(args));if(f.holdInventory)return new Promise(resolve=>{f.releaseInventory=()=>resolve([]);});return[];}
-    if(command==='gameMedia.snapshot')return{entries:{},aliases:{}};
+    if(command==='gameMedia.inventory'){f.inventories++;f.inventoryArgs.push(structuredClone(args));if(f.holdInventory)return new Promise(resolve=>{f.inventoryFlights.push({resolve,signal:options?.signal});f.releaseInventory=()=>resolve([]);});return[];}
+    if(command==='gameMedia.snapshot'){const r={signal:options?.signal};f.snapshots.push(r);if(f.holdSnapshot)return new Promise(resolve=>{r.resolve=resolve;});return{entries:{},aliases:{}};}
     if(command==='gameMedia.background'){f.submissions.push(structuredClone(args));return{};}
     if(command==='gameMedia.watch')return{};
     throw Error('Forbidden native command '+command);
@@ -163,6 +168,25 @@ async function sharedSteamInventoryProbe(){
   ['late-source-read-cannot-scan-old-account',async f=>{const count=f.inventories;f.hold=true;f.emit();const old=f.reads.at(-1);f.emit();old.resolve(state({observedAccount:99}));await flush();await advance(fallbackGap);check(f.inventories===count,'superseded shared response must not scan inventory');f.reads.at(-1).resolve(state({observedAccount:18}));await flush();await advance(250);check(f.inventories===count+1,'latest shared response alone refreshes inventory');}],
   ['unknown-recovers-from-next-shared-signal',async f=>{const count=f.inventories,installed=f.installed;f.state=state({known:true,mode:'unknown',reason:'shared-mode-pending'});f.emit();await flush();await advance(250);check(f.inventories===count,'Unknown cannot authorize a replacement account inventory');f.state=state();f.emit();await flush();await advance(fallbackGap-250);await advance(250);check(f.inventories===count+1&&f.installed===installed,'same identity recovers on public source event without native rescan');}],
   ['document-reentry-refreshes-local-only',async f=>{const count=f.inventories,installed=f.installed;f.state=state({modeEpoch:'document-b:1'});f.emit();await flush();await advance(250);check(f.inventories===count+1&&f.installed===installed,'new verified UI document refreshes local inventory only');origins(f,128);}],
+  ['coalesced-ready-retires-inventory-and-snapshot',async f=>{
+   const ready={phase:'ready',generation:1,suspendSerial:1,known:true,hardwareWritesAllowed:true,notificationPending:false};
+   f.holdInventory=f.holdSnapshot=true;f.state=state({mode:'desktop'});f.emit();f.snapshotNotice();await flush();await advance(250);
+   const oldInventory=f.inventoryFlights.at(-1),oldSnapshot=f.snapshots.at(-1),beforeReads=f.reads.length,beforeSubmissions=f.submissions.length;
+   const changes=[];const record=e=>changes.push(e.detail);window.addEventListener('game-media:changed',record);
+   try{
+    f.lifecycle(ready);await flush();await advance(250);
+    check(f.reads.length===beforeReads+1,'Ready with a new suspend serial revalidates Steam once');
+    check(f.observeSuspendSerial&&oldInventory.signal?.aborted&&oldSnapshot.signal?.aborted,'public scope retires both old requests');
+    const currentInventory=f.inventoryFlights.at(-1),currentSnapshot=f.snapshots.at(-1);
+    check(currentInventory!==oldInventory&&currentSnapshot!==oldSnapshot,'fresh inventory and snapshot start while old reads are still held');
+    oldInventory.resolve([{appId:999,name:'stale',verified:true}]);oldSnapshot.resolve({entries:{stale:{key:'old',bindingRevision:1}},aliases:{}});
+    await flush();check(f.submissions.length===beforeSubmissions&&changes.length===0,'late old results cannot submit or publish');
+    currentInventory.resolve([{appId:570,name:'current',verified:true}]);currentSnapshot.resolve({entries:{fresh:{key:'fresh',bindingRevision:1}},aliases:{}});
+    await flush();check(f.submissions.length===beforeSubmissions+1&&f.submissions.at(-1).targets[0].appId===570&&changes.length===1&&changes[0].key==='fresh','fresh results complete exactly once');
+    const stable=[f.reads.length,f.inventories,f.snapshots.length];f.lifecycle(ready);f.lifecycle({...ready,suspendSerial:0});await advance(60000);
+    check(stable.join() === [f.reads.length,f.inventories,f.snapshots.length].join(),'duplicate or old serial cannot replay work');
+   }finally{window.removeEventListener('game-media:changed',record);}
+  }],
   ['sleep-retires-pending-shared-response',async f=>{const count=f.inventories;f.hold=true;f.emit();const old=f.reads.at(-1);f.lifecycle({phase:'suspending',generation:2,known:true});old.resolve(state({observedAccount:99}));await flush();f.emit();check(f.reads.at(-1)===old,'suspend performs no new shared reads');await advance(1000);check(f.inventories===count,'suspended pending response cannot scan');f.hold=false;f.lifecycle({phase:'ready',generation:2,known:true,hardwareWritesAllowed:true,notificationPending:false});await flush();await advance(250);check(f.inventories===count+1,'committed Ready revalidates same Steam identity');const stable=f.inventories;f.hold=true;f.emit();await advance(fallbackGap-250);const waiting=f.reads.at(-1);f.lifecycle({phase:'ready',generation:2,known:true,hardwareWritesAllowed:true,notificationPending:true});waiting.resolve(state({observedAccount:99}));await flush();await advance(250);check(f.inventories===stable,'same-generation pending authority rejects old source reply');f.hold=false;f.lifecycle({phase:'ready',generation:2,known:true,hardwareWritesAllowed:true,notificationPending:false});await flush();await advance(250);check(f.inventories===stable+1,'same-generation admitted correction restores shared source read');}],
   ['off-and-dc-reject-pending-shared-response',async f=>{const count=f.inventories;f.hold=true;f.emit();const old=f.reads.at(-1);f.enabled=false;window.dispatchEvent(new Event('ui-settings:changed'));old.resolve(state({observedAccount:99}));await flush();const readCount=f.reads.length;for(let n=0;n<20;n++)f.emit();await advance(1000);check(f.reads.length===readCount&&f.inventories===count,'OFF performs no source reads or scans');f.enabled=true;f.blocked=true;f.powerEpoch++;f.powerChanged(true);window.dispatchEvent(new Event('ui-settings:changed'));f.emit();await flush();check(f.reads.length===readCount&&f.inventories===count,'physical DC pause performs no source reads or scans');f.hold=false;f.blocked=false;f.powerEpoch++;f.powerChanged(false);await flush();await advance(250);check(f.reads.length===readCount+1&&f.inventories===count+1,'power recovery reconciles through shared source');}],
   ['stop-unsubscribes-and-stays-idle',async f=>{const count=f.inventories;f.hold=true;f.emit();const pending=f.reads.at(-1);f.stop();pending.resolve(state({observedAccount:99}));await flush();await advance(60000);check(f.events.get('steam.uiStateChanged')?.size===0,'stop releases common source subscription');check(f.inventories===count&&timers.size===0,'stopped consumer leaves no scan or timer');}]

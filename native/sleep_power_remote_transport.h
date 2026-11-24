@@ -83,7 +83,7 @@ inline bool encodeRemotePowerOfferHeaderV1(const RemoteOfferV1& offer,std::strin
     if(!validTransportStem(offer.pipeName)||b.size!=128||b.version!=1||b.reserved!=0||
        !nonzeroKey(b.scope)||!nonzeroKey(b.request)||!b.provider.pid||!b.provider.birth100ns||
        !b.consumer.pid||!b.consumer.birth100ns||
-       (b.purpose!=Purpose::Observation&&b.purpose!=Purpose::FanResume&&b.purpose!=Purpose::FanWrite)||
+       (b.purpose!=Purpose::Observation&&b.purpose!=Purpose::FanResume&&b.purpose!=Purpose::FanWrite&&!inputPurpose(b.purpose))||
        b.captured.size!=48||b.captured.version!=1||!b.captured.generation||b.captured.phase>3||
        !(b.captured.flags&kKnown)||(b.captured.flags&kNotificationPending))return false;
     try{std::string encoded="1 ";for(const auto c:offer.pipeName)encoded+=static_cast<char>(c);encoded+=' ';
@@ -114,7 +114,7 @@ class NativeRemoteTransport final {
             std::size_t kept=0;
             for(const auto& weak:offered_){
                 const auto previous=weak.lock();
-                if(previous&&previous->lastSettlement()!=SettlementOutcome::Returned)
+                if(previous&&!terminalSettlement(previous->lastSettlement()))
                     offered_[kept++]=weak;
             }
             offered_.resize(kept);offered_.push_back(scope);return true;
@@ -271,7 +271,8 @@ public:
     }
     std::wstring pipeName() const {std::lock_guard<std::mutex> lock(lifecycle_);return stem_;}
     std::shared_ptr<NativeScope> capture(HANDLE authenticatedConsumer,Key128 request,Purpose purpose,
-                                        PurposeAdmission admission,RemoteOfferV1& output) noexcept {
+                                        PurposeAdmission admission,RemoteOfferV1& output,
+                                        std::function<std::shared_ptr<void>(HANDLE)> originalCancellation={}) noexcept {
         output=RemoteOfferV1{};
         if(!start())return {};
         try{std::wstring stem;std::shared_ptr<LocalSecurity> security;
@@ -283,6 +284,10 @@ public:
             };
             auto scope=provider_.captureImpl(authenticatedConsumer,request,purpose,std::move(admission),false,eventFactory);
             if(!scope)return {};
+            if(originalCancellation){
+                scope->inheritedCancellation_=originalCancellation(scope->cancellationEvent());
+                if(!scope->inheritedCancellation_){scope->cancel();return {};}
+            }
             RemoteOfferV1 prepared{stem,scope->binding()};
             if(!scope->current(authenticatedConsumer,purpose)){scope->cancel();return {};}
             {std::lock_guard<std::mutex> lock(lifecycle_);

@@ -18,7 +18,7 @@ const fixtureHashes={
  'tools/ui_power_transport_selftest.mjs':'e09ea9e626b57415c656bac1951f4f220685cf29828c5c20cf9282ca765dd98a',
  'tools/ui_power_recovery_selftest.mjs':'630c2fbb4ba2956223cd3b59ca08536895d03fc67aefe2854337ae2d537c83ac',
  [buildReceipt]:'db80c5cb83d93067ccf59331def58078d0b8dbab0b0f3dbc799134731b0fdfd4',
- 'tools/fixtures/ui_shared_power_cases.mjs':'bc86fe46aa7bf2c24bb745975244092c16e06015dc9caa82544e723a1fb3e7b7',
+ 'tools/fixtures/ui_shared_power_cases.mjs':'aefc4248ecb731b249060ef5c1bd77e1c3f9e89b0551c9d6f40dca60939f1dff',
 };
 const esbuildJs='ac0772cb9176e4dd1d896be746b82edff699103940c8535a286493cecb69bdee';
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');

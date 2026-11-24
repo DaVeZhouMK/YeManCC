@@ -78,3 +78,15 @@ The default selection and global minimum remain unchanged.
 that single option for a source-bound historical negative. It does not rewrite
 current sources or the exit-owner header. Original source, executed function
 bytes, private resource facts and expected failure must be recorded separately.
+
+For the shutdown readback order, use the existing parent with
+`--fixed-native-build --scenarios healthy-ordinary unprotected-uncooperative shutdown-rejected-readback shutdown-late-retire-control`.
+Pin the current `main.cpp` with `--expected-main-sha256` and use a fresh short
+core evidence path. Both profiles compile the exact current Stop body and an
+isolated variant with only the retirement block moved past the first readback.
+The real visibility selector uses inert request/CLI ports. The cases distinguish
+SHUTDOWN not sent, acknowledged, and rejected without breaking the transport.
+Only the late-retirement control may issue `HIDHIDE_QUERY`; the second audit
+readback must not query. The fixture separately checks local owner return and
+does not exercise peer EOF or device access. This option leaves the default 11
+cases, helper, completion gates and release behavior unchanged.

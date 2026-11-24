@@ -12,7 +12,8 @@ import { startControllerShortcutRuntime } from '@/bridge/controllerShortcutRunti
 import { enqueueGamepadTaskDetached } from '@/gamepad/serial';
 import { on, invoke } from '@/bridge/ipc';
 import { createNetworkAccelerationWakeRecovery } from '@/bridge/networkAccelerationWake';
-const networkAccelerationWake = createNetworkAccelerationWakeRecovery(generation => invoke('updateAccel.resume', { generation }, { timeoutMs: 8000 }));
+const networkAccelerationWake = createNetworkAccelerationWakeRecovery((generation, suspendSerial) =>
+  invoke('updateAccel.resume', { generation, suspendSerial }, { timeoutMs: 8000 }));
 import { ensureUndervoltRuntime, stopUndervoltRuntime } from '@/bridge/undervoltRuntime';
 import { applyCpuAutostart } from '@/bridge/autostart';
 import { LEGACY_CCD_UNDERVOLT_ACTIVE } from '@/bridge/legacyCpuFeaturePolicy';
@@ -27,7 +28,7 @@ import { initMusic } from '@/bridge/music';
 import { toggleTask, taskExists, detectPowerMode, detectPowerModeReliable, detectPowerModeStable, reconcileRememberedPowerScheme, resumeTdpDaemonAfterWake, primeTdpSession, getSleepPowerPlanOptimizationEnabled, optimizeSleepPowerPlans } from '@/bridge/yeman';
 import TopMonitorBar from '@/components/TopMonitorBar.vue';
 import { applyTheme } from '@/bridge/theme';
-import { adjustContinuousPerformanceTdp, getPerformanceScheduleOwnership, refreshPerformanceScheduleCoreMode, restorePerformanceScheduleIfConfigured, onContinuousPerformanceApplied, SkipApplyError } from '@/bridge/performanceSchedule';
+import { adjustContinuousPerformanceTdp, getPerformanceScheduleOwnership, refreshPerformanceScheduleCoreMode, restorePerformanceScheduleAfterWake, restorePerformanceScheduleIfConfigured, onContinuousPerformanceApplied, SkipApplyError, type WakePerformanceResult } from '@/bridge/performanceSchedule';
 import { getMouseModeState, type MouseModeState } from '@/bridge/gameproc';
 import { acceptMouseModeState } from '@/bridge/mouseModeState';
 import {
@@ -42,7 +43,10 @@ import {
 import {
   cleanGameTitle,
   getDynamicBackgroundConfig,
+  isFailedDynamicVariant,
+  readDynamicBackgroundOriginal,
   refreshDynamicBackground,
+  type DynamicBackgroundFallback,
 } from '@/bridge/dynamicBackground';
 import { detectGame, getCurrentGame, isCurrentGameTarget, subscribeGameStatus, type DetectedGame } from '@/bridge/gamedetect';
 import { startGamePolicyRuntime, stopGamePolicyRuntime, requestGamePolicyTdpReconciliation } from '@/bridge/gamePolicyRuntime';
@@ -77,7 +81,7 @@ import { startGameProfileAutoMemory, stopGameProfileAutoMemory } from '@/bridge/
 import { BOOT_CONTROL_CENTER_TASK, bootMirrorExists, ensureRtssOverlayInstalled, setPowerControlDir, toggleBootMirror } from '@/bridge/yeman';
 import { getUiSetting, loadUiSettings } from '@/bridge/uiSettings';
 import { topMonitorData, type TopMonData } from '@/bridge/topmon';
-import { controllerEditorBackgroundHoldKey, nextLowBatteryStatic, shouldSkipVideoReconcile } from '@/bridge/backgroundPolicy';
+import { controllerEditorBackgroundHoldKey, nextLowBatteryStatic, shouldSkipVideoReconcile, videoPreviewBackgroundHoldKey } from '@/bridge/backgroundPolicy';
 import { createPowerResumeQueue, runPowerResumeTransaction } from '@/bridge/powerResume';
 import { readSettingsSection, saveSettingsSection } from '@/bridge/settingsRepository';
 import { isUiVisible, onUiVisibilityChange, setNativeWindowVisible, startUiPowerReconciliation } from '@/bridge/uiLifecycle';
@@ -250,6 +254,18 @@ const backgroundEditorPaused = ref(false);
 const backgroundEditorHolds = new Set<symbol>();
 let backgroundEditorPauseRevision = 0;
 let backgroundPresentationDisposed = false;
+function resumeAfterBackgroundHold(): void {
+  if (backgroundPresentationDisposed) return;
+  const video = backgroundVideo.value;
+  if (backgroundSource.value === 'dynamic' && activeDynamicMediaAsset && video &&
+      backgroundVideoShouldPlay(video) &&
+      (video.error || (!isHlsUrl(backgroundUrl.value) && !video.getAttribute('src')))) {
+    // A covered error or a cancelled local retry is not a new decode failure.
+    onBackgroundVideoError(undefined, video, true);
+    return;
+  }
+  void reconcileBackgroundVideo();
+}
 function acquireControllerEditorBackgroundHold(): () => void {
   const owner = Symbol();
   backgroundEditorHolds.add(owner);
@@ -265,45 +281,73 @@ function acquireControllerEditorBackgroundHold(): () => void {
     if (!backgroundEditorHolds.delete(owner) || backgroundEditorHolds.size) return;
     backgroundEditorPaused.value = false;
     ++backgroundEditorPauseRevision;
-    if (backgroundPresentationDisposed) return;
-    const video = backgroundVideo.value;
-    if (backgroundSource.value === 'dynamic' && activeDynamicMediaAsset && video &&
-        backgroundVideoShouldPlay(video) &&
-        (video.error || (!isHlsUrl(backgroundUrl.value) && !video.getAttribute('src')))) {
-      // A covered error or a cancelled local retry is not a new decode failure.
-      onBackgroundVideoError(undefined, video, true);
-      return;
-    }
-    void reconcileBackgroundVideo();
+    resumeAfterBackgroundHold();
   };
 }
 provide(controllerEditorBackgroundHoldKey, acquireControllerEditorBackgroundHold);
+let playingWallpaperPreviews = 0;
+provide(videoPreviewBackgroundHoldKey, () => {
+  if (++playingWallpaperPreviews === 1) {
+    // Keep the full-window frame visible while the settings preview plays.
+    cancelFactoryVideoStart();
+    if (backgroundSource.value === 'dynamic') clearBackgroundRetry();
+    videoDesired.value = false;
+    backgroundVideo.value?.pause();
+  }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    if (--playingWallpaperPreviews === 0) resumeAfterBackgroundHold();
+  };
+});
 const lowBatteryStatic = ref(false);
 const videoDesired = ref(false);
 const backgroundVideoGeneration = ref(0);
 const dynamicBackgroundActive = ref(false);
 const backgroundSource = ref<'fixed' | 'dynamic'>('fixed');
+const factoryBackgroundVideo = computed(() =>
+  backgroundSource.value === 'fixed' &&
+  backgroundKind.value === 'video' &&
+  backgroundUrl.value.startsWith('https://default-background.localhost/SteamDeck.mp4?v='),
+);
+// A small copy of the first frame of the shipped SteamDeck.mp4. The optional
+// native asset can be replaced; different advertised sizes use normal preload.
+const factoryBackgroundPoster = computed(() => factoryBackgroundVideo.value &&
+  backgroundUrl.value === 'https://default-background.localhost/SteamDeck.mp4?v=3026151'
+  ? 'data:image/webp;base64,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' : undefined);
+let factoryVideoStartTimer: number | null = null;
+let factoryWindowForeground: boolean | null = null;
+let backgroundWindowActivation: boolean | null = null;
+function cancelFactoryVideoStart(): void {
+  if (factoryVideoStartTimer === null) return;
+  window.clearTimeout(factoryVideoStartTimer);
+  factoryVideoStartTimer = null;
+}
 const backgroundFallbackUrls = ref<string[]>([]);
 const backgroundPlayback=ref<MediaPlayback|null>(null);
 let activeDynamicMediaKey='';
 let sharedMediaDirty=false;
-let activeDynamicMediaAsset:{key:string;assetId:string;bindingRevision:number;kind?:string}|null=null;
+let activeDynamicMediaAsset:{key:string;assetId:string;bindingRevision:number;kind?:string;reducedPlayback?:true;pid?:number;processCreated?:string}|null=null;
+let dynamicOriginalFallback:DynamicBackgroundFallback|null=null;
 let sharedMediaRefreshQueued=false;
 let sharedMediaPending:ReturnType<typeof refreshDynamicBackground>|null=null;
+let waitingDynamicPlayback:{key:string;pid:number;processCreated:string}|null=null;
 function requestSharedBackgroundRefresh(){
   if(!dynamicBackgroundAllowed())return;
   sharedMediaDirty=true;
   queueSharedBackgroundRefresh();
 }
 function queueSharedBackgroundRefresh(){
-  if(!sharedMediaDirty||sharedMediaPending||sharedMediaRefreshQueued||!resumeLifecycleActive||!isUiVisible()||!dynamicBackgroundAllowed())return;
+  const admitted=()=>isSharedPowerLifecycleAdmitted(getSharedPowerLifecycle());
+  if(!sharedMediaDirty||sharedMediaPending||sharedMediaRefreshQueued||!resumeLifecycleActive||!isUiVisible()||!dynamicBackgroundAllowed()||!admitted())return;
   sharedMediaRefreshQueued=true;
   queueMicrotask(async()=>{
     try{
-      if(sharedMediaPending||!resumeLifecycleActive||!isUiVisible()||!dynamicBackgroundAllowed())return;
+      if(sharedMediaPending||!resumeLifecycleActive||!isUiVisible()||!dynamicBackgroundAllowed()||!admitted())return;
       sharedMediaDirty=false;
       const game=await detectGame();
-      if(!resumeLifecycleActive||!dynamicBackgroundAllowed())return;
+      if(!resumeLifecycleActive||!dynamicBackgroundAllowed()||!admitted())return;
       if(sharedMediaPending||!isUiVisible()){sharedMediaDirty=true;return;}
       if(game&&!isCurrentGameTarget(game))return;
       lastDynamicGameIdentity=null;
@@ -313,15 +357,29 @@ function queueSharedBackgroundRefresh(){
   });
 }
 async function readDynamicGameBackground(game:DetectedGame){
-  const pending=refreshDynamicBackground(game);
+  waitingDynamicPlayback=null;
+  const pending=refreshDynamicBackground(game,dynamicOriginalFallback??undefined);
   sharedMediaPending=pending;
-  try{return await pending;}
+  try{const result=await pending;return isFailedDynamicVariant(result?.state,dynamicOriginalFallback)?null:result;}
   finally{
     if(sharedMediaPending===pending){sharedMediaPending=null;queueSharedBackgroundRefresh();}
   }
 }
+function onDynamicBackgroundWaiting(event:Event){
+  const detail=(event as CustomEvent<NonNullable<typeof waitingDynamicPlayback>>).detail;
+  const game=getCurrentGame();
+  if(dynamicBackgroundAllowed()&&detail?.key&&game&&detail.pid===game.pid&&detail.processCreated===game.processCreated)
+    waitingDynamicPlayback=detail;
+}
 function onSharedMediaChanged(event:Event){
-  const detail=(event as CustomEvent).detail;sharedMediaRevisions.observe(detail?.key,detail?.revision,detail?.canonicalKey);
+  const detail=(event as CustomEvent).detail;
+  if(detail?.playbackOnly){
+    if(detail.key===activeDynamicMediaKey&&activeDynamicMediaAsset?.kind==='video')return;
+    const game=getCurrentGame(),waiting=waitingDynamicPlayback;
+    if(game&&waiting&&detail.key===waiting.key&&game.pid===waiting.pid&&game.processCreated===waiting.processCreated){requestSharedBackgroundRefresh();return;}
+    // A publication can race the initial read, before the waiting key is known.
+    if(!activeDynamicMediaKey&&sharedMediaPending){requestSharedBackgroundRefresh();return;}
+  }else sharedMediaRevisions.observe(detail?.key,detail?.revision,detail?.canonicalKey);
   if(detail?.key===activeDynamicMediaKey&&activeDynamicMediaKey){requestSharedBackgroundRefresh();return;}
   // A game with no bound media still needs its first successful publication.
   if(activeDynamicMediaKey||detail?.ready!==true||typeof detail.executable!=='string'||!detail.executable)return;
@@ -368,6 +426,8 @@ function destroyHls(): void {
   hlsInstance = null;
 }
 function invalidateBackgroundMedia(): number {
+  cancelFactoryVideoStart();
+  factoryWindowForeground = null;
   backgroundMediaEpoch += 1;
   destroyHls();
   return backgroundMediaEpoch;
@@ -422,7 +482,7 @@ function scheduleBackgroundRetry(message: string): void {
       if (backgroundVideoSuspended.value) return;
       const video = backgroundVideo.value;
       if (!video || backgroundKind.value !== 'video') return;
-      if (!isHlsUrl(backgroundUrl.value)) video.load();
+      if (!factoryBackgroundPoster.value && !isHlsUrl(backgroundUrl.value)) video.load();
       await setupBackgroundVideo();
       await reconcileBackgroundVideo();
     });
@@ -480,9 +540,10 @@ const backgroundStyle = computed(() =>
 );
 function applyBackgroundState(state: BackgroundState | null | undefined, source: 'fixed' | 'dynamic' = 'fixed'): void {
   if(source==='dynamic'&&sharedMediaRevisions.outdated(state)){requestSharedBackgroundRefresh();return;}
+  if(source==='dynamic'&&isFailedDynamicVariant(state,dynamicOriginalFallback))return;
   backgroundPlayback.value=source==='dynamic'?state?.playback||null:null;
   activeDynamicMediaKey=source==='dynamic'?state?.mediaKey||'':'';
-  activeDynamicMediaAsset=source==='dynamic'&&state?.mediaAssetId&&state.mediaBindingRevision!==undefined?{key:state.mediaKey||'',assetId:state.mediaAssetId,bindingRevision:state.mediaBindingRevision,kind:state.kind}:null;
+  activeDynamicMediaAsset=source==='dynamic'&&state?.mediaAssetId&&state.mediaBindingRevision!==undefined?{key:state.mediaKey||'',assetId:state.mediaAssetId,bindingRevision:state.mediaBindingRevision,kind:state.kind,reducedPlayback:state.mediaReducedPlayback,pid:state.pid,processCreated:state.processCreated}:null;
   const kind = state?.kind === 'video' ? 'video' : 'image';
   const urls = Array.isArray(state?.fallbackUrls)
     ? state.fallbackUrls.filter((url): url is string => typeof url === 'string' && url.length > 0)
@@ -516,7 +577,7 @@ function applyBackgroundState(state: BackgroundState | null | undefined, source:
   backgroundUrl.value = effectiveUrl;
   void nextTick(async () => {
     const video = backgroundVideo.value;
-    if (video && backgroundKind.value === 'video' && !isHlsUrl(backgroundUrl.value)) video.load();
+    if (video && backgroundKind.value === 'video' && !factoryBackgroundPoster.value && !isHlsUrl(backgroundUrl.value)) video.load();
     await setupBackgroundVideo();
     await reconcileBackgroundVideo();
   });
@@ -541,7 +602,7 @@ function onBackgroundPositionChanged(e: Event): void {
   if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) backgroundPosition.value = position;
 }
 
-function backgroundVideoShouldPlay(video = backgroundVideo.value): boolean {
+function backgroundVideoPlaybackEligible(video = backgroundVideo.value): boolean {
   return Boolean(
     video &&
     backgroundKind.value === 'video' &&
@@ -549,12 +610,20 @@ function backgroundVideoShouldPlay(video = backgroundVideo.value): boolean {
     (backgroundSource.value === 'fixed' || dynamicBackgroundAllowed()) &&
     !backgroundVideoSuspended.value &&
     !backgroundEditorPaused.value &&
+    playingWallpaperPreviews === 0 &&
     !backgroundPresentationDisposed &&
     documentVisible.value &&
     nativeWindowVisible.value &&
+    (!factoryBackgroundVideo.value || factoryBackgroundPoster.value || document.hasFocus()) &&
     !lowBatteryStatic.value &&
     !isVideoPlaybackBlockedByPower(),
   );
+}
+
+function backgroundVideoShouldPlay(video = backgroundVideo.value): boolean {
+  return backgroundVideoPlaybackEligible(video) &&
+    (factoryBackgroundPoster.value ? factoryWindowForeground === true :
+      (backgroundWindowActivation ?? document.hasFocus()));
 }
 
 async function reconcileBackgroundVideo(): Promise<void> {
@@ -563,12 +632,30 @@ async function reconcileBackgroundVideo(): Promise<void> {
   const video = backgroundVideo.value;
   const epoch = backgroundMediaEpoch;
   const editorRevision = backgroundEditorPauseRevision;
+  const eligible = backgroundVideoPlaybackEligible(video);
+  const factoryPoster = factoryBackgroundPoster.value;
   const shouldPlay = backgroundVideoShouldPlay(video);
+  if (!eligible) cancelFactoryVideoStart();
   if (!video) {
     videoDesired.value = shouldPlay;
     return;
   }
   if (epoch !== backgroundMediaEpoch || video !== backgroundVideo.value) return;
+  if (eligible && factoryPoster && factoryWindowForeground === null && factoryVideoStartTimer === null) {
+    // DOM focus may be assigned even while another app owns the foreground.
+    const timer = window.setTimeout(async () => {
+      const state = await windowApi.getState().catch(() => null);
+      if (factoryVideoStartTimer !== timer) return;
+      factoryVideoStartTimer = null;
+      if (epoch !== backgroundMediaEpoch || video !== backgroundVideo.value ||
+          !factoryBackgroundPoster.value || !backgroundVideoPlaybackEligible(video)) return;
+      // A frontend temporarily paired with an older host keeps its legacy focus check.
+      if (state) factoryWindowForeground = state.visible && !state.minimized && (state.foreground ?? document.hasFocus());
+      if (factoryWindowForeground) void reconcileBackgroundVideo();
+    }, video.hasAttribute('src') ? 0 : 300);
+    factoryVideoStartTimer = timer;
+  }
+  if (shouldPlay && factoryPoster && !video.hasAttribute('src')) video.src = backgroundUrl.value;
   // Autoplay can leave the element playing while the remembered intent is
   // still false; do not skip the pause operation in that state.
   if (shouldSkipVideoReconcile(
@@ -584,7 +671,7 @@ async function reconcileBackgroundVideo(): Promise<void> {
   // The element is intentionally not marked autoplay. Wait for metadata so
   // the explicit play() below cannot turn a newly mounted or HLS-backed video
   // into a false playback failure while its source is still being attached.
-  if (video.readyState < 1) {
+  if (video.readyState < 1 && !factoryBackgroundPoster.value) {
     videoDesired.value = false;
     return;
   }
@@ -596,7 +683,7 @@ async function reconcileBackgroundVideo(): Promise<void> {
     }
   } catch {
     if (epoch !== backgroundMediaEpoch || video !== backgroundVideo.value ||
-        editorRevision !== backgroundEditorPauseRevision || backgroundEditorPaused.value || backgroundPresentationDisposed) return;
+        editorRevision !== backgroundEditorPauseRevision || !backgroundVideoShouldPlay(video)) return;
     videoDesired.value = false;
     onBackgroundVideoError(undefined, video);
   }
@@ -604,12 +691,36 @@ async function reconcileBackgroundVideo(): Promise<void> {
 
 function onBackgroundVideoLoaded(): void {
   onBackgroundVideoTimeUpdate();
-  videoDesired.value = false;
   void reconcileBackgroundVideo();
 }
 
 function onBackgroundVideoCanPlay(): void {
-  videoDesired.value = false;
+  // Readiness can fire again after a seek while the same play is in flight.
+  void reconcileBackgroundVideo();
+}
+
+function onBackgroundFocusChanged(): void {
+  if (!factoryBackgroundVideo.value && backgroundWindowActivation !== null) return;
+  // A DOM focus edge is a hint to recheck, never a foreground grant.
+  if (factoryBackgroundPoster.value && factoryWindowForeground !== true) {
+    // Preserve any in-flight confirmation. Native foreground loss revokes it.
+    factoryWindowForeground = null;
+  } else if (factoryBackgroundPoster.value && !document.hasFocus()) {
+    cancelFactoryVideoStart();
+    factoryWindowForeground = null;
+  }
+  void reconcileBackgroundVideo();
+}
+
+function onBackgroundWindowActivation(event: Event): void {
+  const active = (event as CustomEvent<{ active: boolean }>).detail?.active;
+  if (typeof active !== 'boolean') return;
+  backgroundWindowActivation = active;
+  if (factoryBackgroundPoster.value) {
+    cancelFactoryVideoStart();
+    factoryWindowForeground = active ? null : false;
+  }
+  if (backgroundKind.value !== 'video') return;
   void reconcileBackgroundVideo();
 }
 
@@ -661,6 +772,7 @@ function reconcileBackgroundLifecycle(): void {
 
 function suspendBackgroundVideo(): void {
   if (backgroundKind.value !== 'video') return;
+  if (dynamicOriginalFallback) { dynamicOriginalFallback = null; sharedMediaDirty = true; }
   clearBackgroundRetry();
   videoDesired.value = false;
   // Mark suspended and revoke HLS callbacks before aborting the media load.
@@ -672,6 +784,12 @@ function suspendBackgroundVideo(): void {
 
 function pauseBackgroundVideoForWindow(): void {
   if (backgroundKind.value !== 'video') return;
+  if (backgroundSource.value === 'dynamic') {
+    if (!backgroundVideoSuspended.value) suspendBackgroundVideo();
+    return;
+  }
+  cancelFactoryVideoStart();
+  factoryWindowForeground = null;
   clearBackgroundRetry();
   videoDesired.value = false;
   backgroundVideo.value?.pause();
@@ -688,7 +806,7 @@ function resumeBackgroundVideo(): void {
     if (backgroundVideoSuspended.value || !documentVisible.value || !nativeWindowVisible.value) return;
     const video = backgroundVideo.value;
     if (!video || backgroundKind.value !== 'video' || !backgroundUrl.value) return;
-    if (!isHlsUrl(backgroundUrl.value)) video.load();
+    if (!factoryBackgroundPoster.value && !isHlsUrl(backgroundUrl.value)) video.load();
     await setupBackgroundVideo();
     // Media recovery is independent from the power transaction. A decoder
     // that does not resolve play() after S3 must never hold input/hardware
@@ -771,7 +889,9 @@ watch([backgroundUrl, backgroundKind], () => {
 // one selected, foreground-only retry; visibility/source/OFF cleanup reuses the
 // existing retry owner, so inactive windows own neither a decoder nor a timer.
 function scheduleSharedBackgroundRetry(message: string): void {
-  if (backgroundRetryTimer !== null || !activeDynamicMediaAsset || !backgroundVideoShouldPlay()) return;
+  // Recovery may reattach a selected source while the window is visible. The
+  // separate playback gate keeps it paused until the window is active again.
+  if (backgroundRetryTimer !== null || !activeDynamicMediaAsset || !backgroundVideoPlaybackEligible()) return;
   const epoch = backgroundMediaEpoch;
   const editorRevision = backgroundEditorPauseRevision;
   const identity = JSON.stringify(activeDynamicMediaAsset);
@@ -785,7 +905,7 @@ function scheduleSharedBackgroundRetry(message: string): void {
   sharedBackgroundRetryAttempts = Math.min(2, sharedBackgroundRetryAttempts + 1);
   const canRetry = () => epoch === backgroundMediaEpoch && editorRevision === backgroundEditorPauseRevision &&
     source === backgroundUrl.value && identity === JSON.stringify(activeDynamicMediaAsset) &&
-    backgroundSource.value === 'dynamic' && backgroundVideoShouldPlay();
+    backgroundSource.value === 'dynamic' && backgroundVideoPlaybackEligible();
   const timer = window.setTimeout(() => {
     if (backgroundRetryTimer !== timer) return;
     backgroundRetryTimer = null;
@@ -809,10 +929,41 @@ function onBackgroundVideoMediaError(event: Event): void {
   onBackgroundVideoError(undefined, video);
 }
 
+function recoverDynamicBackgroundOriginal(video: HTMLVideoElement, message: string): boolean {
+  const failed = activeDynamicMediaAsset;
+  const game = getCurrentGame();
+  if (!failed?.key || !game?.processCreated || failed.pid !== game.pid || failed.processCreated !== game.processCreated ||
+      !isCurrentGameTarget(game) || !backgroundVideoShouldPlay(video)) return false;
+  const previous = dynamicOriginalFallback;
+  if (previous?.pid === game.pid && previous.processCreated === game.processCreated && previous.key === failed.key &&
+      previous.assetId === failed.assetId && previous.bindingRevision === failed.bindingRevision) return true;
+  const fallback: DynamicBackgroundFallback = {key: failed.key, assetId: failed.assetId, bindingRevision: failed.bindingRevision,
+    pid: game.pid, processCreated: game.processCreated};
+  dynamicOriginalFallback = fallback;
+  clearBackgroundRetry();
+  const epoch = invalidateBackgroundMedia();
+  const generation = dynamicBackgroundGeneration;
+  const editorRevision = backgroundEditorPauseRevision;
+  video.pause();
+  void readDynamicBackgroundOriginal(game, fallback).catch(() => null).then(state => {
+    if (dynamicOriginalFallback !== fallback) return;
+    if (epoch !== backgroundMediaEpoch || generation !== dynamicBackgroundGeneration || editorRevision !== backgroundEditorPauseRevision ||
+        video !== backgroundVideo.value || failed !== activeDynamicMediaAsset || !isCurrentGameTarget(game) || !backgroundVideoShouldPlay(video)) {
+      // A concurrent ordinary refresh already carries the same selection override.
+      if (failed === activeDynamicMediaAsset) dynamicOriginalFallback = null;
+      return;
+    }
+    if (state && !sharedMediaRevisions.outdated(state)) { applyBackgroundState(state, 'dynamic'); return; }
+    dynamicOriginalFallback = null;
+    onBackgroundVideoError(message, video, true);
+  });
+  return true;
+}
+
 function onBackgroundVideoError(message = 'Steam 在线视频播放失败', failedVideo?: HTMLVideoElement, localRecoveryOnly = false): void {
   if (failedVideo && failedVideo !== backgroundVideo.value) return;
   if (backgroundSource.value === 'dynamic' &&
-      (backgroundEditorPaused.value || backgroundPresentationDisposed || !dynamicBackgroundAllowed())) return;
+      (backgroundEditorPaused.value || playingWallpaperPreviews > 0 || backgroundPresentationDisposed || !dynamicBackgroundAllowed())) return;
   if (backgroundVideoSuspended.value || !documentVisible.value || !nativeWindowVisible.value ||
       lowBatteryStatic.value || isVideoPlaybackBlockedByPower() || backgroundKind.value !== 'video') return;
   videoDesired.value = false;
@@ -820,8 +971,10 @@ function onBackgroundVideoError(message = 'Steam 在线视频播放失败', fail
     if (!activeDynamicMediaAsset) return;
     const video = failedVideo || backgroundVideo.value;
     const code = video?.error?.code;
-    // SRC_NOT_SUPPORTED also covers failed loads before any bytes reach the decoder.
-    if (code === 3 && !localRecoveryOnly) {
+    if (!localRecoveryOnly && (code === 2 || code === 4) && video && activeDynamicMediaAsset.reducedPlayback === true &&
+        recoverDynamicBackgroundOriginal(video, message)) return;
+    // A read/source error cannot establish that the shared bytes are corrupt.
+    if (!localRecoveryOnly && code === 3) {
       invalidateBackgroundMedia();
       clearBackgroundRetry();
       const failed = activeDynamicMediaAsset;
@@ -854,7 +1007,7 @@ function onBackgroundVideoError(message = 'Steam 在线视频播放失败', fail
       if (backgroundVideoSuspended.value) return;
       const video = backgroundVideo.value;
     if (!video || backgroundKind.value !== 'video') return;
-    if (!isHlsUrl(backgroundUrl.value)) video.load();
+    if (!factoryBackgroundPoster.value && !isHlsUrl(backgroundUrl.value)) video.load();
     await setupBackgroundVideo();
     await reconcileBackgroundVideo();
   });
@@ -911,6 +1064,7 @@ function onBackgroundWindowHidden(): void {
 }
 function onBackgroundWindowShown(): void {
   nativeWindowVisible.value = true;
+  if (factoryWindowForeground === false) factoryWindowForeground = null;
   setNativeWindowVisible(true);
   queueSharedBackgroundRefresh();
   resumeBackgroundVideo();
@@ -935,7 +1089,6 @@ function notePowerTransitionGeneration(e: Event): number {
   return generation;
 }
 function onPowerSuspending(e: Event): void {
-  networkAccelerationWake.cancel();
   tdpRuntimeStore.invalidatePower();
   const generation = notePowerTransitionGeneration(e);
   if (generation > 0 && generation >= fanHostLifecycle.coordinatorSnapshot.powerGeneration) {
@@ -1085,6 +1238,7 @@ function onFanResumeReady(resumeGeneration: number): void {
         if (request.nativeReadyInFlight) return;
         if (!request.nativeReadyRedelivered && startedAt && isSharedPowerLifecycleAdmitted(startedAt) && power.generation === startedAt.generation &&
             power.observedNotificationSequence === startedAt.observedNotificationSequence &&
+            power.suspendSerial === startedAt.suspendSerial &&
             power.publicationRevision === startedAt.publicationRevision) return;
         request.retryAfterPublicReady = undefined;
         request.publicRetryUsed = true;
@@ -1120,7 +1274,6 @@ function onPowerResumed(e: Event): void {
   // The shared native Ready fact also compensates a lost resume-ready event.
   // This queue coalesces the existing task; Fan recovery remains independent.
   scheduleResumeTransaction(generation);
-  networkAccelerationWake.schedule(generation);
   scheduleSleepPowerPlanOptimization();
   if (resumeVideoTimer !== null) window.clearTimeout(resumeVideoTimer);
   resumeVideoTimer = window.setTimeout(() => {
@@ -1365,7 +1518,6 @@ let stopGyroTelemetry: (() => void) | null = null;
 let stopAcWatch: (() => void) | null = null;
 let stopPowerSourceWatch: (() => void) | null = null;
 let stopForegroundPowerSource: (() => void) | null = null;
-let stopResumeWatch: (() => void) | null = null;
 let stopFanResumeWatch: (() => void) | null = null;
 let stopSchemeWatch: (() => void) | null = null;
 let stopStartupPerformanceWatch: (() => void) | null = null;
@@ -1379,7 +1531,8 @@ let sleepPlanOptimizationConfirmation: {
 } | null = null;
 
 function sameSleepPowerPlanScope(a: SharedPowerLifecycleSnapshot, b: SharedPowerLifecycleSnapshot): boolean {
-  return a.generation === b.generation && a.observedNotificationSequence === b.observedNotificationSequence;
+  return a.generation === b.generation && a.suspendSerial === b.suspendSerial &&
+    a.observedNotificationSequence === b.observedNotificationSequence;
 }
 function confirmSleepPowerPlanOptimization(request: object, captured: SharedPowerLifecycleSnapshot, ownsQueue: () => boolean): void {
   if (!resumeLifecycleActive || !ownsQueue() || !sleepPlanOptimizationRequest || sleepPlanOptimizationConfirmation) return;
@@ -1425,8 +1578,8 @@ function continueSleepPowerPlanOptimization(): void {
     const captured = getSharedPowerLifecycle();
     const isCurrent = () => {
       const current = getSharedPowerLifecycle();
-      return ownsQueue() && resumeLifecycleActive && isSharedPowerLifecycleAdmitted(current) &&
-        current!.generation === generation && current!.observedNotificationSequence === captured?.observedNotificationSequence;
+      return ownsQueue() && resumeLifecycleActive && !!captured && !!current &&
+        isSharedPowerLifecycleAdmitted(current) && current.generation === generation && sameSleepPowerPlanScope(current, captured);
     };
     if (!request || !isCurrent()) return;
     try {
@@ -1434,8 +1587,11 @@ function continueSleepPowerPlanOptimization(): void {
       if (!isCurrent()) return;
       if (enabled) {
         const sequence = captured?.observedNotificationSequence;
+        const suspendSerial = captured?.suspendSerial;
         if (sequence === undefined) throw new Error('睡眠电源计划优化缺少公共通知序号');
-        const result = await optimizeSleepPowerPlans({ expectedPowerGeneration: generation, expectedPowerNotificationSequence: sequence, isCurrent });
+        if (suspendSerial === undefined) throw new Error('睡眠电源计划优化缺少公共挂起序号');
+        const result = await optimizeSleepPowerPlans({ expectedPowerGeneration: generation, expectedPowerNotificationSequence: sequence,
+          expectedPowerSuspendSerial: suspendSerial, isCurrent });
         if (!isCurrent()) return;
         if (!result.ok && (!result.stopped || result.failed.length)) console.error('[sleep power plan optimization]', result.failed[0]);
       }
@@ -1462,7 +1618,7 @@ let committedResumeGeneration = 0;
 let resumeFollowup: {
   generation: number; mode: 'ac' | 'dc'; completed: boolean;
   scheme?: Promise<'yeman' | 'auto' | 'manual'>;
-  performance?: Promise<unknown>;
+  performance?: Promise<WakePerformanceResult>;
   legacy?: Promise<void>;
 } | null = null;
 let resumeLifecycleActive = true;
@@ -1606,7 +1762,6 @@ function scheduleResumeTransaction(generation: number): void {
       followup = { generation: targetGeneration, mode, completed: false };
       resumeFollowup = followup;
       needsConfirmedFollowup = true;
-      networkAccelerationWake.schedule(targetGeneration);
       resumeRetryCounts.delete(targetGeneration);
       // The resident owner can keep healing even if a later scheme read fails.
       requestGamePolicyTdpReconciliation(targetGeneration);
@@ -1617,12 +1772,15 @@ function scheduleResumeTransaction(generation: number): void {
     followup.scheme ??= reconcileRememberedPowerScheme().catch(() => 'yeman' as const);
     const schemeOwner = await followup.scheme;
     if (!ownsCurrent()) return;
-    followup.performance ??= restorePerformanceScheduleIfConfigured(followup.mode, {
-      dedicatedOnly: schemeOwner !== 'auto',
-      automaticOnly: true, restoreRemembered: true, forceRemembered: true,
-    }).catch(() => null);
-    await followup.performance;
+    if (followup.performance) {
+      const previous = await followup.performance;
+      if (!ownsCurrent()) return;
+      if (previous === 'retry-on-ready') followup.performance = undefined;
+    }
+    followup.performance ??= restorePerformanceScheduleAfterWake(followup.mode, schemeOwner !== 'auto', ownsCurrent);
+    const performance = await followup.performance;
     if (!ownsCurrent()) return;
+    if (performance === 'retry-on-ready') return;
     // Retained legacy controls stay inactive even when old settings opted in.
     if (LEGACY_CCD_UNDERVOLT_ACTIVE) {
       followup.legacy ??= applyCpuAutostart().catch(() => {});
@@ -1644,6 +1802,7 @@ function onDynamicBackgroundSettingChanged(): void {
     dynamicBackgroundNoGameTimer = null;
   }
   if (!dynamicBackgroundAllowed()) {
+    dynamicOriginalFallback = null;
     stopDynamicBackgroundWatch();
     lastDynamicGameIdentity = null;
     dynamicBackgroundActive.value = false;
@@ -1761,6 +1920,8 @@ function onDynamicGameStatus(game: DetectedGame | null): void {
       dynamicBackgroundNoGameTimer = null;
     }
     if (!game.processCreated) return;
+    if (dynamicOriginalFallback && (dynamicOriginalFallback.pid !== game.pid ||
+        dynamicOriginalFallback.processCreated !== game.processCreated)) dynamicOriginalFallback = null;
     const gameIdentity = `${game.pid}:${game.processCreated}:${game.path || game.name}`;
     if (gameIdentity === lastDynamicGameIdentity) return;
     // The old media belongs to a different valve target. Do not display it
@@ -1793,7 +1954,7 @@ function stopDynamicBackgroundWatch(): void {
 }
 function onDynamicBackgroundLoaded(e: Event): void {
   const state = (e as CustomEvent<BackgroundState>).detail;
-  if (!state?.url || !dynamicBackgroundAllowed()) return;
+  if (!state?.url || !dynamicBackgroundAllowed() || isFailedDynamicVariant(state,dynamicOriginalFallback)) return;
   const generation = ++dynamicBackgroundGeneration;
   void detectGame(true).then((game) => {
     if (generation !== dynamicBackgroundGeneration || !game ||
@@ -1850,6 +2011,7 @@ onMounted(async () => {
   wallpaperPowerPaused.value=wallpaperPowerBlocked();
   stopSharedGameMedia = startSharedGameMedia();
   window.addEventListener('game-media:changed',onSharedMediaChanged);
+  window.addEventListener('dynamic-background:waiting-for-playback',onDynamicBackgroundWaiting);
   steamWallpaperHost = startSteamWallpaperHost();
   try {
     aiFanMockActive = parseAiFanMockSession(await app.aiFanMockSession()) !== null;
@@ -1875,26 +2037,60 @@ onMounted(async () => {
   // operation. A controller recreated during S3 recovery can otherwise miss
   // resume-ready while settings/background initialization is still running.
   window.addEventListener('ipc:fan.suspending', onFanPhysicalSuspending as EventListener);
-  let sharedPowerKey = '', sharedPowerSeen = false, sharedPowerAdmitted = false;
+  let sharedPowerKey = '', sharedPowerSeen = false, sharedPowerAdmitted = false, sharedF5Confirmed = false;
+  let sharedSuspendScope: string | null = null;
   stopSharedPowerWatch = onSharedPowerLifecycle(state => {
     if (!resumeLifecycleActive) return;
+    const confirmedF5 = state.known === true && state.notificationPending !== true && state.resumeReady === true;
+    const f5Restored = confirmedF5 && !sharedF5Confirmed;
+    sharedF5Confirmed = confirmedF5;
+    const wasWorkAllowed = resumeWorkAllowed;
     resumeWorkAllowed = state.known !== false && state.notificationPending !== true &&
-      (state.phase === 'ready' || state.phase === 'resuming');
+      (state.phase === 'ready' || (state.phase === 'resuming' && state.resumeReady !== false));
     const admitted = isSharedPowerLifecycleAdmitted(state);
+    const suspendScope = JSON.stringify([state.generation, state.suspendSerial]);
+    const suspendScopeChanged = sharedSuspendScope !== null && sharedSuspendScope !== suspendScope;
+    sharedSuspendScope = suspendScope;
     if (admitted) for (const request of fanWakeRequests.values()) request.retryAfterPublicReady?.(state);
-    if (!admitted) {
-      sleepPlanOptimizationQueue.invalidate();
-      if (sleepPlanOptimizationConfirmation) sleepPlanOptimizationConfirmation.denied = true;
-    }
-    else if (sleepPlanOptimizationRequest) continueSleepPowerPlanOptimization();
+    if (!admitted || suspendScopeChanged) sleepPlanOptimizationQueue.invalidate();
+    if (!admitted && sleepPlanOptimizationConfirmation) sleepPlanOptimizationConfirmation.denied = true;
+    if (admitted && sleepPlanOptimizationRequest) continueSleepPowerPlanOptimization();
     const admissionRestored = admitted && !sharedPowerAdmitted;
     const admissionLost = !admitted && sharedPowerAdmitted;
     sharedPowerAdmitted = admitted;
+    if (admissionLost || suspendScopeChanged) {
+      ++dynamicBackgroundGeneration;
+      sharedMediaPending = null;
+      lastDynamicGameIdentity = null;
+      if (dynamicBackgroundNoGameTimer !== null) {
+        window.clearTimeout(dynamicBackgroundNoGameTimer);
+        dynamicBackgroundNoGameTimer = null;
+      }
+    }
+    if (admitted && (admissionRestored || suspendScopeChanged)) requestSharedBackgroundRefresh();
     const key = `${state.generation}:${state.phase}:${state.known}:${state.notificationPending}`;
+    // The network check follows hardware admission, which can change without a phase change.
+    if (!admitted) networkAccelerationWake.cancel();
+    else if ((sharedPowerSeen || confirmedF5) && (admissionRestored || f5Restored || key !== sharedPowerKey || suspendScopeChanged))
+      networkAccelerationWake.schedule(state.generation, state.suspendSerial);
+    // Retire the old queue before processing the merged wake's phase.
+    if (suspendScopeChanged) resumeQueue.invalidate();
+    if ((suspendScopeChanged || (wasWorkAllowed && !resumeWorkAllowed)) && resumeRetryTimer) {
+      clearTimeout(resumeRetryTimer);
+      resumeRetryTimer = null;
+    }
     if (key === sharedPowerKey) {
-      if (admissionLost) resumeQueue.invalidate();
+      if (admissionLost || (wasWorkAllowed && !resumeWorkAllowed)) resumeQueue.invalidate();
+      if (f5Restored && state.phase === 'resuming') onPowerResumeReady(state.generation);
+      else if (f5Restored && state.phase === 'ready' && state.generation > latestResumeGeneration) {
+        onPowerResumed(new CustomEvent('shared:power-lifecycle', { detail: state }));
+      }
+      else if (suspendScopeChanged && state.generation === latestResumeGeneration &&
+          (admitted || (confirmedF5 && state.phase === 'resuming'))) {
+        scheduleResumeTransaction(state.generation);
+      }
       // Admission alone wakes only this retained task, not the whole wake broadcast.
-      if (admissionRestored && resumeFollowup?.generation === state.generation && !resumeFollowup.completed)
+      if (!suspendScopeChanged && admissionRestored && resumeFollowup?.generation === state.generation && !resumeFollowup.completed)
         scheduleResumeTransaction(state.generation);
       return;
     }
@@ -1904,32 +2100,22 @@ onMounted(async () => {
     if (state.known === false || state.notificationPending === true) {
       resumeQueue.invalidate();
       if (resumeRetryTimer) { clearTimeout(resumeRetryTimer); resumeRetryTimer = null; }
-      networkAccelerationWake.cancel(); tdpRuntimeStore.invalidatePower();
+      tdpRuntimeStore.invalidatePower();
       if (resumeVideoTimer !== null) window.clearTimeout(resumeVideoTimer);
       resumeVideoTimer = null; suspendBackgroundVideo();
       // Unknown shared context is not evidence that the Fan device lost F5.
-    } else if (state.phase === 'resuming') onPowerResuming(event);
-    else if (state.phase !== 'ready') onPowerSuspending(event);
-    else if (!first) onPowerResumed(event);
-    else {
-      // A resume-ready edge may precede this source's first known snapshot.
-      // Retain that request; ordinary cold Ready still performs no wake task.
-      if (latestResumeGeneration > 0 && state.generation === latestResumeGeneration)
-        scheduleResumeTransaction(state.generation);
-      if (backgroundVideoSuspended.value) resumeBackgroundVideo();
-    }
-    // Cold Ready is not a new wake. Existing mount/device receipts below keep
-    // their own recovery; subsequent same-gen Ready corrects any private hold.
-  });
+    } else if (state.phase === 'resuming') {
+      onPowerResuming(event);
+      if (confirmedF5) onPowerResumeReady(state.generation);
+    } else if (state.phase !== 'ready') onPowerSuspending(event);
+    else if (!first || confirmedF5) onPowerResumed(event);
+    else if (backgroundVideoSuspended.value) resumeBackgroundVideo();
+  }, { observeSuspendSerial: true, observeNotificationSequence: true, onFanWakeRepublished: state => state.fanWakeGeneration && fanWakeRequests.get(state.fanWakeGeneration)?.retryAfterPublicReady?.(state) });
   stopSharedFanWakeWatch = onSharedPowerLifecycle(onSharedFanWake, { observeFanWakeGeneration: true });
   window.addEventListener('fan:guard-state', onFanGuardState as EventListener);
-  stopResumeWatch = on<{ generation?: number }>('power.resume-ready', ({ generation }) => {
-    onPowerResumeReady(generation);
-  });
   stopFanResumeWatch = on<{ generation?: number }>('fan.resume-ready', ({ generation }) => {
     onFanResumeReady(Number(generation) || 0);
   });
-  const lifecycleAtMountPromise = powerLifecycle.get().catch(() => null);
   uiPowerReconciliation = startUiPowerReconciliation();
   const fanLifecycleAtMountPromise = powerLifecycle.getForFan().catch(() => null);
   try {
@@ -2026,6 +2212,9 @@ onMounted(async () => {
   // 唤起（托盘呼出）时按设置项对齐主窗口位置。
   window.addEventListener('ipc:window.summoned', onWindowPlacementSummoned);
   document.addEventListener('visibilitychange', onBackgroundVisibilityChange);
+  window.addEventListener('focus', onBackgroundFocusChanged);
+  window.addEventListener('blur', onBackgroundFocusChanged);
+  window.addEventListener('ipc:window.activationChanged', onBackgroundWindowActivation);
   deckyMirrorHost?.startupPhase('background-state');
   const initialWindowState = await windowApi.getState().catch(() => null);
   if (initialWindowState) {
@@ -2135,36 +2324,7 @@ onMounted(async () => {
     // merely showing the same AC/DC side never replays fan/CPU/TDP settings.
     if (changed) { invalidateFloatPowerSource(mode); schedulePowerChangePerformanceRestore(mode); }
   });
-  // Compensate for a one-shot resume event that was emitted while WebView2
-  // was being recreated.  The native lifecycle remains `resuming` until the
-  // same commit path succeeds, so querying it is safe and idempotent.
-  deckyMirrorHost?.startupPhase('wake-state');
-  const lifecycleAtMount = await lifecycleAtMountPromise;
-  const lifecycleAtMountKnown = (lifecycleAtMount as { known?: boolean } | null)?.known !== false;
-  if (lifecycleAtMountKnown && lifecycleAtMount?.phase === 'resuming' && lifecycleAtMount.resumeReady === true) {
-    onPowerResumeReady(Number(lifecycleAtMount.generation));
-  } else if (lifecycleAtMountKnown && lifecycleAtMount?.phase === 'ready' && lifecycleAtMount.resumeReady === true) {
-    // The durable native state can outlive the one-shot resume-ready event
-    // when the renderer is recreated after the native commit.  Rebind the
-    // Fan-local generation and let the idempotent committed-wake path restore
-    // any remembered curve; no shared sleep strategy or OEM proof is changed.
-    const committedGeneration = Number(lifecycleAtMount.generation) || 0;
-    if (committedGeneration > 0) {
-      latestResumeGeneration = Math.max(latestResumeGeneration, committedGeneration);
-      fanHostLifecycle.setPowerGeneration(committedGeneration);
-      fanHostLifecycle.observePowerBoundary('resumed', committedGeneration);
-      requestFanCommittedResume(committedGeneration);
-      scheduleResumeTransaction(committedGeneration);
-      networkAccelerationWake.schedule(committedGeneration);
-    }
-  } else if (lifecycleAtMount?.phase === 'resuming') {
-    // Native has not delivered F5 yet. Wait for its durable resume-ready
-    // event instead of letting a remounted renderer fabricate that boundary.
-    latestResumeGeneration = Math.max(latestResumeGeneration, Number(lifecycleAtMount.generation) || 0);
-  } else if (lifecycleAtMount && lifecycleAtMount.phase !== 'ready') {
-    latestResumeGeneration = Math.max(latestResumeGeneration, Number(lifecycleAtMount.generation) || 0);
-  }
-  // FAN-927 §5（2026-09-27 用户批准）：渲染器重建 / 主程序非正常退出后重开的**唯一**事件入口。
+  deckyMirrorHost?.startupPhase('wake-state');  // FAN-927 §5（2026-09-27 用户批准）：渲染器重建 / 主程序非正常退出后重开的**唯一**事件入口。
   // 依据完全来自 native 活动记录：本 run 已确认的意图只接上已有会话（不重开 HC、不重发曲线）；
   // 崩溃前仍有效的记录才做一次有界恢复；无依据时零动作（不启动 Host、不发 HTTP）。
   deckyMirrorHost?.startupPhase('fan-owner');
@@ -2265,7 +2425,6 @@ onUnmounted(() => {
   backgroundPresentationDisposed = true;
   stopUndervoltRuntime();
   cancelBootModeLaunches();
-  fanWakeRequests.clear();
   cancelBootModeDeferredMouse();
   stopBootModeReceipts?.(); stopBootModeReceipts = null;
   uiPowerReconciliation?.stop();
@@ -2275,6 +2434,7 @@ onUnmounted(() => {
   updatePredownloadHost?.stop(); updatePredownloadHost = null;
   controllerShortcutRuntime?.stop(); controllerShortcutRuntime = null;
   window.removeEventListener('game-media:changed',onSharedMediaChanged);
+  window.removeEventListener('dynamic-background:waiting-for-playback',onDynamicBackgroundWaiting);
   stopWallpaperPower?.();stopWallpaperPower=null;steamWallpaperHost?.stop(); steamWallpaperHost=null;stopSharedGameMedia?.();stopSharedGameMedia=null;
   radialHost?.stop(); radialHost = null;
   monitorHudHost?.stop(); monitorHudHost = null;
@@ -2295,6 +2455,7 @@ onUnmounted(() => {
     dynamicBackgroundNoGameTimer = null;
   }
   resumeLifecycleActive = false;
+  fanWakeRequests.clear();
   resumeQueue.invalidate();
   sleepPlanOptimizationQueue.invalidate();
   sleepPlanOptimizationRequest = null;
@@ -2352,13 +2513,15 @@ onUnmounted(() => {
   window.removeEventListener('dynamic-background:loaded', onDynamicBackgroundLoaded as EventListener);
   window.removeEventListener('ipc:game.rules.changed', onGameRulesChanged as EventListener);
   document.removeEventListener('visibilitychange', onBackgroundVisibilityChange);
+  window.removeEventListener('focus', onBackgroundFocusChanged);
+  window.removeEventListener('blur', onBackgroundFocusChanged);
+  window.removeEventListener('ipc:window.activationChanged', onBackgroundWindowActivation);
   stopGamepad?.();
   stopGyroTelemetry?.();
   stopAcWatch?.();
   stopPowerSourceWatch?.();
   stopForegroundPowerSource?.();
   stopForegroundPowerSource = null;
-  stopResumeWatch?.();
   stopFanResumeWatch?.();
   stopSchemeWatch?.();
   stopStartupPerformanceWatch?.();
@@ -2418,12 +2581,13 @@ onUnmounted(() => {
       :key="backgroundVideoGeneration"
       ref="backgroundVideo"
       class="user-background-video"
-      :src="isHlsUrl(backgroundUrl) ? undefined : backgroundUrl"
+      :src="factoryBackgroundPoster || isHlsUrl(backgroundUrl) ? undefined : backgroundUrl"
       :style="{ opacity: String(backgroundOpacity), filter: `blur(${backgroundBlur}px) saturate(1.12) contrast(1.08)`, objectFit: backgroundPlayback?.fit || 'cover', objectPosition: backgroundObjectPosition }"
       muted
       loop
       playsinline
-      preload="metadata"
+      :poster="factoryBackgroundPoster"
+      :preload="factoryBackgroundPoster ? 'none' : factoryBackgroundVideo ? 'auto' : 'metadata'"
       disablepictureinpicture
       tabindex="-1"
       aria-hidden="true"
@@ -2470,12 +2634,17 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* Native hiding/minimizing need not change document.visibilityState in WebView2.
- * Pause decorative CSS clocks without removing animations or altering control.
- * Resume preserves their phase; visible UI visuals and timing remain unchanged. */
-.app-stage[data-ui-visible="false"] :deep(*),
-.app-stage[data-ui-visible="false"] :deep(*::before),
-.app-stage[data-ui-visible="false"] :deep(*::after) {
+/* Pause the decorative animations owned by the main UI while it is hidden.
+ * Keep this list in sync with CSS animations rendered inside .app-stage so
+ * a visibility change only restyles animation targets and nearby elements. */
+.app-stage[data-ui-visible="false"] :deep(:where(
+  .nav-icon .spinning, .cd-shape, .wallpaper-preview-ambient span,
+  .device-blink-layer.blinking, .keyboard-blink-layer.blinking,
+  .pad-shoulder.mapped path, .pad-trigger.mapped path, .pad-btn.mapped circle,
+  .dpad.mapped path, .dpad.mapped rect, .stick-dot.mapped circle,
+  .oem-capsule.mapped:not(.live), .handheld-key-bubbles span:not(.live), .creation-dot
+)),
+.app-stage[data-ui-visible="false"] :deep(:where(.rule-row.creating)::before) {
   animation-play-state: paused !important;
 }
 /* 顶层居中容器：viewport 内 grid place-items: center，整体应用壳视觉居中 */

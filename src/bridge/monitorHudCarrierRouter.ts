@@ -2,19 +2,19 @@
 // never queries Steam. Steam preference is explicit; an unknown close is not a hide.
 import { normalizeMonitorOutput, type MonitorOutputPreferences } from './monitorHudModel';
 import type { OutputAck,MonitorOutputCurrent } from './monitorOutputCoordinator';
-export interface HudCarrierPort {available():Promise<boolean>|boolean;visible():boolean;state?():'shown'|'hidden'|'unknown';setVisible(show:boolean,prefs:MonitorOutputPreferences,current?:MonitorOutputCurrent):Promise<OutputAck>;}
+export interface HudCarrierPort {available(scope?:AbortSignal):Promise<boolean>|boolean;visible():boolean;state?():'shown'|'hidden'|'unknown';setVisible(show:boolean,prefs:MonitorOutputPreferences,current?:MonitorOutputCurrent):Promise<OutputAck>;}
 export function createHudCarrierRouter(steam:HudCarrierPort,desktop:HudCarrierPort,policy:'steam-first'|'desktop-global'='steam-first'){
   let queue:Promise<unknown>=Promise.resolve(),active:'steam'|'desktop'|null=null,steamTouched=false;
   let preferences=normalizeMonitorOutput();
   const portState=(port:HudCarrierPort)=>port.state?.()??(port.visible()?'shown':'hidden');
-  async function kind(prefs:MonitorOutputPreferences=preferences){
-    if(policy==='desktop-global'){
-      if(prefs.ymccCarrier==='steam-preferred'){
-        try{if(await steam.available()&&portState(steam)!=='unknown')return 'steam';}catch{/* Unavailable Steam must not veto a usable desktop. */}
-      }
-      return await desktop.available()?'desktop':null;
+  async function kind(prefs:MonitorOutputPreferences=preferences,scope?:AbortSignal){
+    if(scope?.aborted)return null;
+    if(policy==='steam-first'){
+      if(await steam.available(scope))return scope?.aborted?null:'steam';
+    }else if(prefs.ymccCarrier==='steam-preferred'){
+      try{if(await steam.available(scope)&&portState(steam)!=='unknown')return scope?.aborted?null:'steam';}catch{/* Unavailable Steam must not veto a usable desktop. */}
     }
-    return await steam.available()?'steam':await desktop.available()?'desktop':null;
+    return !scope?.aborted&&await desktop.available(scope)&&!scope?.aborted?'desktop':null;
   }
   async function apply(show:boolean,raw:MonitorOutputPreferences,current?:MonitorOutputCurrent):Promise<OutputAck>{
     const requireCurrent=async()=>{if(current&&!await current())throw Error('MONITOR_OUTPUT_REQUEST_EXPIRED');};
@@ -71,7 +71,7 @@ export function createHudCarrierRouter(steam:HudCarrierPort,desktop:HudCarrierPo
     if(values.includes('unknown')||values.filter(v=>v==='shown').length>1)return 'unknown';
     return values.includes('shown')?'shown':'hidden';
   }
-  return {available:async(prefs?:MonitorOutputPreferences)=>!!await kind(prefs),kind,state,
+  return {available:async(prefs?:MonitorOutputPreferences,scope?:AbortSignal)=>!!await kind(prefs,scope),kind,state,
     visible:()=>policy==='desktop-global'&&!steamTouched&&active!=='steam'?desktop.visible():steam.visible()||desktop.visible(),active:()=>active,
     setVisible(show:boolean,prefs:MonitorOutputPreferences,current?:MonitorOutputCurrent){const snapshot=normalizeMonitorOutput(prefs);const result=queue.then(()=>apply(show,snapshot,current));queue=result.catch(()=>{});return result;}};
 }

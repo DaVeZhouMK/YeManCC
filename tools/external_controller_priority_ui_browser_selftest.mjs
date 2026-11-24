@@ -63,7 +63,7 @@ const mocks = {
         return { ok: true, content: committedContent };
       },
     };`,
-  '@/bridge/ipc': `
+  '@/bridge/ipc': `export function setGyroTelemetryInterest(){};
     export function on(name, cb) {
       const callbacks = window.__fixture.events[name] ??= new Set();
       callbacks.add(cb); return () => callbacks.delete(cb);

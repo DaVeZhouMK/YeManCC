@@ -24,7 +24,7 @@ function New-Backend([uint32]$Id,[uint32]$Parent,[int]$Second){
 function New-Listener([uint32]$Id,[string]$Address='127.0.0.1'){[pscustomobject]@{OwningProcess=$Id;LocalAddress=$Address}}
 function Get-BackendProcesses {$script:Family}
 function Get-AppearanceTcpListeners([int]$LocalPort){if($LocalPort -ne 35821){throw 'Unexpected port'};$script:PortReads++;$script:Listeners}
-function Get-Process {param([uint32]$Id,$ErrorAction) if(!$Id){throw 'PRIVATE_PROCESS_SCAN_DENIED'};$script:PidReads++;$script:Current[$Id]}
+function Get-AppearancePid([uint32]$Id) {if(!$Id){throw 'PRIVATE_PROCESS_SCAN_DENIED'};$script:PidReads++;$script:Current[$Id]}
 function Test-CurrentUserProcess($Process){$Process.User}
 function Get-AppearanceProcessPath($Process){$Process.Path}
 function Get-AppearanceParentId($Process){$Process.Parent}

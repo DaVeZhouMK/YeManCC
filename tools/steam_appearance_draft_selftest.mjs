@@ -12,10 +12,39 @@ function fixture(storage=new Map()){
  let now=0,id=0,revision=1;const timers=new Map(),calls={read:0,apply:[],refresh:0,reset:0,active:0,maxActive:0};let applyRelease=null,fail=false,savedUnconfirmed=false,hold=false;
  let actual={targetId:'a'.repeat(16),revision:'1'.padStart(64,'0'),linked:true,backendReady:true,backendProcessCount:2,steamRunning:true,configuredMatchesBackend:true,note:'',packAvailable:true,packPrepared:false,packOwned:false,themes:names.map(name=>({name,installed:true,configured:true,backendEnabled:true,parameterCount:3,error:''}))};
  const deps={read:async()=>{calls.read++;return structuredClone(actual)},apply:async(s,states)=>{calls.active++;calls.maxActive=Math.max(calls.maxActive,calls.active);calls.apply.push({...states});if(hold)await new Promise(r=>applyRelease=r);calls.active--;if(fail)throw Error('fixture failure');for(const [name,value]of Object.entries(states)){actual.themes.find(r=>r.name===name).configured=value;actual.themes.find(r=>r.name===name).backendEnabled=value};actual.revision=(++revision).toString(16).padStart(64,'0');return {ok:!savedUnconfirmed,saved:true,snapshot:structuredClone(actual),message:savedUnconfirmed?'saved; backend unconfirmed':'saved'}},refresh:async()=>{calls.refresh++;return {ok:true,snapshot:structuredClone(actual),message:'refreshed'}},reset:async()=>{calls.reset++;for(const row of actual.themes)row.configured=true;return{ok:true,snapshot:structuredClone(actual),message:'reset'}},now:()=>now,later:(fn,ms)=>{const n=++id;timers.set(n,{fn,due:now+ms});return n},cancel:n=>timers.delete(n),storage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)}};
+ deps.submitDraft=async(id,intent,mode,onCurrent)=>{
+  const current=await deps.read();onCurrent(current);
+  if(!id||current.targetId?.toLowerCase()!==id)throw Error(mode==='preferences'?'主题目录已变化，未补写旧全局偏好':'加载器主题目录已改变，未跨目录提交旧选择');
+  const patch=Object.fromEntries(Object.entries(intent).filter(([name,value])=>current.themes.find(row=>row.name===name)?.configured!==value));
+  if(mode==='selection'&&Object.keys(patch).length)return deps.apply(current,patch);
+  return deps.rememberPreferences?deps.rememberPreferences(current,intent):{ok:true,saved:true,snapshot:current};
+ };
  const q=createAppearanceDraft(deps);
  return{q,deps,calls,timers,storage,get actual(){return actual},setTarget(id){actual.targetId=id},setFail(v){fail=v},setHold(v){hold=v},setSavedUnconfirmed(v){savedUnconfirmed=v},release(){const r=applyRelease;applyRelease=null;r?.()},async advance(ms){now+=ms;for(let i=0;i<40;i++){const next=[...timers].find(([,t])=>t.due<=now);if(!next)break;timers.delete(next[0]);next[1].fn();await flush()}await flush()},async init(){await q.read();await flush()}};
 }
 if(!selected){
+for(const [scenario,expected] of [['pre-dispatch',1],['late click',2],['partial',2],['legacy',2],['unconfirmed',2],['new directory',2],['new Steam session',2],['new switch intent',2]]){
+ await check('Repeated manual Refresh: '+scenario,async()=>{
+  const f=fixture();Object.assign(f.actual,{steamPid:42,steamBirth:'100',packPrepared:true});await f.init();
+  let dispatch,finish;const dispatched=new Promise(r=>dispatch=r),result=new Promise(r=>finish=r);
+  const receipt=()=>({ok:true,saved:true,renderConfirmed:true,renderContextsComplete:true,snapshot:structuredClone(f.actual)});
+  f.deps.refresh=async onDispatch=>{if(++f.calls.refresh===1){await dispatched;onDispatch?.();return result;}onDispatch?.();return receipt();};
+  const first=f.q.flush();
+  if(scenario==='late click'){dispatch();await flush();}
+  for(let i=0;i<10;i++)void f.q.flush();
+  if(scenario==='new switch intent'){f.q.set({Round:false});void f.q.flush();}
+  if(scenario==='new directory')f.setTarget('b'.repeat(16));
+  if(scenario==='new Steam session')f.actual.steamBirth='101';
+  dispatch();await flush();
+  const reply=receipt();
+  if(scenario==='partial')reply.renderContextsComplete=false;
+  if(scenario==='legacy')delete reply.renderContextsComplete;
+  if(scenario==='unconfirmed')Object.assign(reply,{ok:false,renderConfirmed:false});
+  finish(reply);await first;await f.advance(60000);
+  assert.equal(f.calls.refresh,expected);assert.equal(f.calls.apply.length,scenario==='new switch intent'?1:0);assert.equal(f.timers.size,0);
+  if(scenario==='pre-dispatch'){await f.q.flush();assert.equal(f.calls.refresh,2,'A new click after completion must still reapply');}
+ });
+}
 const f=fixture();await f.init();
 await check('view initialization only reads and never replays startup/apply',()=>{assert.equal(f.calls.apply.length,0);assert.equal(f.calls.refresh,0);assert.equal(f.timers.size,0)});
 f.q.set({'Round':false});await check('one click changes the draft immediately without waiting or locking',()=>{assert.equal(f.q.getState().changes.Round,false);assert.equal(f.q.getState().locked,false);assert.equal(f.calls.apply.length,0)});
@@ -61,6 +90,17 @@ await check('an unrelated successful preference cannot erase a failed choice; ex
  f.q.set({'Art Hero':false});await f.advance(3000);assert.equal(f.q.getState().phase,'saved-unconfirmed');assert.match(f.q.getState().message,/开机全局外观偏好未保存/);assert.equal(remembers,0);
  await f.q.flush(false);assert.equal(remembers,1);assert.equal(f.calls.apply.length,2);assert.equal(f.q.getState().phase,'idle');assert.equal(f.timers.size,0);
 });
+await check('a click during preference-only repair keeps its own three-second deadline',async()=>{
+ const f=fixture();await f.init();const apply=f.deps.apply;
+ f.deps.apply=async(...args)=>({...await apply(...args),preferenceSaved:false,message:'preference denied'});
+ f.q.set({Round:false});await f.advance(3000);
+ let release;f.deps.rememberPreferences=snapshot=>new Promise(resolve=>release=()=>resolve({ok:true,saved:true,preferenceSaved:true,snapshot}));
+ const repair=f.q.flush(false);await flush();assert.equal(typeof release,'function');
+ f.deps.apply=apply;f.q.set({'Art Hero':false});release();await repair;
+ assert.equal(f.q.getState().phase,'pending');assert.equal(f.calls.apply.length,1);
+ await f.advance(2999);assert.equal(f.calls.apply.length,1);
+ await f.advance(1);assert.equal(f.calls.apply.length,2);assert.equal(f.q.getState().pendingCount,0);
+});
 await check('ordinary preference retry cannot replay a former theme value over a newer external change',async()=>{
  const f=fixture();await f.init();const apply=f.deps.apply;let remembers=0;
  f.deps.apply=async(...args)=>({...await apply(...args),preferenceSaved:false,message:'开机全局外观偏好未保存'});
@@ -102,6 +142,15 @@ const resetUnreadable=fixture();await resetUnreadable.init();resetUnreadable.dep
 await check('unverifiable reset cannot retain old flags as confirmed data',()=>{assert.equal(resetUnreadable.q.getState().phase,'error');assert.equal(resetUnreadable.q.getState().snapshot,null)});
 const resetCleanup=fixture();let resetIdles=0;resetCleanup.deps.idle=async()=>{resetIdles++;return {ok:true,snapshot:{...structuredClone(resetCleanup.actual),backendReady:false,backendIdle:true,backendProcessCount:0}}};await resetCleanup.init();await resetCleanup.q.reset('preset');await resetCleanup.advance(120000);
 await check('successful reset keeps the resident CSS process',()=>assert.equal(resetIdles,0));
+await check('reset waiting for an old save retains the target shown at confirmation',async()=>{
+ const f=fixture();Object.assign(f.actual,{controlProtocol:2,presetScopeProtocol:1});await f.init();f.setHold(true);
+ let observed;f.deps.reset=async(_mode,value)=>{observed=value;return{ok:false,saved:true,message:'已保存，目录未确认'}};
+ f.q.set({Round:false});await f.advance(3000);const resetting=f.q.reset('preset');await flush();assert.equal(observed,undefined);
+ f.setTarget('b'.repeat(16));const readCount=f.calls.read;f.release();await resetting;
+ assert.equal(observed.targetId,'a'.repeat(16));assert.equal(observed.presetScopeProtocol,1);
+ assert.equal(f.q.getState().snapshot,null);assert.equal(f.q.getState().phase,'saved-unconfirmed');assert.match(f.q.getState().message,/已保存/);
+ assert.equal(f.calls.read,readCount);assert.equal(f.timers.size,0);
+});
 
 const repair=fixture();let repairCalls=0,finishRepair;
 repair.actual.packOwned=true;repair.actual.configuredMatchesBackend=false;
@@ -110,11 +159,68 @@ const repairRead=repair.q.read();await flush();repair.q.set({Round:false});await
 await check('automatic reconciliation preserves responsive switches and one writer',()=>{assert.equal(repairCalls,1);assert.equal(repair.q.getState().changes.Round,false);assert.equal(repair.calls.apply.length,0);assert.equal(repair.q.getState().locked,false)});
 finishRepair({ok:true,snapshot:structuredClone(repair.actual)});await repairRead;await repair.advance(0);
 await check('a click during reconciliation is saved once after repair completion',()=>{assert.equal(repair.calls.apply.length,1);assert.equal(repair.actual.themes.find(row=>row.name==='Round').configured,false)});
+for(const edge of ['same scope','repair failed','new directory','new Steam lifetime','Steam stopped','reset supersedes','no click']){
+ await check('reapply queued during automatic reconciliation: '+edge,async()=>{
+  const f=fixture();Object.assign(f.actual,{packOwned:true,steamPid:43,steamBirth:'100'});await f.init();
+  f.actual.configuredMatchesBackend=false;
+  let complete,fail;
+  f.deps.reconcileExisting=()=>new Promise((resolve,reject)=>{complete=resolve;fail=reject});
+  const observing=f.q.read();await flush();assert.equal(f.q.getState().saving,true);
+  const click=edge==='no click'?[]:[f.q.flush(),f.q.flush()];await flush();
+  assert.equal(f.calls.refresh,0,'No overlapping reconciliation and Refresh');
+  const reset=edge==='reset supersedes'?f.q.reset('preset'):null;
+  const next=structuredClone(f.actual);next.configuredMatchesBackend=true;
+  if(edge==='new directory')next.targetId='b'.repeat(16);
+  if(edge==='new Steam lifetime')next.steamBirth='101';
+  if(edge==='Steam stopped')Object.assign(next,{steamRunning:false,steamPid:0,steamBirth:'0'});
+  if(edge==='repair failed')fail(Error('fixture reconciliation unconfirmed'));
+  else complete({ok:true,snapshot:next});
+  await observing;await Promise.all(click);await reset;await flush();
+  const eligible=edge==='same scope'||edge==='repair failed';
+  assert.equal(f.calls.refresh,Number(eligible),'Only a current explicit intent should be dispatched after repair');
+  assert.equal(f.calls.read,2,'No additional draft-level status read');
+  assert.equal(f.calls.apply.length,0);assert.equal(f.calls.reset,Number(edge==='reset supersedes'));
+  assert.equal(f.q.getState().saving,false);assert.equal(f.timers.size,0);
+ });
+}
 const repairFailure=fixture();repairFailure.actual.packOwned=true;repairFailure.actual.configuredMatchesBackend=false;repairFailure.deps.reconcileExisting=async()=>{throw Error('ambiguous repair')};await repairFailure.init();
 await check('failed reconciliation preserves the observed configuration without a retry timer',()=>{assert.equal(repairFailure.q.getState().phase,'saved-unconfirmed');assert(repairFailure.q.getState().snapshot);assert.equal(repairFailure.timers.size,0)});
 const oldJournal=fixture(new Map([['YMCC.steamAppearanceDraft.v1:'+'a'.repeat(16),JSON.stringify({version:1,targetId:'a'.repeat(16),states:{Round:false,'Game Cover Reflections':true}})]]));await oldJournal.init();await oldJournal.advance(60000);
 await check('retired reflection journal entry is discarded while other choices remain display-only',()=>{assert.deepEqual({...oldJournal.q.getState().changes},{Round:false});assert.equal(oldJournal.calls.apply.length,0);assert.equal(oldJournal.timers.size,0);assert.equal(JSON.parse([...oldJournal.storage.values()][0]).states['Game Cover Reflections'],undefined)});
 }
+
+await check('publication: draft-only updates reuse the confirmed snapshot until a new receipt',async()=>{
+ const f=fixture();await f.init();const states=[];const stop=f.q.subscribe(state=>states.push(state));
+ const first=states[0];f.q.set({Round:false});f.q.set({'Mini Carousel':false});
+ assert.equal(states.length,3);assert.equal(new Set(states.map(state=>state.snapshot)).size,1,'draft updates must not copy the confirmed snapshot or its seven rows');
+ assert.equal(first.snapshot.themes.find(row=>row.name==='Round').configured,true);
+ assert.equal(states[1].changes.Round,false);assert.equal(states[1].changes['Mini Carousel'],undefined);assert.equal(states[2].pendingCount,2);
+ assert.equal(f.calls.apply.length,0);await f.advance(2999);assert.equal(f.calls.apply.length,0);await f.advance(1);
+ const last=states.at(-1);assert.notEqual(last.snapshot,first.snapshot);assert.equal(last.pendingCount,0);
+ assert.equal(last.snapshot.themes.find(row=>row.name==='Round').configured,false);assert.deepEqual(f.calls.apply,[{Round:false,'Mini Carousel':false}]);
+ stop();
+});
+
+await check('publication: shared snapshots are read-only and exclude unused legacy render plans',async()=>{
+ const f=fixture();const raw=f.actual;raw.themes.at(-1).renderPlan={protocol:4,files:[],variables:[]};f.deps.read=async()=>raw;
+ await f.init();let first,second;const stopFirst=f.q.subscribe(state=>first=state);const stopSecond=f.q.subscribe(state=>second=state);
+ assert.equal(f.q.getViewState().snapshot,first.snapshot);assert.equal(first.snapshot,second.snapshot);
+ assert(Object.isFrozen(first.snapshot));assert(Object.isFrozen(first.snapshot.themes));assert(first.snapshot.themes.every(Object.isFrozen));
+ assert.equal(first.snapshot.themes.at(-1).renderPlan,undefined);assert.equal(f.q.getState().snapshot.themes.at(-1).renderPlan.protocol,4);
+ assert.equal(Reflect.set(first.snapshot,'backendReady',false),false);assert.equal(Reflect.set(first.snapshot.themes[0],'configured',false),false);
+ const detached=f.q.getState();detached.snapshot.themes[0].configured=false;raw.themes[0].configured=false;
+ assert.equal(second.snapshot.themes[0].configured,true);assert.equal(f.q.getState().snapshot.themes[0].configured,true);
+ await f.q.read();assert.equal(second.snapshot.themes[0].configured,false);stopFirst();stopSecond();
+});
+
+await check('publication: failed status clears the view and a same-revision replacement uses fresh data',async()=>{
+ const f=fixture();await f.init();let last;const stop=f.q.subscribe(state=>last=state);const first=last.snapshot;
+ const read=f.deps.read;f.deps.read=async()=>{throw Error('fixture status unavailable')};await f.q.read();
+ assert.equal(last.phase,'error');assert.equal(last.snapshot,null);assert.equal(f.q.getViewState().snapshot,null);
+ f.deps.read=read;f.setTarget('b'.repeat(16));await f.q.read();
+ assert.equal(last.snapshot.revision,first.revision);assert.notEqual(last.snapshot,first);assert.equal(last.snapshot.targetId,'b'.repeat(16));
+ stop();
+});
 
 if(selected){
 const id='a'.repeat(16),key='YMCC.steamAppearanceDraft.v1:'+id,age=7*24*60*60*1000;

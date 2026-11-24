@@ -260,7 +260,15 @@ try{
   foreach($relative in $derivedPlan.retiredPaths){if(@($localNew.entries|Where-Object path -IEQ $relative).Count){throw 'LOCAL_DEPLOY_DERIVED_LEGACY_PACKAGE_CONFLICT'}}
   $localReceipt.derivedManagedPlan=$derivedPlan
   $localReceipt.status='PLAN_VERIFIED';Write-LocalDeploymentReceipt $localReceipt
-  if(!$Apply){$localReceipt.status='PLAN_VERIFIED_INSTALL_NOT_RUN';return}
+  if(!$Apply){
+    # A verified preview can authorize the caller to close YMCC. Check the same
+    # Decky build now; deploy-installed.ps1 still revalidates it on apply.
+    $deckyBuild=Join-Path $WorkspaceRoot 'Build\App\Decky\plugins\ymcc-sidebar'
+    & node (Join-Path $localDependencyRoot 'build-decky-sidebar-plugin.mjs') --out $deckyBuild --check
+    if($LASTEXITCODE -ne 0){throw ('LOCAL_DEPLOY_DECKY_PREVIEW_REJECTED: exit='+$LASTEXITCODE)}
+    $localReceipt.deckyBuildPreflight='VERIFIED'
+    $localReceipt.status='PLAN_VERIFIED_INSTALL_NOT_RUN';return
+  }
   $localModuleLease=Enter-YmccModuleMaintenance
   Assert-LocalDeploymentStopped
   $operation=[guid]::NewGuid().ToString('N')

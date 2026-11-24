@@ -38,7 +38,10 @@ static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* value,
  value->flags=ymcc::sleeppower::kKnown|(g_sleepPowerDispatch.pendingSuspend()?ymcc::sleeppower::kNotificationPending:0u);return 1;
 }
 '''
-    f+='\n'+inc.read_text(encoding='utf-8-sig')
+    native=inc.read_text(encoding='utf-8-sig')
+    f+='\n'+native
+    if 'static void sgReportSleepDisplayRelight() noexcept;' in native:
+        f+='\n'+c['function']('sgReportSleepDisplayRelight',noexcept=True)
     for name in ['resumeAutomatic','resumeInteractive','resumeCritical']:
         a='int '+name+'() {\n';assert h.count(a)==1
         code={'resumeAutomatic':'PBT_APMRESUMEAUTOMATIC','resumeInteractive':'PBT_APMRESUMESUSPEND','resumeCritical':'PBT_APMRESUMECRITICAL'}[name]

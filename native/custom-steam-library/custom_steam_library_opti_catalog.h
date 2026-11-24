@@ -48,6 +48,7 @@ inline constexpr size_t maxGames = 20000;
 struct Candidate {
     std::string installPath, executablePath, name, coverPath;
     int steamAppId = 0; // Native Steam ownership only; never a store search ID.
+    bool explicitExecutable = false;
 };
 inline std::string text(const Json& game, const char* key) {
     const auto it = game.find(key);
@@ -155,6 +156,7 @@ inline Json merge(Json games, const std::vector<Candidate>& candidates, Ports& p
         if (!valid(item)) { ++result.skipped; continue; }
         const auto exe = pathKey(item.executablePath), dir = pathKey(item.installPath);
         std::set<size_t> matches;
+        bool directoryConflict = false;
         // A shared launcher or folder cannot override a different native Steam
         // identity. Keep that row intact and resolve this candidate separately.
         auto compatible = [&](size_t i) {
@@ -167,7 +169,13 @@ inline Json merge(Json games, const std::vector<Candidate>& candidates, Ports& p
         };
         auto include = [&](const Index& values, const std::string& key) {
             if (const auto found = values.find(key); found != values.end())
-                for (const auto i : found->second) if (compatible(i)) matches.insert(i);
+                for (const auto i : found->second) {
+                    if (item.explicitExecutable && &values == &byDirectory && !missing(games[i], "ExecutablePath")) {
+                        directoryConflict = true;
+                        continue;
+                    }
+                    if (compatible(i)) matches.insert(i);
+                }
         };
         if (!exe.empty()) include(byExe, exe);
         if (item.steamAppId > 0) include(bySteamId, std::to_string(item.steamAppId));
@@ -176,7 +184,7 @@ inline Json merge(Json games, const std::vector<Candidate>& candidates, Ports& p
             // Older manual OPT entries point at the EXE's subdirectory.
             if (!exe.empty()) include(byDirectory, exe.substr(0, exe.find_last_of('\\')));
         }
-        if (matches.size() > 1) { ++result.skipped; continue; }
+        if (directoryConflict || matches.size() > 1) { ++result.skipped; continue; }
         if (matches.empty() && games.size() >= maxGames) { ++result.skipped; continue; }
         const bool added = matches.empty();
         size_t i = added ? games.size() : *matches.begin();

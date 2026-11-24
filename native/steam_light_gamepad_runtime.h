@@ -176,8 +176,18 @@ static void steamLightGamepadQueue() {
 }
 
 static void steamLightGamepadUiChanged() {
-    const auto now = GetTickCount64();
     const auto checkedProof = g_focusLightIsolationTicket.load(std::memory_order_acquire);
+    if (!checkedProof) {
+        const auto previous = g_steamLightGamepadIntent.load(std::memory_order_acquire);
+        const bool settled = previous && !previous->enabled && !previous->proof &&
+            previous->session == g_focusSessionSequence &&
+            previous->serial == g_steamLightGamepadSettledSerial.load(std::memory_order_acquire);
+        // A fresh proof is required to acquire. Only skip the UI probe when
+        // there is no lease state to maintain and no release left to settle.
+        if ((!previous || settled) && !g_steamLightGamepadLeaseState.load(std::memory_order_acquire) &&
+            steamLightGamepadUiProbeCanIdle()) return;
+    }
+    const auto now = GetTickCount64();
     const bool proofQualified = checkedProof && focusLightIsolationCurrent();
     const bool demand = !g_exitRequested.load(std::memory_order_acquire) &&
         g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready &&

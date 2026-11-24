@@ -48,11 +48,15 @@ export function buildManagedFixture(out,options={}){
  try{
  const names=['InputHost/Program.cs','InputHost/PsEndpointOwnership.cs','InputHost/ParentProcessLifetime.cs','InputHost/HostTerminalCleanup.cs','InputHost/HostControllerOutputStop.cs','InputHost/HostControllerIdleCtsRelease.cs','InputHost/HostGameOutputObservation.cs','InputHost/HostVirtualSignalEvidence.cs','InputHost/HostSdkFirstWitness.cs','InputHost/TargetCreationLifetimeEvidence.cs','InputHost/SteamDeckPadReportObservation.cs','InputHost/MsiSteamDeckReleaseFence1726.cs','InputHost/MsiVirtualReportChain1410.cs','InputHost/ScreenTouchpadReport.cs','InputHost/ScreenButtonReport.cs','InputHost/CanonicalFrameFingerprintMemo.cs','InputHost/HostResponseFields.cs','InputHost/CompactFrameReplyBinding.cs','tools/msi_steamdeck_release_fence_1726_selftest.mjs','tools/msi_steamdeck_release_fence_1726_selftest.cs','tools/inputhost_lifecycle_selftest.cs','tools/input_lifecycle_managed_fixture.mjs','tools/fixtures/input_lifecycle_integration/ManagedEntry.cs','tools/ymcc_sim/global/inputhost-protocol/adapter.mjs','tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json','capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs'];
  if(options.psOwnershipSelfTest)names.push('tools/ps_endpoint_ownership_selftest.cs','tools/ps_endpoint_ownership_selftest.mjs');
+ const powerSources=['InputHost/HostInputPowerBinding.cs','native/SharedSleepPower/RemotePowerContracts.cs','native/SharedSleepPower/RemoteNativePowerClient.cs'];
+ const mandatoryPower=fs.readFileSync(path.join(repo,'InputHost/Program.cs'),'utf8').includes('private HostInputPowerBinding? _powerBindings;');
+ if(mandatoryPower)names.push(...powerSources);
  const inputs=names.map(relative=>{const p=path.join(repo,relative),bytes=fs.readFileSync(p),snapshot=path.join(out,'input-sources',relative);fs.mkdirSync(path.dirname(snapshot),{recursive:true});fs.writeFileSync(snapshot,bytes,{flag:'wx'});return{path:p,relative,snapshot,sha256:hash(bytes),bytes:bytes.length};});
  const read=relative=>fs.readFileSync(inputs.find(r=>r.relative===relative).snapshot,'utf8').replace(/^\uFEFF/,'');
  const tools=toolchainFiles(repo,toolchain).map(p=>{need(fs.existsSync(p)&&fs.statSync(p).isFile(),'Missing compiler/framework input: '+p);return{path:p,sha256:fileHash(p),bytes:fs.statSync(p).size};});
  const source=read('InputHost/Program.cs'),host=path.join(repo,'InputHost');
- const generated=createOfflineHostFixture(out,host,true,{externalGameOutputHelper:true,externalGameFeedbackCatalog:true});let fake=generated.fake;
+ const generated=createOfflineHostFixture(out,host,true,{externalGameOutputHelper:true,externalGameFeedbackCatalog:true,
+  ...(mandatoryPower?{powerBindingMode:'authenticated-native',externalProcessExitOwner:true}:{})});let fake=generated.fake;
  need(!/\bclass\s+HcControllerGameFeedbackCapabilityCatalog\b/.test(fake),'Game feedback catalog must be compiled separately, not embedded');
  // Compile the real passive signal helper and its current session methods.
  // The state type remains an inert SDK terminal; no diagnostic method is stubbed.
@@ -88,7 +92,7 @@ export function buildManagedFixture(out,options={}){
   'internal sealed class HMController : IDisposable { internal string? InstanceId { get; } internal HMController(string? instanceId=null){InstanceId=instanceId;} ');
  fake=replaceOnce(fake,'Program.Fixture.Current=Program.Arrival(Program.Fixture.NextRoot);return new();',
   'Program.Fixture.Current=Program.Arrival(Program.Fixture.NextRoot);return new(p.Id=="dualsense-edge"&&!Program.PsFixtureMissingSdkRoot?Program.ManagedPsRoot(Program.Fixture.Creates):null);');
- let managedEntry='using YeManInputHost.Diagnostics;\n'+read('tools/fixtures/input_lifecycle_integration/ManagedEntry.cs');
+ let managedEntry=(mandatoryPower?'#define YMCC_FIXTURE_SHARED_INPUT_POWER\n':'')+'using YeManInputHost.Diagnostics;\n'+read('tools/fixtures/input_lifecycle_integration/ManagedEntry.cs');
  managedEntry=replaceOnce(managedEntry,'"dualsense-edge" => new(true, 1, 0, 1, 0, 0, true, "fixture-edge-arrival"),','"dualsense-edge" => ManagedPsPnpObservation(),');
  managedEntry=replaceOnce(managedEntry,
   '"elite" => new(true, 1, 0, 1, 0, 0, true, "fixture-elite-arrival"),',
@@ -213,6 +217,15 @@ namespace HIDMaestro {
  'ParentProcessLifetime.cs':read('InputHost/ParentProcessLifetime.cs'),
   'PsEndpointOwnership.cs':read('InputHost/PsEndpointOwnership.cs')
  };
+ if(mandatoryPower){
+  need(generated.powerBindingMode==='authenticated-native'&&generated.compilationInputs.length===powerSources.length,'Exact authenticated power inputs required');
+  for(const relative of powerSources){
+   const input=inputs.find(r=>r.relative===relative);
+   const actual=generated.compilationInputs.filter(r=>path.resolve(r.path).toLowerCase()===path.resolve(input.path).toLowerCase());
+   need(actual.length===1&&actual[0].sha256===input.sha256&&actual[0].bytes===input.bytes&&fileHash(input.snapshot)===input.sha256,'Power input identity changed: '+relative);
+   files[path.basename(relative)]=fs.readFileSync(input.snapshot);
+  }
+ }
  for(const name of ['MsiSteamDeckReleaseFence1726.cs','MsiVirtualReportChain1410.cs','CanonicalFrameFingerprintMemo.cs','HostResponseFields.cs','CompactFrameReplyBinding.cs','HostGameOutputObservation.cs','HostVirtualSignalEvidence.cs','HostSdkFirstWitness.cs','TargetCreationLifetimeEvidence.cs','SteamDeckPadReportObservation.cs'])files[name]=read('InputHost/'+name);
  files['HcControllerGameFeedbackCapabilityCatalog.generated.cs']=read('capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs');
  if(options.psOwnershipSelfTest)files['PsEndpointOwnershipTests.cs']=read('tools/ps_endpoint_ownership_selftest.cs');

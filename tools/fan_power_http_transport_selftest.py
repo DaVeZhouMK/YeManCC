@@ -5,7 +5,7 @@ if len(sys.argv) not in [2,3,4,5]:raise SystemExit('usage: fan_power_http_transp
 extra=sys.argv[2:];case=extra.pop() if len(extra)>1 and extra[-2] in ['--request-lifetime-only','--resume-existing-only'] else None;selection=next((v for v in extra if v.startswith('--')),None);positional=[v for v in extra if not v.startswith('--')]
 if len(positional)>1 or any(v.startswith('--') and v not in ['--shared-power-only','--shared-owner-only','--resume-existing-only','--request-lifetime-only','--compile-only'] for v in extra) or sum(v.startswith('--') for v in extra)>1:raise SystemExit('invalid explicit power transport selection')
 if case is not None:
- allowed={'--request-lifetime-only':{'business-terminal','business-awaiting-old-superseded','business-unknown','business-other-request','business-running-global-ready','business-duplicate-key'},'--resume-existing-only':{'resume-truncated-then-valid-observation','resume-post-only-truncated-then-ready','failed-observation-next-request-still-reachable','unknown500-no-post-repeat'}}
+ allowed={'--request-lifetime-only':{'business-scheduler-zero-action','business-terminal','business-awaiting-old-superseded','business-unknown','business-other-request','business-running-global-ready','business-duplicate-key'},'--resume-existing-only':{'resume-truncated-then-valid-observation','resume-post-only-truncated-then-ready','failed-observation-next-request-still-reachable','unknown500-no-post-repeat'}}
  if not case or case not in allowed.get(selection,set()):raise SystemExit('invalid exact existing Fan case')
 out=Path(sys.argv[1]).resolve();source=Path(positional[0]).resolve() if positional else REPO/'native/main.cpp'
 out.mkdir(parents=True,exist_ok=True)

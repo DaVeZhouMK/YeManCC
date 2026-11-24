@@ -41,14 +41,34 @@ export function createMonitorOutputCoordinator(deps: MonitorOutputDeps) {
         // Desktop visibility is the primary operation. Neither Steam nor RTSS
         // startup/OSD acknowledgement may prevent this local window appearing.
         const ack=(result:OutputAck)=>{if(!result.confirmed)throw Error(result.reason||'原生桌面 HUD 未确认');};
-        phase='hide-ymcc';changed=true;ack(ymccClose??await owned(()=>deps.setYmcc(false,prefs,current)));
-        if(!prefs.enabled)return {ok:true,applied:'off',phase:'done',reason:'YMCC 全局监控已关闭；不修改 Steam，不停止 RTSS 后台。'};
-        phase='show-ymcc';ack(await owned(()=>deps.setYmcc(true,prefs,current)));
-        let warning='';
-        try{await owned(()=>deps.ensureRtss(current));const background=await owned(()=>deps.setRtss(false,prefs,current));if(!background.confirmed)warning=background.reason||'RTSS 游戏 OSD 关闭未确认。';}
-        catch(error){warning=String(error instanceof Error?error.message:error);}
+        phase='hide-ymcc';changed=true;
+        let hudCloseFailure='';
+        try { ack(ymccClose??await owned(()=>deps.setYmcc(false,prefs,current))); }
+        catch(error){
+          if(prefs.enabled)throw error;
+          if(current)await requireCurrent();
+          hudCloseFailure=String(error instanceof Error ? error.message : error);
+        }
+        if(prefs.enabled){phase='show-ymcc';ack(await owned(()=>deps.setYmcc(true,prefs,current)));}
+        const warnings = new Set<string>();
+        // Save OFF before a cold launch, so the lock backend cannot start by
+        // displaying the last RTSS template. OSD errors do not stop lock startup.
+        phase='hide-rtss';
+        try {
+          const hidden = await owned(()=>deps.setRtss(false,prefs,current));
+          if (!hidden.confirmed) warnings.add(hidden.reason || 'RTSS 游戏 OSD 关闭未确认。');
+        } catch (error) { warnings.add(String(error instanceof Error ? error.message : error)); }
         if(current)await requireCurrent();
-        return {ok:true,applied:'ymcc',phase:'done',reason:(prefs.ymcc.visibility==='game-running'?'自定义监控已启用，游戏开启时显示。':prefs.ymcc.visibility==='game-focused'?'自定义监控已启用，游戏对焦时显示。':'自定义监控已开启，常驻显示。')+(warning?' RTSS 后台尚未就绪：'+warning:' RTSS 后台保留，游戏 OSD 已关闭。')};
+        if(!prefs.enabled){
+          if(hudCloseFailure || warnings.size)return {ok:false,applied:'unknown',phase:hudCloseFailure?'hide-ymcc':phase,
+            reason:[hudCloseFailure?'YMCC 全局监控关闭未确认：'+hudCloseFailure:'YMCC 全局监控已关闭',
+              warnings.size?'RTSS 游戏 OSD 关闭未确认：'+[...warnings].join('；'):'RTSS 游戏 OSD 已关闭'].join('；')};
+          return {ok:true,applied:'off',phase:'done',reason:'YMCC 全局监控和 RTSS 游戏 OSD 已关闭；不修改 Steam，不启停 RTSS 后台。'};
+        }
+        try { await owned(()=>deps.ensureRtss(current)); }
+        catch (error) { warnings.add(String(error instanceof Error ? error.message : error)); }
+        if(current)await requireCurrent();
+        return {ok:true,applied:'ymcc',phase:'done',reason:(prefs.ymcc.visibility==='game-running'?'自定义监控已启用，游戏开启时显示。':prefs.ymcc.visibility==='game-focused'?'自定义监控已启用，游戏对焦时显示。':'自定义监控已开启，常驻显示。')+(warnings.size?' RTSS 状态未全部确认：'+[...warnings].join('；'):' RTSS 后台保留，游戏 OSD 已关闭。')};
       }
       if(!prefs.enabled){
         // OFF has no target to enable. Release owned windows even when another

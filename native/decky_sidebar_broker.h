@@ -14,6 +14,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -96,6 +97,10 @@ inline Frame decode(const std::vector<unsigned char>& input) {
     std::string payload(static_cast<size_t>(length),'\0');for(size_t i=0;i<length;++i)payload[i]=static_cast<char>(input[offset+4+i]^input[offset+(i%4)]);
     return {true,offset+4+static_cast<size_t>(length),opcode,std::move(payload)};
 }
+inline std::optional<unsigned> numericCloseCode(const Frame& frame) {
+    if(!frame.complete||frame.opcode!=8||frame.payload.size()<2)return std::nullopt;
+    return (static_cast<unsigned char>(frame.payload[0])<<8)|static_cast<unsigned char>(frame.payload[1]);
+}
 inline std::string encode(const std::string& payload,unsigned opcode=1) {
     if(payload.size()>kMaxPayload)throw std::runtime_error("oversized-response");
     std::string out;out+=static_cast<char>(0x80|opcode);
@@ -117,6 +122,7 @@ class Broker {
     std::atomic<bool> reporting_{true};
     unsigned short port_=0;
     std::string token_,runId_,connection_;
+    ULONGLONG authenticatedAt_=0; // Current authenticated peer only, guarded by state_.
     struct Reply {std::string connection,text;std::function<bool()> owner;size_t sent=0;};
     std::deque<Reply> replies_;
     static bool requestCurrent(const std::function<bool()>& owner){try{return !owner||owner();}catch(...){return false;}}
@@ -190,15 +196,35 @@ class Broker {
             } else if(index==2){
                 WSAResetEvent(sendEvent_);std::deque<Reply> queue;
                 {std::lock_guard lock(state_);queue.swap(replies_);}
-                for(auto& item:queue)if(authenticated&&item.connection==connection){if(!requestCurrent(item.owner))continue;if(outputBytes+item.text.size()>kMaxPayload*2){closePeer("output-limit");break;}outputBytes+=item.text.size();output.push_back(std::move(item));}
+                for(auto& item:queue)if(authenticated&&item.connection==connection){
+                    if(!requestCurrent(item.owner))continue;
+                    if(outputBytes+item.text.size()>kMaxPayload*2){
+                        // Give the socket a nonblocking write before treating a
+                        // batch of queued replies as receiver backpressure.
+                        drain();
+                        if(peer==INVALID_SOCKET)break;
+                        if(!requestCurrent(item.owner))continue;
+                        if(outputBytes+item.text.size()>kMaxPayload*2){closePeer("output-limit");break;}
+                    }
+                    outputBytes+=item.text.size();output.push_back(std::move(item));
+                }
                 drain();
             } else if(index==3&&peer!=INVALID_SOCKET){
                 WSANETWORKEVENTS network{};if(WSAEnumNetworkEvents(peer,peerEvent,&network)==SOCKET_ERROR){closePeer("socket-events-error",WSAGetLastError());continue;}
                 if(network.lNetworkEvents&FD_READ){
-                    char buffer[8192];bool failed=false;const char* readReason="remote-eof";int readError=0;
+                    char buffer[8192];bool failed=false,eof=false;const char* readReason="remote-eof";int readError=0;
                     for(;;){const int n=recv(peer,buffer,sizeof(buffer),0);if(n>0){lastReceive=GetTickCount64();input.insert(input.end(),buffer,buffer+n);if(input.size()>kMaxPayload+32){readReason="input-limit";failed=true;break;}}
-                        else{readError=n==SOCKET_ERROR?WSAGetLastError():0;if(readError==WSAEWOULDBLOCK)break;if(n==SOCKET_ERROR)readReason="receive-error";failed=true;break;}}
-                    if(failed){closePeer(readReason,readError);continue;}
+                        else{readError=n==SOCKET_ERROR?WSAGetLastError():0;if(readError==WSAEWOULDBLOCK)break;if(n==SOCKET_ERROR)readReason="receive-error";eof=n==0;failed=true;break;}}
+                    if(failed){
+                        // A closing client may send its Close and FIN together.
+                        // Recover only the leading close code, never dispatch terminal input.
+                        std::optional<unsigned> code;
+                        if(eof&&authenticated&&!input.empty()&&(input.front()&15)==8){
+                            try{code=numericCloseCode(decode(input));}catch(...){}
+                        }
+                        if(code)closePeer("remote-close",0,*code,true);else closePeer(readReason,readError);
+                        continue;
+                    }
                     const char* inputFailure="handshake-error";
                     try {
                         if(!authenticated){
@@ -208,7 +234,7 @@ class Broker {
                                 append(handshake(header.substr(0,end+4),token_,"127.0.0.1:"+std::to_string(port_)));
                                 input.erase(input.begin(),input.begin()+static_cast<std::ptrdiff_t>(end+4));
                                 authenticated=true;connectedAt=lastReceive=GetTickCount64();connection=std::to_string(++nextConnection_);
-                                {std::lock_guard lock(state_);connection_=connection;++connectionRevision_;}
+                                {std::lock_guard lock(state_);connection_=connection;authenticatedAt_=connectedAt;++connectionRevision_;}
                                 changed(true);
                             }
                         }
@@ -217,8 +243,7 @@ class Broker {
                             if(++processed>32)throw std::runtime_error("message-burst-limit");
                             fragmentDeadline=0;
                             input.erase(input.begin(),input.begin()+static_cast<std::ptrdiff_t>(frame.bytes));
-                            if(frame.opcode==8){const bool known=frame.payload.size()>=2;const unsigned code=known?(static_cast<unsigned char>(frame.payload[0])<<8)|static_cast<unsigned char>(frame.payload[1]):0;
-                                closePeer("remote-close",0,code,known);break;}
+                            if(frame.opcode==8){const auto code=numericCloseCode(frame);closePeer("remote-close",0,code.value_or(0),code.has_value());break;}
                             if(frame.opcode==9){append(encode(frame.payload,10));continue;}
                             if(frame.opcode==10)continue;
                             inputFailure="request-json-error";const auto request=Json::parse(frame.payload);
@@ -269,6 +294,46 @@ public:
     Json bootstrap() {std::lock_guard lock(state_);if(!active_)return Json::object();return {{"endpoint","ws://127.0.0.1:"+std::to_string(port_)+"/mirror"},{"token",token_},{"runId",runId_},{"hudProtocol",1},{"wallpaperProtocol",1},{"wallpaperPrefetchProtocol",0},{"updaterProtocol",1}};}
     Json status() {std::lock_guard lock(state_);Json result={{"active",active_},{"runId",runId_},{"connection",connection_},{"connected",!connection_.empty()},{"revision",revision_},{"connectionRevision",connectionRevision_}};
         if(connection_.empty()&&lastPeerClose_.is_object())result["peerClose"]=lastPeerClose_;return result;}
+    // Watch hints can request a read before the mirror authenticates.
+    // Matching the run is not authenticated-peer proof.
+    bool matchesRunId(const std::string& runId) {
+        std::lock_guard lock(state_);
+        return !runId.empty()&&runId==runId_;
+    }
+    std::optional<ULONGLONG> authenticatedPeerTick(unsigned long long* revision=nullptr) {
+        std::lock_guard lock(state_);
+        if(revision)*revision=0;
+        if(!active_||connection_.empty())return std::nullopt;
+        if(revision)*revision=connectionRevision_;
+        return authenticatedAt_;
+    }
+    struct WorkerCpu {DWORD id;ULONGLONG birth,kernel,user;};
+    // Borrow the owned thread without competing with a stop/rebind that is joining it.
+    std::optional<WorkerCpu> diagnosticWorkerCpu() noexcept {
+        const DWORD savedError=GetLastError();
+        struct RestoreError{DWORD value;~RestoreError(){SetLastError(value);}} restore{savedError};
+        try{
+            std::unique_lock lock(life_,std::try_to_lock);
+            if(!lock.owns_lock()||!worker_.joinable())return std::nullopt;
+            const HANDLE thread=worker_.native_handle();
+            const DWORD id=GetThreadId(thread);
+            FILETIME born{},exited{},kernel{},user{};
+            if(!id||!GetThreadTimes(thread,&born,&exited,&kernel,&user)||WaitForSingleObject(thread,0)!=WAIT_TIMEOUT)return std::nullopt;
+            const auto ticks=[](const FILETIME& t){return (static_cast<ULONGLONG>(t.dwHighDateTime)<<32)|t.dwLowDateTime;};
+            const auto birth=ticks(born);
+            if(birth)return WorkerCpu{id,birth,ticks(kernel),ticks(user)};
+        }catch(...){}
+        return std::nullopt;
+    }
+    struct RequestStamp {std::string runId;unsigned long long revision,connectionRevision;};
+    // Ingress already owns the authenticated connection. Copy just its current
+    // receipt under the same lock, not a full diagnostic JSON per request.
+    // A queued event still needs acceptsRequest() at the actual UI dispatch.
+    std::optional<RequestStamp> requestStamp(const std::string& connection) {
+        std::lock_guard lock(state_);
+        if(!active_||connection.empty()||connection!=connection_)return std::nullopt;
+        return RequestStamp{runId_,revision_,connectionRevision_};
+    }
     // Recheck queued private events at UI dispatch, not only socket receipt.
     // Client payload flags never participate in this native transport fact.
     bool acceptsRequest(const std::string& connection,const std::string& runId,unsigned long long connectionRevision) {

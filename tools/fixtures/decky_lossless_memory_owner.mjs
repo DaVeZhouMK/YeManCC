@@ -16,7 +16,9 @@ export function createOriginalLosslessMemoryOwner({withProfile=true,uiReadable=t
   if(source.includes('UIAutomationClient')){assert.ok(!source.includes('.Invoke('));events.push('readonly-status');if(!uiReadable)return {exitCode:1,stdout:'',stderr:'UIAutomation unavailable'};return {exitCode:0,stdout:JSON.stringify({title,button,status:'Scaling: "window"\nResolution: fixture\nProfile: "'+title+'"'}),stderr:''};}
   throw Error('Undeclared actual LS shell operation');
  }},windowApi:{losslessReturnTarget:async(target,enabled)=>{returnTargets.push({target:structuredClone(target),enabled});return {ok:true};}}};
- const runtime=load(fs.readFileSync(path.join(root,'src/bridge/losslessRuntimeState.ts'),'utf8'),{'./api':api,'./ipc':{on:()=>()=>{}},'./gamePolicyTarget':{subscribePolicyGameStatus:()=>()=>{}}});
+ const ipc={on:()=>()=>{},invoke:async command=>{assert.equal(command,'power.lifecycle');return {generation:1,phase:'ready',known:true,hardwareWritesAllowed:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:1};}};
+ const power=load(fs.readFileSync(path.join(root,'src/bridge/powerLifecycleState.ts'),'utf8'),{'./ipc':ipc});
+ const runtime=load(fs.readFileSync(path.join(root,'src/bridge/losslessRuntimeState.ts'),'utf8'),{'./api':api,'./ipc':ipc,'./powerLifecycleState':power,'./gamePolicyTarget':{subscribePolicyGameStatus:()=>()=>{}}});
  const owner=load(fs.readFileSync(path.join(root,'src/bridge/quickapp.ts'),'utf8'),{'./api':api,'./losslessProfiles':profiles,'./losslessRuntimeState':runtime,'./gamedetect':{},'./optiscalerClientSync':{syncOptiClientGame:()=>{throw Error('Unrelated OptiScaler action');},flushOptiClientGames:()=>{throw Error('Unrelated OptiScaler action');}}});
  return {owner,setObservedRuntime:next=>{if('running' in next)running=next.running;if('title' in next)title=next.title;if('button' in next)button=next.button;runtime.invalidateLosslessRuntime();},failActivations:(count,timeout=false,reason='scaling-paused')=>{failures=count;timeoutFailure=timeout;failureReason=reason;},readLosslessProgram:runtime.readLosslessProgram,setUiReadable:value=>{assert.equal(typeof value,'boolean');uiReadable=value;runtime.invalidateLosslessRuntime();},setCloseDenied:value=>{assert.equal(typeof value,'boolean');closeDenied=value;},replaceProcess:({pid=pidValue,processCreated=birth}={})=>{pidValue=pid;birth=processCreated;runtime.invalidateLosslessRuntime();},readMemoryXml:()=>files.get(file),setLaunchDenied:value=>{assert.equal(typeof value,'boolean');launchDenied=value;},stats:()=>({running,events:[...events],returnTargets:structuredClone(returnTargets),profileXmlUnchanged:files.get(file)===initialXml,memoryProfileWrites:memoryWrites,profilePresent:!!profiles.matchLsProfile(profiles.parseLsProfiles(files.get(file)),'C:\\Games\\Game.exe'),profileEnabled:profiles.matchLsProfile(profiles.parseLsProfiles(files.get(file)),'C:\\Games\\Game.exe')?.enabled===true,realFilesWritten:0,realProcessesStarted:0,physicalHardwareWrites:0})};
 }
@@ -42,6 +44,9 @@ export function createLosslessTopActions(ownerFixture,game,speedOwner=null){
   '@/bridge/quickActionLock':{tryAcquireQuickAction:()=>()=>{}},
   '@/bridge/gameTrainer':{getReadyGameTrainer:()=>null,getGameTrainerState:()=>null},
   '@/bridge/speedhack':speedOwner??{SPEED_PRESETS:[1]},'@/bridge/gameproc':{},'@/bridge/api':{},
+  '@/assets/apps/lossless-scaling.png':'fixture:lossless-icon',
+  './optiDialogLayout':load(fs.readFileSync(path.join(root,'src/components/optiDialogLayout.ts'),'utf8'),{'@/gamepad/focus':{}}),
+  '@/gamepad/taskViewTouchActivation':load(fs.readFileSync(path.join(root,'src/gamepad/taskViewTouchActivation.ts'),'utf8'),{'@/bridge/api':{windowApi:{}}}),
   '@/bridge/optiImportPolicy':{},'@/gamepad/focus':{},'@/gamepad/engine':{},'@/gamepad/activationEvidence':{}};
  function compile(text){const module={exports:{}};vm.runInNewContext(transformSync(text,{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,console,require:name=>{
   if(Object.hasOwn(modules,name))return modules[name];

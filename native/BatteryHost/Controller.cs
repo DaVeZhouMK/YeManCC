@@ -99,7 +99,7 @@ internal sealed class Controller
     Recovery? recovery;
     int revision;
     bool active,conflict;
-    bool resumeCleanupPending;
+    bool resumeCleanupPending,resumeAdmissionDeferred;
     int resumeCleanupAttempts;
     const int MaxResumeCleanupAttempts=3;
     bool invalidStore,journalUnresolved;
@@ -459,7 +459,12 @@ internal sealed class Controller
                 var s=Read();if(!s.Supported)return;
                 // A valid transport with an unknown value allows an explicit user
                 // setting, but cannot authorize unattended startup/resume replay.
-                using(var p=OpenOwnedProvider())if(p.CanReadLimit&&s.CurrentLimit is null){warning="当前充电上限未知，未自动恢复；请手动选择档位后应用";return;}
+                using(var p=OpenOwnedProvider())if(p.CanReadLimit&&s.CurrentLimit is null)
+                {
+                    warning="当前充电上限未知，未自动恢复；请手动选择档位后应用";
+                    if(route?.RouteId=="msi-claw-cg3em-ap")TraceLog.Write("saved-charge-restore-skipped",new {route.RouteId,s.RequestedLimit,s.Verification,reason="current-limit-unknown",writeAttempted=false},true);
+                    return;
+                }
                 _=Apply(s.Fence,preference.Target);
             }
             catch(Exception e){warning=e.Message;}
@@ -468,12 +473,13 @@ internal sealed class Controller
     public void Suspend()
     {
         suspended=true;
-        lock(gate){resumeCleanupPending=false;resumeCleanupAttempts=0;active=false;try{RestoreOwned();}catch(Exception e){warning=e.Message;conflict=true;}}
+        lock(gate){resumeCleanupPending=resumeAdmissionDeferred=false;resumeCleanupAttempts=0;active=false;try{RestoreOwned();}catch(Exception e){warning=e.Message;conflict=true;}}
     }
     void RetryResumeCleanup()
     {
         if(!resumeCleanupPending||suspended||!ready()||resumeCleanupAttempts>=MaxResumeCleanupAttempts)return;
         resumeCleanupAttempts++;
+        resumeAdmissionDeferred=false;
         try
         {
             bool hadChannelDebt=providerCleanupDebt.Count!=0;
@@ -483,18 +489,41 @@ internal sealed class Controller
             // The exact prior channel has returned. Allow StartSaved's first policy Tick;
             // an active policy owns a normal journal, not pending cleanup work.
             resumeCleanupPending=false;
+            int beforeStart=revision;
             StartSaved();
-            resumeCleanupPending=providerCleanupDebt.Count!=0||(!active&&recovery is {Software:true});
+            // A retired preflight did not start the saved policy. Keep its
+            // original budget only when no new ownership or action was taken.
+            resumeAdmissionDeferred=resumeCleanupAttempts<MaxResumeCleanupAttempts&&revision==beforeStart&&
+                !active&&!invalidStore&&!conflict&&recovery is null&&providerCleanupDebt.Count==0&&
+                preference?.Managed==true&&!ready();
+            resumeCleanupPending=resumeAdmissionDeferred||providerCleanupDebt.Count!=0||(!active&&recovery is {Software:true});
         }
         catch(Exception error){resumeCleanupPending=true;warning=error.Message;}
+    }
+    internal void ContinueResumeAfterPowerAdmission()
+    {
+        lock(gate){if(resumeAdmissionDeferred)RetryResumeCleanup();}
     }
     public void Resume()
     {
         lock(gate)
         {
+            bool wasSuspended=suspended;
             suspended=false;
             // Keep actual channel debt; retry only its exact owner, at most three existing-tick attempts.
-            if(route?.Software==true){resumeCleanupPending=true;resumeCleanupAttempts=0;RetryResumeCleanup();}
+            if(route?.Software==true){resumeCleanupPending=resumeAdmissionDeferred=true;resumeCleanupAttempts=0;RetryResumeCleanup();}
+            else if(wasSuspended&&route?.RouteId=="msi-claw-cg3em-ap"&&preference?.Managed==true&&
+                !invalidStore&&!conflict&&recovery is null&&providerCleanupDebt.Count==0&&ready())
+            {
+                // Capture the same-process boundary without turning an unknown or externally changed value into write permission.
+                var s=Read();
+                bool current=ready()&&!suspended;
+                TraceLog.Write("saved-charge-resume-observation",new {route.RouteId,s.RequestedLimit,
+                    currentLimit=current?s.CurrentLimit:null,
+                    outcome=!current?"power-revoked":!s.Ok||!s.Supported?"read-unavailable":
+                        s.CurrentLimit is null?"current-limit-unknown":s.CurrentLimit==s.RequestedLimit?"matches-saved":"differs-from-saved",
+                    writeAttempted=false},true);
+            }
         }
     }
     public void Shutdown()
@@ -502,6 +531,7 @@ internal sealed class Controller
         suspended=true;
         lock(gate)
         {
+            resumeAdmissionDeferred=false;
             RetryProviderCleanup();
             active=false;
             try{RestoreOwned();}catch(Exception error){warning=error.Message;conflict=true;}

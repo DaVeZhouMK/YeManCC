@@ -6,6 +6,7 @@
 #include <bcrypt.h>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <type_traits>
 #pragma comment(lib,"bcrypt.lib")
 namespace ymcc::deckyresources::worker {
@@ -13,17 +14,52 @@ inline constexpr const char* schema="ymcc.decky.resources.v1";
 // Same-image private diagnostics only. Fixed, ordered phase edges never grant
 // readiness, refresh the preparation deadline, or authorize another operation.
 inline constexpr std::array<const char*,4> progressStages={"receipt","inspect","cache","reinspect"};
-inline std::string digest(const std::wstring& path,const std::function<bool()>& current){
-    struct Hash{BCRYPT_ALG_HANDLE algorithm=nullptr;BCRYPT_HASH_HANDLE hash=nullptr;~Hash(){if(hash)BCryptDestroyHash(hash);if(algorithm)BCryptCloseAlgorithmProvider(algorithm,0);}} state;
-    if(!current()||BCryptOpenAlgorithmProvider(&state.algorithm,BCRYPT_SHA256_ALGORITHM,nullptr,0)<0)return {};
-    DWORD length=0,written=0;if(BCryptGetProperty(state.algorithm,BCRYPT_OBJECT_LENGTH,reinterpret_cast<PUCHAR>(&length),sizeof(length),&written,0)<0)return {};
-    std::vector<unsigned char> object(length),buffer(65536),value(32);
-    if(BCryptCreateHash(state.algorithm,&state.hash,object.data(),length,nullptr,0,0)<0)return {};
-    std::ifstream file(std::filesystem::path(path),std::ios::binary);if(!file)return {};
-    while(file&&current()){file.read(reinterpret_cast<char*>(buffer.data()),buffer.size());const auto n=file.gcount();if(n>0&&BCryptHashData(state.hash,buffer.data(),static_cast<ULONG>(n),0)<0)return {};}
-    if(!current()||file.bad()||BCryptFinishHash(state.hash,value.data(),32,0)<0)return {};
-    const char* hex="0123456789abcdef";std::string result;for(const auto b:value){result+=hex[b>>4];result+=hex[b&15];}return result;
-}
+inline constexpr std::array<const char*,3> cacheSteps={"verify","repair","seed"};
+inline constexpr const char* loaderOpenStage="loader-open";
+inline constexpr const char* loaderReadStage="loader-read";
+inline constexpr std::array<const char*,5> initialInspectStages={ymcc::deckysetup::inspectSteps[0],
+    loaderOpenStage,loaderReadStage,ymcc::deckysetup::inspectSteps[1],ymcc::deckysetup::inspectSteps[2]};
+// Reuse only provider and scratch storage within this serial request. Every
+// file still gets a fresh open and hash, including reinspection after repair.
+class RequestDigest {
+    static constexpr std::size_t readChunkBytes_=65536;
+    BCRYPT_ALG_HANDLE algorithm_=nullptr;
+    std::unique_ptr<unsigned char[]> buffer_;
+public:
+    RequestDigest()=default;
+    RequestDigest(const RequestDigest&)=delete;
+    RequestDigest& operator=(const RequestDigest&)=delete;
+    ~RequestDigest(){if(algorithm_)BCryptCloseAlgorithmProvider(algorithm_,0);}
+    template<class Note=ymcc::deckysetup::NoInspectNote>
+    std::string operator()(const std::wstring& path,const std::function<bool()>& current,const Note& note={}){
+        if(!current())return {};
+        if(!algorithm_){
+            BCRYPT_ALG_HANDLE opened=nullptr;
+            if(BCryptOpenAlgorithmProvider(&opened,BCRYPT_SHA256_ALGORITHM,nullptr,0)<0)return {};
+            algorithm_=opened;
+        }
+        struct Hash{BCRYPT_HASH_HANDLE value=nullptr;~Hash(){if(value)BCryptDestroyHash(value);}} hash;
+        // CNG owns the hash object until BCryptDestroyHash, including early exits.
+        if(BCryptCreateHash(algorithm_,&hash.value,nullptr,0,nullptr,0,0)<0)return {};
+        note(loaderOpenStage);
+        std::ifstream file(std::filesystem::path(path),std::ios::binary);if(!file)return {};
+        note(loaderReadStage);
+        if(!buffer_)buffer_=std::make_unique_for_overwrite<unsigned char[]>(readChunkBytes_);
+        // Hash only the bytes from this read, never the remainder of the buffer.
+        while(file&&current()){
+            file.read(reinterpret_cast<char*>(buffer_.get()),readChunkBytes_);
+            const auto n=file.gcount();
+            if(n>0&&BCryptHashData(hash.value,buffer_.get(),static_cast<ULONG>(n),0)<0)return {};
+        }
+        std::array<unsigned char,32> value;
+        if(!current()||file.bad()||BCryptFinishHash(hash.value,value.data(),static_cast<ULONG>(value.size()),0)<0)return {};
+        constexpr char hex[]="0123456789abcdef";
+        std::string result(value.size()*2,'\0');
+        for(std::size_t i=0;i<value.size();++i){result[i*2]=hex[value[i]>>4];result[i*2+1]=hex[value[i]&15];}
+        return result;
+    }
+};
+inline std::string digest(const std::wstring& path,const std::function<bool()>& current){return RequestDigest{}(path,current);}
 inline std::string text(const std::filesystem::path& value){const auto bytes=value.u8string();return {bytes.begin(),bytes.end()};}
 // Only the authenticated inherited pipe can invoke this operation. No command
 // line path or public IPC starts it, and the child never enters application init.
@@ -41,16 +77,22 @@ template<class Emit>bool tryRun(const Json& request,HANDLE cancel,Emit&& emit,in
         const auto current=[&]{return cancel&&WaitForSingleObject(cancel,0)==WAIT_TIMEOUT;};
         const auto progressStarted=GetTickCount64();
         bool progressAvailable=true; // Keep optional observations a contiguous prefix.
-        const auto progress=[&](const char* stage){
+        const auto progress=[&](const char* stage,const char* kind="stage"){
             if(!current()||!progressAvailable)return;
             try{
                 const Json packet={{"schema",schema},{"id",id},{"generation",request.at("generation")},
-                    {"progress",{{"stage",stage},{"elapsedMs",GetTickCount64()-progressStarted}}}};
+                    {"progress",{{kind,stage},{"elapsedMs",GetTickCount64()-progressStarted}}}};
                 if constexpr(std::is_void_v<std::invoke_result_t<Emit&,const Json&>>)emit(packet);
                 else if(!emit(packet))progressAvailable=false;
             }catch(...){progressAvailable=false;} // No later note can skip an omitted stage.
         };
-        const Digest hash=[&](const std::wstring& file){return digest(file,current);};
+        bool observingLoaderDigest=false;
+        RequestDigest requestDigest;
+        const Digest hash=[&](const std::wstring& file){
+            if(!observingLoaderDigest)return requestDigest(file,current);
+            observingLoaderDigest=false;
+            return requestDigest(file,current,[&](const char* stage){progress(stage,"inspectStep");});
+        };
         Options options;options.allowRepair=request.at("allowRepair").get<bool>();options.mayWrite=current;
         // Debug-marker creation remains in the existing parent preparation.
         // This operation touches only exact resources and the bounded local cache.
@@ -61,19 +103,39 @@ template<class Emit>bool tryRun(const Json& request,HANDLE cancel,Emit&& emit,in
         progress("receipt");
         const auto migration=ymcc::deckysetup::migrateLegacyManagedReceipt(home,mayMigrate);
         receiptLease.reset(); // Cache obtains its own lease after the atomic move completes.
-        Json contract,description;const auto invalid=ymcc::deckysetup::readManagedContract(home,description,contract,manifest);
         if(!migration.empty())detail={{"ready",false},{"reason",migration}};
-        else {progress("inspect");detail=ymcc::deckysetup::inspect(steam,home,hash,manifest);}
-        // Launch preflight passes allowRepair=false: validate every installed
-        // byte above, but keep optional cache hashing/copying off that deadline.
-        // Cache seeding/repair remains on the original writable preparation.
-        if(migration.empty()&&invalid.empty()&&!contract.is_null()&&!options.allowRepair)
-            detail["resourceMaintenanceDeferred"]=true;
-        if(migration.empty()&&invalid.empty()&&!contract.is_null()&&options.allowRepair){
-            const SafePath safe=[](const auto& path){return ymcc::deckysetup::safeManagedPath(path);};
-            progress("cache");const auto maintenance=Cache(home,contract,hash,safe,current,options).run();
-            if(maintenance.value("resourcesRepaired",0u)>0){progress("reinspect");detail=ymcc::deckysetup::inspect(steam,home,hash,manifest);}
-            detail.update(maintenance);
+        else {
+            progress("inspect");
+            // Observe only initial writable preparation, not the cold launch preflight or repair verification.
+            const auto note=[&](const char* step){
+                if(!options.allowRepair)return;
+                // Only the exact first Loader digest follows this setup edge.
+                observingLoaderDigest=std::string_view(step)==ymcc::deckysetup::inspectSteps[0];
+                progress(step,"inspectStep");
+            };
+            bool managedContractValidated=false;
+            std::optional<Json> contract;
+            detail=ymcc::deckysetup::inspect(steam,home,hash,manifest,note,options.allowRepair?nullptr:&managedContractValidated,
+                options.allowRepair?&contract:nullptr);
+            if(managedContractValidated)detail["resourceMaintenanceDeferred"]=true;
+            if(options.allowRepair&&current()){
+                // Missing or corrupt live files can stop inspection before
+                // its receipt read. Read once here only on that early path;
+                // a receipt already refused by inspection is not retried.
+                if(!contract){
+                    Json description,fallback;
+                    if(ymcc::deckysetup::readManagedContract(home,description,fallback,manifest).empty())
+                        contract.emplace(std::move(fallback));
+                }
+                if(contract&&!contract->is_null()){
+                    const SafePath safe=[](const auto& path){return ymcc::deckysetup::safeManagedPath(path);};
+                    progress("cache");
+                    const auto maintenance=Cache(home,std::move(*contract),hash,safe,current,options).run(
+                        [&](const char* step){progress(step,"cacheStep");});
+                    if(maintenance.value("resourcesRepaired",0u)>0){progress("reinspect");detail=ymcc::deckysetup::inspect(steam,home,hash,manifest);}
+                    detail.update(maintenance);
+                }
+            }
         }
         if(!current()){detail["ready"]=false;detail["reason"]="preparation-cancelled";}
     }catch(...){detail={{"ready",false},{"reason","resource-worker-invalid"}};}
@@ -125,7 +187,8 @@ inline Json prepare(const std::filesystem::path& steam,const std::filesystem::pa
     const char* resourceStage="start";const char* resourceReadKind=nullptr;
     DWORD resourceReadError=0,resourceSendError=0,resourceWaitError=0;bool replyReceived=false;
     DWORD resourceStartError=ERROR_SUCCESS;bool prewriteMemoryFailure=false,workerStarted=false,writeAttempted=false;
-    unsigned progressCount=0;ULONGLONG childElapsedMs=0;
+    unsigned progressCount=0,inspectCount=0;std::size_t cacheStep=0;
+    ULONGLONG childElapsedMs=0,inspectElapsedMs=0,cacheElapsedMs=0;
     try{
         auto started=owner.start();workerStarted=static_cast<bool>(started);
         if(!started){
@@ -175,10 +238,25 @@ inline Json prepare(const std::filesystem::path& steam,const std::filesystem::pa
                 require(reply.is_object()&&reply.size()==4&&reply.value("schema",std::string{})==schema&&reply.at("id")==id&&reply.at("generation")==generation,"resource-worker-reply-invalid");
                 if(reply.contains("progress")){
                     const auto& note=reply.at("progress");
-                    require(progressCount<progressStages.size()&&note.is_object()&&note.size()==2&&
-                        note.contains("stage")&&note["stage"].is_string()&&note["stage"]==progressStages[progressCount]&&
-                        note.contains("elapsedMs")&&note["elapsedMs"].is_number_unsigned()&&note["elapsedMs"]>=childElapsedMs&&note["elapsedMs"]<=3600000ull,"resource-worker-reply-invalid");
-                    childElapsedMs=note["elapsedMs"].get<ULONGLONG>();++progressCount;continue;
+                    require(note.is_object()&&note.size()==2&&note.contains("elapsedMs")&&note["elapsedMs"].is_number_unsigned()&&
+                        note["elapsedMs"]>=(std::max)({childElapsedMs,inspectElapsedMs,cacheElapsedMs})&&note["elapsedMs"]<=3600000ull,"resource-worker-reply-invalid");
+                    const auto elapsed=note["elapsedMs"].get<ULONGLONG>();
+                    if(note.contains("inspectStep")){
+                        require(allowRepair&&progressCount==2&&inspectCount<initialInspectStages.size()&&
+                            note["inspectStep"]==initialInspectStages[inspectCount],"resource-worker-reply-invalid");
+                        inspectElapsedMs=elapsed;++inspectCount;
+                    }else if(note.contains("cacheStep")){
+                        // Verify comes first; repair and seed are conditional.
+                        auto next=cacheStep;
+                        while(next<cacheSteps.size()&&note["cacheStep"]!=cacheSteps[next])++next;
+                        require(allowRepair&&progressCount==3&&next<cacheSteps.size()&&
+                            (cacheStep||next==0),"resource-worker-reply-invalid");
+                        cacheStep=next+1;cacheElapsedMs=elapsed;
+                    }else{
+                        require(progressCount<progressStages.size()&&note.contains("stage")&&note["stage"]==progressStages[progressCount],"resource-worker-reply-invalid");
+                        childElapsedMs=elapsed;++progressCount;
+                    }
+                    continue;
                 }
                 resourceStage="reply";replyReceived=true;
                 require(reply.at("detail").is_object(),"resource-worker-reply-invalid");
@@ -214,7 +292,9 @@ inline Json prepare(const std::filesystem::path& steam,const std::filesystem::pa
     const bool childCpuKnown=child.value&&GetProcessTimes(child.value,&childCreated,&childExit,&childKernel,&childUser);
     DWORD observedExit=0;
     const bool exitKnown=child.value&&WaitForSingleObject(child.value,0)==WAIT_OBJECT_0&&GetExitCodeProcess(child.value,&observedExit);
+    const auto cleanupStartedAt=GetTickCount64();
     cleanup();
+    const auto cleanupElapsedMs=GetTickCount64()-cleanupStartedAt;
     if(!resourcesDestroyed){result["ready"]=false;result["reason"]="resource-worker-cleanup-incomplete";}
     else if(prewriteMemoryFailure){
         // Only this typed pre-request failure may reuse the original resource
@@ -228,12 +308,28 @@ inline Json prepare(const std::filesystem::path& steam,const std::filesystem::pa
         result["resourceWorkerChildStage"]=progressCount?progressStages[progressCount-1]:"none";
         result["resourceWorkerProgressCount"]=progressCount;
         if(progressCount)result["resourceWorkerChildElapsedMs"]=childElapsedMs;
+        if(inspectCount){
+            result["resourceWorkerInitialInspectStep"]=initialInspectStages[inspectCount-1];
+            result["resourceWorkerInitialInspectElapsedMs"]=inspectElapsedMs;
+        }else{
+            result.erase("resourceWorkerInitialInspectStep");
+            result.erase("resourceWorkerInitialInspectElapsedMs");
+        }
+        if(cacheStep){
+            result["resourceWorkerCacheStep"]=cacheSteps[cacheStep-1];
+            result["resourceWorkerCacheStepElapsedMs"]=cacheElapsedMs;
+        }else{
+            result.erase("resourceWorkerCacheStep");
+            result.erase("resourceWorkerCacheStepElapsedMs");
+        }
         if(resourceReadKind){result["resourceWorkerReadKind"]=resourceReadKind;result["resourceWorkerReadError"]=resourceReadError;}
         if(resourceStartError!=ERROR_SUCCESS)result["resourceWorkerStartError"]=resourceStartError;
         if(resourceSendError!=ERROR_SUCCESS)result["resourceWorkerSendError"]=resourceSendError;
         if(resourceWaitError!=ERROR_SUCCESS)result["resourceWorkerWaitError"]=resourceWaitError;
         result["resourceWorkerReplyReceived"]=replyReceived;
         result["resourceWorkerElapsedMs"]=elapsedBeforeCleanup;
+        // Wall time of the synchronous cleanup only; not proof of resource return.
+        result["resourceWorkerCleanupMs"]=cleanupElapsedMs;
         result["resourceWorkerChildCpuKnown"]=childCpuKnown;
         if(childCpuKnown){
             const auto ticks=[](const FILETIME& value){return (static_cast<unsigned long long>(value.dwHighDateTime)<<32)|value.dwLowDateTime;};

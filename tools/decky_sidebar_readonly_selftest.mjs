@@ -30,13 +30,47 @@ await check('host read is side-effect free and exposes only continuous performan
     readSettingsSection:async key=>{observations.sectionReads++;await extra.beforeFrameRead?.(key);return repository.readSettingsSection(key);},
     saveSettingsSection:async(key,patch,generation)=>{repository.assertSettingsGeneration(generation);return repository.updateSettings(next=>{repository.assertSettingsGeneration(generation);next[key]={...next[key],...structuredClone(patch)};});}},
    './gamePolicyTarget':{...targets,isPolicyGameInitialized:()=>true},'./gamedetect':gameDetection,'./yeman':yeman,'./powerSource':{powerSourceMode:powerSource},
-   './performanceSchedule':{loadGameCustomConfig},'./api':{powerLifecycle:{get:async()=>({phase:'ready',hardwareWritesAllowed:true})}},
+   './performanceSchedule':{loadGameCustomConfig},'./api':{powerLifecycle:{get:async()=>({phase:'ready',hardwareWritesAllowed:true})}},'./powerLifecycleState':{},
    './autofloat':{isContinuousFloat:()=>false,getFloatInfo:()=>({enabled:false}),setFloatRtssLinked(){},setFloatTarget:async()=>{throw Error('Unexpected hardware write');}}
   });return {...actual,loadGlobalFrameRates:(...args)=>{observations.frameCalls++;return actual.loadGlobalFrameRates(...args);}};};
   const owner=createPerformanceMemoryFixture({ports,gameActive:extra.gameActive===true});
   return {owner,ports,observations};
  };
  const display=owner=>owner.schedule.getContinuousPerformanceSnapshot('effective',undefined,undefined,'read-only');
+ {
+  const {models}=await import('./fixtures/performance_memory_fixture.mjs');
+  const controls={version:1,ac:models.defaultContinuousBank('ac'),dc:models.defaultContinuousBank('dc')};
+  const entries=Object.fromEntries(Array.from({length:129},(_,i)=>[`game-${i}.exe`,{displayName:`Fixture ${i}`,enabled:true,controls}]));
+  const primary=['C:','SOFT','YeMan','PowerControl','game-custom.json'].join(String.fromCharCode(92));
+  const body=JSON.stringify({version:1,entries,rtss:{}});
+  for(const source of ['main','backup','corrupt']){
+   let copies=0;
+   const scheduleClone=value=>{if(value?.version===1&&value.entries&&value.rtss)++copies;return structuredClone(value);};
+   const documents=source==='main'?[[primary,body]]:source==='backup'?[[primary,'{invalid'],[primary+'.bak',body]]:[[primary,'{invalid']];
+   const {owner,observations}=build({},{customDocuments:documents,scheduleClone});
+   const first=await owner.schedule.loadGameCustomConfig('read-only');
+   const readCopies=copies, expected=source==='corrupt'?0:129;
+   assert.equal(Object.keys(first.entries).length,expected);
+   assert.equal(observations.customReads,source==='backup'?2:1);
+   if(expected)first.entries['game-0.exe'].controls.ac.tdp=87;
+   else first.entries['x.exe']={};
+   const cache=owner.schedule.getGameCustomConfig();
+   assert.equal(Object.keys(cache.entries).length,expected);
+   if(expected)assert.equal(cache.entries['game-0.exe'].controls.ac.tdp,controls.ac.tdp);
+   else await assert.rejects(owner.schedule.loadGameCustomConfig('read-only',{requireReady:true}));
+   if(source==='main'){
+    const start=copies, reads=observations.customReads;
+    const [a,b]=await Promise.all([owner.schedule.loadGameCustomConfig(),owner.schedule.loadGameCustomConfig()]);
+    assert.equal(observations.customReads-reads,1,'Original ensure callers still share one owner read');
+    assert.equal(copies-start,3,'Coalesced ensure keeps both caller copies');
+    a.entries['game-0.exe'].controls.ac.tdp=88;
+    assert.equal(b.entries['game-0.exe'].controls.ac.tdp,controls.ac.tdp);
+   }
+   assert.equal(owner.effects.length,0);assert.equal(owner.hardwareWrites.length,0);
+   console.log(JSON.stringify({displayProfileCopy:{source,entries:expected,readCopies,cacheIsolated:true,writes:0}}));
+   assert.equal(readCopies,1,'A non-coalesced display read must not copy its detached profile document twice');
+  }
+ }
  // RETIRED_HOST_OBSERVER_BEGIN
  {
   const {models}=await import('./fixtures/performance_memory_fixture.mjs');const observerMeasurements=[];
@@ -51,7 +85,7 @@ await check('host read is side-effect free and exposes only continuous performan
    const demand=async subscribe=>{f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,subscribe}});await flush();};
    const rawController={virtualOutput:{state:'active',requestedPersona:'steamdeck',boundPersona:'steamdeck',hostAlive:true,hostEpoch:1,prepared:true,neutralized:true,frameAccepted:true,sourceLive:true,sourceCurrent:true,steamRunning:true,startProtection:{locked:true,requestId:91,phase:'pending',persona:'steamdeck',remainingMs:1000,elapsedMs:0,maxMs:30000,settleMs:10000}}};
    try{
-    f.ready();await demand(true);assert.equal(latest().ready,true);const oldSchedule=scheduleObservers.at(-1),oldEvent=eventObservers.find(row=>row.event===(mode==='power'?'power.pending':mode==='controller'?'gamepad.state':'test.monitorChanged'));
+    f.ready();await demand(true);assert.equal(latest().ready,true);const oldSchedule=scheduleObservers.at(-1),oldEvent=eventObservers.findLast(row=>row.active&&row.event===(mode==='power'?'power.lifecycleChanged':mode==='controller'?'gamepad.state':'test.monitorChanged'));
     assert(oldSchedule.active);if(mode!=='schedule')assert(oldEvent?.active);await demand(false);assert.equal(oldSchedule.active,false);if(mode!=='schedule')assert.equal(oldEvent.active,false);
     if(mode==='schedule'){
      holdMonitor=true;await demand(true);assert.equal(monitorEntered,true);oldSchedule.callback(structuredClone(seed));holdMonitor=false;releaseMonitor();await flush();let view=latest();
@@ -62,7 +96,7 @@ await check('host read is side-effect free and exposes only continuous performan
     }else{
      configFails=mode!=='controller';await demand(true);if(configFails)for(const delay of [250,1000,3000,10000]){f.advanceController(delay);await flush();}
      assert.equal(latest().ready,true);assert.equal(f.controllerTimerCount(),configFails?1:0);const powerBefore=f.counts.power;
-     const payload=mode==='monitor'?{...structuredClone(f.state.monitor),enabled:false}:mode==='controller'?rawController:{};
+     const payload=mode==='monitor'?{...structuredClone(f.state.monitor),enabled:false}:mode==='controller'?rawController:{...f.state.power,known:true,phase:'suspending',generation:f.state.power.generation+1,hardwareWritesAllowed:false};
      oldEvent.callback(structuredClone(payload));await flush();const afterOld=f.counts.power;f.advanceController(250);await flush();
      console.log(JSON.stringify({retiredHostObserved:{mode,powerBefore,afterOld,powerAfter250:f.counts.power,recoveryTimers:f.controllerTimerCount(),ready:latest()?.ready}}));
      assert.equal(f.counts.power,powerBefore,'Retired '+mode+' callback cannot start a current read');assert.equal(f.controllerTimerCount(),configFails?1:0,'Retired callback cannot rearm current recovery or controller timers');
@@ -154,27 +188,48 @@ await check('host read is side-effect free and exposes only continuous performan
  {
   const {models:copyModels}=await import('./fixtures/performance_memory_fixture.mjs');
   const copyMeasurements=[];
+  const controls={version:1,ac:copyModels.defaultContinuousBank('ac'),dc:copyModels.defaultContinuousBank('dc')};
+  const entries=Object.fromEntries(Array.from({length:129},(_,i)=>[`game-${i}.exe`,{displayName:`Fixture ${i}`,enabled:true,controls}]));
   for(const gameActive of [false,true]){
-   let copies=0;
-   const {owner}=build({performanceSchedule:{version:2,configured:true,enabled:true,controls:{version:1,ac:copyModels.defaultContinuousBank('ac'),dc:copyModels.defaultContinuousBank('dc')}},rtss:{templateDefaults:false,frameRates:frameModel.frameRatePair(null,90,40)}},{gameActive});
-   const performanceOwner={...owner.schedule,getGameCustomConfig:()=>{copies++;return owner.schedule.getGameCustomConfig();}};
-   const host=await createMirrorHostFixture({performanceOwner,frameOwner:owner.frameRateService});host.state.game=structuredClone(owner.game);
+   let copies=0,fences=0,fullEncodes=0;
+   const countFullEncode=(value,...options)=>{if(value?.version===1&&value.entries&&value.rtss&&Object.keys(value.entries).length===129)++fullEncodes;return JSON.stringify(value,...options);};
+   const {owner}=build({performanceSchedule:{version:2,configured:true,enabled:true,controls},rtss:{templateDefaults:false,frameRates:frameModel.frameRatePair(null,90,40)}},
+    {gameActive,initialCustom:{version:1,entries,rtss:{}},scheduleStringify:countFullEncode});
+   const performanceOwner={...owner.schedule,getGameCustomConfig:()=>{copies++;return owner.schedule.getGameCustomConfig();},
+    gameCustomDisplayMatches:document=>{fences++;return owner.schedule.gameCustomDisplayMatches(document);}};
+   const host=await createMirrorHostFixture({performanceOwner,frameOwner:owner.frameRateService,readHooks:{hostStringify:countFullEncode}});host.state.game=structuredClone(owner.game);
    const request=async()=>{const before=host.replies.length;host.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId}});await flush();return host.replies.slice(before).filter(row=>row.message.type==='snapshot').at(-1)?.message.snapshot;};
    try{
-    host.ready();const before=copies,first=await request(),coldCopies=copies-before;assert.equal(first?.ready,true);assert.equal(first.frames.pair.ac.fps,90);assert.equal(first.actions.performance,true);
-    owner.settings.rtss.frameRates=frameModel.frameRatePair(null,105,45);const nextBefore=copies,next=await request();assert.equal(next.frames.pair.ac.fps,105);
-    const nextDisplayCopies=copies-nextBefore;
+    host.ready();const before=copies,beforeFences=fences,beforeEncodes=fullEncodes,first=await request(),coldCopies=copies-before,coldFences=fences-beforeFences,coldEncodes=fullEncodes-beforeEncodes;assert.equal(first?.ready,true);assert.equal(first.frames.pair.ac.fps,90);assert.equal(first.actions.performance,true);
+    owner.settings.rtss.frameRates=frameModel.frameRatePair(null,105,45);const nextBefore=copies,nextBeforeFences=fences,nextBeforeEncodes=fullEncodes,next=await request();assert.equal(next.frames.pair.ac.fps,105);
+    const nextDisplayCopies=copies-nextBefore,nextFences=fences-nextBeforeFences,nextEncodes=fullEncodes-nextBeforeEncodes;
     // A command must read the original owner again, never the prior display data.
     owner.settings.rtss.frameRates=frameModel.frameRatePair(null,110,50);const commandStart=host.replies.length;
     host.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'frame.setField',runId,id:'copy-fresh:1',clientId:'copy-fresh',sequence:1,generation:next.generation,revision:next.revision,identity:next.game?.identity??'',args:{field:'acFps',value:'120'}}});await flush();
     const rejected=host.replies.slice(commandStart).find(row=>row.message.id==='copy-fresh:1')?.message;assert.equal(rejected?.ok,false,'Default frame action must reject the display receipt after external FPS changes');assert.equal(owner.effects.length,0);assert.equal(host.counts.frameApplies,0);
     const hidden=copies;host.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,subscribe:false}});await flush();assert.equal(copies,hidden);assert.equal(owner.effects.length,0);assert.equal(owner.hardwareWrites.length,0);
-    copyMeasurements.push({gameActive,coldCopies,nextDisplayCopies,externalFps:105,displayWrites:0});
+    copyMeasurements.push({gameActive,profileEntries:129,coldCopies,nextDisplayCopies,coldFences,nextFences,coldEncodes,nextEncodes,externalFps:105,displayWrites:0});
    }finally{host.stop();await flush();assert.equal(host.controllerTimerCount(),0);assert.equal(host.fxTimerCount(),0);assert.equal(host.observerStats().watchers,0);}
   }
   console.log(JSON.stringify({profileCopyMeasurements:copyMeasurements,scope:'Host getter calls execute actual getGameCustomConfig structuredClone; not CPU percentage or heap-allocation measurement'}));
-  assert.deepEqual(copyMeasurements.map(row=>row.coldCopies),[1,2],'One display shares its already-read profile with FPS and accepted final profile source');
-  assert.deepEqual(copyMeasurements.map(row=>row.nextDisplayCopies),[1,2],'The next display keeps fresh owner reads and the original two live source fences');
+  assert.deepEqual(copyMeasurements.map(row=>row.coldCopies),[1,0],'The active-game fences do not copy the already-read document');
+  assert.deepEqual(copyMeasurements.map(row=>row.nextDisplayCopies),[1,0],'Later display refreshes also avoid the two fence copies');
+  assert.deepEqual(copyMeasurements.map(row=>[row.coldFences,row.nextFences]),[[0,0],[2,2]],'Both active-game source fences still consult the original owner');
+  assert.deepEqual(copyMeasurements.map(row=>[row.coldEncodes,row.nextEncodes]),[[0,0],[0,0]],'The same owner cache must not serialize a full profile document at either display fence');
+  let fallbackEncodes=0;
+  const scheduleStringify=(value,...options)=>{if(value?.version===1&&value.entries&&value.rtss)++fallbackEncodes;return JSON.stringify(value,...options);};
+  const {owner}=build({},{gameActive:true,initialCustom:{version:1,entries,rtss:{}},scheduleStringify});
+  const receipt=await owner.schedule.loadGameCustomConfig('read-only');
+  const sameSourceStart=fallbackEncodes;
+  assert.equal(owner.schedule.gameCustomDisplayMatches(receipt),true);
+  assert.equal(fallbackEncodes-sameSourceStart,0);
+  await owner.schedule.loadGameCustomConfig('read-only');
+  const equivalentSourceStart=fallbackEncodes;
+  assert.equal(owner.schedule.gameCustomDisplayMatches(receipt),true,'Equivalent cache replacement must preserve the original display acceptance');
+  assert.equal(fallbackEncodes-equivalentSourceStart,2,'A cache replacement must use the exact full-document comparison');
+  assert.equal(owner.effects.length,0);
+  assert.equal(owner.hardwareWrites.length,0);
+  console.log(JSON.stringify({profileEquivalentReplacement:{accepted:true,fullEncodes:2,writes:0}}));
  }
  // DISPLAY_CUSTOM_COPY_BOUNDARY_END
  // DISPLAY_CUSTOM_COPY_SOURCE_BOUNDARY_BEGIN
@@ -358,26 +413,28 @@ await check('host read is side-effect free and exposes only continuous performan
  const {models:scheduleModels}=await import('./fixtures/performance_memory_fixture.mjs');
  for(const template of [false,true])for(const gameActive of [false,true]){
   const {owner,ports}=build({...(template?{}:{performanceSchedule:{version:2,configured:true,enabled:true,controls:{version:1,ac:scheduleModels.defaultContinuousBank('ac'),dc:scheduleModels.defaultContinuousBank('dc')}}}),rtss:{templateDefaults:false,frameRates:frameModel.frameRatePair(null,90,40)}},{gameActive});
-  const originalLoad=owner.settingsRepository.loadSettings;let reads=0;
+  const originalLoad=owner.settingsRepository.loadSettings,validate=owner.settingsRepository.validateSettingsRead;let reads=0,validations=0;
   owner.settingsRepository.loadSettings=async()=>{reads++;return originalLoad();};
+  owner.settingsRepository.validateSettingsRead=async()=>{validations++;return validate();};
   const host=await createMirrorHostFixture({performanceOwner:owner.schedule,frameOwner:owner.frameRateService});host.state.game=owner.game;
   const readHost=async()=>{const start=host.replies.length;host.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId}});await flush();return host.replies.slice(start).filter(row=>row.message.type==='snapshot').at(-1)?.message.snapshot;};
   const tdp=view=>view.performance.controls.find(row=>row.key==='tdp')?.value;
   try{
    host.ready();const first=await readHost();assert.equal(first.ready,true);assert(first.performance);
-   console.log(JSON.stringify({scheduleColdObservation:{template,gameActive,reads,tdp:tdp(first)}}));
-   assert.equal(reads,(template?2:1)+(gameActive?1:0),'One shared schedule plus original custom-root preparation reads');
+   console.log(JSON.stringify({scheduleColdObservation:{template,gameActive,reads,validations,tdp:tdp(first)}}));
+   assert.equal(reads,template?2:1,'One shared schedule plus the original template revalidation');
+   assert.equal(validations,gameActive?1:0,'Game view still validates the settings root');
    const changed=structuredClone((await owner.schedule.loadPerformanceSchedule()).controls);changed.ac.tdp=44;owner.settings.performanceSchedule.controls=changed;
-   const before=reads;const next=await readHost();assert.equal(next.ready,true);assert.equal(reads,before+1+(gameActive?1:0),'A later display keeps one fresh schedule plus original custom-root preparation');assert.equal(tdp(next),44,'A later display sees external schedule changes');
+   const before=reads,validationsBefore=validations;const next=await readHost();assert.equal(next.ready,true);assert.equal(reads,before+1,'A later display still reads the schedule');assert.equal(validations,validationsBefore+(gameActive?1:0));assert.equal(tdp(next),44,'A later display sees external schedule changes');
    // A supplied display value never replaces the ordinary action reader.
    const forged=structuredClone(await owner.schedule.loadPerformanceSchedule());forged.controls.ac.tdp=77;
    const prior=reads;const action=await owner.schedule.getContinuousPerformanceSnapshot('effective',undefined,undefined,'ensure',{generation:ports.generation??1,schedule:forged,globalFrameRates:Promise.resolve(frameModel.frameRatePair(null,10,10))});
-   assert.equal(action.bank.tdp,44);assert.equal(reads,prior+2,'Default action keeps original schedule plus custom-config preparation reads');
+   assert.equal(action.bank.tdp,44);assert.equal(reads,prior+2,'Default action keeps original schedule plus custom-config preparation reads');assert.equal(validations,gameActive?2:0);
    const generation=ports.generation??1;ports.generation=generation+1;
    await assert.rejects(owner.schedule.getContinuousPerformanceSnapshot('effective',undefined,undefined,'read-only',{generation,schedule:forged,globalFrameRates:Promise.resolve(frameModel.frameRatePair(null,10,10))}));
    assert.equal(owner.effects.length,0);assert.equal(owner.hardwareWrites.length,0);
-   const hidden=reads;host.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,subscribe:false}});await flush();assert.equal(reads,hidden);
-   scheduleReadMeasurements.push({template,gameActive,coldSettingsReads:(template?2:1)+(gameActive?1:0),laterDisplayFreshSettingsReads:1+(gameActive?1:0),externalTdp:44,defaultActionFresh:true,oldGenerationRejected:true,displayWrites:0});
+   const hidden=[reads,validations];host.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,subscribe:false}});await flush();assert.deepEqual([reads,validations],hidden);
+   scheduleReadMeasurements.push({template,gameActive,coldFullSettingsReads:template?2:1,laterDisplayFullSettingsReads:1,settingsValidationsPerView:gameActive?1:0,externalTdp:44,defaultActionFresh:true,oldGenerationRejected:true,displayWrites:0});
   }finally{host.stop();await flush();assert.equal(host.fxTimerCount(),0);assert.equal(host.controllerTimerCount(),0);assert.equal(host.observerStats().watchers,0);}
  }
  console.log(JSON.stringify({scheduleReadMeasurements}));
@@ -385,12 +442,15 @@ await check('host read is side-effect free and exposes only continuous performan
  {
   const banks={version:1,ac:scheduleModels.defaultContinuousBank('ac'),dc:scheduleModels.defaultContinuousBank('dc')},dedicated=structuredClone(banks);dedicated.ac.tdp=32;
   const {owner}=build({performanceSchedule:{version:2,configured:true,enabled:true,controls:banks},rtss:{templateDefaults:false,frameRates:frameModel.frameRatePair(null,90,40)}},{gameActive:true,initialCustom:{version:1,entries:{'game.exe':{enabled:true,displayName:'Memory Game',controls:dedicated}},rtss:{}}});
-  const load=owner.settingsRepository.loadSettings;let reads=0;owner.settingsRepository.loadSettings=async()=>{reads++;return load();};
+  const load=owner.settingsRepository.loadSettings,validate=owner.settingsRepository.validateSettingsRead;let reads=0,validations=0;
+  owner.settingsRepository.loadSettings=async()=>{reads++;return load();};
+  owner.settingsRepository.validateSettingsRead=async()=>{validations++;return validate();};
   const host=await createMirrorHostFixture({performanceOwner:owner.schedule,frameOwner:owner.frameRateService});host.state.game=owner.game;
   const readHost=async()=>{const start=host.replies.length;host.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId}});await flush();return host.replies.slice(start).filter(row=>row.message.type==='snapshot').at(-1)?.message.snapshot;};
-  try{host.ready();const first=await readHost();assert.equal(first.ready,true);assert.equal(first.performance.scope,'game');assert.equal(first.performance.controls.find(v=>v.key==='tdp').value,32);assert.equal(reads,2);
-   owner.settings.performanceSchedule.controls.ac.tdp=43;const next=await readHost();assert.equal(next.performance.controls.find(v=>v.key==='tdp').value,32);assert.equal(reads,4);assert.equal(owner.effects.length,0);assert.equal(owner.hardwareWrites.length,0);
-   console.log(JSON.stringify({dedicatedScheduleObservation:{coldSettingsReads:2,nextSettingsReads:2,dedicatedTdp:32,externalGlobalTdp:43,displayWrites:0}}));
+  try{host.ready();const first=await readHost();assert.equal(first.ready,true);assert.equal(first.performance.scope,'game');assert.equal(first.performance.controls.find(v=>v.key==='tdp').value,32);assert.equal(reads,1);assert.equal(validations,1);
+   owner.settings.performanceSchedule.controls.ac.tdp=43;const next=await readHost();assert.equal(next.performance.controls.find(v=>v.key==='tdp').value,32);assert.equal(reads,2);assert.equal(validations,2);assert.equal(owner.effects.length,0);assert.equal(owner.hardwareWrites.length,0);
+   await owner.schedule.loadGameCustomConfig();assert.equal(reads,3,'An ordinary ensure still loads settings on its own');assert.equal(validations,2);
+   console.log(JSON.stringify({dedicatedScheduleObservation:{fullSettingsSnapshotsPerView:1,validationOnlyPerView:1,dedicatedTdp:32,externalGlobalTdp:43,displayWrites:0}}));
   }finally{host.stop();await flush();assert.equal(host.fxTimerCount(),0);assert.equal(host.observerStats().watchers,0);}
  }
  // DISPLAY_SCHEDULE_READ_BOUNDARY_END
@@ -497,6 +557,52 @@ await check('host read is side-effect free and exposes only continuous performan
  // COLD_CUSTOM_EXPLICIT_INTENT_END
 
 
+ // A Steam source publication can retire a display after its profile owner has
+ // started. The admitted file read may settle, but cannot start control reads.
+ {
+  const main=['C:','SOFT','YeMan','PowerControl','game-custom.json'].join(String.fromCharCode(92));
+  const doc=JSON.stringify({version:1,entries:{},rtss:{}});
+  const reads=[];let release;const gate=new Promise(resolve=>release=resolve);
+  const {owner}=build(asyncRaw(),{gameActive:true,customDocuments:[[main,doc],[main+'.bak',doc]],beforeCustomRead:async p=>{
+   reads.push(p===main?'main':'backup');if(reads.length===1)await gate;
+  }});
+  const host=await createMirrorHostFixture({performanceOwner:owner.schedule,frameOwner:owner.frameRateService});host.state.game=owner.game;
+  const replies=()=>host.replies.filter(row=>row.message.type==='snapshot');
+  try{
+   host.ready();host.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,subscribe:true}});await flush();
+   assert.deepEqual(reads,['main'],'Original profile IO must be in flight before retirement');
+   assert.equal(host.counts.inputReads,0);assert.equal(host.counts.monitorReads,0);assert.equal(replies().length,0);
+   host.emit('gameSteam.context.sourceChanged',{pid:900,processCreated:'987654321',processEpoch:'1',accountEpoch:'1'});await flush();
+   assert.equal(replies().length,0);release();await flush();
+   const reports=host.diagnostics.filter(row=>row.event==='snapshot-read-finished');
+   const obsolete=reports.find(row=>row.discardReason==='source-changed'&&row.invalidatedBy==='game');
+   assert(obsolete,'The old read must be discarded for this exact source change');
+   assert.equal(reports.find(row=>!row.discarded)?.demandEpoch,obsolete.demandEpoch);
+   assert.equal(replies().length,1);assert.equal(replies()[0].message.snapshot.ready,true);
+   assert.equal(owner.effects.length,0);assert.equal(owner.hardwareWrites.length,0);
+   assert.equal(host.controllerTimerCount(),0);
+   assert.deepEqual(reads,['main','main','backup'],'A retired display must not open its backup; the successor reads both originals');
+   console.log(JSON.stringify({inFlightSteamSourceRetirement:{startedProfileReads:reads,inputReads:host.counts.inputReads,monitorReads:host.counts.monitorReads,currentSnapshots:replies().length,retryTimers:host.controllerTimerCount(),displayWrites:owner.effects.length}}));
+   assert.equal(host.counts.inputReads,1,'A retired display must not start another input read after its profile settles');
+   assert.equal(host.counts.monitorReads,1,'A retired display must not start another monitor read after its profile settles');
+  }finally{release();host.stop();await flush();assert.deepEqual(host.observerStats(),{ipc:0,game:0,schedule:0,fan:0,watchers:0});}
+ }
+ {
+  let current=true,gateEntered,release;
+  const entered=new Promise(resolve=>gateEntered=resolve),gate=new Promise(resolve=>release=resolve);
+  const {owner,observations}=build(asyncRaw(),{gameActive:true,beforeSettingsLoad:async()=>{gateEntered();await gate;}});
+  const pending=owner.schedule.loadGameCustomConfig('read-only',{displayCurrent:()=>current});
+  const refuses=assert.rejects(pending,/MIRROR_SNAPSHOT_SOURCE_CHANGED/);
+  await Promise.race([entered,pending]);
+  const recoveryBefore=owner.schedule.getGameCustomRecoveryState();
+  current=false;release();await refuses;
+  assert.equal(observations.customReads,0,'Retirement during settings resolution starts no profile file read');
+  assert.deepEqual(owner.schedule.getGameCustomRecoveryState(),recoveryBefore,'Retired display cannot change owner recovery state');
+  await owner.schedule.loadGameCustomConfig('ensure',{requireReady:true,displayCurrent:()=>false});
+  assert.equal(observations.customReads,1,'Ordinary owner read and durable profile remain available');
+  assert.equal(owner.effects.length,0);assert.equal(owner.hardwareWrites.length,0);
+  console.log(JSON.stringify({retiredDuringSettings:{retiredFileReads:0,ordinaryFileReads:observations.customReads,displayWrites:0}}));
+ }
  const sharedOwnerMeasurements=[];
  {
   const main=['C:','SOFT','YeMan','PowerControl','game-custom.json'].join(String.fromCharCode(92)),doc=JSON.stringify({version:1,entries:{},rtss:{}});

@@ -24,6 +24,7 @@ NATIVE_BUILD_SCOPE = 'executing-main-compiled-marker-at-export;not-disk-identity
 NATIVE_BUILD_ID = re.compile(r'[0-9a-f]{64}')
 EXPORT_ZIP_NAME = re.compile(r'YeManCC-logs-[0-9]{8}-[0-9]{6}-([0-9]+-[0-9]+-[0-9]+)\.zip', re.IGNORECASE | re.ASCII)
 LOCAL_TERMINAL_SCOPE = 'bounded-local-lifecycle-observation;not-page-timing-or-desktop-proof'
+STAGING_SCOPE = 'after-second; bounded names; metadata only; no history or holder identity'
 
 
 def utc_time(value):
@@ -33,8 +34,8 @@ def utc_time(value):
     return value  # The fixed UTC format preserves the seventh fractional digit.
 
 
-def load_snapshot(path, stage):
-    value = evidence_json_loads(path.read_bytes())
+def load_snapshot(path, stage, raw=None):
+    value = evidence_json_loads(path.read_bytes() if raw is None else raw)
     keys = {'schema', 'stage', 'directory', 'scanStartedUtc', 'scanEndedUtc', 'files'}
     if (not isinstance(value, dict) or value.keys() != keys or type(value['schema']) is not int or
             value['schema'] != 1 or value['stage'] != stage or not isinstance(value['directory'], str) or
@@ -315,6 +316,87 @@ def desktop_hash_evidence(path, after_second, steps):
                 files=comparisons)
 
 
+def staging_scan_time(value):
+    if isinstance(value, str) and value.endswith('+00:00'):
+        value = value[:-6] + 'Z'
+    return utc_time(value)
+
+
+def staging_metadata(value):
+    if not isinstance(value, dict):
+        raise ValueError('invalid staging metadata')
+    state = value.get('state')
+    if state == 'regular-file-metadata':
+        if (value.keys() == {'state', 'bytes', 'lastWriteUtc'} and
+                type(value['bytes']) is int and value['bytes'] >= 0):
+            utc_time(value['lastWriteUtc'])
+            return state
+    elif state == 'metadata-query-failed':
+        if value.keys() == {'state', 'hresult'} and type(value['hresult']) is int:
+            return state
+    elif state in ('directory', 'not-found', 'reparse-point-not-followed') and value.keys() == {'state'}:
+        return state
+    raise ValueError('invalid staging metadata')
+
+
+def desktop_staging_evidence(path, after_second, after_hash, steps):
+    with path.open('rb') as stream:
+        raw = stream.read(MAX_AUDIT_RECEIPT_BYTES + 1)
+    if len(raw) > MAX_AUDIT_RECEIPT_BYTES:
+        raise ValueError('desktop staging report is too large')
+    value = evidence_json_loads(raw)
+    keys = {'schema', 'scope', 'directory', 'afterSecondInventorySha256', 'scanStartedUtc', 'scanEndedUtc', 'operations'}
+    if (not isinstance(value, dict) or value.keys() != keys or type(value['schema']) is not int or
+            value['schema'] != 1 or value['scope'] != STAGING_SCOPE or
+            not isinstance(value['directory'], str) or PureWindowsPath(value['directory']) != after_second[0] or
+            value['afterSecondInventorySha256'] != after_hash or
+            not isinstance(value['operations'], list) or not 1 <= len(value['operations']) <= 2):
+        raise ValueError('desktop staging report does not bind to the last desktop inventory')
+    started, ended = (staging_scan_time(value[key]) for key in ('scanStartedUtc', 'scanEndedUtc'))
+    if not after_second[2] <= started <= ended:
+        raise ValueError('desktop staging scan must follow the last desktop inventory')
+    expected = {step['suppliedZip']['name'].casefold(): step['suppliedZip'] for step in steps}
+    operations = {}
+    for row in value['operations']:
+        if (not isinstance(row, dict) or row.keys() != {'zipName', 'scanState', 'scanErrorHresult', 'entries'} or
+                not isinstance(row['zipName'], str) or not isinstance(row['entries'], list) or
+                row['scanState'] not in ('complete', 'enumeration-failed') or
+                (row['scanErrorHresult'] is not None if row['scanState'] == 'complete'
+                 else type(row['scanErrorHresult']) is not int)):
+            raise ValueError('invalid desktop staging operation')
+        name = row['zipName'].casefold()
+        supplied = expected.get(name)
+        if name in operations or not supplied or check_archive_name(supplied)['state'] != 'matches-operation-id':
+            raise ValueError('desktop staging operation does not match a supplied original ZIP')
+        op = supplied['operationEvidence']['operation']
+        pattern = re.compile(re.escape(name) + rf"\.staging-{op['writerPid']}-([0-9]{{1,20}})-[0-9]{{1,20}}-([12])")
+        seen = set()
+        temporary_files = 0
+        incomplete = row['scanState'] != 'complete'
+        for entry in row['entries']:
+            if (not isinstance(entry, dict) or entry.keys() != {'name', 'attempt', 'entry', 'temporary'} or
+                    not isinstance(entry['name'], str) or type(entry['attempt']) is not int):
+                raise ValueError('invalid desktop staging entry')
+            leaf = entry['name'].casefold()
+            match = pattern.fullmatch(leaf)
+            if (not match or leaf in seen or int(match[1]) < int(op['startedTickMs']) or int(match[2]) != entry['attempt']):
+                raise ValueError('desktop staging entry does not match the operation or attempt')
+            seen.add(leaf)
+            entry_state = staging_metadata(entry['entry'])
+            if entry_state == 'directory':
+                temporary = staging_metadata(entry['temporary'])
+                temporary_files += temporary == 'regular-file-metadata'
+                incomplete |= temporary not in ('regular-file-metadata', 'not-found')
+            else:
+                if entry['temporary'] is not None:
+                    raise ValueError('temporary metadata requires a staging directory')
+                incomplete = True
+        operations[name] = dict(row, temporaryFilesObserved=temporary_files, observationComplete=not incomplete)
+    return dict(scope=STAGING_SCOPE, scanStartedUtc=started, scanEndedUtc=ended,
+                operations=[operations.get(name, dict(zipName=expected[name]['name'], scanState='not-requested'))
+                            for name in expected])
+
+
 def local_terminal_evidence(path, supplied, last_scan_ended):
     with path.open('rb') as stream:
         raw = stream.read(MAX_AUDIT_RECEIPT_BYTES + 1)
@@ -374,8 +456,10 @@ def local_terminal_evidence(path, supplied, last_scan_ended):
 
 
 def audit(directory, first, second, expected_build_id=None, desktop_hashes=None, second_native_terminal=None,
-          pair_receipts=False):
-    before, after_first, after_second = [load_snapshot(directory / f'desktop-{stage}.json', stage) for stage in STAGES]
+          pair_receipts=False, desktop_staging=None):
+    after_raw = (directory / 'desktop-after-second.json').read_bytes() if desktop_staging is not None else None
+    before, after_first, after_second = [load_snapshot(directory / f'desktop-{stage}.json', stage,
+                                                       after_raw if stage == 'after-second' else None) for stage in STAGES]
     if not (before[0] == after_first[0] == after_second[0] and
             before[2] <= after_first[1] and after_first[2] <= after_second[1]):
         raise ValueError('snapshots must be chronological and from the same reported directory')
@@ -411,6 +495,9 @@ def audit(directory, first, second, expected_build_id=None, desktop_hashes=None,
         evidence = local_terminal_evidence(second_native_terminal, steps[1]['suppliedZip'], after_second[2])
         result['secondNativeTerminal'] = evidence
         result['conforms'] = result['conforms'] and evidence['reportsSuccess']
+    if desktop_staging is not None:
+        result['desktopStaging'] = desktop_staging_evidence(desktop_staging, after_second,
+                                                             hashlib.sha256(after_raw).hexdigest(), steps)
     return result
 
 
@@ -425,6 +512,8 @@ def main():
                         help='compare both supplied ZIPs with their post-second-scan desktop hashes')
     parser.add_argument('--second-native-terminal', type=Path,
                         help='verify a successful local terminal for the second ZIP')
+    parser.add_argument('--desktop-staging', type=Path,
+                        help='bind a post-second-scan staging report; does not change desktop delivery checks')
     parser.add_argument('--pair-receipts', action='store_true',
                         help='report first Native/renderer carry and cooldown evidence; does not change delivery checks')
     args = parser.parse_args()
@@ -432,7 +521,8 @@ def main():
         parser.error('--expected-native-build-id requires the full 64-digit hex build ID')
     try:
         result = audit(args.inventory_directory, args.first_zip, args.second_zip, args.expected_native_build_id,
-                       args.desktop_hashes, args.second_native_terminal, pair_receipts=args.pair_receipts)
+                       args.desktop_hashes, args.second_native_terminal, pair_receipts=args.pair_receipts,
+                       desktop_staging=args.desktop_staging)
     except (OSError, ValueError, UnicodeError, RecursionError) as exc:
         parser.error(str(exc))
     print(json.dumps(result, indent=2, ensure_ascii=True))

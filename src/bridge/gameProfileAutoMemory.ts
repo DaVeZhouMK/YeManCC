@@ -41,6 +41,8 @@ export function createGameProfileAutoMemory(deps: GameProfileAutoMemoryDeps) {
       const candidate = pending; pending = null; inFlight = candidate;
       try {
         if (!admitted(candidate)) continue;
+        // A queued candidate can lose public admission before this worker runs.
+        handled = candidate.key;
         const created = await deps.create(candidate.target, candidate.name, { automatic: true, admit: () => admitted(candidate) });
         if (created && admitted(candidate)) await deps.restore();
         if (admitted(candidate)) lastError = '';
@@ -59,8 +61,8 @@ export function createGameProfileAutoMemory(deps: GameProfileAutoMemoryDeps) {
     const game = deps.game(), key = keyFor(game);
     if (key !== observed) { observed = key; handled = ''; pending = null; }
     if (inFlight && !admitted(inFlight)) handled = '';
-    if (!enabled || !game || !key || !deps.ready() || key === handled) return;
-    handled = key;
+    if (pending && !admitted(pending)) pending = null;
+    if (!enabled || !game || !key || !deps.ready() || key === handled || pending) return;
     pending = { target: captureGameCustomProfileTarget(game, deps.generation()),
       name: detectedGameName(game) || game.name, key, admission: deps.admissionKey(), lifetime, optInEpoch };
     launch();
@@ -108,13 +110,14 @@ const autoMemory = createGameProfileAutoMemory({
   ready: () => isGameStatusCurrent() && isSharedPowerLifecycleAdmitted(getSharedPowerLifecycle()),
   admissionKey: () => {
     const power = getSharedPowerLifecycle();
-    return JSON.stringify([power?.generation, power?.observedNotificationSequence]);
+    return JSON.stringify([power?.generation, power?.observedNotificationSequence, power?.suspendSerial]);
   },
   load: () => loadGameCustomConfig('ensure', { requireReady: true }),
   subscribeConfig: onGameCustomConfigChanged,
   subscribeGame: listener => subscribePolicyGameStatus(listener),
   subscribeReady: listener => {
-    const stops = [subscribeGameTargetReadiness(listener), onSharedPowerLifecycle(listener)];
+    const stops = [subscribeGameTargetReadiness(listener),
+      onSharedPowerLifecycle(listener, { observeNotificationSequence: true, observeSuspendSerial: true })];
     return () => { for (const stop of stops) stop(); };
   },
   create: createGameCustomProfile,

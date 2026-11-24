@@ -25,6 +25,28 @@ inline bool basicActive(const XINPUT_GAMEPAD& p) noexcept {
         p.sThumbLY>1000 || p.sThumbLY< -1000 || p.sThumbRX>1000 ||
         p.sThumbRX< -1000 || p.sThumbRY>1000 || p.sThumbRY< -1000;
 }
+// A cached Raw report can still own buttons and triggers when XInput resumes
+// updating the sticks. Do not switch those fields or age out a steady hold.
+class CachedRawStickHandoff {
+    Epoch epoch_{};
+    std::uint64_t host_=0, sequence_=0;
+    XINPUT_GAMEPAD nativeAtObservation_{};
+    unsigned nativeStickMask_=0;
+public:
+    unsigned apply(std::uint64_t host,const Epoch& epoch,const XINPUT_GAMEPAD& native,Sample* raw) noexcept {
+        if(!host || !raw || !raw->sequence || !raw->completeBasic || raw->isolationSharedRead){host_=0;return 0;}
+        const auto moved=[](SHORT a,SHORT b){const int delta=int(a)-int(b);return delta>1000 || delta< -1000;};
+        if(host_!=host || epoch_!=epoch || sequence_!=raw->sequence) {
+            host_=host;epoch_=epoch;sequence_=raw->sequence;nativeAtObservation_=native;nativeStickMask_=0;
+        }else{
+            if(moved(native.sThumbLX,nativeAtObservation_.sThumbLX) || moved(native.sThumbLY,nativeAtObservation_.sThumbLY))nativeStickMask_|=1u;
+            if(moved(native.sThumbRX,nativeAtObservation_.sThumbRX) || moved(native.sThumbRY,nativeAtObservation_.sThumbRY))nativeStickMask_|=2u;
+        }
+        if(nativeStickMask_&1u){raw->pad.sThumbLX=native.sThumbLX;raw->pad.sThumbLY=native.sThumbLY;}
+        if(nativeStickMask_&2u){raw->pad.sThumbRX=native.sThumbRX;raw->pad.sThumbRY=native.sThumbRY;}
+        return nativeStickMask_;
+    }
+};
 class Lane {
     Epoch epoch_{};
     Sample sample_{};
@@ -41,7 +63,9 @@ public:
         epoch_=e;sample_=sample;have_=true;
     }
     bool read(const Epoch& e,bool eligible,const XINPUT_GAMEPAD& native,Sample& out,bool requireDisagreement=true) noexcept {
-        if(!eligible || !have_ || !(epoch_==e)){clear();return false;}
+        // A lane without a sample is already clear.
+        if(!have_)return false;
+        if(!eligible || !(epoch_==e)){clear();return false;}
         // Actual disagreement arms the alternative. Neutral input is normal
         // and cannot trigger a restart, a controller fault or an acquisition.
         if(!selected_ && (!requireDisagreement || (basicActive(sample_.pad) && !basicActive(native))))selected_=true;
@@ -60,9 +84,17 @@ public:
     bool readWakeFallback(const Epoch& e,bool eligible,const XINPUT_GAMEPAD& native,
         std::uint64_t now,Sample& out) noexcept {
         constexpr std::uint64_t maxAgeMs=250;
-        if(!have_ || !sample_.completeBasic || now<sample_.observedTick || (!selected_ && now-sample_.observedTick>maxAgeMs) ||
+        if(!have_)return false;
+        if(!sample_.completeBasic || now<sample_.observedTick || (!selected_ && now-sample_.observedTick>maxAgeMs) ||
            basicActive(native) || native.bLeftTrigger || native.bRightTrigger){clear();return false;}
         return read(e,eligible,native,out);
+    }
+    bool readColdPrimary(const Epoch& e,const XINPUT_GAMEPAD& native,
+        std::uint64_t now,bool replacingDirect,Sample& out) noexcept {
+        if(!have_ || !(epoch_==e) || !sample_.completeBasic)return false;
+        if(!selected_ && (now<sample_.observedTick || now-sample_.observedTick>250))return false;
+        // A fresh neutral report can retire a previously selected direct DOWN.
+        return read(e,true,native,out,!replacingDirect);
     }
 };
 } // namespace ymcc::commonhid

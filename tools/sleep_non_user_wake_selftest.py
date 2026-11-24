@@ -27,7 +27,7 @@ parser.add_argument('--sleep-request-case', default=None, help='Exact sender cas
 selection.add_argument('--resume-classification-sender-only', action='store_true', help='Original field classification and actual sender joined with public Reader only')
 parser.add_argument('--resume-sender-case', default=None, help='Exact original joined field selection')
 selection.add_argument('--broadcast-consumer-only', action='store_true', help='Execute complete original broadcast with independent observer fault ports')
-parser.add_argument('--broadcast-consumer-case', choices=["gate-query-reopen-refused","gate-query-normal","gate-query-event-refused","gate-query-handle-refused","gate-query-both-refused","gate-query-contended","gate-query-repeat-refused","sensor-query-normal","sensor-query-capture-allocation","sensor-query-refused-allocation","sensor-query-diagnostic-double","sensor-query-already-paused","sensor-query-inactive","journal-query-normal","journal-bare-normal","journal-query-armed-record","journal-bare-armed-record","journal-query-origin-record","journal-bare-origin-record","journal-query-classification-record","journal-bare-classification-record","journal-bare-monitor-record","journal-query-marker-allocation","journal-bare-marker-allocation","suspend-query-normal","suspend-bare-normal","suspend-query-notification-allocation","suspend-bare-notification-allocation","suspend-query-notification-allocation-double","normal","journal","capture","device-log","focus","radial","steam-close","steam-interactive","focus-observation","msi-observation","msi-completion","failure-log","suspend-prepare","argument-allocation","common-normal","common-entry-allocation","common-entry-log","common-keep-journal-allocation","common-input-release","common-input-reset","common-input-rescan","common-handheld","common-resuming","common-notification-allocation","common-msi-observation","common-diagnostic-double","common-retry-automatic","common-duplicate-automatic","common-duplicate-interactive","common-native-queue-normal","common-native-queue-entry-allocation","common-native-queue-keep-allocation","common-native-queue-allocation-fails"], default=None, help='Exact complete-broadcast scenario; requires --broadcast-consumer-only')
+parser.add_argument('--broadcast-consumer-case', choices=["gate-query-reopen-refused","gate-query-normal","gate-query-event-refused","gate-query-handle-refused","gate-query-both-refused","gate-query-contended","gate-query-repeat-refused","sensor-query-normal","sensor-query-capture-allocation","sensor-query-refused-allocation","sensor-query-diagnostic-double","sensor-query-already-paused","sensor-query-inactive","journal-query-normal","journal-bare-normal","journal-query-armed-record","journal-bare-armed-record","journal-query-origin-record","journal-bare-origin-record","journal-query-classification-record","journal-bare-classification-record","journal-bare-monitor-record","journal-query-marker-allocation","journal-bare-marker-allocation","suspend-query-normal","suspend-bare-normal","suspend-query-notification-allocation","suspend-bare-notification-allocation","suspend-query-notification-allocation-double","normal","journal","capture","device-log","focus","radial","steam-close","steam-interactive","focus-observation","msi-observation","msi-completion","failure-log","suspend-prepare","suspend-cpu-observer-failure","suspend-foreground-queue-failure","argument-allocation","common-normal","common-entry-allocation","common-entry-log","common-keep-journal-allocation","common-input-release","common-input-reset","common-input-rescan","common-handheld","common-resuming","common-notification-allocation","common-msi-observation","common-diagnostic-double","common-retry-automatic","common-duplicate-automatic","common-duplicate-interactive","common-native-queue-normal","common-native-queue-entry-allocation","common-native-queue-keep-allocation","common-native-queue-allocation-fails"], default=None, help='Exact complete-broadcast scenario; requires --broadcast-consumer-only')
 args = parser.parse_args()
 if args.broadcast_consumer_case is not None and not args.broadcast_consumer_only:
     parser.error('--broadcast-consumer-case requires --broadcast-consumer-only')
@@ -75,7 +75,7 @@ def braced(opening, text=None):
 _function_region_mask = None
 _function_region_spans = ()
 
-def function(name, native_text=None):
+def function(name, native_text=None, *, noexcept=False):
     global _function_region_mask, _function_region_spans
     native_text = source if native_text is None else native_text
     native_mask = masked if native_text is source else mask_cpp(native_text)
@@ -89,7 +89,8 @@ def function(name, native_text=None):
                 spans.append((start, end))
             start = end
         _function_region_mask, _function_region_spans = native_mask, tuple(spans)
-    pattern = re.compile(r'\bstatic\s+[^;{}]*?\b' + re.escape(name) + r'\s*\([^;{}]*?\)\s*\{')
+    qualifier = r'\s*noexcept' if noexcept else ''
+    pattern = re.compile(r'\bstatic\s+[^;{}]*?\b' + re.escape(name) + r'\s*\([^;{}]*?\)' + qualifier + r'\s*\{')
     matches = [match for start, end in _function_region_spans for match in pattern.finditer(native_mask, start, end)]
     if len(matches) != 1:
         raise RuntimeError('native function not unique: ' + name)
@@ -174,6 +175,11 @@ names = [
 has_retry_timer_scope = 'struct SgSleepRetryFailureScope {' in source
 if has_retry_timer_scope:names.insert(names.index('sgScheduleNextSleepRetry'),'sgArmSleepRetryTimer')
 functions = '\n\n'.join(function(name) for name in names)
+if 'static void sgArmS4WakeRedelivery(' in source:
+    s4_begin=unique_anchor('static std::mutex g_sgFailedS4Mutex;')
+    s4_end=unique_anchor('static void sgPostS4Wake(')
+    assert s4_begin<s4_end
+    functions += '\n'+source[s4_begin:s4_end]+function('sgArmS4WakeRedelivery')+'\n'
 # The Native callback now consumes this actual source-order predicate.
 timeout_native=(args.source.parent/'sleep_timeout_native.inc').read_text('utf-8-sig')
 uses_timeout_owner=any([args.resume_classification_public_facts_only,args.resume_classification_only,
@@ -185,6 +191,23 @@ functions += '\n'+('static bool sgKernelPowerWakePredatesLatestEntry(int,ULONGLO
 hardware_write_allowed = function('hardwareWriteAllowed')
 shared_power_ready = function('msiNativeForegroundSharedPowerReady', isolation_header_bytes.decode('utf-8-sig'))
 shared_power_hold_release = function('msiNativeForegroundTryReleasePowerHold', isolation_header_bytes.decode('utf-8-sig'))
+uses_deferred_ready = 'msiNativeForegroundContinueDeferredReady(' in shared_power_ready
+deferred_ready = function('msiNativeForegroundContinueDeferredReady', isolation_header_bytes.decode('utf-8-sig')) if uses_deferred_ready else ''
+ready_work_current = function('msiNativeForegroundReadyWorkCurrent', isolation_header_bytes.decode('utf-8-sig'), noexcept=True) if 'msiNativeForegroundReadyWorkCurrent(' in deferred_ready else ''
+if uses_deferred_ready:
+    ready_work = re.search(r'\bstruct MsiNativeForegroundReadyWork \{[^}]+\};', source).group(0)
+    ready_work_ports = ready_work + r'''
+std::atomic<uint64_t> g_msiNativeForegroundEdge{1};
+void msiNativeForegroundQueue(const MsiNativeForegroundReadyWork* work){
+ assert(work&&ymcc::sleeppower::powerAdmitted(work->power)&&work->edge==g_msiNativeForegroundEdge.load());
+ ++sharedReadyUiEvents;
+}
+std::atomic<bool>& isolationReadyFixtureDeferred=g_msiNativeForegroundWorkPowerDeferred;
+'''
+    if ready_work_current:
+        ready_work_ports += 'static bool inputHostExitFenceRaised(){return false;}\n'
+else:
+    ready_work_ports = 'std::atomic<bool>& isolationReadyFixtureDeferred=g_msiNativeForegroundReturnPowerDeferred;'
 functions += '\n' + hardware_write_allowed + r'''
 static ymcc::sleeppower::SharedPowerV1 isolationReadyFixtureObservation(){
  ymcc::sleeppower::SharedPowerV1 value;
@@ -205,7 +228,7 @@ static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& power) 
 static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& power) noexcept {
  return ymcc::sleeppower::powerCurrent(&isolationReadyFixtureRead,power);
 }
-''' + '\n' + shared_power_ready + '\n' + shared_power_hold_release + '\n'
+''' + '\n' + ready_work_current + '\n' + deferred_ready + '\n' + shared_power_ready + '\n' + shared_power_hold_release + '\n'
 # Only the added source callback gets a fake window post; restore the original
 # boundary macro before compiling every existing wake/retry handler.
 notification_callback = function('suspendResumeSubscriptionCallback')
@@ -255,7 +278,7 @@ entry_ignore = re.search(
     r'if\s*\(\s*w\s*==\s*PBT_APMSUSPEND\s*&&\s*sgIgnoreLateSuspendNotification\s*\(\s*suspendAdmission\s*\)\s*\)\s*return\s+TRUE\s*;',
     mask_cpp(power_prefix))
 assert entry_ignore and entry_admission.end() <= entry_ignore.start(), 'late suspend must return before independent consumers'
-slow_suspend_leaves = ['sleepRecoveryAutoPrepareSuspend()']
+slow_suspend_leaves = ['sleepRecoveryAutoPrepareSuspend(']
 screenpads_suspend_route = 'direct-before-independent-consumers'
 if 'ymcc::screenpads::ownerOnSuspend()' in mask_cpp(power_prefix):
     slow_suspend_leaves.append('ymcc::screenpads::ownerOnSuspend()')
@@ -272,14 +295,26 @@ for slow_leaf in slow_suspend_leaves:
     assert entry_admission.end() < power_prefix.index(slow_leaf), 'private admission must precede ' + slow_leaf
     assert entry_ignore.end() < power_prefix.index(slow_leaf), 'late suspend rejection must precede ' + slow_leaf
 receipt_preamble = 'const auto powerReceipt=received?*received:g_sleepPowerDispatch.window(static_cast<ULONG>(w),GetTickCount64(),sgNowFileTime());\nstruct Done{ymcc::sleeppower::Dispatch::Receipt r;~Done(){g_sleepPowerDispatch.complete(r,GetTickCount64());}} done{powerReceipt};\n'
+# The exact private observer now runs at the broadcast call site. Keep that
+# part in selective extracts as well, while supporting an old-source control.
+private_hook_start = power_prefix.find('if(suspendAdmission.privateIsolationRequired())', entry_ignore.end())
+if private_hook_start < 0:
+    assert 'if(admission.privateIsolationRequired())msiNativeForegroundPowerEvent(PBT_APMSUSPEND);' in suspend_admission_helper
+    private_suspend_hook = ''
+else:
+    private_hook_end = power_prefix.index('});', private_hook_start) + len('});')
+    private_suspend_hook = power_prefix[private_hook_start:private_hook_end] + '\n'
+    assert 'powerConsumer("msi-foreground-suspend",' in private_suspend_hook
+    assert 'msiNativeForegroundPowerEvent(' not in suspend_admission_helper
 # Bind the same original observer boundary in the extracted query/suspend bodies.
 # The complete-broadcast selection below keeps its own original local lambda.
 consumer_at=power_broadcast.index('const auto powerConsumer=[&](')
 consumer_open=power_broadcast.index('{',consumer_at)
 consumer_end=braced(consumer_open,mask_cpp(power_broadcast))
 assert power_broadcast[consumer_end]==';','complete original power consumer lambda'
-receipt_preamble+='const auto type=static_cast<ULONG>(w);\n'+power_broadcast[consumer_at:consumer_end+1]+'\n'
-handlers += '\nint handleSuspendAdmission(WPARAM w=PBT_APMSUSPEND,const ymcc::sleeppower::Dispatch::Receipt* received=nullptr) {\n'+receipt_preamble+power_prefix[entry_admission.start():entry_admission.end()]+'\nif(sgIgnoreLateSuspendNotification(suspendAdmission))return TRUE;\n' + suspend + '\nreturn TRUE;\n}\n'
+consumer_binding='const auto type=static_cast<ULONG>(w);\n'+power_broadcast[consumer_at:consumer_end+1]+'\n'
+receipt_preamble+=consumer_binding
+handlers += '\nint handleSuspendAdmission(WPARAM w=PBT_APMSUSPEND,const ymcc::sleeppower::Dispatch::Receipt* received=nullptr) {\n'+receipt_preamble+power_prefix[entry_admission.start():entry_admission.end()]+'\nif(sgIgnoreLateSuspendNotification(suspendAdmission))return TRUE;\n' + private_suspend_hook + suspend + '\nreturn TRUE;\n}\n'
 handlers += '\nint handleQueryAdmission(const ymcc::sleeppower::Dispatch::Receipt* received=nullptr) {\nconst WPARAM w=PBT_APMQUERYSUSPEND;\n'+receipt_preamble+body_after('else if (w == PBT_APMQUERYSUSPEND)')+'\nreturn TRUE;\n}\n'
 # Execute the production retry-confirmation branch; non-retry setup is covered
 # by the production sgMarkSleepTrigger and the single-PID companion selftest.
@@ -287,7 +322,7 @@ retry_start = suspend.index('if (suspendAdmission.kind==SgSuspendAdmissionKind::
 retry_open = suspend.index('{', retry_start)
 retry_mask = mask_cpp(suspend)
 retry_end = braced(retry_open, retry_mask)
-handlers += '\nint confirmRetrySuspend() {\nconst auto suspendAdmission=sgAdmitSuspendNotification({});\nif(sgIgnoreLateSuspendNotification(suspendAdmission))return FALSE;\n' + suspend[retry_start:retry_end] + '\nreturn FALSE;\n}\n'
+handlers += '\nint confirmRetrySuspend() {\nconst WPARAM w=PBT_APMSUSPEND;\nconst ymcc::sleeppower::Dispatch::Receipt powerReceipt{};\n' + consumer_binding + '\nconst auto suspendAdmission=sgAdmitSuspendNotification({});\nif(sgIgnoreLateSuspendNotification(suspendAdmission))return FALSE;\n' + private_suspend_hook + suspend[retry_start:retry_end] + '\nreturn FALSE;\n}\n'
 
 preamble = r'''
 #define NOMINMAX
@@ -338,6 +373,8 @@ enum class SgSleepMode : uint8_t {Unknown,S3,S4};
 enum class SgRetryKind : uint8_t {None,EntryFailure,UnexpectedWake,SleepTimeout};
 static void sgCancelEntryFailureRetry(const char*,SgRetryKind=SgRetryKind::EntryFailure,bool=false);
 enum class SgWork : uint8_t {Suspend,WakeAutomatic,WakeSuspend,WakeHibernate};
+/* actual-sg-work-item */
+static std::atomic<uint64_t> g_sharedPowerSuspendSerial{1};
 struct SgSleepTask {unsigned long long generation=0;SgSleepMode mode=SgSleepMode::Unknown;SgRetryKind retryKind=SgRetryKind::None;unsigned retryAttempt=0;ULONGLONG retryEntryFileTime=0;bool unexpectedWakeConsumed=false;} g_sgTask;
 struct Internal {SgRetryKind kind=SgRetryKind::None;ULONGLONG dispatchTick=0,dispatchFileTime=0;} g_sgInternalSleepRequest;
 struct SgSleepTarget {bool markerOwned=false;unsigned long long powerGeneration=0;};
@@ -368,7 +405,7 @@ void inputHostArmWakePhysicalHold(const char*){++suspendLeafCalls;}
 void sgHandheldSleepSensorsOnly(const char*){++suspendLeafCalls;}
 void gamepadResetNativeState(bool){++suspendLeafCalls;}
 void rogEnsureXboxFaceEnabled(const char*){++suspendLeafCalls;}
-void fanHostScheduleEmergencySuspend(const char*,ULONGLONG){++suspendLeafCalls;}
+void fanHostScheduleEmergencySuspend(const char*,ULONGLONG,ULONGLONG=0){++suspendLeafCalls;}
 bool sgHibernateAvailable(){++suspendLeafCalls;return false;}
 SgSleepMode sgPowerButtonSleepMode(){++suspendLeafCalls;return suspendConfiguredMode;}
 ULONGLONG g_sgIgnoredEarlyWakeFileTime=0,g_sgRetryDueTick=0,g_sgSleepTriggerTick=0,g_sgLastS0WakeTick=0,g_sgLastPowerButtonWakeTick=0,g_sgModernStandbyGeneration=0,g_sgModernWakeClassifiedTick=0,g_lastResumeNotifyTick=0;
@@ -386,6 +423,7 @@ bool g_sgRetrySleepTimeout=false;
 bool g_guardEnabled=true,g_sgResleepEnabled=true,g_sgRetryEntryFailure=true,g_sgRepairEligible=false,g_sgRetryInProgress=false,g_sgNonUserWakeObserved=false,g_sgSleepIntentArmed=false,g_sgModernStandbyActive=false,g_sgModernWakeClassified=false;
 bool g_sgSleepQueryGateClosed=false,g_sgSleepQueryOwnsGeneration=false;
 unsigned long long g_sgSleepQueryGeneration=0;
+unsigned long long g_sgConfirmedSuspendGeneration=0;
 int g_sgLastS0WakeReason=-1;
 bool requestAccepted=true,keepInput=true,frozen=false,platformAoAc=true,platformCapsKnown=true;
 int platformQueries=0;
@@ -414,7 +452,12 @@ bool sharedReadyFamilyAllowed=true;
 unsigned sharedReadyUiEvents=0;
 void msiNativeForegroundQueue(){++sharedReadyUiEvents;}
 bool nativeForegroundFamilyAllowed(){return sharedReadyFamilyAllowed;}
-void msiNativeForegroundUiEvent(bool force=false,bool sourceReturn=false){assert(force&&!sourceReturn);++sharedReadyUiEvents;}
+void msiNativeForegroundUiEvent(bool force=false,bool sourceReturn=false,const ymcc::sleeppower::SharedPowerV1* power=nullptr){
+ assert(force&&!sourceReturn);
+ if(power)assert(ymcc::sleeppower::powerAdmitted(*power));
+ ++sharedReadyUiEvents;
+}
+/* actual-isolation-ready-deferred-binding */
 /* actual-shared-power-dispatch-constants */
 static bool notificationPostSucceeds=true;
 static unsigned notificationPostCalls=0;
@@ -469,8 +512,9 @@ void sgReconcileSleepGameFlagsAfterRecoveryCancel(const char*){
 unsigned mockRadialInvalidations=0,mockRadialShutdownCalls=0;
 void radialInputIsolationInvalidate(){++mockRadialInvalidations;}
 struct MockRadialOverlay {
- bool active() const noexcept {return false;}
- void shutdown() noexcept {++mockRadialShutdownCalls;}
+ bool open=false;
+ bool active() const noexcept {return open;}
+ void shutdown() noexcept {++mockRadialShutdownCalls;open=false;}
 } g_radialOverlay;
 // New timeout hooks are disabled memory ports in the original wake replay.
 // The separate timeout fixture owns its timer, evidence, and shared-budget policy.
@@ -501,7 +545,7 @@ static bool sgAbnormalObserveOwnedRetry(ULONGLONG human,ULONGLONG request){
 static void sgAbnormalOwnedRetryResult(ULONGLONG human,ULONGLONG request,bool){assert(human && request>=human);}
 
 static void sleepRecoveryAutoArm(unsigned long long){} // automatic owner separately tested; this fixture keeps opt-in off
-bool sgBeginWakeGameRecovery(ULONGLONG g){(void)sgResumeSleepTarget(g,true);return true;}
+bool sgBeginWakeGameRecovery(ULONGLONG g,const SgWorkItem* =nullptr){(void)sgResumeSleepTarget(g,true);return true;}
 SgSystemSleepRequestResult sgRequestSystemSleep(ymcc::sleeprequest::Mode=ymcc::sleeprequest::Mode::ModernStandby,ymcc::sleeprequest::Mode=ymcc::sleeprequest::Mode::Sleep,bool=false,const ymcc::sleeppower::SharedPowerV1* =nullptr){
  ++requestCount;if(requestAccepted)timerDue=0;
  SgSystemSleepRequestResult result{requestAccepted,true,0,requestAccepted?0UL:5UL};
@@ -515,15 +559,15 @@ static void sgScheduleNextSleepRetry(const char*);
 static void sgFinishSleepRetryFailure(const char*);
 static void sgStopSleepRetry();
 static void sgMarkSleepTrigger();
-static void sgRealWake(const char*,unsigned long long);
+static void sgRealWake(const char*,unsigned long long,const SgWorkItem*);
 static void sgClearUnexpectedWake(const char*,bool);
 static bool sgS0EntryFailureEligible(int,ULONGLONG);
 static bool sgKernelPowerWakePredatesLatestEntry(int,ULONGLONG,ULONGLONG*);
 static void sgObserveUnattributedSleepRetryFailure(const char*,int=-1,ULONGLONG=0);
-void sgQueueWork(SgWork w,ULONGLONG g,ULONGLONG=0){if(w==SgWork::Suspend)++suspendQueued;else if(w==SgWork::WakeSuspend){sgRealWake("resume_suspend",g);g_powerLifecycle=PowerLifecycle::Ready;}}
-void sgAbortSleepIntent(const char*, ULONGLONG){++abortCount;sgStopSleepRetry();sgRealWake("resume_suspend",generation);g_powerLifecycle=PowerLifecycle::Ready;}
+void sgQueueWork(SgWork w,ULONGLONG g,ULONGLONG=0){if(w==SgWork::Suspend)++suspendQueued;else if(w==SgWork::WakeSuspend){sgRealWake("resume_suspend",g,nullptr);g_powerLifecycle=PowerLifecycle::Ready;}}
+void sgAbortSleepIntent(const char*, ULONGLONG){++abortCount;sgStopSleepRetry();sgRealWake("resume_suspend",generation,nullptr);g_powerLifecycle=PowerLifecycle::Ready;}
 void sgMarkUserStandby(const char*,int,ULONGLONG){}
-void sgBeginModernStandbyIntent(){
+void sgBeginModernStandbyIntent(ULONGLONG=0){
  ++beginCount;
  if(g_sgTask.mode==SgSleepMode::Unknown){g_sgTask.mode=SgSleepMode::S3;g_sgSleepIntentArmed=true;sgMarkSleepTrigger();g_powerLifecycle=PowerLifecycle::Suspended;}
  else g_sgModernStandbyActive=true;
@@ -535,7 +579,7 @@ void handlePowerResumeNotification(SgWork w,const char*){
  // seen by the real S4 worker, not call it while still Suspended.
  if(g_powerLifecycle==PowerLifecycle::Suspending||g_powerLifecycle==PowerLifecycle::Suspended)
   g_powerLifecycle=PowerLifecycle::Resuming;
- sgRealWake(w==SgWork::WakeSuspend?"resume_suspend":w==SgWork::WakeHibernate?"resume_hibernate":"resume_auto",generation);
+ sgRealWake(w==SgWork::WakeSuspend?"resume_suspend":w==SgWork::WakeHibernate?"resume_hibernate":"resume_auto",generation,nullptr);
  g_powerLifecycle=PowerLifecycle::Ready;
 }
 static void sgHandleModernStandbyWake(bool,ULONGLONG);
@@ -544,6 +588,10 @@ void inputHostRequestWakeRescan(ULONGLONG){}
 
 '''
 preamble = preamble.replace('/* actual-shared-power-dispatch-constants */', dispatch_constants)
+preamble = preamble.replace('/* actual-isolation-ready-deferred-binding */', ready_work_ports)
+item_at=masked.index('struct SgWorkItem {')
+work_item=source[item_at:braced(masked.index('{',item_at))]+';'
+preamble=preamble.replace('/* actual-sg-work-item */',work_item)
 
 if has_retry_timer_scope:
     at=source.index('struct SgSleepRetryFailureScope {');opening=source.index('{',at);masked_scope=mask_cpp(source);end=opening+1;depth=1
@@ -561,7 +609,7 @@ int handle507(WPARAM user,LPARAM reason){
 }
 void reset(bool pause=false){
  g_exitRequested=false;
- at(10000);generation=2;timerDue=0;g_sgTask={};g_sgInternalSleepRequest={};
+ at(10000);generation=2;timerDue=0;g_sgTask={};g_sgInternalSleepRequest={};g_sgConfirmedSuspendGeneration=0;
  monitorTimerDue=0;g_entryFailureInterruptedAt=0;g_entryFailureExpanded=false;g_entryFailureQuickDeadline=0;g_entryFailureDisplayState=-1;g_monitorEntryFailureTimerArmed=false;g_monitorEntryFailureGeneration=0;
  g_monitorEntryFailureIntent=g_monitorEntryFailureDeadline=0;g_entryFailureDisplayOn=false;
  g_entryFailureDisplayOnFileTime=g_entryFailureDisplayOffFileTime=g_entryFailureNewOffFileTime=0;successfulExit=0;
@@ -709,14 +757,20 @@ void verifySharedPowerDispatch(){
   Dispatch dispatch;Receipt queued;unsigned posts=0;
   assert(dispatch.callback(PBT_APMSUSPEND,100,[&](const Receipt& receipt){queued=receipt;++posts;return true;}));
   assert(posts==1&&queued&&queued.callback&&queued.tick==100&&dispatch.pendingSuspend()&&dispatch.hasPending());
-  const auto resume=dispatch.window(PBT_APMRESUMEAUTOMATIC,101);
-  assert(resume&&resume.sequence>queued.sequence&&!resume.callback&&resume.type==PBT_APMRESUMEAUTOMATIC);
+  assert(!dispatch.window(PBT_APMRESUMEAUTOMATIC,101));
+  const auto first=dispatch.forwarded(queued.sequence,queued.type);
+  assert(first&&first.tick==100&&dispatch.pendingSuspend());
+  dispatch.complete(first);
+  const auto pending=dispatch.pendingReplay();
+  assert(pending&&pending.sequence>queued.sequence&&!pending.callback&&pending.type==PBT_APMRESUMEAUTOMATIC);
+  const auto resume=dispatch.forwarded(pending.sequence,pending.type);
+  assert(resume&&resume.tick==101);
   dispatch.complete(resume);
   assert(!dispatch.pendingSuspend()&&!dispatch.hasPending());
   assert(!dispatch.forwarded(queued.sequence,queued.type));
   const auto stale=dispatch.snapshot();
   assert(stale["staleForwardedIgnored"]==1&&stale["claimed"]==resume.sequence&&stale["completed"]==resume.sequence&&stale["consumerActive"]==false);
-  scenarios.emplace_back("callback-suspend-before-direct-resume-rejects-stale-forward");
+  scenarios.emplace_back("callback-suspend-delivers-before-direct-resume-and-rejects-replay");
   Receipt later;
   assert(dispatch.callback(PBT_APMSUSPEND,102,[&](const Receipt& receipt){later=receipt;++posts;return true;}));
   assert(later.sequence>resume.sequence&&dispatch.pendingSuspend());
@@ -774,6 +828,12 @@ void verifySharedPowerDispatch(){
   assert(busy["consumerActive"]==true&&busy["claimed"]==outer.sequence&&busy["deferredReentrantDeliveries"]==3);
   dispatch.complete(outer);
   assert(dispatch.pendingSuspend());
+  const auto selected=dispatch.pendingReplay();
+  assert(selected&&selected.tick==402&&selected.type==PBT_APMSUSPEND);
+  assert(!dispatch.forwarded(forwardedSuspend.sequence,forwardedSuspend.type));
+  const auto suspend=dispatch.forwarded(selected.sequence,selected.type);
+  assert(suspend&&dispatch.pendingSuspend());
+  dispatch.complete(suspend);
   const auto candidate=dispatch.pendingReplay();
   assert(candidate&&candidate.tick==403&&candidate.type==PBT_APMRESUMESUSPEND);
   const auto latest=dispatch.forwarded(candidate.sequence,candidate.type);
@@ -782,8 +842,8 @@ void verifySharedPowerDispatch(){
   assert(!dispatch.pendingSuspend()&&!dispatch.hasPending()&&!dispatch.pendingReplay());
   assert(!dispatch.forwarded(forwardedSuspend.sequence,forwardedSuspend.type));
   const auto done=dispatch.snapshot();
-  assert(done["issued"]==4&&done["claimed"]==latest.sequence&&done["completed"]==latest.sequence&&done["replayDeliveries"]==1&&done["consumerActive"]==false);
-  scenarios.emplace_back("reentrant-forward-and-window-defer-to-one-latest-replay");
+  assert(done["issued"]==4&&done["claimed"]==latest.sequence&&done["completed"]==latest.sequence&&done["replayDeliveries"]==2&&done["consumerActive"]==false);
+  scenarios.emplace_back("reentrant-delivery-retains-latest-suspend-and-successor-resume");
  }
  assert(scenarios.size()==5);
  std::cout<<"SHARED_POWER_DISPATCH "<<json({{"scenarios",scenarios},{"groups",scenarios.size()},
@@ -805,7 +865,7 @@ void verifySharedPowerReady(){
   sharedReadyFamilyAllowed=true;sharedReadyUiEvents=0;
   g_msiNativeForegroundPowerHold=true;g_msiNativeForegroundResumePending=false;
   g_msiNativeForegroundPowerTransitionObserved=true;g_msiNativeForegroundLastResumeGeneration=0;
-  g_msiNativeForegroundReturnPowerDeferred=false;
+  isolationReadyFixtureDeferred=false;
   isolationReadyFixtureSuspendSerial=0;g_msiNativeForegroundLastReadySuspendSerial=0;
  };
  prepare();const auto ready=isolationReadyFixtureObservation();
@@ -862,17 +922,23 @@ void verifySharedPowerReady(){
  prepareHold();g_hardwareWriteGate=false;
  const bool closedGate=held();g_hardwareWriteGate=true;
  const bool afterGate=releasedOnce();
- prepareHold();g_msiNativeForegroundResumePending=true;g_lastPowerResumeCommitTick=100;
+ prepareHold();
  assert(!g_sleepPowerDispatch.callback(PBT_APMSUSPEND,501,[](const auto&){return false;}));
- const bool pendingGate=held()&&g_msiNativeForegroundResumePending;
+ const bool pendingGate=held();
  drain();const bool afterDrain=releasedOnce();
+ prepareHold();g_lastPowerResumeCommitTick=100;
+ const bool unchangedCommitHeld=held();
+ msiNativeForegroundSharedPowerReady(isolationReadyFixtureObservation());
+ const bool cancelledByProjection=!g_msiNativeForegroundPowerHold&&sharedReadyUiEvents==1&&
+  !msiNativeForegroundTryReleasePowerHold();
  prepareHold();g_exitRequested=true;const bool exitHeld=held();
  prepareHold();g_inputReady=false;const bool inputHeld=held();
  g_inputReady=true;const bool afterInput=releasedOnce();
  std::cout<<"SHARED_POWER_HOLD_MAINTENANCE "<<json({{"closedGate",closedGate},{"afterGate",afterGate},
-  {"pendingGate",pendingGate},{"afterDrain",afterDrain},{"exitHeld",exitHeld},{"inputHeld",inputHeld},
+  {"pendingGate",pendingGate},{"afterDrain",afterDrain},{"unchangedCommitHeld",unchangedCommitHeld},
+  {"cancelledByProjection",cancelledByProjection},{"exitHeld",exitHeld},{"inputHeld",inputHeld},
   {"afterInput",afterInput},{"realHardwareOperations",0}}).dump()<<"\n";
- assert(closedGate&&afterGate&&pendingGate&&afterDrain&&exitHeld&&inputHeld&&afterInput);
+ assert(closedGate&&afterGate&&pendingGate&&afterDrain&&unchangedCommitHeld&&cancelledByProjection&&exitHeld&&inputHeld&&afterInput);
  for(const bool maintenanceFirst:{false,true}){
   prepareHold();
   const auto oldReady=isolationReadyFixtureObservation();
@@ -896,13 +962,13 @@ void verifySharedPowerReady(){
  const auto readyBeforeReader=isolationReadyFixtureObservation();
  msiNativeForegroundSharedPowerReady(readyBeforeReader);
  assert(!g_msiNativeForegroundPowerHold&&sharedReadyUiEvents==1);
- g_msiNativeForegroundReturnPowerDeferred=true;
+ isolationReadyFixtureDeferred=true;
  msiNativeForegroundSharedPowerReady(readyBeforeReader);
- assert(g_msiNativeForegroundReturnPowerDeferred&&sharedReadyUiEvents==1&&"duplicate Ready spent deferred isolation return before input was ready");
+ assert(isolationReadyFixtureDeferred&&sharedReadyUiEvents==1&&"duplicate Ready spent deferred isolation return before input was ready");
  g_inputReady=true;
  msiNativeForegroundSharedPowerReady(readyBeforeReader);
  msiNativeForegroundSharedPowerReady(readyBeforeReader);
- assert(!g_msiNativeForegroundReturnPowerDeferred&&sharedReadyUiEvents==2);
+ assert(!isolationReadyFixtureDeferred&&sharedReadyUiEvents==2);
  std::cout<<"ISOLATION_DEFERRED_RETURN {\"beforeReaderPreserved\":true,\"afterReaderQueues\":1}\n";
  drain();reset();g_inputReady=true;g_hardwareWriteGate=true;g_aiFanMockSession.isolated=false;
  g_msiNativeForegroundPowerHold=false;g_msiNativeForegroundResumePending=false;g_msiNativeForegroundPowerTransitionObserved=false;
@@ -1000,20 +1066,28 @@ void verifySuspendAdmission(){
  prepare();handleSuspendAdmission();at(10025);resumeBoundary();
  at(10050);const auto agedOut=enqueue(PBT_APMSUSPEND);
  for(unsigned index=0;index<8;++index){at(10051+index);(void)enqueue(PBT_APMRESUMEAUTOMATIC);}
- at(10090);const auto unknown=claim(agedOut);
- assert(unknown&&unknown.tick==0&&unknown.sequence==agedOut.sequence);
- const auto unknownGeneration=generation;const auto unknownLeaves=suspendLeafCalls;
- handleSuspendAdmission(unknown.type,&unknown);
- noNewSuspend(unknownGeneration,unknownLeaves);
- assert(facts.back().second["ageClock"]=="ui-dispatch"&&facts.back().second["ageMs"]==90);
+ at(10090);const auto precise=claim(agedOut);
+ assert(precise&&precise.tick==10050&&precise.sequence==agedOut.sequence);
+ assert(g_sleepPowerDispatch.snapshot()["diagnosticHistoryEvictions"].get<unsigned>()>0);
+ const auto unchangedGeneration=generation;const auto unchangedLeaves=suspendLeafCalls;
+ handleSuspendAdmission(precise.type,&precise);
+ noNewSuspend(unchangedGeneration,unchangedLeaves);
+ assert(facts.back().second["ageClock"]=="process-receipt"&&facts.back().second["ageMs"]==50);
  assert(g_sleepPowerDispatch.pendingSuspend());
  const auto pending=g_sleepPowerDispatch.pendingReplay();assert(pending);
  const auto retained=claim(pending);assert(retained);g_sleepPowerDispatch.complete(retained,nowTick);
  assert(!g_sleepPowerDispatch.hasPending()&&!g_sleepPowerDispatch.pendingSuspend());++scenarios;
 
- prepare();handleSuspendAdmission();at(10050);const auto older=enqueue(PBT_APMSUSPEND);
- at(10060);resumeBoundary();at(11200);
- assert(!claim(older)&&"an older suspend must be rejected by Dispatch before admission");
+ prepare();handleSuspendAdmission();at(10020);resumeBoundary();
+ at(10050);const auto older=enqueue(PBT_APMSUSPEND);
+ at(10060);const auto successor=enqueue(PBT_APMRESUMESUSPEND);
+ assert(!claim(successor)&&"a successor wake cannot bypass a pending suspend decision");
+ at(11200);const auto ordered=claim(older);assert(ordered);
+ const auto sameGeneration=generation;const auto sameLeaves=suspendLeafCalls;
+ handleSuspendAdmission(ordered.type,&ordered);noNewSuspend(sameGeneration,sameLeaves);
+ const auto wake=claim(successor);assert(wake&&wake.tick==10060);
+ g_sleepPowerDispatch.complete(wake,nowTick);
+ assert(!claim(older)&&"replaying the retired suspend cannot reopen admission");
  assert(isolationSuspendCalls==1&&isolationResumePending&&suspendQueued==1&&!g_sleepPowerDispatch.hasPending());++scenarios;
  assert(scenarios==15);
  std::cout<<"SUSPEND_ADMISSION "<<json({{"scenarios",scenarios},{"actualCompleteSuspendBody",true},{"privateHook","counter-memory-port"},{"realOsSleep",false},{"hardwarePassed",false}}).dump()<<"\n";
@@ -1063,6 +1137,10 @@ void verifyInterruptedEntry(){
  reset();genuineButtonIntent();at(11000);sgObserveEntryFailureDisplay(1,"initial-on");assert(!monitorTimerDue);
  sgObserveEntryFailureDisplay(2,"dim");sgObserveEntryFailureDisplay(1,"dim-to-on");assert(!monitorTimerDue);
  pass("initial ON and DIM to ON without this intent's OFF do not manufacture a failed entry");
+ reset();genuineButtonIntent();at(11000);sgObserveEntryFailureDisplay(0,"off");
+ at(11100);sgObserveEntryFailureDisplay(2,"dim");
+ at(11200);sgObserveEntryFailureDisplay(1,"dim-to-on");assert(!monitorTimerDue&&!requestCount);
+ pass("dim breaks the original OFF to ON entry-failure evidence");
  for(int cancel:{0,1,2,3,4,5}){
   reset();genuineButtonIntent();at(11000);sgObserveEntryFailureDisplay(0,"off");
   at(12000);sgObserveEntryFailureDisplay(1,"on");assert(monitorTimerDue);
@@ -1505,6 +1583,7 @@ assert 'WM_FAN_KERNEL_POWER_FACT' not in handlers and 'fanHostQueueSuspend' not 
  'sharedPowerReadyHeader':str(isolation_header_path.resolve()),'sharedPowerReadyHeaderSha256':hashlib.sha256(isolation_header_bytes).hexdigest(),
  'sharedPowerReadyFunction':shared_power_ready,'sharedPowerReadyFunctionSha256':hashlib.sha256(shared_power_ready.encode()).hexdigest(),
  'sharedPowerHoldReleaseFunction':shared_power_hold_release,'sharedPowerHoldReleaseFunctionSha256':hashlib.sha256(shared_power_hold_release.encode()).hexdigest(),
+ 'isolationReadyWorkCurrentFunction':ready_work_current,'isolationReadyWorkCurrentFunctionSha256':hashlib.sha256(ready_work_current.encode()).hexdigest(),
  'hardwareWriteAllowedFunction':hardware_write_allowed,'hardwareWriteAllowedFunctionSha256':hashlib.sha256(hardware_write_allowed.encode()).hexdigest(),
  'sharedPowerReadyGroups':1,'sharedPowerReadyFunctionBodyRewritten':False,
  'suspendAdmissionBodySha256':hashlib.sha256(suspend.encode()).hexdigest(),'suspendAdmissionBody':suspend,

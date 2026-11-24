@@ -30,3 +30,9 @@ export function setRtssIniValue(text: string, section: string, key: string, valu
   if (!inserted) out.push(`${key}=${value}`);
   return out.join('\r\n');
 }
+
+export const RTSS_OSD_VISIBLE = 1;
+export function readRtssSharedFlags(text: string): number | null {
+  const value = rtssIniValue(text, 'Shared', 'Flags');
+  return value !== null && /^[0-9a-f]{1,8}$/i.test(value) ? Number.parseInt(value, 16) : null;
+}

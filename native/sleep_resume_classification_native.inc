@@ -56,7 +56,7 @@ static bool sgResumeClassificationHeld(unsigned long long generation) {
 struct SgRetryAdmissionHandoff {
     SgRetryKind kind=SgRetryKind::None;
     unsigned long long generation=0;
-    ULONGLONG origin=0;
+    ULONGLONG origin=0,latestEntry=0;
     ymcc::sleeprequest::CompletionWitness success;
     ymcc::sleeppower::SharedPowerV1 power;
 };
@@ -68,11 +68,15 @@ static void sgCancelRetryAdmission(SgRetryKind only) {
 }
 static bool sgRetryAdmissionHeld(SgRetryKind kind,unsigned long long generation,ULONGLONG origin) {
     std::lock_guard<std::mutex> deliveryLock(g_sgWorkMx);
-    return kind!=SgRetryKind::None && g_sgRetryAdmissionHandoff.kind==kind &&
-        g_sgRetryAdmissionHandoff.generation==generation && g_sgRetryAdmissionHandoff.origin==origin;
+    const auto& pending=g_sgRetryAdmissionHandoff;
+    return kind!=SgRetryKind::None && pending.kind==kind && pending.generation==generation &&
+        pending.origin==origin &&
+        g_sgLatestSleepEntryFileTime.load(std::memory_order_acquire)<=pending.latestEntry &&
+        !pending.success.superseded(sgSleepTimeoutSuccessfulExitTime(),sgSleepTimeoutSuccessAfter(origin));
 }
 static void sgDeferRetryAdmission(SgRetryKind kind,ULONGLONG origin,ymcc::sleeprequest::CompletionWitness success) {
     const auto generation=currentPowerGeneration();
+    const auto latestEntry=g_sgLatestSleepEntryFileTime.load(std::memory_order_acquire);
     ymcc::sleeppower::SharedPowerV1 power;
     if(!origin || !generation || g_exitRequested.load(std::memory_order_acquire) ||
        !ymcc::sleeppower::capturePowerObservation(&readSharedSystemPower,power) ||
@@ -87,7 +91,7 @@ static void sgDeferRetryAdmission(SgRetryKind kind,ULONGLONG origin,ymcc::sleepr
             if(previous.generation>generation ||
                (previous.generation==generation && previous.origin>=origin))return;
         }
-        g_sgRetryAdmissionHandoff={kind,generation,origin,success,power};
+        g_sgRetryAdmissionHandoff={kind,generation,origin,latestEntry,success,power};
         first=true;
     }
     sgRequestEntryObservationHandoff();
@@ -108,6 +112,7 @@ static void sgResumeRetryAdmission() {
         g_sgLastPowerButtonSleepIntentFileTime.load(std::memory_order_acquire);
     if(g_exitRequested.load(std::memory_order_acquire) || pending.generation!=currentPowerGeneration() ||
        origin!=pending.origin || pending.origin<=g_sgClosedSleepIntentFileTime.load(std::memory_order_acquire) ||
+       g_sgLatestSleepEntryFileTime.load(std::memory_order_acquire)>pending.latestEntry ||
        sgUserWakeCancelsSleepIntent(origin,g_sgLastPowerButtonWakeEventFileTime.load(std::memory_order_acquire)) ||
        pending.success.superseded(sgSleepTimeoutSuccessfulExitTime(),sgSleepTimeoutSuccessAfter(origin)) ||
        !ymcc::sleeppower::capturePowerObservation(&readSharedSystemPower,current) ||
@@ -256,6 +261,32 @@ static void sgStopResumeClassificationWait(const char* reason) {
     if(generation)try{sgRecordFact("resume-classification-stopped",{{"generation",generation},
         {"reason",reason?reason:"unknown"},{"detailLogsRequired",false},{"mandatoryEvidence",true}});}catch(...){}
 }
+// Session-display edges are UI-thread observations, not another wake authority.
+// A second generation change requires a continuing kernel session and a final exit.
+static struct SgSleepDisplayEvidence {
+    ULONGLONG off=0,on=0,offGeneration=0,onGeneration=0,reportedIntent=0;
+    bool reportedExit=false;
+} g_sgSleepDisplayEvidence;
+
+static void sgReportSleepDisplayRelight() noexcept;
+
+static void sgObserveSleepSessionDisplay(int previous,DWORD state) noexcept {
+    if(state>2 || previous==static_cast<int>(state) || !sgModernStandbyRepairSupported() ||
+       g_exitRequested.load(std::memory_order_acquire))return;
+    auto& display=g_sgSleepDisplayEvidence;
+    const auto generation=currentPowerGeneration();
+    const auto now=sgNowFileTime();
+    if(state==0){
+        display={};
+        if(previous>=0){display.off=now;display.offGeneration=generation;}
+    }else if(state==1 && previous==0 && display.off && display.off<now && display.offGeneration &&
+             display.offGeneration<=generation && generation-display.offGeneration<=2){
+        display.on=now;
+        display.onGeneration=generation;
+        sgReportSleepDisplayRelight();
+    }else display={};
+}
+
 static void sgFinishResumeClassification(const char* reason,ULONGLONG acceptedButtonWake) {
     const auto generation=g_sgResumeClassification.generation.load(std::memory_order_acquire);
     if(!generation){sgRevokeResumeEntryObservation();return;}
@@ -291,9 +322,9 @@ static void sgFinishResumeClassification(const char* reason,ULONGLONG acceptedBu
         if(!sgResumeEntryObservationPresent(generation))sgRevokeResumeEntryObservation();
     }
     const bool entryRetained=sgResumeEntryObservationPresent(generation);
-    // Ordinary resource/classification completion cannot retire a separately
-    // admitted UI operation still waiting for the original operation lock.
-    const bool retryAdmissionRetained=!manual && !sgSleepTimeoutSuccessAfter(origin) &&
+    // A successful original sleep can precede an unexpected wake. Only newer
+    // evidence can supersede the separately admitted re-sleep.
+    const bool retryAdmissionRetained=!manual &&
         sgNonUserWakeGuardEnabled() && sgRetryAdmissionHeld(SgRetryKind::UnexpectedWake,generation,origin);
     if(!retryAdmissionRetained)sgClearUnexpectedWake(reason,!timeoutRetained&&!entryRetained);
     sleepRecoveryAutoCloseSuspendEpisode();
@@ -369,10 +400,11 @@ static bool sgDeferModernResume(ULONG type,ULONGLONG receiptTick) {
     if(!g_hwnd||!SetTimer(g_hwnd,SG_RESUME_CLASSIFY_TIMER_ID,static_cast<UINT>(delay),nullptr)){
         sgStopResumeClassificationWait("timer-registration-failed");return false;
     }
-    sgRecordFact("resume-classification-pending",{{"generation",generation},{"code",type},
+    // A diagnostics failure must not unwind an already-registered classification.
+    try{sgRecordFact("resume-classification-pending",{{"generation",generation},{"code",type},
         {"originalHumanIntent100ns",origin},{"firstReceiptTickMs",first},
         {"deadlineTickMs",g_sgResumeClassification.deadlineTick},{"observationOnly",true},
-        {"detailLogsRequired",false},{"mandatoryEvidence",true}});
+        {"detailLogsRequired",false},{"mandatoryEvidence",true}});}catch(...){}
     return true;
 }
 // Refine only this already-admitted original receipt. A late506 cannot
@@ -504,10 +536,10 @@ static bool sgIgnorePowerReturnBeforeCurrentIntent(const ymcc::sleeppower::Dispa
         g_sgInternalSleepRequest.kind==g_sgTask.retryKind&&receipt.tick<g_sgInternalSleepRequest.dispatchTick;
     const bool missingForwardTime=receipt.callback&&(!receipt.tick||(queryRejected&&!receipt.fileTime100ns));
     if(!beforeOriginal&&!beforeAttempt&&!missingForwardTime)return false;
-    sgRecordFact(queryRejected?"sleep-query-rejection-ignored":"power-resume-ignored",{{"reason",
+    try{sgRecordFact(queryRejected?"sleep-query-rejection-ignored":"power-resume-ignored",{{"reason",
         beforeOriginal?"receipt-before-current-original-entry":beforeAttempt?"receipt-before-current-attempt":"forwarded-receipt-time-unknown"},
         {"generation",currentPowerGeneration()},{"receiptSequence",receipt.sequence},
         {"receiptFileTime100ns",receipt.fileTime100ns},{"originalHumanIntent100ns",origin},
-        {"detailLogsRequired",false},{"mandatoryEvidence",true}});
+        {"detailLogsRequired",false},{"mandatoryEvidence",true}});}catch(...){}
     return true;
 }

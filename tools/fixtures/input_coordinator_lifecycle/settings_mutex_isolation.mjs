@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {terminal26RuntimePaths,terminal26RuntimeLayout,TERMINAL26_PUBLIC_RUNTIME_POLICY} from '../../ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-runtime-layout.mjs';
+import {currentLifecycleModePlan,currentLifecycleModeLabel} from '../../ymcc_sim/global/controller-coordinator-pipe/r3-current-run.mjs';
 const sha=text=>createHash('sha256').update(text).digest('hex');
 export const privateSettingsMutexDefinition=String.raw`
 // Test-only OS boundary. Same private settings directory shares a real named
@@ -44,10 +45,18 @@ static HANDLE fixturePrivateSettingsMutex(LPSECURITY_ATTRIBUTES attributes,BOOL 
 `;
 // A moved core-test run must explicitly bind its one runtime directory.
 // Keep the legacy default byte-for-byte; never admit all of Testing or a sibling.
-export function privateSettingsMutexDefinitionForRuntimeRoot(runtimeRoot,{managedInputContract,runtimeParameterLayout,runtimeReusePolicy,gpdPreHideBatchCount}={}){
+export function originalLifecycleRuntimeLabels(mutation=null){
+ const plan=currentLifecycleModePlan(),matching=plan.filter(row=>row.mutation===mutation);
+ // The three full Pipe negatives use the root directly and have no mode directory.
+ if(['rollback-cancellation-guards','rollback-ps-endpoint-ownership','rollback-ps-binding-revision'].includes(mutation))return [];
+ assert(matching.length>0,'KNOWN_ORIGINAL_LIFECYCLE_MUTATION_REQUIRED');
+ return matching.map(currentLifecycleModeLabel);
+}
+export function privateSettingsMutexDefinitionForRuntimeRoot(runtimeRoot,{managedInputContract,runtimeParameterLayout,runtimeReusePolicy,gpdPreHideBatchCount,lifecycleMutation}={}){
  assert(managedInputContract===undefined||['current105-exact21-v1','current105-terminal22-v1','current105-terminal23-sd-decoder-v1','current105-terminal26-sdk-lifetime-compact-v1'].includes(managedInputContract),'UNKNOWN_MUTEX_RUNTIME_CONTRACT');
  const finiteModes=managedInputContract==='current105-terminal26-sdk-lifetime-compact-v1';
  if(gpdPreHideBatchCount!==undefined)assert(Number.isInteger(gpdPreHideBatchCount)&&gpdPreHideBatchCount>=2&&gpdPreHideBatchCount<=16&&runtimeRoot!==undefined&&managedInputContract===undefined&&runtimeParameterLayout===undefined&&runtimeReusePolicy===undefined,'EXACT_GPD_PRE_HIDE_BATCH_ROOTS_REQUIRED');
+ if(lifecycleMutation!==undefined)assert(runtimeRoot!==undefined&&[managedInputContract,runtimeParameterLayout,runtimeReusePolicy,gpdPreHideBatchCount].every(v=>v===undefined),'ORIGINAL_MODE_ROOT_OPTIONS_EXCLUSIVE');
  if(runtimeRoot===undefined){assert(!finiteModes,'EXPLICIT26_RUNTIME_ROOT_REQUIRED');return privateSettingsMutexDefinition;}
  assert(typeof runtimeRoot==='string'&&path.isAbsolute(runtimeRoot)&&!/[\0\r\n]/.test(runtimeRoot),'ABSOLUTE_OWNED_RUNTIME_ROOT_REQUIRED');
  const canonical=path.resolve(runtimeRoot),base=path.resolve(import.meta.dirname,'../../../../../../Testing/YMCC/Evidence'),relative=path.relative(base,canonical);
@@ -61,6 +70,10 @@ export function privateSettingsMutexDefinitionForRuntimeRoot(runtimeRoot,{manage
  assert(start>=0&&end>start,'EXACT_LEGACY_RUNTIME_ADMISSION_REQUIRED');
  const old=privateSettingsMutexDefinition.slice(start,end+1);
  assert.equal(privateSettingsMutexDefinition.split(old).length,2,'EXACT_LEGACY_RUNTIME_ADMISSION_REQUIRED');
+ if(lifecycleMutation!==undefined){
+ const roots=[canonical,...originalLifecycleRuntimeLabels(lifecycleMutation).map(label=>path.join(canonical,label))];
+ return privateSettingsMutexDefinition.replace(old,roots.map(root=>'root!=normalizeWindowsPathForCompare(L'+JSON.stringify(root)+')').join(' &&\n       '));
+ }
  assert(runtimeParameterLayout===undefined||finiteModes,'PARAMETER_PATHS_REQUIRE_FINITE_EXPLICIT26');
  const paths=finiteModes?terminal26RuntimePaths(canonical,{runtimeParameterLayout,runtimeReusePolicy}):gpdPreHideBatchCount===undefined?[canonical]:Array.from({length:gpdPreHideBatchCount},(_,i)=>path.join(canonical,'b'+i));
  if(runtimeReusePolicy!==undefined){
@@ -102,9 +115,9 @@ static bool fixturePrivateRuntimeRootAllowed(const std::wstring& supplied,bool f
  const expression=paths.map(value=>'root!=normalizeWindowsPathForCompare(L'+JSON.stringify(value)+')').join(' &&\n        ');
  return privateSettingsMutexDefinition.replace(old,paths.length===1?expression:'('+expression+')');
 }
-export function isolateCurrentFixtureSettingsMutex(original,{runtimeRoot,moduleMaintenance=false,managedInputContract,runtimeParameterLayout,runtimeReusePolicy,gpdPreHideBatchCount}={}){
+export function isolateCurrentFixtureSettingsMutex(original,{runtimeRoot,moduleMaintenance=false,managedInputContract,runtimeParameterLayout,runtimeReusePolicy,gpdPreHideBatchCount,lifecycleMutation}={}){
  assert(typeof moduleMaintenance==='boolean','BOOLEAN_MODULE_MAINTENANCE_BOUNDARY_REQUIRED');
- let boundary=privateSettingsMutexDefinitionForRuntimeRoot(runtimeRoot,{managedInputContract,runtimeParameterLayout,runtimeReusePolicy,gpdPreHideBatchCount});
+ let boundary=privateSettingsMutexDefinitionForRuntimeRoot(runtimeRoot,{managedInputContract,runtimeParameterLayout,runtimeReusePolicy,gpdPreHideBatchCount,lifecycleMutation});
  if(moduleMaintenance){
   assert(runtimeRoot!==undefined,'EXPLICIT_MODULE_MAINTENANCE_RUNTIME_REQUIRED');
   const oldGuard='if(attributes || initialOwner || !requestedName ||\n       std::wstring(requestedName)!=L"Local\\\\YeManCC-UnifiedSettings")';
@@ -135,5 +148,5 @@ export function isolateCurrentFixtureSettingsMutex(original,{runtimeRoot,moduleM
  assert.equal(inverse,original);
  return {text,originalSha256:sha(original),isolatedSha256:sha(text),wholeOriginalRestored:true,...(runtimeReusePolicy===undefined?{}:{runtimeEntryAdmissionEnforced:!runtimeBoundaryOnly,runtimeBoundaryOnly}),
   scope:'Only the generated private fixture CreateMutexW boundary. Original SettingsFileGuard/local mutex, INFINITE named wait, release and CloseHandle code remain. Directory identity names share the same real mutex only for the same admitted private settings directory. Installed product source is unchanged.',
-  productionMutexReached:false,...(moduleMaintenance?{moduleMaintenanceNamespace:'same owned directory identity plus -ModuleMaintenance',moduleMaintenanceProductionNameReached:false}:{}),edits};
+  productionMutexReached:false,...(lifecycleMutation!==undefined?{lifecycleMutation,originalLifecycleLabels:originalLifecycleRuntimeLabels(lifecycleMutation),exactOriginalModeRootsOnly:true}:{}),...(moduleMaintenance?{moduleMaintenanceNamespace:'same owned directory identity plus -ModuleMaintenance',moduleMaintenanceProductionNameReached:false}:{}),edits};
 }

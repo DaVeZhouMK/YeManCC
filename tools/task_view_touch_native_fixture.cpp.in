@@ -16,6 +16,7 @@
 #include <unordered_map>
 #include <vector>
 #include "json.hpp"
+#include "sleep_power_observation.h"
 using json=nlohmann::json;
 namespace fake {
 unsigned checks=0,cases=0,creates=0,destroys=0,pauses=0,desktops=0,desktopCloses=0,handlerCalls=0;
@@ -98,6 +99,12 @@ static unsigned long long g_focusSessionSequence=3;
 static std::atomic<std::uint64_t> g_taskViewFocusToken{0};static std::atomic<bool> g_exitRequested{false};
 enum class PowerLifecycle{Ready,Suspended};static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
 static ULONGLONG fixturePower=1;static ULONGLONG currentPowerGeneration(){return fixturePower;}
+static std::uint64_t fixtureSuspendSerial=0;static bool fixturePending=false;
+static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,std::uint32_t size){
+ if(g_exitRequested||size!=sizeof(*out))return 0;
+ *out={};out->generation=currentPowerGeneration();out->suspendSerial=fixtureSuspendSerial;out->phase=g_powerLifecycle==PowerLifecycle::Ready?0u:2u;
+ out->flags=ymcc::sleeppower::kKnown|(fixturePending?ymcc::sleeppower::kNotificationPending:0u);return 1;
+}
 namespace ymcc::gameoverlay {struct Binding {HWND carrier=nullptr;std::uint64_t session=0,power=1;bool pointerInteractive=true,detachedPointer=true,visualProbe=false,observationHold=false;};}
 struct OverlayPort {std::shared_ptr<const ymcc::gameoverlay::Binding> binding;bool active()const{return static_cast<bool>(binding);}auto snapshot()const{return binding;}};
 static OverlayPort g_gameOverlay;
@@ -105,6 +112,7 @@ static HWND g_gameOverlaySurface=nullptr;static bool g_gameOverlaySurfaceAttache
 static struct {bool enabled=true;bool active()const{return enabled;}}g_mainWebViewComposition;
 static struct {HWND input=nullptr;bool enabled=false;bool ready()const{return enabled;}HWND window()const{return input;}}g_gameOverlayPanel;
 static bool gameOverlayBindingCurrent(const ymcc::gameoverlay::Binding& b){return fixtureBindingCurrent&&b.power==fixturePower;}
+__MAIN_PRESENTED__
 static void prepareOverlay(){
  g_gameOverlaySurface=reinterpret_cast<HWND>(27);g_gameOverlaySurfaceAttached=true;
  g_gameOverlayPanel.input=reinterpret_cast<HWND>(37);g_gameOverlayPanel.enabled=true;
@@ -140,7 +148,7 @@ static void reset(){
  fake::iconic=fake::logThrows=false;fake::bounds={20,30,420,230};fake::offset={100,200};fake::missing.clear();fake::errors.clear();fake::frames.clear();fake::logs.clear();fake::onInject={};fake::onCreate={};fake::onPause={};
  fake::windows.clear();g_gameOverlay.binding.reset();g_gameOverlaySurface=nullptr;g_gameOverlaySurfaceAttached=false;g_gameOverlayPanel.input=nullptr;g_gameOverlayPanel.enabled=false;g_mainWebViewComposition.enabled=fixtureBindingCurrent=true;
  fake::shortWait=fake::createFails=false;fake::clockOk=true;fake::counter=100000;
- g_hwnd=fake::owner;g_ctrl.p=&fixtureController;g_view.p=&fixtureView;g_webviewReady=true;g_webviewGeneration=1;g_webviewNavigationId=2;g_focusSessionSequence=3;g_exitRequested=false;g_powerLifecycle=PowerLifecycle::Ready;fixturePower=1;
+ g_hwnd=fake::owner;g_ctrl.p=&fixtureController;g_view.p=&fixtureView;g_webviewReady=true;g_webviewGeneration=1;g_webviewNavigationId=2;g_focusSessionSequence=3;g_exitRequested=false;g_powerLifecycle=PowerLifecycle::Ready;fixturePower=1;fixtureSuspendSerial=0;fixturePending=false;
 }
 static void noDelivery(const json& result){using fake::check;check(result["downAccepted"]==false&&result["upAccepted"]==false,"refused request invented delivery");check(fake::frames.empty()&&fake::creates==0&&fake::destroys==0,"refused request created pointer state");}
 static void cancelOnlyAfterDown(const json& result){using fake::check;check(result["downAccepted"]==true&&result["upAccepted"]==false,"partial delivery status lost");check(fake::frames.size()==2&&fake::frames[1].touchInfo.pointerInfo.pointerFlags==(POINTER_FLAG_CANCELED|POINTER_FLAG_UP),"lost owner sent normal UP or omitted cancellation");check(fake::creates==1&&fake::destroys==1,"partial device not returned");}
@@ -171,6 +179,10 @@ int main(){try{using fake::check;registerEndpoint();
   auto rejected=registered(tap);noDelivery(rejected);check(rejected["reason"]==reason,"ticket rejection did not preserve boundary");
  }
  reset();auto preparedTap=prepare(args());fake::onInject=[](unsigned index){if(!index)fake::tick+=1001;};cancelOnlyAfterDown(registered(preparedTap));
+ reset();preparedTap=prepare(args());++fixtureSuspendSerial;auto staleTap=registered(preparedTap);noDelivery(staleTap);check(staleTap["reason"]=="touch-context-changed","old prepared touch crossed a same-generation sleep");
+ auto currentTap=prepare(args());check(registered(currentTap)["upAccepted"]==true,"new touch ticket cannot complete after sleep");
+ reset();fixturePending=true;noDelivery(registered(args()));
+ reset();fake::onInject=[](unsigned index){if(!index)++fixtureSuspendSerial;};cancelOnlyAfterDown(registered(args()));
  for(int invalid=0;invalid<17;++invalid){reset();switch(invalid){case 0:fake::thread=99;break;case 1:fake::windowProcess=99;break;case 2:fake::exists=false;break;case 3:fake::visible=false;break;case 4:fake::iconic=true;break;case 5:fake::desktop=false;break;case 6:fake::receiving=false;break;case 7:fake::webVisible=false;break;case 8:fake::parent=reinterpret_cast<HWND>(99);break;case 9:fake::boundsOk=false;break;case 10:fake::screenOk=false;break;case 11:fake::hit=reinterpret_cast<HWND>(99);break;case 12:g_ctrl.p=nullptr;break;case 13:g_view.p=nullptr;break;case 14:g_webviewReady=false;break;case 15:g_exitRequested=true;break;case 16:g_powerLifecycle=PowerLifecycle::Suspended;break;}noDelivery(registered(args()));}
  for(const auto* missing:{"CreateSyntheticPointerDevice","InjectSyntheticPointerInput","DestroySyntheticPointerDevice"}){reset();fake::missing=missing;auto r=registered(args());noDelivery(r);check(r["reason"]=="api-unavailable","missing API not identified");}
  reset();fake::module=false;noDelivery(registered(args()));

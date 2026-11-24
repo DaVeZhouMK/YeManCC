@@ -145,7 +145,13 @@ internal static partial class Program
             string sdkPath = Path.Combine(root, "PowerControl", "feature-assets", "virtual-gamepad", "HIDMaestro.Core.dll");
             string marker = Path.Combine(Path.GetDirectoryName(sdkPath)!, "test-auto-install.flag");
             log["autoInstallMarkerExists"] = File.Exists(marker);
-            bool hash = File.Exists(sdkPath) && new FileInfo(sdkPath).Length == 63076352 && FileSha(sdkPath) == CoreSha;
+            // Keep the verified SDK read-locked through inspection and the official call.
+            // Allow the assembly loader to read it, but prevent writes and replacement.
+            using var sdkFile = File.Exists(sdkPath)
+                ? new FileStream(sdkPath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan)
+                : null;
+            bool hash = sdkFile != null && sdkFile.Length == PackagePreparation.CoreBytes &&
+                Convert.ToHexString(SHA256.HashData(sdkFile)) == CoreSha;
             log["sdk"] = new { path = sdkPath, expectedSha256 = CoreSha, hashMatches = hash };
             if (!hash) { status = "SDK_IDENTITY_MISMATCH"; return ExitFor(status); }
             // No HMContext construction: its constructor prewarms GameInputSvc. Check mode stays read-only.
@@ -184,9 +190,8 @@ internal static partial class Program
                 var clients=BlockingClients();
                 bool admin=new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
                 bool owner=StartupOwnerPid==0 || ValidStartupOwner();
-                bool stillPinned=File.Exists(sdkPath) && new FileInfo(sdkPath).Length==PackagePreparation.CoreBytes && FileSha(sdkPath)==CoreSha;
                 var facts=new PackagePreparation.MaintenanceFacts(admin,mutexHeld,owner,own,clients.Length!=0);
-                var observation=new PackagePreparation.Observation(drivers,facts,RepoHasRemnants(),true,stillPinned);
+                var observation=new PackagePreparation.Observation(drivers,facts,RepoHasRemnants(),true,true);
                 Evidence("observe-"+phase,new {facts,clients,observation.RepositoryRemnants,observation.SdkIdentity,
                     owned=drivers.Where(Owned).ToArray(),catalogScope="driver-raw-and-package-independent;not-binding-proof"});
                 return observation;
@@ -195,8 +200,6 @@ internal static partial class Program
             var runtime=new PackagePreparation.PreparationRuntime(Observe,contract=> {
                 // Exactly one official terminal, the body of FullDeploy. Its enum
                 // is preserved rather than lost by that public bool forwarding shim.
-                if(FileSha(sdkPath)!=CoreSha || asm.ManifestModule.ModuleVersionId.ToString()!=CoreMvid)
-                    throw new InvalidDataException("SDK changed before official preparation");
                 log["installAttempted"]=true;
                 log["sdkMethodsInvoked"]=new[] {"HIDMaestro.Internal.DriverDeploy.Run(null)"};Save();
                 return PackagePreparation.InvokeOfficialPreparation(asm);

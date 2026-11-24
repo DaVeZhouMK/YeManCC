@@ -813,30 +813,34 @@ static std::atomic<bool> g_radialReturning{false};
 static ymcc::radial::ReleaseGate g_radialInputIsolation;
 static std::atomic<unsigned long long> g_radialInputIsolationSourceRevision{0};
 static std::atomic<unsigned long long> g_radialInputIsolationHostEpoch{0};
+static std::atomic<uint64_t> g_radialInputIsolationSuspendSerial{0};
 static bool radialInputIsolationBindingCurrent() {
     return g_radialInputIsolationSourceRevision.load(std::memory_order_acquire) ==
                g_msiMainSourceRevision.load(std::memory_order_acquire) &&
-           g_radialInputIsolationHostEpoch.load(std::memory_order_acquire) == inputHostEpochToken();
+           g_radialInputIsolationHostEpoch.load(std::memory_order_acquire) == inputHostEpochToken() &&
+           g_radialInputIsolationSuspendSerial.load(std::memory_order_acquire) ==
+               g_sharedPowerSuspendSerial.load(std::memory_order_acquire);
 }
 static void radialInputIsolationInvalidate() {
     g_radialInputIsolation.invalidate();
     g_radialUiOwnsInput.store(false, std::memory_order_release);
     g_radialReturning.store(false, std::memory_order_release);
 }
-static void radialInputIsolationOwnership(bool active) {
-    const auto power = currentPowerGeneration();
+static void radialInputIsolationOwnership(bool active,const ymcc::sleeppower::SharedPowerV1& power) {
     const auto now = GetTickCount64();
     if (active) {
         radialInputIsolationInvalidate();
+        if(!sharedPowerLifecycleCurrent(power))return;
         g_radialInputIsolationSourceRevision.store(g_msiMainSourceRevision.load(std::memory_order_acquire), std::memory_order_release);
         g_radialInputIsolationHostEpoch.store(inputHostEpochToken(), std::memory_order_release);
-        g_radialInputIsolation.begin(power, now);
+        g_radialInputIsolationSuspendSerial.store(power.suspendSerial, std::memory_order_release);
+        g_radialInputIsolation.begin(power.generation, now);
     } else {
-        if (!radialInputIsolationBindingCurrent()) { radialInputIsolationInvalidate(); return; }
-        g_radialInputIsolation.end(power, now);
+        if (power.generation!=currentPowerGeneration() || !radialInputIsolationBindingCurrent()) { radialInputIsolationInvalidate(); return; }
+        g_radialInputIsolation.end(power.generation, now);
     }
     if (!radialInputIsolationBindingCurrent()) { radialInputIsolationInvalidate(); return; }
-    const bool owns = g_radialInputIsolation.owns(power, now);
+    const bool owns = g_radialInputIsolation.owns(currentPowerGeneration(), now);
     g_radialUiOwnsInput.store(active && owns, std::memory_order_release);
     g_radialReturning.store(!active && owns, std::memory_order_release);
 }

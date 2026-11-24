@@ -23,6 +23,7 @@
 #include <json.hpp>
 using json = nlohmann::json;
 #include "monitor_identity.h"
+#include "sleep_power_observation.h"
 #include "production_focus_types.inc"
 static HWND h(int n) { return reinterpret_cast<HWND>(static_cast<INT_PTR>(n)); }
 struct Window { DWORD pid; bool visible=true, iconic=false, tool=false, cloaked=false; std::wstring cls=L"Game"; };
@@ -37,6 +38,15 @@ static std::atomic<bool> g_losslessReturnArmed{false};
 static std::atomic<bool> g_exitRequested{false};
 enum class PowerLifecycle { Ready, Suspending, Suspended, Resuming };
 static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static bool knownPower=true, pendingPower=false;
+static std::uint64_t suspendSerial=0, powerRevision=1;
+static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,std::uint32_t size) {
+    if (!knownPower || g_exitRequested || !out || size!=sizeof(*out)) return 0;
+    *out={};out->generation=powerGeneration;out->suspendSerial=suspendSerial;out->publicationRevision=powerRevision;
+    out->phase=static_cast<std::uint32_t>(g_powerLifecycle.load());
+    out->flags=ymcc::sleeppower::kKnown|(pendingPower?ymcc::sleeppower::kNotificationPending:0u);
+    return 1;
+}
 static std::atomic<DWORD> g_manualPausedPid{0};
 static std::mutex g_rememberedGameTargetMx,g_gameValveMx;
 static FocusTargetSnapshot g_rememberedGameTarget,g_pendingSummonTarget;
@@ -45,6 +55,14 @@ struct Game { DWORD pid=0; ULONGLONG processCreated=0; std::wstring path; };
 struct Valve { Game game; };
 static Valve g_gameValveTarget;
 static FocusSessionState g_focusSession;
+static unsigned long long g_focusSessionSequence=0;
+static std::pair<std::uint64_t,std::uint64_t> g_focusSessionPowerPeriod,g_focusIsolationPowerPeriod;
+static std::atomic<bool> g_focusIsolationPrepared{false};
+static std::atomic<ULONGLONG> g_focusLightProofNotBefore{0};
+static std::atomic<unsigned long long> g_summonRegistrationGeneration{0};
+static std::atomic<std::shared_ptr<const bool>> g_focusLightIsolationTicket;
+static bool g_deferFirstShow=false;
+static bool taskViewPaused=false;
 static int g_summonFocusRetries=0,g_asyncMode=2;
 static bool g_summonAltTried=false,g_bClosePending=false;
 static ULONGLONG g_bClosePendingSince=0,g_bCloseReadyAt=0;
@@ -158,6 +176,28 @@ static FocusTargetSnapshot focusRememberedGameTarget() { auto t=g_rememberedGame
 static void hideWindowAnimated(HWND w) { windows.at(w).visible=false;if(foreground==w)foreground=afterHide; }
 static void focusLosslessReturnCancel();
 static void focusLosslessReturnInvalidate();
+static void focusClearSession(bool retainFloatingPresentation=false);
+static bool focusLosslessSharedPowerChanged(const ymcc::sleeppower::SharedPowerV1&);
+static bool taskViewSharedPowerChanged(const ymcc::sleeppower::SharedPowerV1&){return true;}
+static void focusEndIsolationOnUi(){g_focusIsolationPrepared=false;}
+static void focusPrepareIsolationBeforeShow(){g_focusIsolationPrepared=true;g_focusIsolationPowerPeriod={powerGeneration,suspendSerial};}
+static bool focusLightIsolationBegin(){return false;}
+static bool focusLightIsolationCurrent(){return false;}
+static bool focusLightReturnTick(ULONGLONG){return true;}
+static FocusTargetSnapshot focusCaptureTarget(HWND){return {};}
+static void shortcutSummonClearRenderWait(){}
+static void taskViewInvalidateHandover(){}
+static bool taskViewFocusHandoffPaused(){return taskViewPaused;}
+static void focusLightHandoffCancel(){}
+static void steamLightGamepadUiChanged(){}
+static void appendNativeLifecycleLog(const char*,const json&){}
+static struct { int family=0; } g_machineIdentity;
+static const char* ymccFamilyName(int){return "fixture";}
+struct FixtureSuspendAdmission{bool accepted;bool privateIsolationRequired()const{return accepted;}};
+template<class F> static void powerConsumer(const char*,F&& consume){consume();}
+static struct { struct Presentation{bool originalUiInput;}; const Presentation* snapshot(){return nullptr;} bool active(){return false;} } g_gameOverlay;
+static bool gameOverlayInputEligible(){return false;}
+static void gameOverlayStop(const char*){}
 using IpcFn=std::function<json(const json&)>;
 static std::map<std::string,IpcFn> commands;
 static void ipc_on(const std::string& cmd,IpcFn fn) { commands[cmd]=std::move(fn); }
@@ -173,6 +213,7 @@ static json identity(bool enabled=true,DWORD pid=42) { const auto t=target(pid);
 static json call(const json& args) { return commands.at("game.losslessReturnTarget")(args); }
 static void reset() {
     g_losslessReturnFocus={};g_losslessReturnArmed=false;g_focusSession={};g_pendingSummonTarget={};timers.clear();postedTimers.clear();
+    g_focusSessionPowerPeriod={};g_focusIsolationPrepared=false;knownPower=true;pendingPower=false;suspendSerial=0;powerRevision=1;taskViewPaused=false;
     windows={{h(1),{1}},{h(2),{42}},{h(3),{77}},{h(4),{55}},{h(5),{43}}};
     windows.at(h(4)).cls=L"Notepad";
     processes={{1,{L"C:\\YMCC.exe"}},{42,{L"C:\\Games\\Game.exe"}},{77,{L"C:\\LS\\LosslessScaling.exe"}},{55,{L"C:\\Windows\\notepad.exe"}},{43,{L"C:\\Games\\Other.exe",456}}};
@@ -184,6 +225,7 @@ static void reset() {
 static void arm() { if(call(identity())["ok"]!=true){std::cerr<<"arm rejected\n";std::exit(1);} }
 static void begin() { focusBeginReturnToPreviousWindow(clockMs); }
 static void tick(ULONGLONG relative) { clockMs=10000+relative;dispatchReturnTimer(); }
+static ymcc::sleeppower::SharedPowerV1 observePower(){ymcc::sleeppower::SharedPowerV1 power;readSharedSystemPower(&power,sizeof(power));return power;}
 static void noResources(const char* label) { check(timers.empty()&&!g_losslessReturnFocus.target.valid&&!g_losslessReturnArmed&&!g_focusSession.returning,label); }
 static void noMoreRequests() { const int before=requests;tick(11000);tick(20000);check(requests==before,"late timers cannot revive a stopped session"); }
 int main() {
@@ -228,7 +270,47 @@ int main() {
     reset();arm();begin();focusLosslessReturnInvalidate();check(!postedTimers.empty(),"game selection changes post an owner-thread invalidation");while(!postedTimers.empty()){postedTimers.pop_front();dispatchReturnTimer();}noResources("identity invalidation destroys active timer on owner thread");noMoreRequests();
     reset();arm();focusLosslessReturnInvalidate();dispatchReturnTimer();noResources("identity invalidation clears a merely armed target without starting a timer");
     for(auto phase:{PowerLifecycle::Suspending,PowerLifecycle::Suspended,PowerLifecycle::Resuming}){reset();arm();begin();g_powerLifecycle=phase;dispatchReturnTimer();noResources("non-ready power phase cancels bounded return");g_powerLifecycle=PowerLifecycle::Ready;noMoreRequests();}
-    for(WPARAM event:{WPARAM(PBT_APMSUSPEND),WPARAM(PBT_APMRESUMEAUTOMATIC),WPARAM(PBT_APMRESUMESUSPEND),WPARAM(PBT_APMRESUMECRITICAL)}){reset();arm();begin();dispatchPowerCancel(event);noResources("actual WM_POWERBROADCAST cancellation clears target and timer");noMoreRequests();}
+    reset();arm();acceptForeground=false;begin();++suspendSerial;tick(1000);
+    check(requests==1&&timers.empty()&&!g_losslessReturnArmed,"new suspend serial retires return before deferred public delivery");
+    reset();arm();const auto oldReady=observePower();++suspendSerial;++powerRevision;
+    const auto nextReady=observePower();
+    check(focusIsolationSharedPowerChanged(nextReady),"coalesced Ready settles its Lossless projection");
+    noResources("coalesced Ready retires independently armed Lossless target");
+    arm();check(focusIsolationSharedPowerChanged(oldReady)&&focusIsolationSharedPowerChanged(nextReady)&&g_losslessReturnArmed&&timers.empty(),
+        "older and repeated Ready preserve new registration");
+    auto staleNonReady=oldReady;staleNonReady.phase=2;
+    check(!focusIsolationSharedPowerChanged(staleNonReady)&&g_losslessReturnArmed,"stale non-Ready cannot cancel a current registration");
+    begin();check(requests==1&&timers.count(RETURN_GAME_FOCUS_TIMER_ID),"first new-period return works after retire");
+    reset();focusPrepareIsolationBeforeShow();arm();begin();const auto oldFocusSession=g_focusSessionSequence;
+    ++suspendSerial;check(focusIsolationSharedPowerChanged(observePower())&&!g_focusIsolationPrepared&&g_focusSessionSequence==oldFocusSession+1,
+        "shared delivery clears overlapping isolation and Lossless owners once");
+    noResources("overlapping owners have no remaining return timer");
+    reset();arm();acceptForeground=false;begin();pendingPower=true;tick(1000);
+    check(requests==1&&g_losslessReturnFocus.attempts==1&&timers.count(RETURN_GAME_FOCUS_TIMER_ID),"pending notification blocks focus and leaves original retry armed");
+    pendingPower=false;++powerRevision;tick(1100);
+    check(requests==2&&g_losslessReturnFocus.attempts==2,"same-period Ready lets a paused retry continue");
+    knownPower=false;tick(3000);check(requests==2&&timers.count(RETURN_GAME_FOCUS_TIMER_ID),"unknown power blocks actions without dropping the timer");
+    tick(10000);noResources("unknown power does not extend the absolute return deadline");
+    reset();pendingPower=true;check(call(identity())["ok"]==false&&!g_losslessReturnArmed,"pending notification rejects a fresh registration");
+    reset();arm();pendingPower=true;begin();check(g_losslessReturnArmed&&timers.empty()&&requests==0&&windows.at(g_hwnd).visible,"pending notification does not start or hide an independently armed return");
+    pendingPower=false;begin();check(requests==1,"first return can start after pending notice clears in the same period");
+    reset();onQuery=[] {++suspendSerial;};check(call(identity())["ok"]==false&&!g_losslessReturnArmed,"sleep during registration cannot commit an old target");
+    reset();arm();windows.erase(h(2));windows.emplace(h(6),Window{42});onFind=[] {++suspendSerial;};begin();
+    check(requests==0,"sleep during HWND lookup cannot issue a foreground request");noResources("sleep during lookup cleans active Lossless return");
+    reset();arm();begin();dispatchPowerCancel(PBT_APMSUSPEND,{false});
+    check(g_losslessReturnArmed&&timers.count(RETURN_GAME_FOCUS_TIMER_ID),"late rejected suspend cannot clean current return");
+    reset();arm();begin();taskViewPaused=true;dispatchTaskViewCancellation();
+    noResources("Task View supersession cannot leave a returning Lossless target after stopping its timer");
+    check(g_focusSession.active&&!g_focusSession.target.valid,"Task View clears Lossless target and keeps controller isolation session");
+    reset();arm();begin();taskViewPaused=true;dispatchTaskViewAdmission();
+    noResources("Task View admission clears active return even if no queued timer arrives");
+    reset();arm();taskViewPaused=true;begin();check(requests==0&&timers.empty()&&g_losslessReturnArmed,"an armed return waits for explicit action after Task View pause");
+    taskViewPaused=false;begin();check(requests==1&&timers.count(RETURN_GAME_FOCUS_TIMER_ID),"fresh close can return after Task View releases focus");
+    for(WPARAM event:{WPARAM(PBT_APMSUSPEND),WPARAM(PBT_APMRESUMEAUTOMATIC),WPARAM(PBT_APMRESUMESUSPEND),WPARAM(PBT_APMRESUMECRITICAL)}){
+        reset();arm();begin();dispatchPowerCancel(event);
+        if(event!=PBT_APMSUSPEND){check(g_losslessReturnArmed&&timers.count(RETURN_GAME_FOCUS_TIMER_ID),"raw late resume cannot retire current return");++suspendSerial;ymcc::sleeppower::SharedPowerV1 observed;readSharedSystemPower(&observed,sizeof(observed));focusIsolationSharedPowerChanged(observed);}
+        noResources("actual power consumer clears old target and timer");noMoreRequests();
+    }
     reset();arm();begin();g_exitRequested=true;focusLosslessReturnCancel();noResources("exit cancellation destroys owned timer before async cleanup");noMoreRequests();
     reset();arm();timerWorks=false;begin();noResources("timer creation failure terminates session synchronously");noMoreRequests();
     reset();arm();acceptForeground=false;begin();clockMs=10900;begin();tick(1000);tick(3000);check(requests==3&&g_losslessReturnFocus.started==10000,"duplicate return entry cannot reset budget or deadline");tick(10000);noResources("duplicate B preserves original deadline");

@@ -29,7 +29,7 @@ export const fs={
 };
 export const losslessRuntime=new Proxy(Object.create(null),{get(){throw Error('Lossless control is outside this opti-client fixture')}});
 export const steamInformation={installationRoots:async()=>{throw Error('Steam discovery is outside this opti-client fixture')}};
-export const optiClient={prepareCatalog:async()=>{f().preparations=(f().preparations||0)+1;if(f().prepareHook)await f().prepareHook();return f().prepareResult||{status:'prepared'};}};
+export const optiClient={prepareCatalog:async(p)=>{f().preparations=(f().preparations||0)+1;if(f().prepareHook)await f().prepareHook(p);return f().prepareResult||{status:'prepared'};}};
 export const proc={running:async names=>{f().processNames.push(names);if(f().runningHook)await f().runningHook();const r=f().runningChecks?.length?f().runningChecks.shift():f().running;return {OptiscalerClient:r}}};
 export const registry={read:async()=>f().appData};
 export const app={powerControlDir:async()=> 'C:\\\\Fixture\\\\PowerControl',exeDir:async()=> 'C:\\\\Fixture\\\\YMCC'};
@@ -146,6 +146,11 @@ await test('new Manual game matches client schema, no false FG success',()=>{
  assert.equal(items[0].OptiscalerVersion,'0.9.5-pre4');assert.equal(items[0].Fsr4ExtraVersion,'FSR_4.1.1b');
  assert(!('IsAntiCheatDetected' in items[0]));assert(!('FrameGenerationSettings' in items[0]));
 });
+await test('stable base-only import clears the older Extras selection without inventing a new package',()=>{
+ const gameEntry={ExecutablePath:game,OptiscalerVersion:'0.9.5-pre4',Fsr4ExtraVersion:'FSR_4.1.1b',IsFavorite:true};
+ const [result]=m.mergeOptiClientGames([gameEntry],[{executablePath:game,name:'Game',installed:true,version:'0.9.5'}],()=> 'unused');
+ assert.equal(result.OptiscalerVersion,'0.9.5');assert.equal(result.Fsr4ExtraVersion,null);assert.equal(result.IsFavorite,true);
+});
 await test('merge preserves Steam identity, preferences and unknown fields',()=>{
  const existing={Name:'User Name',InstallPath:'D:\\Games\\Example',ExecutablePath:game,Platform:0,AppId:'123',IsFavorite:true,FrameGenerationSettings:{Route:9},FutureField:{v:1}};
  const before=JSON.stringify(existing);
@@ -212,15 +217,22 @@ await test('BOM catalog and malformed pending record are handled safely',async()
  assert.equal((await m.syncOptiClientGame(game,true)).status,'error');assert.equal(f.files[paths.pending],'{"broken":true}');assert.equal(f.files[paths.games],'[]');
 });
 await test('CLI acknowledgement is explicit and install-only',async()=>{
- let f=fixture();assert.equal((await m.oneClickOptiScaler(game,false,'fsr')).ok,true);assert(!f.runs[0].args.includes('--acknowledge-anticheat-risk'));
- f=fixture({result:{ok:true,version:'0.9.5-pre4/FSR_4.1.1b',analysis:{anti_cheat:true},warnings:['risk']}});
+ let f=fixture({prepareResult:{status:'unavailable'}});assert.equal((await m.oneClickOptiScaler(game,false,'fsr')).ok,true);assert(!f.runs[0].args.includes('--acknowledge-anticheat-risk'));assert(!f.runs[0].args.includes('--game-exe'));
+ const card={ExecutablePath:game,InstallPath:'D:\\Games',Name:'Existing title',AppId:'keep-id',IsOptiscalerInstalled:false};
+ f=fixture({prepareHook:async p=>{assert.equal(p,game);assert.equal(f.runs.length,0);f.files[paths.games]=JSON.stringify([card]);},result:{ok:true,version:'0.9.5-pre4/FSR_4.1.1b',analysis:{anti_cheat:true},warnings:['risk']}});
  const installed=await m.oneClickOptiScaler(game,false,'xess',{acknowledgeAntiCheatRisk:true});
  assert.equal(installed.antiCheat,true);assert(f.runs[0].args.includes('--acknowledge-anticheat-risk'));assert.equal(installed.clientSyncStatus,'synced');
- f=fixture();await m.oneClickOptiScaler(game,true,'auto',{acknowledgeAntiCheatRisk:true});assert(!f.runs[0].args.includes('--acknowledge-anticheat-risk'));
+ assert.deepEqual(f.runs[0].args.slice(-2),['--game-exe',game]);assert.equal(f.preparations,1);assert.equal(f.executions.length,0);assert.equal(catalog()[0].AppId,'keep-id');assert.equal(catalog()[0].InstallPath,'D:\\Games');assert.equal(catalog()[0].IsOptiscalerInstalled,true);
+ f=fixture();await m.oneClickOptiScaler(game,true,'auto',{acknowledgeAntiCheatRisk:true});assert(!f.runs[0].args.includes('--acknowledge-anticheat-risk'));assert.equal(f.preparations,undefined);assert(!Object.hasOwn(f.files,paths.games));
 });
-await test('failed install never registers; registration failure keeps install success',async()=>{
+await test('failed install never marks a card installed; state sync errors preserve actual install success',async()=>{
  let f=fixture({exitCode:7,result:{ok:false,msgs:['blocked']}});assert.equal((await m.oneClickOptiScaler(game,false,'fsr')).ok,false);assert.equal(f.writes.length,0);
  f=fixture({files:{[paths.games]:'broken'}});const result=await m.oneClickOptiScaler(game,false,'fsr');assert.equal(result.ok,true);assert.equal(result.clientSyncStatus,'error');
+});
+await test('busy, running, and ambiguous OPT preparation neither launch the client nor mutate game files',async()=>{
+ for(const status of ['busy','running','error','cancelled']){
+  const f=fixture({prepareResult:{status}});assert.equal((await m.oneClickOptiScaler(game,false,'fsr')).ok,false);assert.equal(f.runs.length,0);assert.equal(f.writes.length,0);assert.equal(f.executions.length,0);
+ }
 });
 await test('open-client flushes pending records before issuing open request',async()=>{
  const f=fixture({running:true});await m.syncOptiClientGame(game,true);f.running=false;const notice=await m.openOptiConsole();

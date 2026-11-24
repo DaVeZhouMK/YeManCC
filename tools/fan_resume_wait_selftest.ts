@@ -8,7 +8,7 @@
  * 全部走**生产**代码路径（FanHostLifecycle 的真实入队/等待/准入逻辑），只用夹具替换
  * adapter/launcher 与受控时钟（`resumeWaitDeadlineMs`）。不碰用户运行实例、不产生硬件写入。
  */
-import { FanHostLifecycle, unsupportedFanControlError, type FanHostLauncher, type FanHostProcess } from '../src/bridge/fanHost';
+import { FanHostLifecycle, unsupportedFanControlError, type FanHostLauncher, type FanHostLifecycleOptions, type FanHostProcess } from '../src/bridge/fanHost';
 import { FanApiError, type FanApiAdapter, type FanHandshake, type FanLease, type FanNode, type FanState } from '../src/bridge/fanApi';
 import { readFileSync } from 'node:fs';
 
@@ -195,13 +195,15 @@ class FakeAdapter implements FanApiAdapter {
   }
 }
 
-function newLifecycle(adapter: FakeAdapter, deadlineMs: number): FanHostLifecycle {
+function newLifecycle(adapter: FakeAdapter, deadlineMs: number,
+  readNativePowerState?: FanHostLifecycleOptions['readNativePowerState']): FanHostLifecycle {
   return new FanHostLifecycle({
     enabled: true,
     adapter,
     launcher: new FakeLauncher(),
     heartbeatIntervalMs: 0,
     resumeWaitDeadlineMs: deadlineMs,
+    readNativePowerState,
   });
 }
 
@@ -239,40 +241,60 @@ async function main(): Promise<void> {
     adapter.calls.length = 0;
   };
   {
-    const adapter = new FakeAdapter(); let reads = 0;
+    const adapter = new FakeAdapter();
     const lifecycle = new FanHostLifecycle({ enabled: true, adapter, launcher: new FakeLauncher(),
       heartbeatIntervalMs: 0, resumeWaitDeadlineMs: 1200,
-      readNativePowerState: async () => { reads += 1; return nativeReady(2); },
+      readNativePowerState: async () => { adapter.calls.push('native-power'); return nativeReady(2); },
     });
     await missingWake(lifecycle, adapter);
     adapter.stateScript = [() => ({ ...adapter.craft('Suspended', false), powerState: 'Suspended',
       openCalled: false, openEventsCalled: false }), () => adapter.craft('Ready', true)];
     await lifecycle.apply(CURVE.map(n => ({ ...n, dutyPercent: Math.min(100, n.dutyPercent + 5) })));
-    assert(reads === 1, 'R4: lost edge must use one event-driven native read');
+    const reads = adapter.calls.flatMap((call, index) => call === 'native-power' ? [index] : []);
+    const resume = adapter.calls.indexOf('resume');
+    const acquire = adapter.calls.indexOf('acquire');
+    const enable = adapter.calls.indexOf('enable');
+    assert(reads.length === 2 && reads[0] < resume && resume < reads[1] && reads[1] < enable
+      && (acquire < 0 || reads[1] < acquire),
+      'R4: read once to recover the missing edge and once after Host recovery to recheck write permission');
     assert(adapter.calls.filter(c => c === 'resume').length === 1, 'R4: closed Host must rearm exactly once');
     assert(lifecycle.controlReady && adapter.calls.includes('enable'), 'R4: manual request must reach current HC enable');
     assert(adapter.enableNodes[1].dutyPercent === 30, 'R4: must apply the new manual curve, not replay the stale one');
     await lifecycle.apply(CURVE);
-    assert(reads === 1, 'R4: ordinary awake adjustment must add zero native reads');
+    assert(adapter.calls.filter(c => c === 'native-power').length === reads.length,
+      'R4: ordinary awake adjustment must add zero native reads');
     await lifecycle.close();
   }
-  // FAN-938 R6 §P2：native **陈旧 phase 但真实唤醒事实 resumeReady=true**（宿主与 Host 都停在
-  // Suspended，系统已真实唤醒）必须被受理并推动 Fan 专属恢复——不得再以 wake-not-ready 永久拒绝。
+  // A persisted wake can begin recovery with a stale phase. Writing still
+  // waits for a current public permission after the Host session resumes.
   // 注意「正在睡」(phase==='suspending') 恒拒绝，见下方 R6-03 反例，故不在此正例集合内。
-  for (const state of [nativeReady(2, 'suspended', true), nativeReady(2, 'resuming', true)]) {
+  for (const [state, allowFirstWrite] of [[nativeReady(2, 'suspended', true), true],
+    [nativeReady(2, 'resuming', true), true], [nativeReady(2, 'suspended', true), false]] as const) {
     const adapter = new FakeAdapter(); let reads = 0;
+    let writesAllowed = allowFirstWrite;
     const lifecycle = new FanHostLifecycle({ enabled: true, adapter, launcher: new FakeLauncher(),
       heartbeatIntervalMs: 0, resumeWaitDeadlineMs: 800,
-      readNativePowerState: async () => { reads += 1; return state; } });
+      readNativePowerState: async () => {
+        reads += 1;
+        return adapter.calls.includes('resume') ? { ...nativeReady(2), hardwareWritesAllowed: writesAllowed } : state;
+      } });
     await missingWake(lifecycle, adapter);
     adapter.stateName = 'Suspended'; adapter.controlAccepting = false;
     // 陈旧 phase 被采纳后，宿主在受控 resume 后真正重开 HC 会话。
     adapter.stateScript = [() => ({ ...adapter.craft('Suspended', false), state: 'Suspended',
       powerState: 'Suspended', openCalled: false, openEventsCalled: false }), () => adapter.craft('Ready', true)];
+    if (!allowFirstWrite) {
+      const [result] = await Promise.allSettled([lifecycle.apply(CURVE)]);
+      assert(result.status === 'rejected' && adapter.calls.includes('resume'),
+        'R6 §P2: Host recovery alone cannot admit a write while the public grant is denied');
+      assert(!adapter.calls.some(c => c === 'acquire' || c === 'enable'),
+        'R6 §P2: a denied grant must leave control unclaimed and issue no curve');
+      writesAllowed = true;
+    }
     await lifecycle.apply(CURVE);
-    assert(reads >= 1, 'R6 §P2: stale-phase recovery with persisted resumeReady must read native power state');
+    assert(reads >= 2, 'R6 §P2: stale-phase recovery must consult public power again before writing');
     assert(lifecycle.controlReady && adapter.calls.includes('enable'),
-      'R6 §P2: stale phase + resumeReady=true must be accepted and reach HC enable');
+      'R6 §P2: persisted wake and the current public grant allow HC enable');
     await lifecycle.close();
   }
   // FAN-938 R6 §P2 反例（R6-03）：真实睡眠进行中（phase==='suspending'）即使 inputReady=true，
@@ -328,13 +350,34 @@ async function main(): Promise<void> {
   }
   {
     const adapter = new FakeAdapter();
-    const lifecycle = new FanHostLifecycle({ enabled: true, adapter, launcher: new FakeLauncher(),
+    let launches = 0;
+    const launcher: FanHostLauncher = {
+      async start() {
+        launches += 1;
+        if (launches === 2) {
+          adapter.calls.push('replacement-start');
+          adapter.stateName = 'Ready';
+          adapter.controlAccepting = true;
+          adapter.lease = null;
+        }
+        return { pid: 4241 + launches, executable: 'fake.exe' };
+      },
+      async stop() {},
+    };
+    const lifecycle = new FanHostLifecycle({ enabled: true, adapter, launcher,
       heartbeatIntervalMs: 0, resumeWaitDeadlineMs: 800, readNativePowerState: async () => nativeReady(2) });
-    await missingWake(lifecycle, adapter); adapter.stateName = 'FaultLocked';
-    const result = await Promise.allSettled([lifecycle.apply(CURVE)]);
-    assert(result[0].status === 'rejected' && !adapter.calls.includes('enable'),
-      'R4: native Ready must not clear a Host fault or write through it');
-    adapter.stateName = 'Ready'; await lifecycle.close();
+    await missingWake(lifecycle, adapter);
+    adapter.stateName = 'FaultLocked';
+    adapter.controlAccepting = false;
+    await lifecycle.apply(CURVE);
+    const replacement = adapter.calls.indexOf('replacement-start');
+    const close = adapter.calls.indexOf('close');
+    const shutdown = adapter.calls.indexOf('shutdown');
+    const enable = adapter.calls.indexOf('enable');
+    assert(launches === 2 && close >= 0 && close < shutdown && shutdown < replacement && replacement < enable
+      && adapter.calls.filter(c => c === 'enable').length === 1,
+      'R4: an explicit click must close the faulted Host and write once on its replacement');
+    await lifecycle.close();
   }
   console.log('FAN-938 R4: missing-edge manual rearm / no extra awake reads / 5 rejection+retry cases / stale in-flight response / Host fault all PASS');
 
@@ -590,9 +633,13 @@ async function main(): Promise<void> {
       () => { throw new Error('G7-B: 401 不得放行'); },
       (error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
-        assert(/FAN_RESUME_ADMISSION_TERMINAL_FAILED/.test(message), `G7-B: 401 必须终态失败（message=${message}）`);
+        const directRefusal = error instanceof FanApiError && error.status === 401
+          && error.errorCode === 'API_SESSION_REQUIRED';
+        assert(directRefusal || /FAN_RESUME_ADMISSION_TERMINAL_FAILED/.test(message),
+          `G7-B: 401 must remain terminal (message=${message})`);
       });
-    assert(authAdapter.enableCalls === 0, 'G7-B: 401 之后不得写');
+    assert(authAdapter.enableCalls === 0 && !authAdapter.calls.some(c => c === 'resume' || c === 'open' || c === 'acquire'),
+      'G7-B: an authentication refusal must leave the Host and its control untouched');
     await authLife.close();
 
     // (4) 未知状态：即使有本代唤醒依据，unknownState 也必须终态失败且不写。
@@ -880,8 +927,10 @@ async function main(): Promise<void> {
   // FAN-942: current typed rejection and old Host context both stop immediately, while manual retry remains usable.
   for (const typed of [true, false]) {
     const adapter = new FakeAdapter();
-    const lifecycle = newLifecycle(adapter, 5000);
+    let power = nativeReady(0);
+    const lifecycle = newLifecycle(adapter, 5000, async () => power);
     await armWake(lifecycle, adapter);
+    power = nativeReady(1);
     const rejected = () => ({ ...adapter.craft('AwaitingControl', false), openCalled: false, openEventsCalled: false,
       hardwareWritesEnabled: false, lastError: 'FanApiException: HC 当前设备未声明 FanControl 能力',
       ...(typed ? { fanCapabilitySupported: false } : {}) });

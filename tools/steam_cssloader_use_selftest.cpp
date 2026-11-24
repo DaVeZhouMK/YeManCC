@@ -127,9 +127,11 @@ static constexpr sleeppower::SharedPowerV1 completionReady = [] {
     value.flags = sleeppower::kKnown | sleeppower::kHardwareAllowed;
     return value;
 }();
+static std::atomic<bool> completionPowerReady{true};
 static int __cdecl completionPower(sleeppower::SharedPowerV1* out, std::uint32_t bytes) {
     if (!out || bytes != sizeof(*out)) return 0;
     *out = completionReady;
+    if (!completionPowerReady) out->flags = sleeppower::kKnown;
     return 1;
 }
 static struct{bool big=true;ymcc::steamui::ModeObserver* actual=nullptr;auto snapshot(const ymcc::steamsession::Session& s,const sleeppower::SharedPowerV1& power){if(actual)return actual->snapshot(s,power);return nlohmann::json{{"known",true},{"running",true},{"pid",s.pid},{"birth",std::to_string(s.created)},{"mode",big?"bigpicture":"desktop"}};}}g_steamModeObserver;
@@ -225,9 +227,19 @@ static int completionSourceCase(const std::filesystem::path& root){
  g_steamSettingsObserver.value=session;g_steamCssUse.value=&use;
  const auto observe=[](auto&,const auto& s,auto& identity,bool renew=false){auto result=actualMainObserved(s,false,renew);identity=std::move(result.identity);return result.completion;};
  deckylaunch::Handle completion;std::shared_ptr<const steamsession::IdentitySnapshot> observed;
+ const auto readyPolicy=use.readPolicy(session);
+ check(readyPolicy.ready&&!readyPolicy.processQuery.empty()&&!readyPolicy.automaticRepairActive,"idle policy reports no repair owner before the automatic use");
  completion.value=observe(use,session,observed);
  check(completion.value&&observed==first,"returned wait binds the exact identity captured inside Use");
+ const auto activePolicy=use.readPolicy(session);
+ check(activePolicy.automaticRepairActive&&activePolicy.processQuery==readyPolicy.processQuery,"live same-session automatic apply is visible on the existing policy read");
+ auto other=session;++other.created;
+ check(!use.readPolicy(other).automaticRepairActive,"another Steam birth cannot borrow the automatic repair owner");
+ completionPowerReady=false;
+ check(!use.readPolicy(session).automaticRepairActive,"public power revocation removes the repair owner immediately");
+ completionPowerReady=true;
  auto successor=std::make_shared<steamsession::IdentitySnapshot>(*first);successor->accountEpoch=2;successor->registeredPidReadError=ERROR_ACCESS_DENIED;current=successor;
+ check(!use.readPolicy(session).automaticRepairActive,"same-PID identity revocation refuses the previous helper before cancellation");
  use.observeSteam(session);check(WaitForSingleObject(completion.value,2000)==WAIT_OBJECT_0,"same numeric account metadata retirement completes the actual old helper wait");
  check(observed==first&&observed!=current.load(),"old completed wait retains its own immutable source instead of borrowing latest facts");
  CloseHandle(completion.value);completion.value=nullptr;
@@ -235,9 +247,15 @@ static int completionSourceCase(const std::filesystem::path& root){
  deckylaunch::Handle renewed;std::shared_ptr<const steamsession::IdentitySnapshot> renewedSource;
  renewed.value=observe(use,session,renewedSource,true);check(renewed.value&&renewedSource==observed,"renewed same use returns the same source while holding the original mutex");
  use.invalidateForResume(session,false);check(WaitForSingleObject(completion.value,2000)==WAIT_OBJECT_0,"source-bearing wait retains original cancellation semantics");
+ check(!use.readPolicy(session).automaticRepairActive,"retired helper leaves no repair owner");
  CloseHandle(completion.value);completion.value=nullptr;CloseHandle(renewed.value);renewed.value=nullptr;
+ completion.value=use.confirmExisting(session);
+ check(completion.value&&!use.readPolicy(session).automaticRepairActive,"VerifyOnly never owns configuration repair");
+ use.invalidateForResume(session,false);
+ CloseHandle(completion.value);completion.value=nullptr;
  const auto manual=use.begin(session);observed=first;completion.value=observe(use,session,observed);
- check(!completion.value&&!observed,"manual ownership refusal clears an old output source without launching another helper");use.release(manual.token);
+ check(!completion.value&&!observed,"manual ownership refusal clears an old output source without launching another helper");
+ check(!use.readPolicy(session).automaticRepairActive,"manual hold does not impersonate an automatic helper");use.release(manual.token);
  g_exitRequested=true;check(!actualMainObserved(session,false,false).completion,"actual main observed callback rejects exit");g_exitRequested=false;
  g_powerLifecycle=PowerLifecycle::Suspended;check(!actualMainObserved(session,false,false).completion,"actual main observed callback rejects non-Ready");g_powerLifecycle=PowerLifecycle::Ready;
  g_aiFanMockSession.isolated=true;check(!actualMainObserved(session,false,false).completion,"actual main observed callback rejects isolation");g_aiFanMockSession.isolated=false;

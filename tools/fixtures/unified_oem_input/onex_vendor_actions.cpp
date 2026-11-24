@@ -12,6 +12,9 @@ static void vendorRule(uint64_t mask,const std::string& id="vendor-action"){
  const auto resolve=[](const std::string& action,const std::string& code,unsigned short& vk,bool& shift){vk='K';shift=false;return action=="keyboard.key"&&code=="KeyK";};
  check(ymcc::keyboardSequence::parse(json{{"key","KeyK"}},"keyboard.key",resolve,rule.keyboardPlan),"actual sequence plan parses "+id);
  g_nativeKeyboardShortcuts={rule};
+#ifdef YMCC_FIXTURE_OEM_DEMAND
+ g_nativeShortcutNeedsLiveOem=(rule.requiredMask >> 20) != 0;
+#endif
 }
 static void vendorBegin(){
  if(g_onexBack.actionGeneration)oemProducerCancel(OemProducerId::OneX,g_onexBack.actionGeneration);

@@ -8,11 +8,15 @@ const originalMissingBootstrapCase='missing bootstrap uses one capped local retr
 const tdpReceiptCase='TDP terminal diagnostic only follows the sent current operation';
 const connectingPauseCase='hiding before OPEN does not restart the shared transport';
 const restoredPauseFailureCase='hidden restored snapshot pause failure creates one recovery despite repeated stale packets';
+const actionTimeoutCase='timeout never resends a possibly applied action';
+const outageBackoffCase='visible sidebar recovers beyond three failures with capped outage backoff';
+const lateBootstrapCase='late native bootstrap event replaces the cold retry immediately without duplicate work';
+const manualConnectionCase='connection test reconnects existing binding without replaying writes';
 const selectionArgs=process.argv.slice(2);
 let exactCase=null,commandLifetimeOnly=false,legacyArtifactArgument=null,restartVariant=null;
 for(let i=0;i<selectionArgs.length;i++){
  const argument=selectionArgs[i];
- if(argument.startsWith('--restart-variant=')){assert(restartVariant===null,'CLIENT_VARIANT_DUPLICATE');restartVariant=argument.slice('--restart-variant='.length);assert(['visible-after-opening-timeout','hidden-proof-lifetimes','native-reply-proof','disconnect-diagnostics','open-before-first-reply','plugin-disposal-sources','entry-factory-activation','official-import-lifetime','client-diagnostic'].includes(restartVariant),'CLIENT_VARIANT_UNKNOWN');continue;}
+ if(argument.startsWith('--restart-variant=')){assert(restartVariant===null,'CLIENT_VARIANT_DUPLICATE');restartVariant=argument.slice('--restart-variant='.length);assert(['visible-after-opening-timeout','hidden-proof-lifetimes','native-reply-proof','disconnect-diagnostics','open-before-first-reply','plugin-disposal-sources','entry-factory-activation','official-import-lifetime','official-import-no-replay','client-diagnostic','snapshot-delivery-refusal'].includes(restartVariant),'CLIENT_VARIANT_UNKNOWN');continue;}
  if(argument==='--command-lifetime'){
   assert(!commandLifetimeOnly,'CLIENT_CASE_SELECTION_DUPLICATE');commandLifetimeOnly=true;continue;
  }
@@ -20,7 +24,7 @@ for(let i=0;i<selectionArgs.length;i++){
   assert(exactCase===null,'CLIENT_CASE_SELECTION_DUPLICATE');
   const value=argument==='--case'?selectionArgs[++i]:argument.slice('--case='.length);
   assert(typeof value==='string'&&value.length>0&&!value.startsWith('--'),'CLIENT_CASE_SELECTION_EMPTY');
-  assert([originalMissingBootstrapCase,tdpReceiptCase,connectingPauseCase,restoredPauseFailureCase,'non-loopback bootstrap rejected','restart run ID disconnects and no mutation replay','port zero and out-of-range bootstrap are rejected',"24 mixed restart cycles fence silent connections old replies deadlines and duplicate edges","OPEN wallpaper context without response times out and recovers without replay","wallpaper timeout never replays an uncertain business write",'malformed snapshot rejects instead of crashing React','request freezes identity/generation/revision and args','slider rendered revision change rejects before sending any mutation'].includes(value),'CLIENT_CASE_SELECTION_UNKNOWN');
+  assert([originalMissingBootstrapCase,tdpReceiptCase,connectingPauseCase,restoredPauseFailureCase,actionTimeoutCase,outageBackoffCase,lateBootstrapCase,manualConnectionCase,'non-loopback bootstrap rejected','restart run ID disconnects and no mutation replay','port zero and out-of-range bootstrap are rejected',"24 mixed restart cycles fence silent connections old replies deadlines and duplicate edges","OPEN wallpaper context without response times out and recovers without replay","wallpaper timeout never replays an uncertain business write",'malformed snapshot rejects instead of crashing React','request freezes identity/generation/revision and args','slider rendered revision change rejects before sending any mutation'].includes(value),'CLIENT_CASE_SELECTION_UNKNOWN');
   exactCase=value;continue;
  }
  // Original parent/release callers pass one absolute artifact directory as a
@@ -43,7 +47,9 @@ const contextModule={exports:{}};
 vm.runInNewContext(transformSync(fs.readFileSync(path.join(root,'decky-plugin/src/steamRunningContext.ts'),'utf8'),{loader:'ts',format:'cjs'}).code,{module:contextModule,exports:contextModule.exports});
 // Execute the same shared display DTO validator that the shipped client imports.
 const gameContextModule={exports:{}};
-vm.runInNewContext(transformSync(fs.readFileSync(path.join(root,'src/bridge/gameSteamContextModel.ts'),'utf8'),{loader:'ts',format:'cjs'}).code,{module:gameContextModule,exports:gameContextModule.exports});
+let steamDisplayIdReads=0;
+vm.runInNewContext(transformSync(fs.readFileSync(path.join(root,'src/bridge/gameSteamContextModel.ts'),'utf8'),{loader:'ts',format:'cjs'}).code,
+ {module:gameContextModule,exports:gameContextModule.exports,BigInt:value=>{steamDisplayIdReads++;return BigInt(value);}});
 const openingDeadlineObservations=[],optionalContextObservations=[];
 const module = { exports: {} };
 vm.runInNewContext(transformSync(fs.readFileSync(process.env.YMCC_MIRROR_CLIENT_SOURCE_OVERRIDE||path.join(root,'decky-plugin/src/mirrorClient.ts'),'utf8'), { loader:'ts',format:'cjs' }).code,
@@ -65,7 +71,7 @@ const readBootstrap=host=>vm.runInNewContext('('+provider.initializer.getText(en
 const lifetimeCases=new Set([
  'hidden/unloaded releases socket and timers','old view packets ignored after hide',
  'request freezes identity/generation/revision and args','second mutation cannot overlap first',
- 'timeout never resends a possibly applied action','close rejects inflight mutation and reconnect does not replay it',
+ actionTimeoutCase,'close rejects inflight mutation and reconnect does not replay it',
  'power not ready rejects changes without send','fan requests do not include game identity',
  'new native run cancels old mutation, never replays into new host',
  'slider accepts only the exact rendered snapshot','slider rendered revision change rejects before sending any mutation',
@@ -75,7 +81,7 @@ const lifetimeCases=new Set([
  'a timeout observer hiding the last page cannot restart paused passive snapshot demand',
  ...['hud','wallpaper','updater'].map(c=>'failed hidden pause recovers '+c+' transport without replaying an uncertain action')
 ]);
-const cases=[],visibleReconnectRows=[],openingReadMeasurements=[],startupDeadlineRows=[];
+const cases=[],visibleReconnectRows=[],openingReadMeasurements=[],startupDeadlineRows=[],disconnectObservations=[];
 const tdpReceiptObservations=[];
 function writeRaw(failure=null) {
  const results=failure?[...cases,{name:failure.name,status:'failed',error:failure.error?.stack||String(failure.error)}]:cases;
@@ -319,6 +325,56 @@ async function verifyOptionalDisplayIsolation() {
  const cached=()=>({...metadata(),steam:{status:'cached-association',appid:480,gameId:'480',gamePid:target.pid,gameCreated:target.processCreated,gamePath:target.path,gameIdentityGeneration:1,steamPid:202,steamCreated:'134000000000000002',processEpoch:'1',accountEpoch:'1',processValidated:false,currentSource:false}});
  const core=(f,revision=2)=>{const snap=f.snapshot(revision);snap.game.identity=identity;snap.actions={fan:true,game:true,performance:true};snap.performance={version:1,side:'dc',scope:'game',mode:'auto',sourceRevision:'fixture-power-1',enabled:true,controls:[{key:'tdp',kind:'slider',label:'TDP',enabled:true,value:20,min:5,max:30,step:1}]};return snap;};
  const copy=structuredClone;
+ {
+  const f=fixture();let checking;
+  try{
+   f.client.setVisible(true);
+   const socket=f.sockets.at(-1);socket.readyState=1;socket.emit('open');
+   const original={...core(f),provenance:{kind:'ymcc-native',pid:123}};
+   socket.emit('message',{type:'snapshot',runId:'run-1',displayOnly:true,snapshot:original});
+   assert.equal(f.client.snapshot().snapshot,null,'A display cannot supply the first snapshot');
+   assert.equal(f.client.connectionVerified('run-1'),false,'A display cannot supply the first native proof');
+   socket.emit('message',{type:'snapshot',runId:'run-1',snapshot:original});
+   checking=f.client.testConnection().catch(error=>error);
+   const nonce=socket.sent.at(-1).probeId,deadline=f.client.snapshotDeadline?.timer;
+   assert(nonce&&f.timers.has(deadline));
+   const display=copy(original);display.gameSteam=metadata();display.losslessProgram={known:true,running:true};
+   display.performance.controls[0].value=29;
+   socket.emit('message',{type:'snapshot',runId:'run-1',displayOnly:true,probeId:nonce,snapshot:display});
+   assert(f.timers.has(deadline),'Optional display must not acknowledge a pending read');
+   assert.equal(f.client.snapshot().connectionTest.pending,true,'Display cannot complete a current connection probe');
+   assert.deepEqual(copy(f.client.snapshot().snapshot.performance),original.performance);
+   assert.deepEqual(copy(f.client.snapshot().snapshot.gameSteam),display.gameSteam);
+   assert.deepEqual(copy(f.client.snapshot().snapshot.losslessProgram),display.losslessProgram);
+   let redraws=0;const stopDisplay=f.client.subscribe(()=>{redraws++;});
+   try{
+    const initial=redraws;
+    for(let i=0;i<24;i++)socket.emit('message',{type:'snapshot',runId:'run-1',displayOnly:true,snapshot:display});
+    socket.emit('message',{type:'snapshot',runId:'run-1',displayOnly:true,snapshot:{...display,gameSteam:{schemaVersion:0},losslessProgram:{known:false,running:true}}});
+    assert.equal(redraws,initial,'Repeated or invalid display fields must not notify');
+    const clear={...display,gameSteam:undefined};
+    socket.emit('message',{type:'snapshot',runId:'run-1',displayOnly:true,snapshot:clear});
+    socket.emit('message',{type:'snapshot',runId:'run-1',displayOnly:true,snapshot:clear});
+    assert.equal(redraws,initial+1,'Actual removal still redraws, once');
+    assert.equal(f.client.snapshot().snapshot.gameSteam,undefined);
+    socket.emit('message',{type:'snapshot',runId:'run-1',displayOnly:true,snapshot:display});
+    assert.equal(redraws,initial+2,'Real metadata restoration still redraws');
+    assert(f.timers.has(deadline),'None of these repaints can settle the probe');
+   }finally{stopDisplay();}
+   socket.emit('message',{type:'snapshot',runId:'run-1',displayOnly:true,snapshot:{...display,generation:2,losslessProgram:{known:true,running:false}}});
+   assert.equal(f.client.snapshot().snapshot.losslessProgram.running,true);
+   socket.emit('message',{type:'snapshot',runId:'run-1',displayOnly:true,snapshot:{...display,revision:3}});
+   assert.equal(f.client.snapshot().snapshot.revision,2);
+   const empty={...original,revision:3};
+   socket.emit('message',{type:'snapshot',runId:'run-1',probeId:nonce,snapshot:empty});
+   assert.equal((await checking).revision,3);assert.equal(f.timers.size,0);
+   f.client.setPassiveVisible(true);f.client.setVisible(false);const before=socket.sent.length;
+   socket.emit('message',{type:'snapshot',runId:'run-1',displayOnly:true,snapshot:display});
+   assert.equal(socket.sent.length,before,'A late optional display cannot restart hidden demand or send another pause');
+   assert.equal(f.client.snapshot().snapshot,null);
+   optionalContextObservations.push({kind:'display-only',readDeadlinePreserved:true,probeSettledByFullRevision:3,hiddenLateSends:0});
+  }finally{f.client.dispose();await checking;}assert.equal(f.timers.size,0);
+ }
  const badGroup=cached();badGroup.steam.processGroup={status:'incomplete',scope:'process-lifetime',processValidated:false,currentSource:false,roleValidated:false,reason:'future-schema',futureField:1};
  const variants=[
   ['null',null],['array',[]],['primitive','future-version'],
@@ -353,6 +409,30 @@ async function verifyOptionalDisplayIsolation() {
   }finally{f.client.dispose();}assert.equal(f.timers.size,0);
  }
  const group=cached();group.steam.processGroup={status:'observed',scope:'process-lifetime',processValidated:false,currentSource:false,roleValidated:false,reason:'cached-only',sourceRevision:'7',selectedPid:target.pid,selectedSourceLine:11,appid:480,gameId:'480',gameIdRaw:'480',gameIdKind:'native-app',members:[{pid:target.pid,path:target.path,observedAt:'2026-11-13 10:00:00',sourceLine:11,gameIdRaw:'480'}]};
+ for(let i=1;i<32;i++)group.steam.processGroup.members.push({...group.steam.processGroup.members[0],pid:target.pid+i,sourceLine:11+i});
+ {
+  const f=fixture();try{
+   const socket=f.connect(),base=core(f);socket.readyState=1;
+   const start=steamDisplayIdReads;
+   socket.emit('message',{type:'snapshot',runId:'run-1',snapshot:{...base,gameSteam:group}});
+   const full=steamDisplayIdReads-start;
+   assert.deepEqual(f.client.snapshot().snapshot.gameSteam,group);
+   socket.emit('message',{type:'snapshot',runId:'run-1',displayOnly:true,snapshot:base});
+   const startDisplay=steamDisplayIdReads;
+   socket.emit('message',{type:'snapshot',runId:'run-1',displayOnly:true,snapshot:{...base,gameSteam:group}});
+   const display=steamDisplayIdReads-startDisplay;
+   assert.deepEqual(f.client.snapshot().snapshot.gameSteam,group);
+   for(const edit of [v=>{delete v.game.rulesEpoch;},v=>{delete v.game.powerGeneration;},
+      v=>{v.steam.processGroup.members[31].pid=v.game.pid;},v=>{v.steam.processGroup.members[0].sourceLine++;},
+      v=>{v.steam.processGroup.members.push({...v.steam.processGroup.members[31],pid:999});}]){
+    const bad=copy(group);edit(bad);
+    socket.emit('message',{type:'snapshot',runId:'run-1',displayOnly:true,snapshot:{...base,gameSteam:bad}});
+    assert.deepEqual(f.client.snapshot().snapshot.gameSteam,group,'Malformed display packet must preserve the last valid view');
+   }
+   optionalContextObservations.push({kind:'process-group-validation',members:32,bigIntConversionsFull:full,bigIntConversionsDisplay:display});
+   assert(full<=72&&display<=72,`One complete group validation per packet, full=${full}, display=${display}`);
+  }finally{f.client.dispose();}assert.equal(f.timers.size,0);
+ }
  for(const [name,value] of [['unknown',metadata()],['pending',{...metadata(),steam:{...metadata().steam,status:'pending'}}],['cached-association',cached()],['cached-process-group',group],['no-display',undefined]]){
   const f=fixture();try{const socket=f.connect();socket.readyState=1;const snap=core(f);if(value!==undefined)snap.gameSteam=value;socket.emit('message',{type:'snapshot',runId:'run-1',snapshot:snap});
    assert.equal(f.client.snapshot().connected,true);assert.deepEqual(f.client.snapshot().snapshot.gameSteam,value);
@@ -517,7 +597,138 @@ async function verifyOpeningTeardownReentry(){
  }
 }
 
+async function verifyHiddenOpeningTeardownReentry(){
+ for(const replacement of ['same-run','new-run','async-open']){
+  const f=fixture();let current=null,notifications=0,stop;
+  try{
+   f.client.deps.connectionCheckCompleted=()=>{notifications++;};
+   f.client.setPassiveDemand('connection',true);
+   const old=f.sockets.at(-1);old.readyState=1;old.emit('open');
+   const original=old.sent.at(-1)?.probeId;assert(original);
+   const late=[...f.timers.values()].map(timer=>timer.action);
+   stop=f.client.subscribe(state=>{
+    if(current||state.connected||state.connectionTest?.pending!==false)return;
+    // Bootstrap notification can run within disconnect; its reply is later.
+    if(replacement==='new-run')Object.assign(f.bootstrap,{endpoint:'ws://127.0.0.1:12346/mirror',token:'HIDDEN-OPENING-RETIRE',runId:'run-after-hidden-retire'});
+    f.client.bootstrapChanged();current=f.sockets.at(-1);
+    if(replacement!=='async-open'){current.readyState=1;current.emit('open');}
+   });
+   old.emit('message','invalid-json');assert(current);assert.notEqual(current,old);
+   await new Promise(resolve=>setImmediate(resolve));
+   if(replacement==='async-open'){current.readyState=1;current.emit('open');}
+   const wire=current.sent.filter(packet=>packet.command==='snapshot'&&packet.subscribe!==false);
+   const nonce=wire[0]?.probeId;
+   const row={mode:'hidden-opening-teardown-reentry',replacement,reads:wire.length,correlated:typeof nonce==='string',
+    pausedBeforeReply:current.sent.some(packet=>packet.subscribe===false)};
+   startupDeadlineRows.push(row);
+   assert.equal(wire.length,1);
+   assert.equal(row.correlated,true,'Hidden replacement needs its own correlated proof before the retired owner finishes');
+   assert.notEqual(nonce,original);assert.equal(row.pausedBeforeReply,false);
+   const run=f.bootstrap.runId;
+   for(const callback of late)callback();
+   assert.equal(f.client.connectionChecking(run),true);assert.equal(notifications,0);
+   current.emit('message',{type:'snapshot',runId:run,probeId:nonce,snapshot:{...f.snapshot(3),runId:run,provenance:{kind:'ymcc-native',pid:321}}});
+   await new Promise(resolve=>setImmediate(resolve));
+   assert.equal(f.client.connectionVerified(run),true);assert.equal(notifications,1);
+   assert.equal(current.sent.filter(packet=>packet.subscribe===false).length,1);
+   assert.equal(f.client.snapshot().snapshot,null);assert.equal(f.sockets.length,2);assert.equal(f.timers.size,0);
+   assert(f.sockets.flatMap(socket=>socket.sent).every(packet=>packet.command==='snapshot'));
+   Object.assign(row,{verified:true,notifications,timers:f.timers.size});
+  }finally{stop?.();f.client.dispose();assert.equal(f.timers.size,0);assert(f.sockets.every(socket=>socket.closed));}
+ }
+}
+
+async function verifySnapshotDeliveryRefusal(){
+ const {load}=await import('./fixtures/decky_game_memory_store.mjs');
+ const {ReadOnlyMirrorRelay}=load(fs.readFileSync(path.join(root,'src/bridge/deckyMirrorRelay.ts'),'utf8'),{'../../decky-plugin/src/steamRunningContext':contextModule.exports});
+ const flush=()=>new Promise(resolve=>setImmediate(resolve));
+ for(const mode of ['ordinary','probe','persistent','hidden','source','peer','ambiguous']){
+  const f=fixture(),run='b'.repeat(32),peer={connection:'1',runId:run,connected:true};f.bootstrap.runId=run;
+  const timers=new Map(),sent=[];let timerId=0,reads=0,generation=1,refusals=mode==='probe'?0:mode==='persistent'?2:1,probe;
+  f.client.setVisible(true);const socket=f.sockets.at(-1);socket.readyState=1;
+  const relay=new ReadOnlyMirrorRelay({read:async()=>{
+   ++reads;const {runId,revision,...view}=f.snapshot();return {...view,generation,provenance:{kind:'ymcc-native',pid:123}};
+  },observe:()=>()=>{},schedule:(action,delay)=>{const id=++timerId;timers.set(id,{action,delay});return id;},cancel:id=>timers.delete(id),
+   reply:async(connection,message)=>{
+    sent.push({connection,...structuredClone(message)});
+    if(refusals>0){--refusals;if(mode==='ambiguous')throw new Error('Unknown IPC result');return false;}
+    if(connection===peer.connection)socket.emit('message',message);return true;
+   }});
+  const rawSend=socket.send.bind(socket);socket.send=raw=>{rawSend(raw);void relay.request({...peer,request:JSON.parse(raw)});};
+  try{
+   relay.connected(peer);socket.emit('open');await flush();
+   if(mode==='probe'){assert(f.client.snapshot().snapshot?.ready);refusals=1;probe=f.client.testConnection();void probe.catch(()=>{});await flush();}
+   const initialSent=sent.length,initialReads=reads,initialRequests=socket.sent.length;
+   const row={mode:'delivery-refusal-'+mode,attemptsBefore:initialSent,readsBefore:initialReads,retryTimers:timers.size,originalDeadlines:f.timers.size};
+   openingReadMeasurements.push(row);
+   if(mode==='ambiguous'){assert.equal(timers.size,0,'Unknown IPC outcome is not a definite refusal');continue;}
+   assert.equal(timers.size,1,'A definite refusal of the current snapshot must arm one local retry');
+   const [id,retry]=timers.entries().next().value;assert.equal(retry.delay,250);
+   const initial=sent.at(-1);
+   if(mode==='hidden'){
+    f.client.setPassiveDemand('hud',true);f.client.setVisible(false);await flush();
+    assert.equal(socket.closed,false);assert.equal(socket.sent.at(-1).subscribe,false,'HUD retains the peer while the sidebar pauses');
+   }
+   if(mode==='source'){++generation;relay.invalidate('power');await flush();}
+   if(mode==='peer')relay.connected({...peer,connection:'2',connectionRevision:2});
+   const retired=['hidden','source','peer'].includes(mode);
+   if(retired)assert.equal(timers.size,0,'The old delivery lease must be canceled at the ownership edge');
+   const beforeCallback=sent.length;timers.delete(id);retry.action();await flush();
+   assert.equal(timers.size,0,'One rejection may not grow into a polling loop');
+   assert.equal(sent.length-beforeCallback,retired?0:1,'Dispatched old callback must not send');
+   if(mode==='source')assert.equal(f.client.snapshot().snapshot.generation,2);
+   if(!retired){
+    assert.equal(reads,initialReads,'Reuse the resolved current snapshot');
+    assert.equal(socket.sent.length,initialRequests,'Do not request another client snapshot');
+    assert.deepEqual(sent.at(-1),initial,'Original revision, peer and probe nonce stay intact');
+    if(mode==='persistent')assert.equal(f.timers.size,row.originalDeadlines,'Repeated refusal leaves the original client deadline intact');
+    else{assert(f.client.snapshot().snapshot?.ready);assert.equal(f.timers.size,0);}
+    if(probe)assert.equal((await probe).pid,123);
+    assert.equal(f.sockets.length,1);assert.equal(socket.closed,false);
+   }
+   assert(socket.sent.every(message=>message.command==='snapshot'));
+   Object.assign(row,{resends:sent.length-beforeCallback,readsAfter:reads,commands:socket.sent.length,settingsCommands:0,sockets:f.sockets.length});
+  }finally{f.client.dispose();relay.dispose();if(probe)await probe.catch(()=>{});await flush();assert.equal(timers.size,0);assert.equal(f.timers.size,0);}
+ }
+}
+
 async function verifyClientDiagnostic(){
+ // A source notification can run after the read settles but before its reply
+ // is sent. The active nonce must wait for the replacement owner's state.
+ {
+  const {load}=await import('./fixtures/decky_game_memory_store.mjs');
+  const {ReadOnlyMirrorRelay}=load(fs.readFileSync(path.join(root,'src/bridge/deckyMirrorRelay.ts'),'utf8'),{'../../decky-plugin/src/steamRunningContext':contextModule.exports});
+  const f=fixture(),run='b'.repeat(32),peer={connection:'1',runId:run,connected:true};f.bootstrap.runId=run;
+  f.client.setVisible(true);const socket=f.sockets.at(-1);socket.readyState=1;
+  let reads=0,hold=false,inject=false,outcome='pending',result,release;
+  const blocked=new Promise(resolve=>{release=resolve;}),outbound=[],pending=[];
+  const relay=new ReadOnlyMirrorRelay({read:async()=>{
+   const number=++reads;if(hold&&number===3)await blocked;
+   const {runId,revision,...view}=f.snapshot();return {...view,generation:number===3?2:1,provenance:{kind:'ymcc-native',pid:123}};
+  },observe:()=>()=>{},schedule:f.client.deps.schedule,cancel:f.client.deps.cancel,
+   reply:async(_key,message)=>{outbound.push(structuredClone(message));socket.emit('message',message);return true;}});
+  relay.connected(peer);
+  const send=socket.send.bind(socket);socket.send=raw=>{send(raw);pending.push(relay.request({...peer,request:JSON.parse(raw)}));};
+  const snapshot=relay.snapshot.bind(relay);
+  relay.snapshot=()=>{const read=snapshot();if(inject){inject=false;void read.then(()=>relay.invalidate('power'));}return read;};
+  const flush=()=>new Promise(resolve=>setImmediate(resolve));
+  try{
+   socket.emit('open');await Promise.all(pending);assert.equal(reads,1);
+   hold=inject=true;
+   result=f.client.testConnection().then(value=>{outcome='resolved';return value;},error=>{outcome='rejected';return error;});
+   const timer=f.client.probe.timer,nonce=f.client.probe.id;await flush();assert.equal(reads,3);
+   const reply=outbound.find(message=>message.probeId===nonce);
+   const row={mode:'read-invalidated-before-reply',outcomeAtBoundary:outcome,readyAtBoundary:reply?.snapshot.ready,
+    proofAtBoundary:reply?.snapshot.provenance?.kind,timerRetained:f.timers.has(timer)};openingReadMeasurements.push(row);
+   assert.equal(row.outcomeAtBoundary,'pending','A settled read from the retired source must not authenticate the current probe');
+   assert.equal(row.readyAtBoundary,false);assert.equal(row.proofAtBoundary,'unconfirmed');assert.equal(row.timerRetained,true);
+   release();await Promise.all(pending);await flush();
+   assert.equal((await result).pid,123);assert.equal(f.client.snapshot().snapshot.generation,2);
+   assert.equal(reads,3,'Use the already triggered replacement read');assert.equal(f.sockets.length,1);
+   assert.equal(f.timers.size,0);assert.equal(socket.sent.length,2);assert(socket.sent.every(p=>p.command==='snapshot'));
+   Object.assign(row,{reads,remainingTimers:f.timers.size,settingsCommands:0,settledGeneration:f.client.snapshot().snapshot.generation});
+  }finally{release();f.client.dispose();relay.dispose();if(result)await result;await Promise.all(pending);await flush();assert.equal(f.timers.size,0);}
+ }
  // A temporary view derived from a previous healthy cache is not a fresh
  // native reply. Join the actual relay and client to check the wire contract.
  {
@@ -586,33 +797,83 @@ async function verifyClientDiagnostic(){
  }
  await verifyOpeningTeardownReentry();
  await verifySnapshotObserverReentry();
- for(const variant of ['native-arrives','silent','disposed']){
+ for(const mode of ['legacy-unready','ready-unconfirmed'])for(const variant of ['native-arrives','silent','disposed']){
   const deferred=fixture();let tick=100;deferred.client.deps.now=()=>tick;
+  const ready=mode==='ready-unconfirmed';
+  const unconfirmed=revision=>({...deferred.snapshot(revision),ready,...(ready?{provenance:{kind:'unconfirmed'}}:{generation:0})});
   let opening;
   try{
    const s=deferred.connect();s.readyState=1;deferred.client.setPassiveDemand('connection',true);deferred.client.setVisible(false);
    opening=deferred.client.checkConnectionOnOpen();const probe=deferred.client.probe;assert(probe);const timer=probe.timer,scheduled=deferred.timers.get(timer),beforeRequests=s.sent.length;
-   s.emit('message',{type:'snapshot',runId:'run-1',probeId:probe.id,snapshot:{...deferred.snapshot(2),generation:0,ready:false}});
+   s.emit('message',{type:'snapshot',runId:'run-1',probeId:probe.id,snapshot:unconfirmed(2)});
    for(let n=0;n<40;n++)await Promise.resolve();
-   assert.equal(deferred.client.connectionChecking('run-1'),true,'A correlated deferred wake reply must keep the existing probe pending');
+   const row={mode:'opening-owner-proof',variant,ready,checking:deferred.client.connectionChecking('run-1'),afterUnconfirmedPackets:s.sent.length-beforeRequests};
+   openingReadMeasurements.push(row);
+   assert.equal(row.checking,true,'A correlated '+mode+' reply must keep the existing probe pending');
    assert.equal(deferred.client.connectionVerified('run-1'),false,'Deferred view cannot fabricate native connection proof');
    assert.equal(deferred.client.probe,probe);assert.equal(deferred.client.probe.timer,timer);assert.equal(s.sent.length,beforeRequests,'Deferred response does not trigger another snapshot or hidden unsubscribe');
    assert.equal(scheduled.delay,15000);
    if(variant==='native-arrives'){
-    tick=2600;s.emit('message',{type:'snapshot',runId:'run-1',snapshot:{...deferred.snapshot(3),provenance:{kind:'ymcc-native',pid:123}}});await opening;
+    for(const [revision,probeId] of [[1,undefined],[3,'probe:older:1']]){
+     s.emit('message',{type:'snapshot',runId:'run-1',probeId,snapshot:{...deferred.snapshot(revision),provenance:{kind:'ymcc-native',pid:123}}});
+     assert.equal(deferred.client.probe,probe,'Stale revisions and different nonces cannot finish the opening');
+     assert.equal(deferred.client.connectionVerified('run-1'),false);
+    }
+    tick=2600;s.emit('message',{type:'snapshot',runId:'run-1',snapshot:{...deferred.snapshot(4),provenance:{kind:'ymcc-native',pid:123}}});await opening;
     assert.equal(deferred.client.connectionVerified('run-1'),true);assert.equal(deferred.client.connectionChecking('run-1'),false);assert.equal(deferred.timers.size,0);
+    assert.deepEqual(s.sent.slice(beforeRequests).map(p=>[p.command,p.subscribe]),[['snapshot',false]],'Recovery only releases its own hidden read lease');
    }else if(variant==='silent'){
     tick=15099;assert.equal(deferred.client.connectionChecking('run-1'),true);
-    s.emit('message',{type:'snapshot',runId:'run-1',probeId:probe.id,snapshot:{...deferred.snapshot(3),generation:0,ready:false}});
+    s.emit('message',{type:'snapshot',runId:'run-1',probeId:probe.id,snapshot:unconfirmed(3)});
     assert.equal(deferred.client.probe.timer,timer,'Repeated deferred replies never renew the original deadline');
     tick=15100;assert.equal(deferred.client.connectionChecking('run-1'),false);assert.equal(deferred.client.connectionReady('run-1'),false);
     deferred.timers.delete(timer);scheduled.action();await opening;assert.equal(deferred.client.connectionVerified('run-1'),false);
    }else{
     deferred.client.dispose();await opening;scheduled.action();assert.equal(deferred.timers.size,0);assert.equal(deferred.client.connectionVerified('run-1'),false);
    }
+   assert.equal(deferred.sockets.length,1);assert(s.sent.every(p=>p.command==='snapshot'));
+   Object.assign(row,{verified:deferred.client.connectionVerified('run-1'),timers:deferred.timers.size,sockets:deferred.sockets.length,settingsCommands:0});
   }finally{deferred.client.dispose();if(opening)await opening;assert.equal(deferred.timers.size,0);}
  }
 
+ for(const owner of ['opening','direct-probe']){
+  const f=fixture(),receipts=[],notifications=[];
+  f.client.deps.nativeSnapshotObserved=facts=>receipts.push(facts.ready);
+  f.client.deps.connectionCheckCompleted=()=>notifications.push(f.client.connectionVerified('run-1'));
+  try{
+   const s=f.connect();s.readyState=1;
+   const expired=f.client.checkConnectionOnOpen(),oldNonce=f.client.probe.id;
+   const lateDeadline=f.timers.get(f.client.probe.timer).action;
+   f.fireDelay(15000);await expired;
+   assert.deepEqual(notifications,[false]);
+   const send=(revision,ready,probeId)=>s.emit('message',{type:'snapshot',runId:'run-1',probeId,snapshot:{...f.snapshot(revision),ready,provenance:{kind:'ymcc-native',pid:123}}});
+   send(2,false);send(3,false,oldNonce);
+   assert.equal(f.client.connectionVerified('run-1'),false,'Late snapshots cannot certify an expired opening');
+   const lateNotifications=notifications.slice(1);
+   const next=owner==='opening'?f.client.checkConnectionOnOpen():f.client.testConnection().catch(error=>error);
+   const probe=f.client.probe;assert(probe&&probe.id!==oldNonce);
+   send(4,false,oldNonce);
+   assert.equal(f.client.probe,probe,'Previous nonce cannot finish the current probe');
+   assert.equal(f.client.connectionVerified('run-1'),false);
+   const requests=s.sent.length;
+   send(5,false,probe.id);
+   const outcome=await next;
+   if(owner==='opening')assert.equal(outcome,true);else assert.match(outcome.message,/尚未就绪/);
+   const row={mode:'not-ready-proof-after-opening-timeout',owner,verified:f.client.connectionVerified('run-1'),businessReady:f.client.snapshot().snapshot?.ready,receipts:[...receipts],notifications:[...notifications],lateNotifications,timers:f.timers.size};
+   openingReadMeasurements.push(row);
+   assert.equal(row.verified,true,'A new correlated native reply retires the old failure even when controls still wait');
+   assert.deepEqual(row.receipts,[false],'Take the browser receipt at the actual native reply, not at a later push');
+   assert.deepEqual(lateNotifications,[],'Uncorrelated pushes cannot announce recovery');
+   assert.deepEqual(notifications,[false,true],'Only one verified recovery notification');
+   assert.equal(row.businessReady,false);
+   await assert.rejects(f.client.mutate('game.setField',{field:'acMode',value:'balanced'}),/当前不可操作/);
+   lateDeadline();send(6,false,probe.id);send(7,true);
+   assert.equal(f.client.connectionVerified('run-1'),true);
+   assert.deepEqual(receipts,[false,true]);assert.deepEqual(notifications,[false,true]);
+   assert.equal(f.timers.size,0);assert.equal(f.sockets.length,1);assert.equal(s.closed,false);
+   assert.equal(s.sent.length,requests);assert(s.sent.every(p=>p.command==='snapshot'));
+  }finally{f.client.dispose();assert.equal(f.timers.size,0);}
+ }
  const f=fixture();
  try{
   assert.equal(typeof f.client.connectionDiagnostic,'function','finite client explanation is available');
@@ -677,6 +938,36 @@ async function verifyClientDiagnostic(){
   assert.equal(passiveNotices,2);lifetime.client.deps.connectionCheckCompleted=()=>{throw Error('display observer');};
  }finally{lifetime.client.dispose();assert.equal(lifetime.timers.size,0);}
  const waiting=fixture();try{waiting.client.setVisible(true);const s=waiting.sockets.at(-1);s.readyState=1;s.emit('open');assert.equal(waiting.client.connectionDiagnostic('run-1'),'transport-unconfirmed');waiting.client.setVisible(false);assert.equal(waiting.client.connectionDiagnostic('run-1'),'socket-missing');}finally{waiting.client.dispose();}
+ const receipts=[];let now=100;
+ const observed=fixture({now:()=>now});
+ observed.client.deps.nativeSnapshotObserved=facts=>{receipts.push(structuredClone(facts));if(facts.ready)throw Error('diagnostic sink failure');};
+ try{
+  const s=observed.connect();s.readyState=1;
+  observed.client.setPassiveDemand('connection',true);
+  const opening=observed.client.checkConnectionOnOpen(),nonce=observed.client.probe.id;
+  const send=(socket,revision,ready,probeId)=>socket.emit('message',{type:'snapshot',runId:'run-1',probeId,snapshot:{...observed.snapshot(revision),ready,provenance:{kind:'ymcc-native',pid:123}}});
+  now=150;send(s,2,true,'wrong-probe');
+  assert.deepEqual(receipts,[],'unrelated receipt while checking cannot certify the first native snapshot');
+  now=200;send(s,3,false,nonce);await opening;
+  assert.equal(observed.client.connectionVerified('run-1'),true);
+  assert.deepEqual(receipts,[{generation:1,ready:false,connectedAgeMs:100}],'log current verified native receipt even before controls are ready');
+  const sentBefore=s.sent.length,timersBefore=observed.timers.size;
+  now=320;send(s,4,true);
+  for(let n=5;n<=68;n++)send(s,n,n%2===0);
+  assert.deepEqual(receipts,[{generation:1,ready:false,connectedAgeMs:100},{generation:1,ready:true,connectedAgeMs:220}],'at most one log per level on a live transport');
+  assert.equal(s.sent.length,sentBefore,'diagnostics send no requests');assert.equal(observed.timers.size,timersBefore,'diagnostics arm no timer');
+  s.close();observed.fireDelay(250);const next=observed.sockets.at(-1);next.readyState=1;next.emit('open');
+  send(s,69,true);assert.equal(receipts.length,2,'old socket cannot write a receipt');
+  now=420;send(next,2,true);
+  assert.equal(receipts.length,3,'first ready proof on the replacement socket logs once');
+  assert.deepEqual(receipts.at(-1),{generation:1,ready:true,connectedAgeMs:100});
+  assert.equal(observed.client.connectionVerified('run-1'),true,'a broken diagnostic sink cannot change verification');
+ }finally{observed.client.dispose();assert.equal(observed.timers.size,0);}
+ const nativeReceipt=clientDeclaration.initializer.arguments[0].properties.find(node=>node.name?.getText(entryTree)==='nativeSnapshotObserved');
+ assert(nativeReceipt&&ts.isPropertyAssignment(nativeReceipt),'actual plugin entry wires native receipt logging');
+ const info=[];const wire=vm.runInNewContext('('+nativeReceipt.initializer.getText(entryTree)+')',{window:{console:{info:text=>info.push(text)}}});
+ wire({generation:2,ready:true,connectedAgeMs:345});
+ assert.deepEqual(info,['[YMCC:DeckyClient] {"schema":1,"stage":"mirror-native-snapshot","generation":2,"ready":true,"connectedAgeMs":345}']);
 }
 
 async function verifyOpeningDeadlineObservation(){
@@ -793,7 +1084,6 @@ async function verifySnapshotSendFailureReentry(){
  }
 }
 
-const disconnectObservations=[];
 async function verifyDisconnectDiagnostics(){
  const plain=value=>JSON.parse(JSON.stringify(value));
  const make=()=>{const f=fixture(),facts=[];f.client.deps.transportDisconnected=row=>facts.push(plain(row));return {f,facts};};
@@ -841,8 +1131,59 @@ async function verifyDisconnectDiagnostics(){
     if(kind==='operation-send-failed')await assert.rejects(f.client.mutate('fan.setPreset',{preset:'soft'}),/连接已结束，操作结果需重新确认/);
     if(kind==='snapshot-send-failed')await f.client.checkConnectionOnOpen();
    }
-   source(facts,kind==='wallpaper-deadline'?kind:'send-failed');assert.equal(socket.closeCode,undefined);row(kind,{facts});
+   source(facts,kind==='wallpaper-deadline'?kind:'send-failed');assert.equal(socket.closeCode,kind==='wallpaper-deadline'?4002:undefined);row(kind,{facts,closeCode:socket.closeCode});
   }finally{f.client.dispose();assert.equal(f.timers.size,0);}
+ }
+  // WebSocket send() can discard data once closing begins, before close delivery.
+ // Record every entry point on the same baseline instead of stopping at the first drop.
+ const closedSendRows=[];
+  for(const readyState of [3,2])for(const mode of ['snapshot','snapshot-during-observation','wallpaper','pause','mutation','mutation-during-busy']){
+  const {f,facts}=make();let stop,write,writeSettled;
+  try{
+   f.bootstrap.wallpaperProtocol=1;
+   const socket=f.connect();socket.readyState=1;f.client.setPassiveDemand('wallpaper',true);
+   if(mode.startsWith('snapshot'))f.client.setVisible(false);
+   let closedSendCalls=0,delayedCloseCalls=0;
+   const send=socket.send.bind(socket);
+    socket.send=value=>{if(socket.readyState===readyState){closedSendCalls++;return;}send(value);};
+   socket.close=()=>{delayedCloseCalls++;};
+    if(mode==='mutation-during-busy')stop=f.client.subscribe(state=>{if(state.busy)socket.readyState=readyState;});
+    else if(mode==='snapshot-during-observation')f.client.deps.steam=()=>{socket.readyState=readyState;return {availability:'unavailable'};};
+    else socket.readyState=readyState;
+   let passiveAccepted;
+   if(mode.startsWith('snapshot'))f.client.setVisible(true);
+   else if(mode==='wallpaper')passiveAccepted=f.client.sendWallpaper('wallpaper.context',{visible:true,contextSeq:1,appId:'480'});
+   else if(mode==='pause')f.client.setVisible(false);
+   else write=f.client.mutate('fan.setPreset',{preset:'soft'}).then(()=>{writeSettled='resolved';},error=>{writeSettled=error.message;});
+   await Promise.resolve();
+   const timers=[...f.timers.values()].map(t=>t.delay),connected=f.client.snapshot().connected,busy=f.client.snapshot().busy;
+   const retry=timers.length===1&&timers[0]===250;
+    const observation={mode,readyState,closedSendCalls,delayedCloseCalls,timers,connected,busy,passiveAccepted,writeSettled,facts:plain(facts)};
+    const label=readyState===2?'closing':'closed';
+    closedSendRows.push(observation);row(label+'-send-'+mode,observation);
+   if(!retry)continue;
+    source(facts,'socket-'+label);assert.equal(facts[0].readyState,readyState);
+   for(let n=0;n<24;n++)assert.equal(f.client.sendWallpaper('wallpaper.context',{visible:true,contextSeq:n+2,appId:'480'}),false);
+   assert.deepEqual([...f.timers.values()].map(t=>t.delay),[250]);
+   f.fireDelay(250);const next=f.sockets.at(-1);assert.equal(f.sockets.length,2);
+   next.readyState=1;next.emit('open');
+   socket.emit('close');socket.emit('message',{type:'snapshot',runId:'run-1',snapshot:f.snapshot(99)});
+   assert.equal(f.client.snapshot().snapshot,null);
+   next.emit('message',{type:'snapshot',runId:'run-1',snapshot:f.snapshot(2)});
+   assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,0);
+   assert(next.sent.every(value=>value.command==='snapshot'),'neither wallpaper messages nor settings are replayed');
+   if(mode.startsWith('mutation')){
+    const explicit=f.client.mutate('fan.setPreset',{preset:'soft'}),request=next.sent.at(-1);
+    assert.equal(request.command,'fan.setPreset');next.emit('message',{type:'reply',runId:'run-1',id:request.id,ok:true});await explicit;
+   }
+    row(label+'-send-recovered-'+mode,{newSocketReads:next.sent.filter(value=>value.command==='snapshot').length,newExplicitWrites:next.sent.filter(value=>value.command==='fan.setPreset').length,remainingTimers:f.timers.size});
+  }finally{stop?.();f.client.dispose();if(write)await write;assert.equal(f.timers.size,0);}
+ }
+ for(const result of closedSendRows){
+   assert.equal(result.closedSendCalls,0,`${result.mode}: must not send to a socket with readyState=${result.readyState}`);
+  assert.equal(result.delayedCloseCalls,1);assert.equal(result.connected,false);assert.equal(result.busy,false);assert.deepEqual(result.timers,[250]);
+  if(result.mode==='wallpaper')assert.equal(result.passiveAccepted,false);
+  if(result.mode.startsWith('mutation'))assert.match(result.writeSettled??'',/本次操作未发送/);
  }
  for(const invalid of ['{','[]','x'.repeat(65537),{type:'snapshot',runId:'run-1',snapshot:{}}]){
   const {f,facts}=make();try{const socket=f.connect();socket.readyState=1;socket.emit('message',invalid);source(facts,'message-invalid');row('message-invalid-'+disconnectObservations.length,{facts});}
@@ -904,7 +1245,7 @@ async function verifyDisconnectDiagnostics(){
 // browser sockets, feature installers, React and host events are memory ports.
 // Extra parameter of the existing restart consumer. Whole official class is
 // evaluated unchanged; browser import/OS endpoints are explicit VM ports.
-async function verifyOfficialImportLifetime(){
+async function verifyOfficialImportLifetime(noReplay=false){
  const plain=value=>JSON.parse(JSON.stringify(value));
  const flush=async()=>{for(let n=0;n<120;n++)await Promise.resolve();await new Promise(r=>setImmediate(r));for(let n=0;n<30;n++)await Promise.resolve();};
  const officialFile=process.env.YMCC_DECKY_OFFICIAL_LOADER_SOURCE,nativeFile=process.env.YMCC_DECKY_NATIVE_UPDATE_SOURCE;
@@ -923,10 +1264,10 @@ async function verifyOfficialImportLifetime(){
  const controls={PanelSection:'section',PanelSectionRow:'row',SliderField:'slider',DropdownItem:'dropdown',ToggleField:'toggle',ButtonItem:'button',Router:{}};
  const entryImports=new Set(['../../src/bridge/deckyInputOptions','../../src/bridge/losslessProgramState','../../src/bridge/frameRateModel','./AnchoredDropdown','./fanChoiceDebounce','./performanceIntentQueue','./performanceModel','./PerformanceControls','./GameProfileControls','./steamRunningContext']);
  function evaluateEntry(build){
-  const ordinal=++nextModule,module={exports:{}},scope={module,exports:module.exports,SP_REACT:react,DFL:controls,Event,structuredClone,WebSocket:Socket,__YMCC_DECKY_BUILD_ID__:build,crypto:{randomUUID:()=> 'official-entry-'+ordinal},window:host,Date:Clock,setTimeout:schedule,clearTimeout:cancel,require:name=>{
+  const ordinal=++nextModule,runId=host.__YMCC_DECKY_MIRROR__.runId,module={exports:{}},scope={module,exports:module.exports,SP_REACT:react,DFL:controls,Event,structuredClone,WebSocket:Socket,__YMCC_DECKY_BUILD_ID__:build,crypto:{randomUUID:()=> 'official-entry-'+ordinal},window:host,Date:Clock,setTimeout:schedule,clearTimeout:cancel,require:name=>{
    if(name==='./mirrorClient')return{MirrorClient:OwnedClient};if(name==='@decky/api')return{useQuickAccessVisible:()=>false,routerHook:{}};
    if(name==='./steamHudProbe')return{installSteamHudProbe:()=>{throw Error('default must not install probe');}};
-   if(name==='./steamMonitorHud')return{installSteamMonitorHud:()=>{const s=sockets.at(-1);assert(s);s.readyState=1;s.emit('open');const p=s.sent.filter(p=>p.command==='snapshot'&&p.subscribe!==false).at(-1);s.emit('message',{type:'snapshot',runId:'run-1',...(p?.probeId?{probeId:p.probeId}:{}),snapshot:{runId:'run-1',generation:1,revision:ordinal,ready:true,game:null,provenance:{kind:'ymcc-native',pid:123},fan:{supported:false,enabled:false,preset:'off',choices:[]}}});return ownFeature('monitor');}};
+   if(name==='./steamMonitorHud')return{installSteamMonitorHud:()=>{const s=sockets.at(-1);assert(s);s.readyState=1;s.emit('open');const p=s.sent.filter(p=>p.command==='snapshot'&&p.subscribe!==false).at(-1);s.emit('message',{type:'snapshot',runId,...(p?.probeId?{probeId:p.probeId}:{}),snapshot:{runId,generation:1,revision:ordinal,ready:true,game:null,provenance:{kind:'ymcc-native',pid:123},fan:{supported:false,enabled:false,preset:'off',choices:[]}}});return ownFeature('monitor');}};
    if(name==='./steamWallpaper')return{installSteamWallpaper:()=>ownFeature('wallpaper')};if(name==='./deckyLoaderUpdate')return{installLoaderUpdateRow:()=>ownFeature('updater')};if(name==='./qamPlacement')return{installConsoleTab:()=>({active:true,dispose:ownFeature('placement')})};if(entryImports.has(name))return{};throw Error('unmocked entry '+name);
   }};
   vm.runInNewContext(transformSync(entryText,{loader:'tsx',format:'cjs',jsxFactory:'SP_REACT.createElement'}).code,scope);
@@ -975,12 +1316,29 @@ async function verifyOfficialImportLifetime(){
   const expected='2'.repeat(64),value={frontendBuildId:expected,runId:'run-1'};host.__YMCC_DECKY_MIRROR__={...host.__YMCC_DECKY_MIRROR__,...value};
   const update=vm.runInNewContext(nativeSource,{window:host,Error,Promise});update(value);await flush();assert.equal(imports.length,2);assert.equal(snapshot().liveSockets,0,'official unload must retire the seed before replacement import');
   await advance(10000);assert.equal(host.__YMCC_DECKY_FRONTEND_UPDATE__.phase,'failed');assert.equal(loader.reloadLock,false);assert.equal(loader.plugins.length,0);trace.push({phase:'original-import-and-ready-deadlines',...snapshot()});
-  await advance(5000);assert.equal(imports.length,3);assert.equal(new Set(imports.map(g=>g.spec)).size,3,'seed and retry must use distinct original Date.now URL identities');assert.equal(host.__YMCC_DECKY_FRONTEND_UPDATE__.attempts,2);imports[2].release();await flush();assert.equal(imports[2].module.factoryCalls,1);assert.equal(loader.plugins.length,1);assert.equal(host.__YMCC_DECKY_FRONTEND_UPDATE__.phase,'current');assert.equal(snapshot().liveSockets,1);assert.equal(snapshot().timers,0);const acceptedReceipt=host.__YMCC_DECKY_FRONTEND__,acceptedClient=clients.at(-1);trace.push({phase:'bounded-second-import-accepted',...snapshot()});
+  if(noReplay){
+   for(let n=0;n<32;n++)update({...value,recoverFrontend:true,loaderVersion:'v3.3.1'});
+   await advance(60000);
+   const exhausted=host.__YMCC_DECKY_FRONTEND_UPDATE__;
+   const terminal={imports:imports.length,attempts:exhausted.attempts,phase:exhausted.phase,pending:exhausted.pending,firstLoad:!!host.__YMCC_DECKY_FRONTEND_BOOT__,...snapshot()};
+   trace.push({stage:'retained-grant-exhausted',...terminal});
+   // Preserve the state before the assertion also on the old retrying source.
+   disconnectObservations.push({name:'retained-grant-after-deadline',...terminal});
+   assert.deepEqual({imports:terminal.imports,attempts:terminal.attempts,phase:terminal.phase,pending:terminal.pending,firstLoad:terminal.firstLoad,liveSockets:terminal.liveSockets,timers:terminal.timers,events:terminal.events,features:terminal.features},
+    {imports:2,attempts:1,phase:'failed',pending:false,firstLoad:false,liveSockets:0,timers:0,events:0,features:0},'Same grant must not replay a dispatched import or start a fallback');
+   const grant={...value,runId:'run-2',recoverFrontend:true,loaderVersion:'v3.3.1'};
+   host.__YMCC_DECKY_MIRROR__={...host.__YMCC_DECKY_MIRROR__,...grant};host.dispatchEvent(new Event('ymcc-decky-bootstrap'));
+   update(grant);await advance(11999);assert.equal(imports.length,2,'a new grant uses the original first-load grace');await advance(1);
+   assert.equal(imports.length,3);assert.equal(host.__YMCC_DECKY_FRONTEND_BOOT__.dispatched,true);
+  }else{
+   await advance(5000);assert.equal(imports.length,3);assert.equal(host.__YMCC_DECKY_FRONTEND_UPDATE__.attempts,2);
+  }
+  assert.equal(new Set(imports.map(g=>g.spec)).size,3,'seed and replacement must use distinct original Date.now URL identities');imports[2].release();await flush();assert.equal(imports[2].module.factoryCalls,1);assert.equal(loader.plugins.length,1);assert.equal((noReplay?host.__YMCC_DECKY_FRONTEND_BOOT__:host.__YMCC_DECKY_FRONTEND_UPDATE__).phase,'current');assert.equal(snapshot().liveSockets,1);assert.equal(snapshot().timers,0);const acceptedReceipt=host.__YMCC_DECKY_FRONTEND__,acceptedClient=clients.at(-1);trace.push({phase:noReplay?'new-grant-first-load-accepted':'bounded-second-import-accepted',...snapshot()});
   imports[1].release();await flush();assert.equal(imports[1].module.factoryCalls,0,'expired original import must not call its factory');
   const late={phase:'first-import-evaluates-late',...snapshot(),lateFactoryCalls:imports[1].module.factoryCalls,receiptRetained:host.__YMCC_DECKY_FRONTEND__===acceptedReceipt,acceptedClientConnected:acceptedClient.snapshot().connected};trace.push(late);
   loader.unloadPlugin('ymcc-sidebar');await flush();trace.push({phase:'actual-official-unload',...snapshot()});loader.deinit();await flush();trace.push({phase:'actual-official-deinit',...snapshot(),remainingRoutes:loader.routerHook.routes.size});
   const terminal=snapshot(),passed=late.liveSockets===1&&late.receiptRetained&&late.timers===0&&terminal.liveSockets===0&&terminal.timers===0&&terminal.events===0&&terminal.features===0&&terminal.receiptBuild===null&&terminal.officialPlugins===0;
-  disconnectObservations.push({name:'whole-official-class-late-import',passed,trace:plain(trace),officialConstructor:true,officialImportReactImportUnloadDeinit:true,rawOfficialSourceUnmodified:true,dynamicImportIsControlledVmPort:true,actualEntryAndMirrorClient:true,rootUiModePromiseStillPending:true,officialBackendCallbacksNotClaimedRetired:true,officialFactoryCounts:imports.map(g=>g.module?.factoryCalls??null),distinctImportSpecifiers:imports.map(g=>g.spec),realSteam:false});
+  disconnectObservations.push({name:'whole-official-class-late-import',passed,policy:noReplay?'no-replay-after-dispatch':'historical-bounded-retry',trace:plain(trace),officialConstructor:true,officialImportReactImportUnloadDeinit:true,rawOfficialSourceUnmodified:true,dynamicImportIsControlledVmPort:true,actualEntryAndMirrorClient:true,rootUiModePromiseStillPending:true,officialBackendCallbacksNotClaimedRetired:true,officialFactoryCounts:imports.map(g=>g.module?.factoryCalls??null),distinctImportSpecifiers:imports.map(g=>g.spec),realSteam:false});
   assert(passed,'whole official/native retry + late original evaluation must retain only accepted owner and return it on unload');
  }finally{
   // Preserve any failure observation before fixture-only rescue. Never count
@@ -1011,13 +1369,15 @@ async function verifyPluginDisposalSources(activationOnly=false){
    disconnectObservations.push({name:'dispose-source-'+source+'-'+sink,source,sink,facts,transportClosed:true,timers:0,lateEdges:200,settingsWrites:sink==='working'?1:0,uncertainWriteNotReplayed:true});
   }finally{unsubscribe?.();f.client.dispose();if(pending)await pending;if(probe)await probe;assert.equal(f.timers.size,0);}
  }
- for(const route of ['loader','pagehide','initialization-rejected'])for(const sinkThrow of [false,true])for(const cleanupThrow of route==='initialization-rejected'?[false]:[false,true]){
-  const sockets=[],timers=new Map(),events=new Map(),clients=[],logs=[],released=[];let timerId=0;
+ for(const route of ['placement-rejected','receipt-rejected','loader','pagehide','initialization-rejected'])for(const sinkThrow of [false,true])for(const cleanupThrow of route==='initialization-rejected'?[false]:[false,true]){
+  const sockets=[],timers=new Map(),events=new Map(),clients=[],logs=[],released=[];let timerId=0,placementRejected=route==='placement-rejected';
   const native={endpoint:'ws://127.0.0.1:12345/mirror',token:'TEST-ENTRY-ONLY',runId:'run-1'};
   class Socket {listeners=new Map();sent=[];closed=false;readyState=0;constructor(url){this.url=url;sockets.push(this);}addEventListener(k,v){this.listeners.set(k,v);}send(v){this.sent.push(JSON.parse(v));}close(){this.closed=true;this.readyState=3;this.listeners.get('close')?.();}emit(k,v){this.listeners.get(k)?.({data:JSON.stringify(v)});}}
   class OwnedClient extends MirrorClient {constructor(deps){super(deps);clients.push(this);}}
   const host={__YMCC_DECKY_MIRROR__:native,console:{info:value=>{logs.push(value);if(sinkThrow)throw Error('optional-console-unavailable');},warn:()=>{}},
    addEventListener:(k,v)=>events.set(k,v),removeEventListener:(k,v)=>{if(events.get(k)===v)events.delete(k);},dispatchEvent:event=>{events.get(event.type)?.(event);return true;}};
+  const previousReceipt=route==='receipt-rejected'?{buildId:'other-owner'}:undefined;
+  if(previousReceipt)Object.defineProperty(host,'__YMCC_DECKY_FRONTEND__',{value:previousReceipt});
   const module={exports:{}},react={createElement:(type,props,...children)=>({type,props:props??{},children})};
   const release=stage=>()=>{released.push(stage);if(cleanupThrow&&stage==='wallpaper')throw Error('old-surface-cleanup-unavailable');};
   const imports=new Set(['../../src/bridge/deckyInputOptions','../../src/bridge/losslessProgramState','../../src/bridge/frameRateModel','./AnchoredDropdown','./fanChoiceDebounce','./performanceIntentQueue','./performanceModel','./PerformanceControls','./GameProfileControls','./steamRunningContext']);
@@ -1029,13 +1389,13 @@ async function verifyPluginDisposalSources(activationOnly=false){
     if(name==='./steamMonitorHud')return {installSteamMonitorHud:()=>{const s=sockets.at(-1);assert(s);s.readyState=1;s.emit('open');s.emit('message',{type:'snapshot',runId:'run-1',snapshot:{runId:'run-1',generation:1,revision:1,ready:true,game:null,fan:{supported:false,enabled:false,preset:'off',choices:[]}}});return release('monitor-hud');}};
     if(name==='./steamWallpaper')return {installSteamWallpaper:()=>{if(route==='initialization-rejected')throw Error('fixture-initialization-rejected');return release('wallpaper');}};
     if(name==='./deckyLoaderUpdate')return {installLoaderUpdateRow:()=>release('loader-update')};
-    if(name==='./qamPlacement')return {installConsoleTab:()=>({active:true,dispose:release('placement')})};
+    if(name==='./qamPlacement')return {installConsoleTab:()=>{if(placementRejected)throw Error('fixture-placement-rejected');return {active:true,dispose:release('placement')};}};
     if(imports.has(name))return {};throw Error('unexpected entry dependency '+name);
    }};
   const run=()=>{
    vm.runInNewContext(transformSync(entryText,{loader:'tsx',format:'cjs',jsxFactory:'SP_REACT.createElement'}).code,scope);
    if(activationOnly){
-    const before={clients:clients.length,sockets:sockets.length,timers:timers.size,listeners:events.size,frontendReceipt:host.__YMCC_DECKY_FRONTEND__!==undefined,features:released.length};
+     const before={clients:clients.length,sockets:sockets.length,timers:timers.size,listeners:events.size,frontendReceipt:host.__YMCC_DECKY_FRONTEND__!==previousReceipt,features:released.length};
     const quiet=before.clients===0&&before.sockets===0&&before.timers===0&&before.listeners===0&&!before.frontendReceipt;
     if(!quiet){
      // The caller abandoned import and never constructed this plugin. Rescue
@@ -1047,18 +1407,33 @@ async function verifyPluginDisposalSources(activationOnly=false){
    }
    return module.exports.default();
   };
-  if(route==='initialization-rejected')assert.throws(run,/fixture-initialization-rejected/);
+   if(route==='initialization-rejected')assert.throws(run,/fixture-initialization-rejected/);
+   else if(route==='placement-rejected')assert.throws(run,/fixture-placement-rejected/);
+   else if(route==='receipt-rejected')assert.throws(run,{name:'TypeError',message:/__YMCC_DECKY_FRONTEND__/});
   else{
    const plugin=run(),oldPagehide=events.get('pagehide');assert(oldPagehide);
    if(route==='pagehide')oldPagehide(new Event('pagehide'));else plugin.onDismount();
    plugin.onDismount();oldPagehide(new Event('pagehide'));
   }
-  await flush();assert.equal(clients.length,1);assert.equal(clients[0].snapshot().connected,false);assert.equal(sockets.length,1);assert(sockets[0].closed);assert.equal(timers.size,0);assert.equal(events.size,0);assert.equal(host.__YMCC_DECKY_FRONTEND__,undefined);
+   await flush();
+   const observed={clients:clients.length,connected:clients[0]?.snapshot().connected,peers:sockets.length,liveSockets:sockets.filter(s=>!s.closed).length,timers:timers.size,eventListeners:events.size,previousReceiptUnchanged:host.__YMCC_DECKY_FRONTEND__===previousReceipt};
+   disconnectObservations.push({name:'actual-entry-terminal-resources',route,sinkThrow,cleanupThrow,...observed});
+   assert.deepEqual(observed,{clients:1,connected:false,peers:1,liveSockets:0,timers:0,eventListeners:0,previousReceiptUnchanged:true},'Factory exit must return acquired runtime resources');
   const records=logs.filter(value=>value.startsWith('[YMCC:DeckyClient] ')).map(value=>JSON.parse(value.slice('[YMCC:DeckyClient] '.length)));
   const wanted=route==='loader'?'plugin-disposed':route==='pagehide'?'plugin-pagehide':'plugin-initialization-failed';
   assert.equal(records.length,1);assert.equal(records[0].source,wanted,'actual module exit must identify original caller');assert.equal(records[0].connected,true);
-  assert.deepEqual(released,route==='initialization-rejected'?['monitor-hud']:['loader-update','wallpaper','monitor-hud','placement']);
+   assert.deepEqual(released,route==='initialization-rejected'?['monitor-hud']:route==='placement-rejected'?['loader-update','wallpaper','monitor-hud']:['loader-update','wallpaper','monitor-hud','placement']);
   disconnectObservations.push({name:'actual-entry-'+route,route,sinkThrow,cleanupThrow,source:wanted,records:records.length,released,peers:sockets.length,timers:timers.size,eventListeners:events.size,actualProductionEntry:true,realSteam:false});
+   if(route==='placement-rejected'){
+    placementRejected=false;
+    const next=module.exports.default();await flush();
+    assert.equal(clients.length,2);assert.equal(clients[1].snapshot().connected,true);assert.equal(sockets.length,2);
+    assert.equal(sockets.filter(s=>!s.closed).length,1);assert.equal(host.__YMCC_DECKY_FRONTEND__.active,true);
+    assert.equal(sockets.flatMap(s=>s.sent).filter(p=>p.command!=='snapshot').length,0,'Initialization and retry must not replay writes');
+    next.onDismount();await flush();
+    assert.equal(timers.size,0);assert.equal(events.size,0);assert(sockets.every(s=>s.closed));assert.equal(host.__YMCC_DECKY_FRONTEND__,undefined);
+    disconnectObservations.push({name:'actual-entry-retry-after-placement-rejection',sinkThrow,cleanupThrow,singleReplacement:true,noWrites:true,liveSockets:0,timers:0,eventListeners:0});
+   }
  }
 }
 
@@ -1086,23 +1461,71 @@ async function verifyPassiveOpenSnapshotHandoff(){
   try{
    socket.emit('open');const sent=socket.sent.filter(p=>p.command==='snapshot'&&p.subscribe!==false);
    await Promise.all(tasks);await flush();
-   const row={mode:'passive-open-publication-'+mode,requests:sent.length,correlated:sent.filter(p=>p.probeId).length,relayReads:readCount,steamObservations:observations};
+   const row={mode:'passive-open-publication-'+mode,requests:sent.length,correlated:sent.filter(p=>p.probeId).length,relayReads:readCount,steamObservations:observations,requestSources:sent.map(p=>p.requestSource)};
    openingReadMeasurements.push(row);
    assert.equal(row.requests,mode==='retire'?0:1,'Only one opening read leaves this socket after publication');
    assert.equal(row.correlated,mode.includes('probe')?1:0,'The first open request preserves an explicit pending probe nonce');
+   assert.deepEqual(row.requestSources,mode==='retire'?[]:[mode.includes('probe')?'socket-open-probe':'socket-open']);
    assert.equal(row.relayReads,mode==='retire'?0:1);assert.equal(row.steamObservations,mode==='retire'?0:1);
    if(probe)assert(await probe);
    assert.equal(f.timers.size,0);assert(socket.sent.every(p=>p.command==='snapshot'));
    if(mode==='visible'){
     f.client.setVisible(false,owner);const before=socket.sent.length;
+    assert.equal(socket.sent.at(-1).requestSource,'demand-stop');assert.equal(socket.sent.at(-1).subscribe,false);
     f.client.setVisible(true,owner);assert.equal(socket.sent.length,before+1,'A later fresh demand is not coalesced with the opening');
+    assert.equal(socket.sent.at(-1).requestSource,'demand-start');
+    row.demandSources=socket.sent.slice(-2).map(p=>p.requestSource);
     await Promise.all(tasks);await flush();assert.equal(readCount,2);assert.equal(f.timers.size,0);
    }
   }finally{off();f.client.dispose();relay.dispose();if(probe)await probe.catch(()=>{});await Promise.allSettled(tasks);assert.equal(f.timers.size,0);}
  }
 }
 
+async function verifyHudPreferencesReady(){
+ const {load}=await import('./fixtures/decky_game_memory_store.mjs');
+ const source=file=>fs.readFileSync(path.join(root,'src/bridge',file),'utf8');
+ const model={normalizeMonitorOutput:()=>({})}; // HUD data and output owners are unused by the hello path.
+ const protocol=load(source('monitorHudProtocol.ts'),{'./monitorHudModel':model});
+ const {createSteamHudRelay}=load(source('steamHudRelay.ts'),{'./monitorHudProtocol':protocol,'./monitorHudModel':model,'./monitorHudWire':load(source('monitorHudWire.ts'))});
+ const {ReadOnlyMirrorRelay}=load(source('deckyMirrorRelay.ts'),{'../../decky-plugin/src/steamRunningContext':contextModule.exports});
+ const run='a'.repeat(32),peer={connection:'1',runId:run,connected:true};
+ for(const mode of ['visible','pending','hidden']){
+  const f=fixture(),tasks=[],extras=[];let reads=0,release;
+  const held=new Promise(resolve=>release=resolve);
+  f.bootstrap.runId=run;f.bootstrap.hudProtocol=1;f.client.setPassiveDemand('hud',true);
+  const socket=f.sockets[0];socket.readyState=1;
+  const mirror=new ReadOnlyMirrorRelay({read:async()=>{
+    if(++reads===1&&mode==='pending')await held;
+    const {runId,revision,...snapshot}=f.snapshot(reads);return {...snapshot,provenance:{kind:'ymcc-native',pid:123}};
+   },observe:()=>()=>{},snapshotDemand:()=>{},reply:async(_id,message)=>{socket.emit('message',message);return true;},schedule:()=>assert.fail('No recovery timer while healthy')});
+  const unexpected=()=>assert.fail('HUD hello cannot acquire a sample or timer');
+  const hud=createSteamHudRelay({now:()=>0,session:()=>'',reply:async(_id,message)=>{if(message.type==='hud-ready')socket.emit('message',message);return true;},sample:unexpected,acquire:unexpected,setTimer:unexpected,clearTimer:unexpected});
+  const off=f.client.subscribeExtra(message=>extras.push(structuredClone(message)));
+  const send=socket.send.bind(socket);
+  socket.send=raw=>{send(raw);const request=JSON.parse(raw);assert.equal(request.command,'snapshot');tasks.push(mirror.request({...peer,request}));};
+  try{
+   mirror.connected(peer);if(mode!=='hidden')f.client.setVisible(true);socket.emit('open');
+   if(mode!=='pending')await Promise.all(tasks);
+   const initial=socket.sent.length;hud.connected(peer);
+   assert.equal(socket.sent.length,initial+1,'An unmarked peer hello must still restore or explicitly pause demand');
+   assert.equal(socket.sent.at(-1).requestSource,'hud-peer-ready');
+   assert.deepEqual(extras.at(-1),{type:'hud-ready',protocol:1,runId:run});
+   if(mode==='hidden')assert.equal(socket.sent.at(-1).subscribe,false);
+   if(mode!=='pending')await Promise.all(tasks);
+   const requests=socket.sent.length,readsBefore=reads,timers=[...f.timers.keys()];
+   hud.preferencesReady();
+   assert.deepEqual(extras.at(-1),{type:'hud-ready',protocol:1,runId:run,snapshotRefresh:false},'The original HUD subscriber gets the actual preferences hello');
+   openingReadMeasurements.push({mode:'hud-preferences-'+mode,addedRequests:socket.sent.length-requests,addedReads:reads-readsBefore,hudNotices:extras.length,peerRequestSource:socket.sent.at(-1).requestSource});
+   assert.equal(socket.sent.length,requests,'A preferences-only hello cannot resend a sidebar snapshot or pause');
+   assert.equal(reads,readsBefore);assert.deepEqual([...f.timers.keys()],timers);
+   release();await Promise.all(tasks);
+   assert.equal(f.client.connectionVerified(run),mode!=='hidden');assert.equal(f.timers.size,0);
+  }finally{release();off();f.client.dispose();hud.dispose();mirror.dispose();await Promise.allSettled(tasks);assert.equal(f.timers.size,0);}
+ }
+}
+
 async function verifyOpenBeforeFirstReply(){
+ await verifyHudPreferencesReady();
  await verifyPassiveOpenSnapshotHandoff();
  const flush=async()=>{for(let n=0;n<80;n++)await Promise.resolve();};
  for(const ready of [true,false]){
@@ -1113,6 +1536,7 @@ async function verifyOpenBeforeFirstReply(){
    opening=f.client.checkConnectionOnOpen();const probe=f.client.probe;assert(probe);
    const requests=socket.sent.filter(p=>p.command==='snapshot'&&p.subscribe!==false),correlated=requests.filter(p=>p.probeId===probe.id);
    assert.equal(correlated.length,1,'An OPEN socket awaiting its first reply must issue this existing probe nonce');
+   assert.deepEqual(requests.map(p=>p.requestSource),['socket-open','connection-probe']);
    const originalTimer=probe.timer,deadline=f.timers.get(originalTimer);assert.equal(deadline.delay,15000);
    assert.equal(await f.client.checkConnectionOnOpen(),false);assert.equal(socket.sent.length,2);assert.equal(f.client.probe.timer,originalTimer);
    socket.emit('message',{type:'snapshot',runId:'run-1',snapshot:{...f.snapshot(2),provenance:{kind:'ymcc-native',pid:123}}});
@@ -1121,13 +1545,13 @@ async function verifyOpenBeforeFirstReply(){
    await opening;await flush();assert.equal(f.client.connectionVerified('run-1'),true);assert.equal(f.client.snapshot().snapshot.ready,ready);
    if(!ready)await assert.rejects(f.client.mutate('performance.setControls',{patch:{tdp:25}}));
    deadline.action();for(let n=0;n<100;n++)socket.emit('open');assert.equal(socket.sent.length,2);assert.equal(f.sockets.length,1);assert.equal(f.timers.size,0);
-   assert(socket.sent.every(p=>p.command==='snapshot'));openingReadMeasurements.push({mode:'open-before-first-reply',ready,ordinaryRequests:1,correlatedRequests:1,settingsCommands:0,sockets:f.sockets.length,timers:f.timers.size,verified:true});
+   assert(socket.sent.every(p=>p.command==='snapshot'));openingReadMeasurements.push({mode:'open-before-first-reply',ready,ordinaryRequests:1,correlatedRequests:1,settingsCommands:0,sockets:f.sockets.length,timers:f.timers.size,verified:true,requestSources:requests.map(p=>p.requestSource)});
   }finally{f.client.dispose();if(opening)await opening;assert.equal(f.timers.size,0);assert(f.sockets.every(s=>s.closed));}
  }
  const connecting=fixture();let opening;
  try{
   connecting.client.setVisible(true);const s=connecting.sockets.at(-1);s.readyState=0;opening=connecting.client.checkConnectionOnOpen();const p=connecting.client.probe;assert(p);assert.equal(s.sent.length,0);
-  s.readyState=1;s.emit('open');assert.equal(s.sent.length,1);assert.equal(s.sent[0].probeId,p.id);
+  s.readyState=1;s.emit('open');assert.equal(s.sent.length,1);assert.equal(s.sent[0].probeId,p.id);assert.equal(s.sent[0].requestSource,'socket-open-probe');
   s.emit('message',{type:'snapshot',runId:'run-1',probeId:p.id,snapshot:{...connecting.snapshot(2),provenance:{kind:'ymcc-native',pid:123}}});await opening;
   assert.equal(connecting.client.connectionVerified('run-1'),true);assert.equal(connecting.timers.size,0);openingReadMeasurements.push({mode:'connecting-before-first-reply',correlatedRequests:1,settingsCommands:0,verified:true});
  }finally{connecting.client.dispose();if(opening)await opening;assert.equal(connecting.timers.size,0);}
@@ -1136,20 +1560,53 @@ async function verifyOpenBeforeFirstReply(){
   try{f.client.setVisible(true);const s=f.sockets.at(-1);s.readyState=1;s.emit('open');s.readyState=state;const before=s.sent.length;stopped=f.client.checkConnectionOnOpen();assert.equal(s.sent.length,before,'Closing or closed unconfirmed sockets do not receive the new probe');f.client.dispose();await stopped;assert.equal(f.client.connectionVerified('run-1'),false);assert(s.sent.every(p=>p.command==='snapshot'));openingReadMeasurements.push({mode:'unconfirmed-socket-not-open',readyState:state,additionalRequests:0,settingsCommands:0,verified:false});}
   finally{f.client.dispose();if(stopped)await stopped;assert.equal(f.timers.size,0);}
  }
+ // The platform can expose CLOSED before its queued close dispatch runs.
+ // A hidden QAM check must not send on that socket or wait for its reply.
+ const stale=fixture();let staleOpening;
+ try{
+  const old=stale.connect(),runId='run-1';old.readyState=1;
+  const send=(socket,revision,probeId)=>socket.emit('message',{type:'snapshot',runId,probeId,
+    snapshot:{...stale.snapshot(revision),provenance:{kind:'ymcc-native',pid:123}}});
+  send(old,2);assert.equal(stale.client.connectionVerified(runId),true);
+  stale.client.setPassiveDemand('connection',true);stale.client.setVisible(false);
+  old.readyState=3;
+  const sent=old.sent.length;staleOpening=stale.client.checkConnectionOnOpen();
+  const row={mode:'closed-before-platform-callback',additionalRequests:old.sent.length-sent,
+    connected:stale.client.snapshot().connected,checking:stale.client.connectionChecking(runId),
+    retryDelays:[...stale.timers.values()].map(t=>t.delay),sockets:stale.sockets.length};
+  openingReadMeasurements.push(row);
+  assert.equal(row.additionalRequests,0,'Opened QAM does not ask a CLOSED transport for state');
+  assert.equal(row.connected,false);assert.equal(row.checking,false);
+  assert.deepEqual(row.retryDelays,[250],'Only the existing shared rebind lease remains');
+  await staleOpening;
+  for(let n=0;n<24;n++)assert.equal(await stale.client.checkConnectionOnOpen(),false);
+  assert.equal(stale.sockets.length,1);assert.deepEqual([...stale.timers.values()].map(t=>t.delay),[250]);
+  stale.fireDelay(250);const next=stale.sockets.at(-1);assert.notEqual(next,old);next.readyState=1;next.emit('open');
+  const requests=next.sent.filter(p=>p.command==='snapshot'&&p.subscribe!==false);assert.equal(requests.length,1);assert.match(requests[0].probeId,/^probe:/);
+  const probeId=requests[0].probeId;
+  send(old,100,probeId);old.emit('close');assert.equal(stale.client.connectionVerified(runId),false);
+  send(next,3,probeId);await flush();
+  assert.equal(stale.client.connectionVerified(runId),true);assert.equal(stale.timers.size,0);
+  assert(stale.sockets.flatMap(s=>s.sent).every(p=>p.command==='snapshot'));
+  Object.assign(row,{recovered:true,newSnapshotRequests:requests.length,remainingTimers:stale.timers.size,settingsCommands:0});
+ }finally{stale.client.dispose();if(staleOpening)await staleOpening;assert.equal(stale.timers.size,0);}
  const retired=fixture();let unsubscribe,aborted;
  try{retired.client.setVisible(true);const s=retired.sockets.at(-1);s.readyState=1;s.emit('open');const before=s.sent.length;unsubscribe=retired.client.subscribe(state=>{if(state.connectionTest?.pending)retired.client.dispose();});aborted=retired.client.checkConnectionOnOpen();await aborted;assert.equal(s.sent.length,before,'A synchronous observer dispose still retires the original probe before send');assert.equal(retired.client.connectionVerified('run-1'),false);assert.equal(retired.timers.size,0);openingReadMeasurements.push({mode:'observer-dispose-before-probe-send',additionalRequests:0,settingsCommands:0,verified:false});}
  finally{unsubscribe?.();retired.client.dispose();if(aborted)await aborted;assert.equal(retired.timers.size,0);}
 }
 
 await check('restart run ID disconnects and no mutation replay',async()=>{
+ if(restartVariant==='snapshot-delivery-refusal'){await verifySnapshotDeliveryRefusal();return;}
  if(restartVariant==='client-diagnostic'){await verifyClientDiagnostic();return;}
  if(restartVariant==='official-import-lifetime'){await verifyOfficialImportLifetime();return;}
+ if(restartVariant==='official-import-no-replay'){await verifyOfficialImportLifetime(true);return;}
  if(restartVariant==='entry-factory-activation'){await verifyPluginDisposalSources(true);return;}
  if(restartVariant==='plugin-disposal-sources'){await verifyPluginDisposalSources();return;}
  if(restartVariant==='open-before-first-reply'){await verifyOpenBeforeFirstReply();return;}
  if(restartVariant==='disconnect-diagnostics'){await verifyDisconnectDiagnostics();return;}
  if(restartVariant===null)await verifyDisconnectDiagnostics();
- if(restartVariant==='native-reply-proof'){await verifyCancelledProbeSetupOwnership();await verifySnapshotSendFailureReentry();await verifyClientDiagnostic();return;}
+ if(restartVariant==='native-reply-proof'){await verifyCancelledProbeSetupOwnership();await verifySnapshotSendFailureReentry();await verifyClientDiagnostic();await verifyHiddenOpeningTeardownReentry();return;}
+ if(restartVariant===null)await verifyHiddenOpeningTeardownReentry();
  await verifyOpeningDeadlineObservation();
  await verifyClientDiagnostic();
  if(restartVariant!=='hidden-proof-lifetimes'){await verifyVisibleReconnectAfterOpeningTimeout();if(restartVariant!==null)return;await verifyOpeningProbeReadCoalescing();}
@@ -1240,14 +1697,75 @@ await check('restart run ID disconnects and no mutation replay',async()=>{
 });
 await check('request freezes identity/generation/revision and args',async()=>{const f=fixture();const s=f.connect();const args={field:'acMode',value:'eco'};const p=f.client.mutate('game.setField',args);args.value='extreme';const req=s.sent.at(-1);assert.equal(req.args.value,'eco');assert.equal(req.identity,'app:480:pid101:birthA');assert.equal(req.generation,1);s.emit('message',{type:'reply',runId:'run-1',id:req.id,ok:true,result:{saved:true,applied:true}});await p;assert.equal(f.timers.size,0);f.client.dispose();});
 await check('second mutation cannot overlap first',async()=>{const f=fixture();const s=f.connect();const p=f.client.mutate('fan.setPreset',{preset:'soft'});await assert.rejects(f.client.mutate('fan.setPreset',{preset:'aggressive'}),/当前不可操作/);const req=s.sent.at(-1);s.emit('message',{type:'reply',runId:'run-1',id:req.id,ok:true});await p;f.client.dispose();});
-await check('timeout never resends a possibly applied action',async()=>{const f=fixture();const s=f.connect();const p=f.client.mutate('fan.setEnabled',{enabled:false});f.fireDelay(4000);await assert.rejects(p,/未确认/);assert.equal(s.sent.filter(m=>m.command==='fan.setEnabled').length,1);assert.equal(s.sent.at(-1).command,'snapshot');assert.equal(f.client.snapshot().snapshot,null);assert.equal(f.client.snapshot().busy,false);f.client.dispose();});
+await check(actionTimeoutCase,async()=>{const f=fixture();const s=f.connect();const p=f.client.mutate('fan.setEnabled',{enabled:false});f.fireDelay(4000);await assert.rejects(p,/未确认/);assert.equal(s.sent.filter(m=>m.command==='fan.setEnabled').length,1);assert.equal(s.sent.at(-1).command,'snapshot');assert.equal(s.sent.at(-1).requestSource,'operation-timeout');assert.equal(f.client.snapshot().snapshot,null);assert.equal(f.client.snapshot().busy,false);f.client.dispose();});
 await check('close rejects inflight mutation and reconnect does not replay it',async()=>{const f=fixture();const s=f.connect();const p=f.client.mutate('fan.setEnabled',{enabled:false});s.close();await assert.rejects(p,/中断/);f.fireDelay(250);const next=f.sockets.at(-1);next.emit('open');assert.equal(next.sent.length,1);assert.equal(next.sent[0].command,'snapshot');f.client.dispose();});
 await check('silent first connection has finite deadline and reconnect',()=>{const f=fixture();f.client.setVisible(true);f.fireDelay(10000);assert.equal(f.sockets[0].closed,true);f.fireDelay(250);assert.equal(f.sockets.length,2);f.client.dispose();});
-await check('visible sidebar recovers beyond three failures with capped outage backoff',()=>{const f=fixture();f.client.setVisible(true);for(const delay of [250,1000,3000,10000,30000,30000]){f.sockets.at(-1).close();f.fireDelay(delay);}assert.equal(f.sockets.length,7);const s=f.sockets.at(-1);s.emit('open');s.emit('message',{type:'snapshot',runId:'run-1',snapshot:f.snapshot()});assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,0);f.client.dispose();});
+await check(outageBackoffCase,async()=>{const f=fixture();f.client.setVisible(true);for(const delay of [250,1000,3000,10000,30000,30000]){f.sockets.at(-1).close();f.fireDelay(delay);}assert.equal(f.sockets.length,7);const s=f.sockets.at(-1);s.emit('open');s.emit('message',{type:'snapshot',runId:'run-1',snapshot:f.snapshot()});assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,0);f.client.dispose();
+ const rows=[];
+ for(const entry of ['sidebar','qam']){
+  const shared=fixture(),{client,sockets,timers,fireDelay}=shared;
+  try{
+   shared.bootstrap.hudProtocol=shared.bootstrap.wallpaperProtocol=1;
+   const old=shared.connect();
+   for(const consumer of ['connection','hud','wallpaper'])client.setPassiveDemand(consumer,true);
+   const write=client.mutate('fan.setEnabled',{enabled:false}).then(()=>null,error=>error);
+   old.close();assert.match((await write)?.message??'',/中断/);
+   client.setVisible(false);
+   for(const delay of [250,1000,3000,10000]){fireDelay(delay);sockets.at(-1).close();}
+   const [retry]=timers.keys(),start=sockets.length;assert.equal(timers.get(retry)?.delay,30000);
+   for(let n=0;n<8;n++){
+    const previous=sockets.length;
+    if(entry==='sidebar')client.setVisible(true);
+    const check=entry==='qam'?client.checkConnectionOnOpen():null;
+    if(sockets.length>previous)sockets.at(-1).close();
+    if(check)await check;
+    if(entry==='sidebar')client.setVisible(false);
+   }
+   const row={entry,extraSockets:sockets.length-start,retainedRetry:timers.has(retry),retryDelays:[...timers.values()].map(t=>t.delay)};
+   rows.push(row);visibleReconnectRows.push(row);
+   if(row.extraSockets!==0||!row.retainedRetry)continue; // Capture both old paths before asserting.
+   if(entry==='sidebar')client.setVisible(true);
+   fireDelay(30000);
+   const next=sockets.at(-1);next.readyState=1;next.emit('open');
+   const reads=next.sent.filter(p=>p.command==='snapshot'&&p.subscribe!==false);assert.equal(reads.length,1);
+   if(entry==='qam')assert.equal(typeof reads[0].probeId,'string','Hidden reconnect still obtains a native proof');
+   next.emit('message',{type:'snapshot',runId:'run-1',probeId:reads[0].probeId,snapshot:{...shared.snapshot(2),provenance:{kind:'ymcc-native',pid:123}}});
+   await new Promise(resolve=>setImmediate(resolve));
+   assert.equal(client.connectionVerified('run-1'),true);assert.equal(sockets.length,start+1);assert.equal(timers.size,0);
+   assert.equal(sockets.flatMap(peer=>peer.sent).filter(p=>p.command==='fan.setEnabled').length,1);
+   row.recovered=true;row.recoverySnapshotReads=reads.length;
+  }finally{client.dispose();assert.equal(timers.size,0);assert.ok(sockets.every(peer=>peer.closed));}
+ }
+ for(const row of rows){assert.equal(row.extraSockets,0,row.entry);assert.equal(row.retainedRetry,true,row.entry);assert.deepEqual(row.retryDelays,[30000],row.entry);assert.equal(row.recovered,true,row.entry);}
+});
 await check('hide cancels queued reconnect',()=>{const f=fixture();const s=f.connect();s.close();f.client.setVisible(false);assert.equal(f.timers.size,0);assert.equal(f.sockets.length,1);});
 await check('power not ready rejects changes without send',async()=>{const f=fixture();const s=f.connect();const snap=f.snapshot(2);snap.ready=false;s.emit('message',{type:'snapshot',runId:'run-1',snapshot:snap});await assert.rejects(f.client.mutate('fan.setEnabled',{enabled:true}),/当前不可操作/);assert.equal(s.sent.length,1);f.client.dispose();});
 await check('fan requests do not include game identity',async()=>{const f=fixture();const s=f.connect();const p=f.client.mutate('fan.setPreset',{preset:'soft'});const req=s.sent.at(-1);assert.equal(req.identity,undefined);s.emit('message',{type:'reply',runId:'run-1',id:req.id,ok:true});await p;f.client.dispose();});
-await check('late native bootstrap event replaces the cold retry immediately without duplicate work',()=>{const f=fixture({boot:false});f.client.setVisible(true);assert.equal(f.sockets.length,0);assert.equal(f.timers.size,1);const late=[...f.timers.values()][0].action;f.makeBootstrapAvailable();f.client.bootstrapChanged();assert.equal(f.sockets.length,1);assert.equal(f.timers.size,1);late();assert.equal(f.sockets.length,1);const socket=f.sockets[0];socket.emit('open');socket.emit('message',{type:'snapshot',runId:f.bootstrap.runId,snapshot:f.snapshot()});assert.equal(f.timers.size,0);f.client.dispose();});
+await check(lateBootstrapCase,async()=>{const f=fixture({boot:false});f.client.setVisible(true);assert.equal(f.sockets.length,0);assert.equal(f.timers.size,1);const late=[...f.timers.values()][0].action;f.makeBootstrapAvailable();f.client.bootstrapChanged();assert.equal(f.sockets.length,1);assert.equal(f.timers.size,1);late();assert.equal(f.sockets.length,1);const socket=f.sockets[0];socket.emit('open');socket.emit('message',{type:'snapshot',runId:f.bootstrap.runId,snapshot:f.snapshot()});assert.equal(f.timers.size,0);f.client.dispose();
+ for(const entry of ['sidebar','qam'])for(const edge of ['new-run','revoked']){
+  const shared=fixture(),{client,sockets,timers,nativeWindow,bootstrap}=shared;
+  try{
+   const old=shared.connect();client.setPassiveDemand('connection',true);client.setVisible(false);old.close();
+   assert.equal(timers.size,1);const [[retry,queued]]=timers;
+   const current={...bootstrap,...(edge==='new-run'?{runId:'run-2',token:'REPLACEMENT-TEST',endpoint:'ws://127.0.0.1:12346/mirror'}:{revoked:true})};
+   nativeWindow.__YMCC_DECKY_MIRROR__=current; // Deliberately omit the native change event.
+   if(entry==='sidebar')client.setVisible(true);else await client.checkConnectionOnOpen();
+   assert.equal(timers.has(retry),false,`${entry}: ${edge} must retire the old retry`);
+   queued.action();
+   if(edge==='new-run'){
+    assert.equal(sockets.length,2);const next=sockets.at(-1);assert.ok(next.url.startsWith(current.endpoint+'?'));
+    next.readyState=1;next.emit('open');const read=next.sent.at(-1);
+    assert.equal(read.runId,current.runId);
+    if(entry==='qam')assert.equal(typeof read.probeId,'string');
+    next.emit('message',{type:'snapshot',runId:current.runId,probeId:read.probeId,snapshot:{...shared.snapshot(2),runId:current.runId,provenance:{kind:'ymcc-native',pid:123}}});
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(client.connectionVerified(current.runId),true);
+   }else{assert.equal(sockets.length,1);assert.equal(client.snapshot().connected,false);}
+   assert.equal(timers.size,0);
+   visibleReconnectRows.push({entry,bindingEdge:edge,oldRetryRetired:true,verified:client.connectionVerified(current.runId),socketCount:sockets.length});
+  }finally{client.dispose();assert.equal(timers.size,0);assert.ok(sockets.every(peer=>peer.closed));}
+ }
+});
 await check('same native binding event cannot duplicate live connection',()=>{const f=fixture();f.connect();f.client.bootstrapChanged();assert.equal(f.sockets.length,1);assert.equal(f.timers.size,0);f.client.dispose();});
 await check('new native run cancels old mutation, never replays into new host',async()=>{const f=fixture();const old=f.connect();const mutation=f.client.mutate('fan.setEnabled',{enabled:true});f.bootstrap.runId='run-2';f.bootstrap.token='NEW-TEST-TOKEN';f.client.bootstrapChanged();await assert.rejects(mutation,/连接已结束/);assert.equal(old.closed,true);assert.equal(f.sockets.length,2);f.sockets[1].emit('open');assert.equal(f.sockets[1].sent.length,1);assert.equal(f.sockets[1].sent[0].command,'snapshot');assert.equal(f.sockets[1].sent[0].runId,'run-2');f.client.dispose();});
 await check('hidden bootstrap event starts zero sockets',()=>{const f=fixture();f.client.bootstrapChanged();assert.equal(f.sockets.length,0);assert.equal(f.timers.size,0);f.client.dispose();});
@@ -1260,7 +1778,7 @@ await check('slider accepts only the exact rendered snapshot',async()=>{const f=
 await check('slider rendered revision change rejects before sending any mutation',async()=>{const f=fixture(),s=f.connect(),expected=f.client.snapshot().snapshot;s.emit('message',{type:'snapshot',runId:'run-1',snapshot:f.snapshot(2)});await assert.rejects(f.client.mutate('fan.setPreset',{preset:'soft'},expected),/快照已变化/);assert.equal(s.sent.length,1);f.client.dispose();});
 await check(tdpReceiptCase,async()=>{
  const record=[];
- for(const mode of ['write-ack','saved-unconfirmed','owner-unconfirmed','unknown-receipt','reply-timeout','transport-ended','non-tdp','before-send','sink-throws']){
+ for(const mode of ['write-ack','saved-unconfirmed','owner-unconfirmed','unknown-receipt','reply-timeout','transport-ended','non-tdp','before-send','sink-throws','regressed-clock']){
   let clock=100;const f=fixture({now:()=>clock}),s=f.connect(),snap=f.snapshot(2),rows=[];
   try{
    snap.actions={fan:true,game:true,performance:true};
@@ -1271,6 +1789,8 @@ await check(tdpReceiptCase,async()=>{
    f.client.deps.tdpActionSettled=value=>{rows.push(JSON.parse(JSON.stringify(value)));if(mode==='sink-throws')throw Error('diagnostic failure');};
    const expected=f.client.snapshot().snapshot;
    if(mode==='before-send')expected.revision--;
+   const sendAt=mode==='regressed-clock'?90:450;
+   clock=sendAt;
    const pending=f.client.mutate('performance.setControls',{patch:mode==='non-tdp'?{bias:55}:{tdp:25}},expected);
    const request=s.sent.at(-1),sentBefore=s.sent.filter(x=>x.command==='performance.setControls').length;
    const reply=(id=request.id)=>s.emit('message',{type:'reply',runId:'run-1',id,ok:mode!=='owner-unconfirmed',error:mode==='owner-unconfirmed'?'owner state uncertain':undefined,
@@ -1278,13 +1798,13 @@ await check(tdpReceiptCase,async()=>{
    if(mode==='before-send'){await assert.rejects(pending);assert.equal(sentBefore,0);}
    else{
     assert.equal(sentBefore,1);reply('foreign-reply');assert.deepEqual(rows,[]);assert.equal(f.client.snapshot().busy,true);
-    clock=mode==='reply-timeout'?15100:125;
+    clock=sendAt+(mode==='reply-timeout'?15000:25);
     if(mode==='reply-timeout')f.fireDelay(15000);
     else if(mode==='transport-ended')s.close();else reply();
     if(['reply-timeout','owner-unconfirmed','transport-ended'].includes(mode))await assert.rejects(pending);else await pending;
     reply(); // Delayed or duplicate reply cannot create another terminal record.
    }
-   const outcome=mode==='sink-throws'?'write-ack':mode,expectedRows=['non-tdp','before-send'].includes(mode)?[]:[{generation:1,elapsedMs:clock-100,outcome}];
+   const outcome=['sink-throws','regressed-clock'].includes(mode)?'write-ack':mode,expectedRows=['non-tdp','before-send'].includes(mode)?[]:[{generation:1,elapsedMs:clock-sendAt,outcome,connectedAgeAtSendMs:mode==='regressed-clock'?null:350}];
    tdpReceiptObservations.push({mode,sentBefore,rows});
    assert.deepEqual(rows,expectedRows,'one scoped TDP outcome for '+mode);
    assert.equal(s.sent.filter(x=>x.command==='performance.setControls').length,sentBefore);
@@ -1292,11 +1812,47 @@ await check(tdpReceiptCase,async()=>{
   }finally{f.client.dispose();}
   assert.equal(f.timers.size,0);
  }
+ // A snapshot received on the same transport can already settle the new
+ // generation's view even though the original write result is still unknown.
+ for(const [mode,generation,ready,kind] of [
+   ['new-native-ready',2,true,'ymcc-native'],['same-generation',1,true,'ymcc-native'],
+   ['new-unconfirmed',2,true,'unconfirmed'],['new-native-not-ready',2,false,'ymcc-native']
+ ]){
+  const f=fixture(),s=f.connect(),snap=f.snapshot(2),rows=[];
+  try{
+   snap.actions={fan:true,game:true,performance:true};
+   snap.performance={version:1,side:'ac',scope:'global',mode:'auto',sourceRevision:'source',enabled:true,controls:[
+    {key:'tdp',label:'TDP',kind:'slider',enabled:true,value:20,min:5,max:30,step:1}]};
+   s.emit('message',{type:'snapshot',runId:snap.runId,snapshot:snap});
+   f.client.deps.tdpActionSettled=value=>rows.push(JSON.parse(JSON.stringify(value)));
+   const pending=f.client.mutate('performance.setControls',{patch:{tdp:25}}),id=s.sent.at(-1).id;
+   const next={...snap,revision:3,generation,ready,provenance:kind==='ymcc-native'?{kind,pid:123}:{kind},notice:'current generation'};
+   s.emit('message',{type:'snapshot',runId:snap.runId,snapshot:next});
+   assert.equal(f.client.snapshot().snapshot?.revision,3);
+   const reads=()=>s.sent.filter(x=>x.command==='snapshot').length;
+   const before=reads();
+   f.fireDelay(15000);
+   await assert.rejects(pending,/未确认/);
+   s.emit('message',{type:'reply',runId:snap.runId,id,ok:true,result:{saved:true,applied:true,pending:false}});
+   const state=f.client.snapshot(),readDelta=reads()-before,sentBefore=s.sent.filter(x=>x.command==='performance.setControls').length;
+   tdpReceiptObservations.push({mode,sentBefore,rows,readDelta,retainedRevision:state.snapshot?.revision??null,notice:state.notice,deadlines:f.timers.size});
+   assert.equal(sentBefore,1,'timed out action is never replayed');
+   assert.deepEqual(rows.map(({generation,outcome})=>({generation,outcome})),[{generation:1,outcome:'reply-timeout'}]);
+   assert.equal(state.busy,false);assert.equal(s.closed,false);
+   if(mode==='new-native-ready'){
+    assert.equal(state.snapshot?.revision,3,'old timeout must keep the verified newer Ready snapshot');
+    assert.equal(state.notice,next.notice);assert.equal(readDelta,0);assert.equal(f.timers.size,0);
+   }else{
+    assert.equal(state.snapshot,null);assert.equal(readDelta,1);assert.equal(s.sent.at(-1).requestSource,'operation-timeout');assert.equal(f.timers.size,1);
+   }
+  }finally{f.client.dispose();}
+  assert.equal(f.timers.size,0);
+ }
  const wire=clientDeclaration.initializer.arguments[0].properties.find(node=>node.name?.getText(entryTree)==='tdpActionSettled');
  assert(wire&&ts.isPropertyAssignment(wire)&&ts.isArrowFunction(wire.initializer),'actual plugin entry must wire TDP diagnostic');
  const consoleRows=[],log=vm.runInNewContext('('+wire.initializer.getText(entryTree)+')',{window:{console:{info:line=>consoleRows.push(line)}}});
- log({generation:1,elapsedMs:25,outcome:'write-ack'});
- record.push('[YMCC:DeckyClient] '+JSON.stringify({schema:1,stage:'tdp-action-settled',generation:1,elapsedMs:25,outcome:'write-ack'}));
+ log({generation:1,elapsedMs:25,outcome:'write-ack',connectedAgeAtSendMs:350});
+ record.push('[YMCC:DeckyClient] '+JSON.stringify({schema:1,stage:'tdp-action-settled',generation:1,elapsedMs:25,outcome:'write-ack',connectedAgeAtSendMs:350}));
  assert.deepEqual(consoleRows,record);
 });
 await check('slider game identity cannot migrate to a different foreground game',async()=>{const f=fixture(),s=f.connect(),expected=f.client.snapshot().snapshot;expected.game.identity='old-foreground';await assert.rejects(f.client.mutate('game.setField',{field:'corePolicyMode',value:'only-small'},expected),/快照已变化/);assert.equal(s.sent.length,1);f.client.dispose();});
@@ -1310,7 +1866,7 @@ await check('connection test needs its own fresh native reply and never emits a 
 await check('connection test cannot mistake unconfirmed or not-ready replies for success',async()=>{for(const mode of ['unknown','not-ready']){const f=fixture(),s=f.connect(),pending=f.client.testConnection(),probeId=s.sent.at(-1).probeId,snap=f.snapshot(2);if(mode==='not-ready'){snap.ready=false;snap.provenance={kind:'ymcc-native',pid:123};}s.emit('message',{type:'snapshot',runId:'run-1',probeId,snapshot:snap});await assert.rejects(pending,/尚未就绪/);assert.equal(f.client.snapshot().connectionTest.pending,false);f.client.dispose();}});
 await check('connection test timeout does not replay or block business controls',async()=>{const f=fixture(),s=f.connect(),pending=f.client.testConnection();f.fireDelay(15000);await assert.rejects(pending,/15 秒/);assert.equal(f.client.snapshot().busy,false);assert.equal(s.sent.length,2);assert.equal(f.client.snapshot().connected,true);f.client.dispose();});
 await check('hiding disposes the connection test and consumes late responses',async()=>{const f=fixture(),s=f.connect(),pending=f.client.testConnection();f.client.setVisible(false);await assert.rejects(pending,/隐藏/);assert.equal(f.timers.size,0);f.client.dispose();});
-await check('connection test reconnects existing binding without replaying writes',async()=>{const f=fixture(),s=f.connect();s.close();const pending=f.client.testConnection(),next=f.sockets.at(-1);next.emit('open');const req=next.sent.at(-1),snap=f.snapshot(2);snap.provenance={kind:'ymcc-native',pid:321};next.emit('message',{type:'snapshot',runId:'run-1',probeId:req.probeId,snapshot:snap});assert.equal((await pending).pid,321);assert.equal(f.timers.size,0);f.client.dispose();});
+await check(manualConnectionCase,async()=>{const f=fixture(),s=f.connect();s.close();const pending=f.client.testConnection(),next=f.sockets.at(-1);assert.notEqual(next,s);next.emit('open');const req=next.sent.at(-1),snap=f.snapshot(2);snap.provenance={kind:'ymcc-native',pid:321};next.emit('message',{type:'snapshot',runId:'run-1',probeId:req.probeId,snapshot:snap});assert.equal((await pending).pid,321);assert.equal(f.timers.size,0);f.client.dispose();});
 await check('trainer open requires a confirmed ready entry, not a missing or pending snapshot',async()=>{
  for(const trainer of [undefined,{available:false,pending:false,notice:''},{available:true,pending:true,notice:''}]){const f=fixture(),socket=f.connect(),snap=f.snapshot(2);snap.trainer=trainer;socket.emit('message',{type:'snapshot',runId:'run-1',snapshot:snap});const before=socket.sent.length;await assert.rejects(f.client.mutate('game.setField',{field:'trainer',value:'open'}),/未找到/);assert.equal(socket.sent.length,before);assert.equal(f.timers.size,0);f.client.dispose();}
 });
@@ -1411,9 +1967,11 @@ await check(connectingPauseCase,async()=>{
 });
 await check(restoredPauseFailureCase,()=>{
  const f=fixture();f.bootstrap.hudProtocol=1;f.client.setPassiveVisible(true);
+ const attempted=[];
  try{
-  const socket=f.sockets.at(-1);socket.emit('open');socket.send=()=>{throw Error('Inert restored pause send failed');};
+  const socket=f.sockets.at(-1);socket.emit('open');socket.send=raw=>{attempted.push(JSON.parse(raw));throw Error('Inert restored pause send failed');};
   for(let i=0;i<1024;i++)socket.emit('message',{type:'snapshot',runId:f.bootstrap.runId,snapshot:f.snapshot(i+1)});
+  assert.deepEqual(attempted,[{command:'snapshot',runId:f.bootstrap.runId,subscribe:false,requestSource:'hidden-snapshot'}]);
   assert.equal(f.client.snapshot().connected,false);assert.equal(f.timers.size,1);assert.equal(f.sockets.length,1);
   f.fireDelay(250);f.sockets.at(-1).emit('open');assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,0);
   assert.equal(f.sockets.at(-1).sent.length,0,'Background recovery must not request a business snapshot');
@@ -1425,7 +1983,28 @@ await check(restoredPauseFailureCase,()=>{
 // snapshot/HUD messages and of whether a valid response contains a playable asset.
 function contextFixture(){const f=fixture();f.bootstrap.wallpaperProtocol=1;f.bootstrap.hudProtocol=1;f.client.setPassiveDemand('wallpaper',true);const socket=f.sockets.at(-1);socket.emit('open');return {...f,socket,context:(seq=1,extra={})=>f.client.sendWallpaper('wallpaper.context',{contextSeq:seq,appId:'480',visible:true,...extra}),ack:(seq=1,type='wallpaper-ready',extra={})=>socket.emit('message',{type,runId:f.bootstrap.runId,contextSeq:seq,enabled:true,...extra})};}
 await check('OPEN wallpaper context without response times out and recovers without replay',()=>{
- const f=contextFixture();try{assert.equal(f.context(),true);assert.equal(f.timers.size,1);f.fireDelay(10000);assert.equal(f.client.snapshot().connected,false);assert.equal(f.socket.closed,true);assert.equal(f.timers.size,1);f.fireDelay(250);const next=f.sockets.at(-1);next.emit('open');assert.equal(f.client.snapshot().connected,true);assert.equal(next.sent.length,0);assert.equal(f.timers.size,0);f.context(2);next.emit('message',{type:'wallpaper',runId:f.bootstrap.runId,contextSeq:2,appId:'480',enabled:true,entry:null});assert.equal(f.timers.size,0);}finally{f.client.dispose();}
+ // A locally invalid selection has no possible correlated host receipt. It
+ // cannot create or extend the live lease, or cancel one as a hidden context.
+ const admitted=contextFixture();try{
+  assert.equal(admitted.context(1,{appId:'0'}),false,'zero app ID cannot start shared recovery');
+  assert.equal(admitted.timers.size,0);assert.equal(admitted.socket.sent.length,0);
+  assert.equal(admitted.context(2),true);const timer=[...admitted.timers.keys()][0];
+  for(const [seq,appId] of [[3,'00000000000000000000'],[3,'18446744073709551616'],[3,'12-3'],[3,480],[3,undefined],[-1,'480'],[1.5,'480'],[Number.MAX_SAFE_INTEGER+1,'480']])
+   for(const visible of [true,false])assert.equal(admitted.context(seq,{appId,visible}),false);
+  const cycle={};cycle.self=cycle;
+  assert.equal(admitted.context(3,{visible:false,cycle}),false,'unsent hide must not cancel a valid lease');
+  assert.equal(admitted.socket.sent.length,1);assert.deepEqual([...admitted.timers.keys()],[timer]);
+  const unavailable={foreground:false,entry:null,status:'foreground-transport-unavailable'};
+  admitted.ack(1,'wallpaper',{...unavailable,appId:'480'});assert.deepEqual([...admitted.timers.keys()],[timer]);
+  admitted.ack(2,'wallpaper',{...unavailable,appId:'481'});assert.deepEqual([...admitted.timers.keys()],[timer]);
+  admitted.ack(2,'wallpaper',{...unavailable,appId:'480'});assert.equal(admitted.timers.size,0);
+  assert.equal(admitted.context(3,{appId:'18446744073709551615'}),true,'full unsigned shortcut ID');
+  admitted.ack(3,'wallpaper',{appId:'18446744073709551615'});assert.equal(admitted.timers.size,0);
+  assert.equal(admitted.context(4,{appId:'000001'}),true,'preserve host-admitted decimal text');
+  assert.equal(admitted.context(5,{appId:'000001',visible:false}),true);
+  assert.equal(admitted.timers.size,0);assert.equal(admitted.socket.closed,false);assert.equal(admitted.client.snapshot().connected,true);
+ }finally{admitted.client.dispose();}
+ const f=contextFixture();try{assert.equal(f.context(),true);assert.equal(f.timers.size,1);f.fireDelay(10000);assert.equal(f.client.snapshot().connected,false);assert.equal(f.socket.closed,true);assert.equal(f.socket.closeCode,4002,'wallpaper timeout must be visible as a distinct numeric cause to the native broker');assert.equal(f.timers.size,1);f.fireDelay(250);const next=f.sockets.at(-1);next.emit('open');assert.equal(f.client.snapshot().connected,true);assert.equal(next.sent.length,0);assert.equal(f.timers.size,0);f.context(2);next.emit('message',{type:'wallpaper',runId:f.bootstrap.runId,contextSeq:2,appId:'480',enabled:true,entry:null});assert.equal(f.timers.size,0);}finally{f.client.dispose();}
 });
 for(const type of ['wallpaper','wallpaper-ready'])await check('correlated '+type+' response settles context transport even when disabled or empty',()=>{
  const f=contextFixture();try{f.context();assert.equal(f.timers.size,1);f.ack(1,type,{enabled:false,entry:null});assert.equal(f.timers.size,0);for(let i=0;i<1000;i++)f.client.sendWallpaper('wallpaper.status',{contextSeq:1,status:'observed'});assert.equal(f.timers.size,0);assert.equal(f.client.snapshot().connected,true);}finally{f.client.dispose();}

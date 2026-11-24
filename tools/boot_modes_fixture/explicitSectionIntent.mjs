@@ -23,6 +23,7 @@ const selections=args.filter(v=>v.startsWith('--explicit-section-only='));assert
 const groups=args.filter(v=>v.startsWith('--explicit-section-group='));assert(groups.length<=1&&(!groups.length||!selections.length),'Choose exact explicit section or group');
 const group=groups[0]?.slice('--explicit-section-group='.length);assert(group===undefined||group==='common-fan','Unknown explicit-section group');
 const commonOnly=field=>['fan','fanBoot','fanCurve'].includes(field[0]);
+const sharedOnly=field=>commonOnly(field)||field[1]==='sleep';
 // Retain all original case identities. The common-only changed-value controls
 // are explicit opt-in, not additions to default minimum/whole-suite execution.
 const commonChanges=['global','xbox','steam','xbox-steam'].flatMap(mode=>[
@@ -55,9 +56,9 @@ try{
   const options=s.origin==='default'||s.origin==='mutator'?{}:{origin:s.origin};
   if(s.origin==='mutator')await r.updateSettings(d=>put(d,[section,...rootPath],submitted),options);
   else await r.saveSettingsSection(section,patch,undefined,options);
-  const after=disk.read(),projects=s.origin==='default'&&!commonOnly(s.field),expected=projects?submitted:old;
-  const row={key:s.key,commonOnly:commonOnly(s.field),beforeRoot:get(before,[section,...rootPath]),afterRoot:get(after,[section,...rootPath]),submitted,beforeGlobal:get(beforeMode.global,globalPath),expected,actual:get(after.extensions.bootModes.global,globalPath),beforeRevision:beforeMode.revision,afterRevision:after.extensions.bootModes.revision};rows.push(row);
-  assert.deepEqual(row.actual,expected,commonOnly(s.field)?'Common fan preference must not enter a retired mode bank '+s.key:'Explicit ordinary section choice must reach global even when runtime already matches '+s.key);
+  const after=disk.read(),projects=s.origin==='default'&&!sharedOnly(s.field),expected=projects?submitted:old;
+  const row={key:s.key,commonOnly:sharedOnly(s.field),beforeRoot:get(before,[section,...rootPath]),afterRoot:get(after,[section,...rootPath]),submitted,beforeGlobal:get(beforeMode.global,globalPath),expected,actual:get(after.extensions.bootModes.global,globalPath),beforeRevision:beforeMode.revision,afterRevision:after.extensions.bootModes.revision};rows.push(row);
+  assert.deepEqual(row.actual,expected,sharedOnly(s.field)?'Shared preference must not enter a retired mode bank '+s.key:'Explicit ordinary section choice must reach global even when runtime already matches '+s.key);
   assert.deepEqual(row.afterRoot,submitted,'The original common/ordinary preference was not actually saved '+s.key);
   const expectedGlobal=structuredClone(beforeMode.global);if(projects)put(expectedGlobal,globalPath,expected);
   assert.deepEqual(after.extensions.bootModes.global,expectedGlobal,'Unmentioned global leaves were captured '+s.key);
@@ -65,7 +66,7 @@ try{
   assert.deepEqual(after.extensions.bootModes.presets,beforeMode.presets);assert.deepEqual(after.extensions.bootModes.activeSnapshot,beforeMode.activeSnapshot);
   assert.equal(after.extensions.bootModes.global[globalPath[0]].futureSentinel,'global-unknown-preserved');
   assert.equal(row.afterRevision,row.beforeRevision+(projects?1:0),'Only an actual mode projection owns a new mode revision '+s.key);
-  if(commonOnly(s.field))assert.deepEqual(after.extensions.bootModes,beforeMode,'Common fan save changed the four-mode owner '+s.key);
+  if(sharedOnly(s.field))assert.deepEqual(after.extensions.bootModes,beforeMode,'Shared save changed the four-mode owner '+s.key);
   assert.deepEqual(after.games,before.games);assert.deepEqual(after.gameProfiles,before.gameProfiles);
   const reopened=await disk.moduleAt('reopened-'+rows.length),loaded=await reopened.repository.loadSettings();
   assert.deepEqual(get(loaded,[section,...rootPath]),submitted,'Common preference did not survive a fresh repository '+s.key);
@@ -76,7 +77,7 @@ try{
 }finally{
  a.boot.cancelBootModeLaunches();a.boot.cancelBootModeDeferredMouse();disk.flush();
  const sourceClosing=Object.fromEntries(Object.keys(sourceHashes).map(file=>[file,digest(path.resolve(M,file))]));
- fs.writeFileSync(path.join(out,'EXPLICIT-INTENT.json'),JSON.stringify({rows,actualRows:rows.length,selectedNames:selected.map(s=>s.key),complete,source:source??path.join(M,'src/bridge/bootModeGlobalPreferences.ts'),sourceSha256:digest(source??path.join(M,'src/bridge/bootModeGlobalPreferences.ts')),sourceHashes,sourceClosing,scope:'Original real settings repository/native file writer and fresh reopens; common fan is deliberately not a mode module; no feature engine calls'},null,2),{flag:'wx'});
+ fs.writeFileSync(path.join(out,'EXPLICIT-INTENT.json'),JSON.stringify({rows,actualRows:rows.length,selectedNames:selected.map(s=>s.key),complete,source:source??path.join(M,'src/bridge/bootModeGlobalPreferences.ts'),sourceSha256:digest(source??path.join(M,'src/bridge/bootModeGlobalPreferences.ts')),sourceHashes,sourceClosing,scope:'Original real settings repository/native file writer and fresh reopens; fan and sleep are shared-only; no feature engine calls'},null,2),{flag:'wx'});
  assert.deepEqual(sourceClosing,sourceHashes,'Explicit preference source changed during execution');
 }
 

@@ -2,8 +2,10 @@
 #include "msi_rear_source_observation.h"
 #include <json.hpp>
 namespace ymcc::msi::rearObservation {
+inline constexpr char dinputObservationStage[] = "get-device-state-success-before-admission";
 inline nlohmann::json exportSnapshot(const Snapshot& s,uint64_t tick) {
-    return {{"schema",1},{"exportTick",tick},{"counterScope","process-lifetime, possibly multiple source/power generations"},
+    return {{"schema",2},{"exportTick",tick},{"counterScope","process-lifetime, possibly multiple source/power generations"},
+        {"dinputObservationStage",dinputObservationStage},
         {"sequence",s.sequence},{"activityRowsReserved",s.activityReservations},{"activityRowLimit",48},
         {"lastReservedSequence",s.lastReservedSequence},{"counterTransitionsAfterLastReservation",s.sequence!=s.lastReservedSequence},
         {"reservationIsDurableLogProof",false},{"snapshotAtomicAcrossProducers",false},

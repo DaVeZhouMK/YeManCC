@@ -3,6 +3,7 @@
 import { gameMirrorIdentity } from './deckyGameActions';
 import type { DetectedGame } from './gamedetect';
 import type { PowerLifecycleState } from './api';
+import { isSharedPowerLifecycleAdmitted } from './powerLifecycleState';
 import type { RelayMutationContext } from './deckyMirrorRelay';
 import type { GameSpeedState, SpeedResult, SpeedOperationAdmission } from './speedhack';
 export interface SpeedMirrorNativeState {active:boolean;connected:boolean;connection:string;runId:string;connectionRevision:number;powerGeneration:number;hardwareWritesAllowed:boolean;}
@@ -28,21 +29,22 @@ export function createSpeedMirrorActions(deps: {
     if (!release) throw Error('SPEED_MIRROR_BUSY');
     try {
       const power = await deps.power(); checkpoint();
-      if (power.generation !== context.generation || power.phase !== 'ready' || !power.hardwareWritesAllowed) throw Error('SPEED_MIRROR_POWER_NOT_READY');
+      if (power.generation !== context.generation || !isSharedPowerLifecycleAdmitted(power)) throw Error('SPEED_MIRROR_POWER_NOT_READY');
+      const {observedNotificationSequence: notificationSequence, suspendSerial} = power;
       const state = deps.state();
       if (JSON.stringify(state) !== admittedSource) throw Error('SPEED_MIRROR_SOURCE_CHANGED');
       const own = state?.pid === target.pid && state.processCreated === target.processCreated;
       if (!state?.cleanupPending && factor === (own && state?.enabled ? state.factor : 1)) return { saved:false, applied:false, notice:'游戏变速倍率未改变' };
       // The original owner rechecks the native valve and PID creation identity.
-      const admission:SpeedOperationAdmission={generation:context.generation,nativePeer:context.nativePeer,checkpoint:async()=>{
+      const admission:SpeedOperationAdmission={generation:context.generation,notificationSequence,suspendSerial,nativePeer:context.nativePeer,checkpoint:async()=>{
         checkpoint();
+        const fresh=await deps.power();checkpoint();
+        if(!isSharedPowerLifecycleAdmitted(fresh)||fresh.generation!==context.generation||
+          fresh.observedNotificationSequence!==notificationSequence||fresh.suspendSerial!==suspendSerial) throw Error('SPEED_MIRROR_POWER_NOT_READY');
         if(context.nativePeer){
           if(!deps.nativeState)throw Error('SPEED_MIRROR_NATIVE_ADMISSION_REQUIRED');
           const current=await deps.nativeState();checkpoint();
           if(current.active!==true||current.connected!==true||current.connection!==context.nativePeer.connection||current.runId!==context.nativePeer.runId||current.connectionRevision!==context.nativePeer.connectionRevision||current.powerGeneration!==context.generation||current.hardwareWritesAllowed!==true)throw Error('SPEED_MIRROR_NATIVE_ADMISSION_CHANGED');
-        }else{
-          const current=await deps.power();checkpoint();
-          if(current.generation!==context.generation||current.phase!=='ready'||!current.hardwareWritesAllowed)throw Error('SPEED_MIRROR_POWER_NOT_READY');
         }
       }};
       const result = await (factor === 1 ? deps.clear(target,admission) : deps.apply(target, factor,admission));

@@ -920,6 +920,33 @@ internal static partial class FanCapabilityRoundtrip
     }
     private static void RunLegacyOneXInitialHandoffGuard()
     {
+        const string fly = "HandheldCompanion.Devices.OneXPlayerOneXFly";
+        const string f1Pro = "HandheldCompanion.Devices.OneXPlayerOneXFlyF1Pro";
+        const string vendor = "ONE-NETBOOK";
+        var flyRoute = RealHcBackend.ResolveRouteForSelfTest(fly);
+        Require(flyRoute?.RestoreStrategy == FanRestoreStrategy.OneXAcpiFanMode &&
+            flyRoute.Precondition == FanRoutePrecondition.OpenLibHandleOpen,
+            "onex-fly-aliases-retain-mode-return-and-open-transport-gate");
+        foreach (var product in new[] { "ONEXPLAYER F1 EVA-01", "ONEXPLAYER F1 EVA-02", "ONEXPLAYER F1 OLED", "ONEXPLAYER F1L" })
+        {
+            var factory = RealHcBackend.SelectLegacyFanFactoryAlias(vendor, product, null);
+            Require(factory == fly && ReferenceEquals(RealHcBackend.ResolveRouteForSelfTest(factory), flyRoute),
+                "onex-fly-exact-alias-enters-existing-route:" + product);
+            Require(RealHcBackend.SelectLegacyFanFactoryAlias(" One-Netbook Technology Co., Ltd. ",
+                " " + product.ToLowerInvariant() + " ", null) == fly, "onex-fly-normalized-board-alias:" + product);
+        }
+        foreach (var product in new[] { "ONEXPLAYER F1", "ONEXPLAYER F1Pro", "ONEXPLAYER F1 EVA-03", "ONEXPLAYER F1 EVA-01 EXTRA", "ONEXPLAYER X2MINI PRO", "ONEXPLAYER 3 EVA-01" })
+            Require(RealHcBackend.SelectLegacyFanFactoryAlias(vendor, product, null) is null,
+                "onex-fly-leaves-existing-or-unknown-factory-alone:" + product);
+        Require(RealHcBackend.ResolveRouteForSelfTest(f1Pro)?.RestoreStrategy == FanRestoreStrategy.OneXAcpiFanMode,
+            "onex-f1-pro-keeps-distinct-existing-factory-route");
+        Require(RealHcBackend.SelectLegacyFanFactoryAlias("OTHER", "ONEXPLAYER F1 EVA-01", null) is null &&
+            RealHcBackend.SelectLegacyFanFactoryAlias(null, "ONEXPLAYER F1 EVA-01", null) is null &&
+            RealHcBackend.SelectLegacyFanFactoryAlias(vendor, null, null) is null,
+            "onex-fly-missing-or-foreign-board-identity-is-not-an-alias");
+        Reject(() => RealHcBackend.SelectLegacyFanFactoryAlias(vendor, "ONEXPLAYER F1 EVA-01", f1Pro),
+            "onex-fly-alias-rejects-conflicting-diagnostic-factory");
+
         var routes = RealHcBackend.FanRoutesForSelfTest
             .Where(pair => pair.Value.RestoreStrategy == FanRestoreStrategy.OneXAcpiFanMode).ToArray();
         Require(routes.Length == 9, "legacy-one-x-existing-catalog-nine-strategies");

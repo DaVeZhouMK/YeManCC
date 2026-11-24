@@ -151,7 +151,7 @@ struct Captured {ULONGLONG generation=0,configEpoch=0,boundaryGeneration=0,power
 bool originalTargetCurrent(const Captured&){return false;} // Fixed inactive API port, never action authority.
 Captured capturedFor(ULONGLONG){return {};}
 Captured wakeBoundaryFor(ULONGLONG){return {};}
-void prepareSuspend(){}
+void prepareSuspend(ULONGLONG){}
 void cancelPreparedSuspend(){}
 std::mutex captureMx;
 unsigned long long repeatedSuspendGeneration=0,repeatedSuspendEpoch=0;
@@ -159,7 +159,7 @@ unsigned long long repeatedSuspendGeneration=0,repeatedSuspendEpoch=0;
 json inspect(ULONGLONG,const char* = "observation"){return {{"scope","steam"},{"steamRecovery",{{"status","unknown"},{"reason","fixture-not-used"}}}};}
 // Compatibility-only declarations. Actual Steam wake/input actions are covered
 // by sleep_steam_only_selftest.py against the production headers, not this stub.
-void captureSuspend(ULONGLONG){}
+void captureSuspend(ULONGLONG,const std::shared_ptr<void>&,ULONGLONG){}
 json capturedPauseState(ULONGLONG){return {{"available",false}};}
 json reconcile(const json&,ULONGLONG,ULONGLONG,const std::function<bool()>& gate={},ymcc::sleepsteam::CommandAttempt* = nullptr){return {{"accepted",false}};}
 json resumeInputContext(const json&,ULONGLONG,ULONGLONG,const std::function<bool()>& gate={},ymcc::sleepsteam::CommandAttempt* = nullptr){return {{"accepted",false}};}

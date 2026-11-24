@@ -38,13 +38,16 @@ export function batteryChargeStatus(state: BatteryChargeState): string {
     ? `当前目标：${state.requestedLimit}%` : '当前：100%';
   if (state.verification === 'acknowledged') return `当前设置：${state.requestedLimit}%（已接受）`;
   if (state.currentLimit !== null) return `当前：${state.currentLimit}%`;
+  if (state.verification === 'unknown' && state.managed && state.requestedLimit !== null) return '当前：未确认';
   return '当前上限未知';
 }
-const request = async (operation: string, args: Record<string, unknown> = {}) => {
-  try { return parseBatteryChargeState(await invoke<unknown>(`battery.charge.${operation}`, args, { timeoutMs: 35000 })); }
+const request = async (operation: string, args: Record<string, unknown> = {}, signal?: AbortSignal) => {
+  try { return parseBatteryChargeState(await invoke<unknown>(`battery.charge.${operation}`, args, { timeoutMs: 35000, signal })); }
   catch (error) {
     // Retain evidence even when an old/missing native command never reaches BatteryHost.
-    try { reportFrontendError(`battery-charge.${operation}`, error); } catch { /* Logging cannot mask the request failure. */ }
+    if (!signal?.aborted) {
+      try { reportFrontendError(`battery-charge.${operation}`, error); } catch { /* Logging cannot mask the request failure. */ }
+    }
     throw error;
   }
 };
@@ -54,7 +57,7 @@ const preferenceArgs = (options: BootPreferenceWrite) => {
     ...(submitted.bootContext === undefined ? {} : { bootContext: submitted.bootContext }) };
 };
 export const batteryCharge = {
-  get: () => request('get'), refresh: () => request('refresh'),
+  get: (signal?: AbortSignal) => request('get', {}, signal), refresh: () => request('refresh'),
   set: (fence: string, target: number, options: BootPreferenceWrite = {}) => request('set', { fence, target, ...preferenceArgs(options) }),
   release: (options: BootPreferenceWrite = {}) => request('release', preferenceArgs(options)),
 };

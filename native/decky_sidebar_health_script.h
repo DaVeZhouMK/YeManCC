@@ -80,7 +80,7 @@ inline const char* healthScript(){return R"YMCCHEALTH(// YMCC observes the offic
          Number.isInteger(boot.probes)&&boot.probes>=0&&boot.probes<=3&&typeof boot.dispatched==='boolean'){
         facts.bootPhase=boot.phase;facts.bootProbes=boot.probes;facts.bootDispatched=boot.dispatched;
       }
-      if(update?.stamp===frontendStamp&&['pending','current','failed','canceled'].includes(update.phase)&&
+      if(update?.stamp===frontendStamp&&['pending','waiting-official-slot','current','failed','canceled'].includes(update.phase)&&
          Number.isInteger(update.attempts)&&update.attempts>=0&&update.attempts<=3&&typeof update.pending==='boolean'){
         facts.updatePhase=update.phase;facts.updateAttempts=update.attempts;facts.updatePending=update.pending;
       }
@@ -118,7 +118,8 @@ inline const char* healthScript(){return R"YMCCHEALTH(// YMCC observes the offic
   // evidence only: it cannot disable/restart Decky or change recovery budgets.
   const boundaryFacts=new Set();
   const noteBoundary=(source,version,trace)=>{
-    if(stopped||host.__YMCC_DECKY_MIRROR__?.runId!==value.runId)return;
+)YMCCHEALTH"
+R"YMCCHEALTH(    if(stopped||host.__YMCC_DECKY_MIRROR__?.runId!==value.runId)return;
     const attribution=source==='This error likely occurred in the Decky frontend.'?'decky':source==='This error likely occurred in Steam.'?'steam':source?'plugin':'unknown';
     const fault=trace.length>8192?'oversized':/(?:Failed to fetch|Load failed|NetworkError|HTTP (?:429|5\d\d))/.test(trace)?'network':/Minified React error #\d+/.test(trace)?'react':/(?:TypeError:|ReferenceError:)/.test(trace)?'script':'unknown';
     const loader=version===value.loaderVersion?'current':version?'other':'unknown';
@@ -215,14 +216,17 @@ inline const char* healthScript(){return R"YMCCHEALTH(// YMCC observes the offic
   }
   // A real QAM opening is an observation request, never a healthy verdict or
   // launch permission. Reuse the current authenticated watch and native ladder.
-  let checkQueued=false;
+  let pendingCheck=null;
   const checkConnection=event=>{
-    if(checkQueued||!current())return;
-    const code=event.type==='ymcc-decky-connection-result'?'decky-connection-result':'decky-connection-check';
-    checkQueued=true;Promise.resolve().then(()=>{
-      checkQueued=false;
+    const completed=event.type==='ymcc-decky-connection-result';
+    const code=completed?'decky-connection-result':'decky-connection-check';
+    if((pendingCheck&&(!completed||pendingCheck===code))||!current())return;
+    // Both hints request the same read; only completion can advance a wake slot.
+    if(pendingCheck){pendingCheck=code;return;}
+    pendingCheck=code;Promise.resolve().then(()=>{
+      const next=pendingCheck;pendingCheck=null;
       if(!current())return;
-      if(typeof host[binding]==='function')host[binding](JSON.stringify({runId:value.runId,code}));
+      if(typeof host[binding]==='function')host[binding](JSON.stringify({runId:value.runId,code:next}));
     });
   };
   function stopObserving(){
@@ -238,7 +242,8 @@ inline const char* healthScript(){return R"YMCCHEALTH(// YMCC observes the offic
   }
   Object.defineProperty(host,key,{value:api,configurable:true});
   // Context creation may precede <html>; Document itself is always available.
-  watchBoundaries(false);
+)YMCCHEALTH"
+R"YMCCHEALTH(  watchBoundaries(false);
   host.addEventListener('pagehide',dispose);host.addEventListener('ymcc-decky-health-stop',dispose);host.addEventListener('ymcc-decky-connection-check',checkConnection);host.addEventListener('ymcc-decky-connection-result',checkConnection);scan();accountChanged();
 })
 )YMCCHEALTH";}

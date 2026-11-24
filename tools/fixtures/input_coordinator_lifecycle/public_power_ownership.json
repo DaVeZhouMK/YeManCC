@@ -1,0 +1,308 @@
+{
+  "schemaVersion": 1,
+  "kind": "EXACT_READ_ONLY_SHARED_INPUT_POWER_OWNER_OBSERVATION_V1",
+  "managedInputContract": "current105-terminal29-shared-input-power-v1",
+  "addition": "\n\n// Read-only fixture friend over the pinned original private cache slots.\n// No new product API/state, capture, clear, current or return call is added.\nnamespace ymcc::inputHost::sharedPower {\nstruct FixtureOwnershipInspector {\n static bool cache(const Cache& value)noexcept{return value.scope_!=nullptr;}\n static bool lifecycle(const RemoteOffers& value)noexcept{return value.lifecycle_!=nullptr;}\n static bool frame(const RemoteOffers& value)noexcept{return value.frame_!=nullptr;}\n};\n}\n\n// Only the original full-cycle terminal owner calls this after its last Clear.\n// No fresh capture/import, ledger erasure, synthetic Returned, or device action.\nstatic json fixtureCurrentPublicPowerReturn=json::object();\nstatic void fixtureObserveCurrentPublicPowerReturn(){\n using Runtime=ymcc::sleeppower::remote::NativeRemoteRuntime;\n using Transport=ymcc::sleeppower::remote::NativeRemoteTransport;\n auto* runtime=g_sharedNativeRemotePowerRuntimeGate.published(); // Read-only: cold exit stays cold.\n Transport* transport=runtime?runtime->transport():nullptr; // Borrow through original runtime lifetime.\n const bool debtBefore=g_msiDinputReturnOwed.load();\n const auto episodeBefore=g_msiDinputReturnDebtEpisode.load();\n auto localInputOwners=[&](){\n  std::lock_guard<InputHostMutex> lock(g_inputHostMx);\n  using Inspector=ymcc::inputHost::sharedPower::FixtureOwnershipInspector;\n  return json{{\"inputCache\",Inspector::cache(g_inputHostInputPowerCache)},\n   {\"lifecycleCache\",Inspector::cache(g_inputHostLifecyclePowerCache)},\n   {\"lifecycleOffer\",Inspector::lifecycle(g_inputHostRemotePowerOffers)},\n   {\"frameOffer\",Inspector::frame(g_inputHostRemotePowerOffers)},\n   {\"threadRequestScope\",t_inputHostRequestPower!=nullptr},\n   {\"threadFrameSubmission\",t_inputFrameSubmission!=nullptr},\n   {\"scope\",\"existing Native Host transaction owners only; read without capture or clear\"}};\n };\n auto snapshot=[&](){\n  json value={{\"runtimePublished\",runtime!=nullptr},{\"gateClosed\",g_sharedNativeRemotePowerRuntimeGate.closed()},\n   {\"msiModeDebt\",g_msiDinputReturnOwed.load()},{\"msiModeDebtEpisode\",g_msiDinputReturnDebtEpisode.load()}};\n  if(runtime){auto& provider=runtime->provider();value[\"provider\"]={{\"open\",provider.isOpen()},\n   {\"admissionOpen\",provider.admissionOpen()},{\"outstanding\",provider.outstanding()},\n   {\"exitedConsumerDebt\",provider.exitedConsumerDebtCount()},\n   {\"changeEventOwnedUntilRuntimeDestruction\",provider.changeEvent()!=nullptr}};}\n  if(transport)value[\"transport\"]={{\"running\",transport->running()},{\"activeRequests\",transport->activeRequests()},\n   {\"pendingIo\",transport->pendingIo()},{\"trackedOffers\",transport->trackedOffers()},\n   {\"trackedOfferCapacity\",transport->trackedOfferCapacity()},{\"servedRequests\",transport->servedRequests()}};\n  value[\"nativeInputOwners\"]=localInputOwners();\n  return value;\n };\n const auto before=snapshot();\n std::vector<std::weak_ptr<ymcc::sleeppower::remote::NativeScope>> observedBorrowers;\n json originalConsumers=json::array();bool waitSnapshotKnown=true;\n if(runtime){\n  std::vector<ymcc::sleeppower::remote::NativeProvider::ConsumerWait> consumers;\n  waitSnapshotKnown=runtime->provider().consumerWaits(consumers);\n  for(const auto& consumer:consumers){\n   observedBorrowers.emplace_back(consumer.scope);\n   originalConsumers.push_back({{\"consumerPid\",consumer.scope->binding().consumer.pid},\n    {\"kernelWait\",WaitForSingleObject(consumer.process,0)},\n    {\"lastSettlement\",static_cast<unsigned>(consumer.scope->lastSettlement())}});\n  }\n } // Release every diagnostic strong borrow before the real stop/join.\n finishSharedNativeRemotePower();\n const auto after=snapshot();\n unsigned heldBorrowers=0;for(const auto& weak:observedBorrowers)if(!weak.expired())++heldBorrowers;\n\n // Query the original debt reader with actual issued identities and this exact\n // provider birth. This is read-only and cannot invent a Returned receipt.\n json debtRows=json::array();\n const auto issued=ymcc::sleeppower::remote::issuedScopeIdentities.load(std::memory_order_acquire);\n ymcc::sleeppower::remote::ProcessIdentityV1 self;\n bool providerIdentityKnown=false;\n {ymcc::sleeppower::remote::ProcessHold selfHold;\n  if(selfHold.bind(GetCurrentProcess()))providerIdentityKnown=ymcc::sleeppower::remote::processIdentity(selfHold.get(),self);\n } // Original held-process diagnostic owner returned before querying the ledger.\n const bool debtScanBounded=issued<=65536;\n if(runtime&&providerIdentityKnown&&debtScanBounded){\n  for(std::uint64_t value=1;value<=issued;++value){\n   ymcc::sleeppower::remote::NativeProvider::ExitedConsumerDebt debt;\n   if(runtime->provider().exitedConsumerDebt({value,self.birth100ns},debt))\n    debtRows.push_back({{\"scopeLow\",debt.binding.scope.low},{\"scopeHigh\",debt.binding.scope.high},\n     {\"consumerPid\",debt.binding.consumer.pid},{\"consumerBirth100ns\",debt.binding.consumer.birth100ns},\n     {\"requestLow\",debt.binding.request.low},{\"purpose\",static_cast<unsigned>(debt.binding.purpose)},\n     {\"lastOutcome\",static_cast<unsigned>(debt.lastOutcome)},{\"lastFlags\",debt.lastFlags},\n     {\"kernelExitObserved\",debt.kernelExitObserved},{\"nativeBorrowerStillHeld\",debt.nativeBorrowerStillHeld}});\n  }\n }\n\n fixtureCurrentPublicPowerReturn={{\"schemaVersion\",1},{\"stage\",\"after-original-full-cycle-before-parent-exit\"},\n  {\"parentPid\",GetCurrentProcessId()},{\"afterSourceOrdinal\",cases.size()},{\"originalChecks\",checks},\n  {\"beforeStop\",before},{\"afterStop\",after},{\"consumerWaitSnapshotKnown\",waitSnapshotKnown},{\"exitedConsumerDebtRows\",debtRows},{\"issuedScopeIdentities\",issued},{\"providerIdentityKnown\",providerIdentityKnown},{\"debtScanBounded\",debtScanBounded},\n  {\"originalConsumers\",originalConsumers},{\"observedRepresentativeBorrowersStillHeld\",heldBorrowers},\n  {\"finishCalled\",true},{\"runtimeNotCreatedByObserver\",g_sharedNativeRemotePowerRuntimeGate.published()==runtime},\n  {\"msiDebtUnchanged\",g_msiDinputReturnOwed.load()==debtBefore&&g_msiDinputReturnDebtEpisode.load()==episodeBefore},\n  {\"nativeCacheDiagnosticsAvailable\",true},{\"managedChildCountersInChildReceipt\",true},\n  {\"scope\",\"actual original runtime/provider/transport terminal observation; cache and child-local counters remain unproven\"}};\n}\n",
+  "branch": {
+    "before": "fixtureCurrentOrderedReturn[\"postTargetReturnTail\"]=fixtureCurrentOrderedBoundary();ok=failures.empty();}",
+    "after": "fixtureCurrentOrderedReturn[\"postTargetReturnTail\"]=fixtureCurrentOrderedBoundary();fixtureObserveCurrentPublicPowerReturn();ok=failures.empty();}"
+  },
+  "report": {
+    "before": "{\"orderedReturn\",fixtureCurrentOrderedReturn},{\"cases\",cases}",
+    "after": "{\"orderedReturn\",fixtureCurrentOrderedReturn},{\"publicPowerReturn\",fixtureCurrentPublicPowerReturn},{\"cases\",cases}"
+  },
+  "headers": [
+    {
+      "relative": "native/input_host_shared_power.h",
+      "beforeSha256": "7e8ff2bd610e42c5d2caec6ab1e6d978987cb0b23b57cba8a33130319c94bcc3",
+      "afterSha256": "00f53eabc3595103cd470bc92895063f84ad6e869f7bab172106640acf0b7ad2",
+      "before": "class Cache final {",
+      "after": "class Cache final {\n    friend struct FixtureOwnershipInspector;"
+    },
+    {
+      "relative": "native/input_host_remote_power.h",
+      "beforeSha256": "4b0efdc19244e2f0e1da4ce1af50a6b7290bbc1eea6007805e14c88e1c528394",
+      "afterSha256": "8482bff87e9f86bb5a68cd138a74bcfca521f3798fb8518a47b96aa766d6b86f",
+      "before": "class RemoteOffers final {",
+      "after": "class RemoteOffers final {\n    friend struct FixtureOwnershipInspector;"
+    }
+  ],
+  "scope": "Generated fixture only; no product API/state/permission or resource-return grant",
+  "sourceApproval": false,
+  "runtimeAccepted": false,
+  "additionalBranches": [
+    {
+      "before": "else if(mode==L\"cold-msi-archive\"){coldMsiArchiveCases();ok=failures.empty();}",
+      "after": "else if(mode==L\"cold-msi-archive\"){coldMsiArchiveCases();\n const auto coldRecordBefore=coldArchive::bytes();\n const auto coldSummaryBefore=fixtureTargetReturn::summary(fixtureTargetReturn::disk());\n fixtureObserveCurrentPublicPowerReturn();\n fixtureCurrentPublicPowerReturn[\"fixtureMode\"]=\"cold-msi-archive\";\n fixtureCurrentPublicPowerReturn[\"coldRecordBytesUnchanged\"]=coldArchive::bytes()==coldRecordBefore;\n fixtureCurrentPublicPowerReturn[\"coldRecordBefore\"]=coldSummaryBefore;\n fixtureCurrentPublicPowerReturn[\"coldRecordAfter\"]=fixtureTargetReturn::summary(fixtureTargetReturn::disk());\n ok=failures.empty();}"
+    }
+  ],
+  "originalCold": {
+    "mode": "cold-msi-archive",
+    "originalId": "controller.cold-msi-archive",
+    "originalModeBudgetMs": 90000,
+    "caseNames": [
+      "COLD-ARCHIVE/MSI/saved-ON-steamdeck",
+      "COLD-ARCHIVE/MSI/saved-ON-elite",
+      "COLD-ARCHIVE/MSI/saved-ON-dualsense-edge",
+      "COLD-ARCHIVE/MSI/OFF-two-hidden-paths",
+      "COLD-ARCHIVE/MSI/reserved-paths-already-visible",
+      "COLD-ARCHIVE/MSI/ack-loss-readback-proves-return",
+      "COLD-ARCHIVE/MSI/transient-target-present",
+      "COLD-ARCHIVE/MSI/transient-census-unknown",
+      "COLD-ARCHIVE/MSI/transient-writer-unknown",
+      "COLD-ARCHIVE/MSI/transient-ancestry-unknown",
+      "COLD-ARCHIVE/MSI/transient-visibility-unknown",
+      "COLD-ARCHIVE/MSI/transient-old-path-still-present",
+      "COLD-ARCHIVE/MSI/reboot-missing-old-devnodes",
+      "COLD-ARCHIVE/MSI/original-budget-then-explicit-OFF"
+    ],
+    "positive": {
+      "checks": 557,
+      "originalChecks": 545,
+      "observerCloseChecks": 12,
+      "children": 12
+    },
+    "negative": {
+      "cases": 14,
+      "checks": 86,
+      "failedAssertions": 14,
+      "minimumSentinelFailures": 3,
+      "managedChildren": 0,
+      "failures": [
+        {
+          "assertion": "MSI opaque OS ID permits durable two-duty cleanup before saved ON creation",
+          "case": "COLD-ARCHIVE/MSI/saved-ON-steamdeck"
+        },
+        {
+          "assertion": "MSI opaque OS ID permits durable two-duty cleanup before saved ON creation",
+          "case": "COLD-ARCHIVE/MSI/saved-ON-elite"
+        },
+        {
+          "assertion": "MSI opaque OS ID permits durable two-duty cleanup before saved ON creation",
+          "case": "COLD-ARCHIVE/MSI/saved-ON-dualsense-edge"
+        },
+        {
+          "assertion": "MSI OFF completes both historical duties through the real cold owner",
+          "case": "COLD-ARCHIVE/MSI/OFF-two-hidden-paths"
+        },
+        {
+          "assertion": "MSI reserved but already-visible paths settle without inventing a hide write",
+          "case": "COLD-ARCHIVE/MSI/reserved-paths-already-visible"
+        },
+        {
+          "assertion": "lost unhide ACK may settle only after exact readback proves both keys absent",
+          "case": "COLD-ARCHIVE/MSI/ack-loss-readback-proves-return"
+        },
+        {
+          "assertion": "MSI transient proof recovery creates the requested Host within the original period",
+          "case": "COLD-ARCHIVE/MSI/transient-target-present"
+        },
+        {
+          "assertion": "MSI transient proof recovery creates the requested Host within the original period",
+          "case": "COLD-ARCHIVE/MSI/transient-census-unknown"
+        },
+        {
+          "assertion": "MSI transient proof recovery creates the requested Host within the original period",
+          "case": "COLD-ARCHIVE/MSI/transient-writer-unknown"
+        },
+        {
+          "assertion": "MSI transient proof recovery creates the requested Host within the original period",
+          "case": "COLD-ARCHIVE/MSI/transient-ancestry-unknown"
+        },
+        {
+          "assertion": "MSI transient proof recovery creates the requested Host within the original period",
+          "case": "COLD-ARCHIVE/MSI/transient-visibility-unknown"
+        },
+        {
+          "assertion": "MSI transient proof recovery creates the requested Host within the original period",
+          "case": "COLD-ARCHIVE/MSI/transient-old-path-still-present"
+        },
+        {
+          "assertion": "MSI missing old devnodes require complete absence before removing historical hide keys",
+          "case": "COLD-ARCHIVE/MSI/reboot-missing-old-devnodes"
+        },
+        {
+          "assertion": "MSI later OFF settles now-provable old responsibilities",
+          "case": "COLD-ARCHIVE/MSI/original-budget-then-explicit-OFF"
+        }
+      ]
+    },
+    "mutation": {
+      "id": "rollback-cold-observed-id",
+      "relative": "native/virtual_target_return_pnp_absence.h",
+      "before": "if(!leafDetail::observedInstance(observed)){",
+      "after": "if(!ymcc::targetReturn::detail::instance(leafDetail::instanceUtf8(observed))){"
+    }
+  },
+  "originalCurrentSwitch": {
+    "managedInputContract": "current105-terminal29-shared-input-power-v1",
+    "mode": "switch-recovery",
+    "sourceFixtureSha256": "d4526baa384b1deae0909bd09ada5b0726dfc589f9c4ebafecea9d1d35b38edb",
+    "sourceMainSha256": "3b75068d05f7b21635ca177570d9866ba1f123e6d934820cd70618d4cf36ee52",
+    "compiledFunctionSha256": "de11f0656a5edf0c308fd5650bbb3ecdd62c800b2ff46570c032a217f6180d93",
+    "originalFunctionSha256": "01667618dd12adefba387c888d0ee9b19cb5620bf2cb93ad14b65e85bfae7d5c",
+    "caseNames": [
+      "central-switch-lifecycle-version-and-single-fallback-clock",
+      "actual-source-lineage-change-requires-current-accepted-frame",
+      "actual-msi-mode-change-requires-current-mode-accepted-frame",
+      "actual-msi-mode-change-cannot-credit-old-recovery-health",
+      "actual-focus-neutral-current-source-verifies-without-health-credit",
+      "actual-classified-failed-start-off-on-recovery",
+      "actual-verification-window-detects-transport-fault-and-reopens",
+      "actual-frame-fault-natural-worker-order-recovery",
+      "actual-post-inspection-fault-spent-return-continuation",
+      "actual-switch-recovery-guard/recording",
+      "actual-switch-recovery-guard/source-missing",
+      "actual-switch-recovery-guard/power-paused",
+      "actual-switch-recovery-guard/external-priority",
+      "actual-switch-recovery-guard/budget-exhausted",
+      "actual-switch-recovery-guard/stale-request",
+      "actual-switch-recovery-guard/stale-power",
+      "actual-switch-recovery-guard/stale-epoch",
+      "actual-switch-recovery-guard/deadline-expired",
+      "actual-switch-recovery-guard/unproven-release",
+      "actual-switch-recovery-guard/nonretryable-error",
+      "actual-switch-return-hook-ownership-guards",
+      "actual-switch-return-hook-retains-owned-endpoint-debt",
+      "actual-frame-fault-safety-cleanup/recording",
+      "actual-frame-fault-safety-cleanup/budget-exhausted",
+      "ROG/normal-persona-transition-retains-timed-out-old-host",
+      "ROG/normal-persona-transition-retains-timed-out-old-host/return-hook-guards",
+      "ROG/normal-persona-transition-retains-timed-out-old-host/stale-request-at-return",
+      "ROG/normal-persona-transition-retains-timed-out-old-host/stale-power-at-return",
+      "ROG/normal-persona-transition-retains-timed-out-old-host/deadline-at-return",
+      "ROG/normal-persona-transition-retains-timed-out-old-host/recording",
+      "ROG/normal-persona-transition-retains-timed-out-old-host/external-priority",
+      "ROG/normal-persona-transition-retains-timed-out-old-host/power-not-ready",
+      "ROG/normal-persona-transition-retains-timed-out-old-host/input-not-ready",
+      "ROG/normal-persona-transition-retains-timed-out-old-host/queued-recording",
+      "ROG/normal-persona-transition-retains-timed-out-old-host/queued-external-priority",
+      "ROG/normal-persona-transition-retains-timed-out-old-host/queued-power-not-ready",
+      "ROG/normal-persona-transition-retains-timed-out-old-host/queued-stale-request",
+      "ROG/normal-persona-transition-retains-timed-out-old-host/queued-stale-power",
+      "ROG/normal-persona-transition-retains-timed-out-old-host/queued-deadline",
+      "ROG/normal-persona-transition-retains-timed-out-old-host/pause-to-deadline",
+      "GPD/normal-persona-transition-retains-timed-out-old-host",
+      "MSI/normal-persona-transition-retains-timed-out-old-host",
+      "actual-local-owned-hidden-missing-single-fallback",
+      "actual-local-owned-hidden-guard/unknown-readback",
+      "actual-local-owned-hidden-guard/cloak-off-only",
+      "actual-local-owned-hidden-guard/journal-selected-identity-mismatch",
+      "actual-local-offer-unknown-holds-healthy-resolves-sticky",
+      "actual-owned-readback-publication-rejected/same-transaction-target-mutation",
+      "actual-owned-readback-publication-rejected/stale-request",
+      "actual-owned-readback-publication-rejected/stale-power",
+      "actual-owned-readback-older-query-and-start-freshness",
+      "actual-deferred-hide-current-known-source-and-unknown-guards",
+      "actual-queued-local-fallback-original-deadline-no-io",
+      "actual-owned-local-fault-before-first-frame-starts-original-inspection",
+      "actual-owned-root-refresh-original-clock-single-fallback",
+      "actual-owned-root-refresh-ordinary-repair-revokes-unspent-offer",
+      "actual-owned-root-refresh-guard/refresh-issued",
+      "actual-owned-root-refresh-guard/refresh-result-unknown",
+      "actual-owned-root-refresh-guard/configuration-unapplied",
+      "actual-owned-root-refresh-guard/configuration-not-ready",
+      "actual-owned-root-refresh-guard/continuation-retired",
+      "actual-owned-root-refresh-guard/refresh-not-required",
+      "actual-owned-root-refresh-guard/unknown-readback",
+      "actual-owned-root-refresh-guard/cloak-off",
+      "actual-owned-root-refresh-guard/stale-readback",
+      "actual-owned-root-refresh-guard/foreign-readback",
+      "actual-owned-root-refresh-guard/stage-targets-changed",
+      "actual-owned-root-refresh-guard/stage-root-changed",
+      "actual-owned-root-refresh-guard/stage-identity-changed",
+      "actual-owned-root-refresh-guard/journal-targets-changed",
+      "actual-owned-root-refresh-guard/journal-root-changed",
+      "actual-owned-root-refresh-guard/journal-owner-changed",
+      "actual-owned-root-refresh-guard/journal-source-count",
+      "actual-owned-root-refresh-guard/journal-source-mismatch",
+      "actual-owned-root-refresh-guard/old-host",
+      "actual-owned-root-refresh-guard/old-run",
+      "actual-owned-root-refresh-guard/old-request",
+      "actual-owned-root-refresh-guard/old-power",
+      "actual-owned-root-refresh-guard/old-persona",
+      "actual-owned-root-refresh-guard/expired-stage",
+      "actual-owned-root-refresh-guard/source-mask-absent",
+      "actual-owned-root-refresh-guard/source-mask-extra",
+      "actual-owned-root-refresh-guard/source-not-admitted",
+      "actual-owned-root-refresh-guard/pretarget-absent",
+      "actual-owned-root-refresh-offered-stage-change/refresh-issued",
+      "actual-owned-root-refresh-offered-stage-change/configuration-not-ready",
+      "actual-owned-root-refresh-offered-stage-change/continuation-retired",
+      "actual-owned-root-refresh-offered-stage-change/stage-targets-changed",
+      "actual-owned-root-refresh-offered-stage-change/stage-root-changed",
+      "actual-owned-root-refresh-offered-stage-change/stage-owner-changed",
+      "actual-owned-root-refresh-offered-stage-change/configuration-revision",
+      "actual-owned-root-refresh-offered-stage-change/intent-revision",
+      "actual-owned-root-refresh-offered-stage-change/unknown-readback",
+      "actual-owned-root-refresh-offered-stage-change/replacement-root-and-targets",
+      "actual-owned-hidden-offer-advances-root-after-source-wait",
+      "actual-owned-root-refresh-deadline/queued-original-deadline",
+      "actual-owned-root-refresh-deadline/stop-reaches-original-deadline",
+      "actual-unique-OFF-verification-exit"
+    ],
+    "checks": 1727,
+    "traceSha256": "5ff74fbb9aebd4c886e9d3100e7b4be971ee94923f678d8391536b9ac5eb067f",
+    "originalRequiredNegative": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\PS31A\\Testing\\YMCC\\Evidence\\p\\Build\\Validation\\CurrentCoordinatorTerminal22\\sr\\qualification-runtime\\negative-rollback-switch-return-rearm\\fixture-result.json",
+      "bytes": 2785836,
+      "sha256": "ee952fc5ebefbfd79450e57df0c5f36d31c0d0e51b00d3dda2b0a3d515252421"
+    },
+    "negativeExpectedFailures": 20,
+    "original43LegacyUnchanged": true,
+    "qualificationSource": "Case order independently expands exact original C17 fixture constants/loops including original family skip and name suffix. Assertion names/order/index match all1727 original required-negative rows; native PASS and all original assertions must remain true."
+  },
+  "originalCurrentRecovery": {
+    "managedInputContract": "current105-terminal29-shared-input-power-v1",
+    "mode": "recovery-protection",
+    "caseNames": [
+      "same-intent-external-return-during-pending-start",
+      "same-intent-external-return-during-success-settle",
+      "MSI/3100/same-intent-external-return-during-pending-start",
+      "MSI/3100/same-intent-external-return-during-success-settle",
+      "MSI/10100/same-intent-external-return-during-pending-start",
+      "MSI/10100/same-intent-external-return-during-success-settle",
+      "MSI/31000/same-intent-external-return-during-pending-start",
+      "MSI/31000/same-intent-external-return-during-success-settle",
+      "ROG/0/same-intent-external-return-during-pending-start",
+      "ROG/0/same-intent-external-return-during-success-settle",
+      "ROG/3100/same-intent-external-return-during-pending-start",
+      "ROG/3100/same-intent-external-return-during-success-settle",
+      "ROG/10100/same-intent-external-return-during-pending-start",
+      "ROG/10100/same-intent-external-return-during-success-settle",
+      "ROG/31000/same-intent-external-return-during-pending-start",
+      "ROG/31000/same-intent-external-return-during-success-settle",
+      "GPD/0/same-intent-external-return-during-pending-start",
+      "GPD/0/same-intent-external-return-during-success-settle",
+      "GPD/3100/same-intent-external-return-during-pending-start",
+      "GPD/3100/same-intent-external-return-during-success-settle",
+      "GPD/10100/same-intent-external-return-during-pending-start",
+      "GPD/10100/same-intent-external-return-during-success-settle",
+      "GPD/31000/same-intent-external-return-during-pending-start",
+      "GPD/31000/same-intent-external-return-during-success-settle",
+      "explicit-OFF-during-policy-pause-cannot-auto-resurrect"
+    ],
+    "sourceFixtureSha256": "d4526baa384b1deae0909bd09ada5b0726dfc589f9c4ebafecea9d1d35b38edb",
+    "sourceMainSha256": "3b75068d05f7b21635ca177570d9866ba1f123e6d934820cd70618d4cf36ee52",
+    "compiledFunctionSha256": "0d49af1d7d1f588ea0be9e22acd83d62a1d0f5514dc1e738296bb7a96f99a4fa",
+    "originalFunctionSha256": "6091117b56e04e8e52f6bcd2dc2dca4af06c5f0eefba7b64823c610c11022af4",
+    "checks": 249,
+    "baseChecks": 201,
+    "baseTraceSha256": "08746c3d20f9783ecffb96c292078204be62cfbff694ed2963d85873ac27eeb5",
+    "startAssertions": [
+      "same-intent recovery can execute its serialized real start during user cooldown",
+      "recovery start inherits request ownership without renewing timer"
+    ],
+    "positiveStartRows": 48,
+    "negativeStartRows": 12,
+    "originalRequiredNegative": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\PS31A\\Testing\\YMCC\\Evidence\\p\\Build\\Validation\\CurrentCoordinatorTerminal22\\recovery-negative\\qualification-runtime\\negative-rollback-recovery-inheritance\\fixture-result.json",
+      "bytes": 166721,
+      "sha256": "98917f1963c64bb4afdd0e8dfd6e25dd2dd5f9070bec2e0387365fd584e054e3"
+    },
+    "negativeChecks": 213,
+    "negativeFailures": 31,
+    "extraPositiveRows": 36,
+    "sourceDerivation": "Original3families x4delays x2terminal states plus explicitOFF; all24positive cases actually enter original if(virtualTargetEnabled) Start branch. Negative31 failures leave only6 cases in that branch. Same201 other original assertion rows, plus48 positive or12 negative Start assertion rows."
+  }
+}

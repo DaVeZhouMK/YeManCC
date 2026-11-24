@@ -14,28 +14,28 @@ static std::string inputCaptureCalibrationStorageKey(const std::string& id){
 static void contextTests(){
  ownerReset();auto sourceState=ownerSelect();onPump();auto oldPrivate=inputCaptureWindowsSensorViewSnapshot();auto built=ymcc::windows_motion::forProcessing(oldPrivate.submission,ownerCpu);
  check(sourceState.value("inputProcessingCommitted",false)&&ymcc::windows_motion::currentForOutput(built),"context revocation witness starts with a committed processed source");
- std::atomic_load(&g_windowsSelectionWorkerContext)->active->store(false);inputCaptureWindowsSelectionPublishContext();
+ g_windowsSelectionWorkerContext.load()->active->store(false);inputCaptureWindowsSelectionPublishContext();
  check(!ymcc::windows_motion::currentForOutput(built)&&ownerCpu->load(),"BUS context replacement revokes already-built output before STA polling or CPU retirement");
  check(!inputCaptureWindowsSensorViewSnapshot().coherent,"new same-fingerprint context cannot borrow the old private projection");
- ownerReset();std::atomic_store(&g_windowsSelectionWorkerContext,std::shared_ptr<const WindowsSelectionWorkerContext>{});
- inputCaptureWindowsSelectionPublishContext();auto first=std::atomic_load(&g_windowsSelectionWorkerContext);
+ ownerReset();g_windowsSelectionWorkerContext.store(std::shared_ptr<const WindowsSelectionWorkerContext>{});
+ inputCaptureWindowsSelectionPublishContext();auto first=g_windowsSelectionWorkerContext.load();
  check(inputCaptureWindowsSelectionContextCurrent(first)&&first->defaultKey=="pinned-default-key:"+g_sensorMeta.gyroDeviceId,"actual BUS publisher exports bound default identity and calibration key");
  for(unsigned i=0;i<512;++i)inputCaptureWindowsSelectionPublishContext();
- check(std::atomic_load(&g_windowsSelectionWorkerContext)==first,"stable sampling reuses immutable context without rebuilding JSON/model each tick");
- ++g_sensorMeta.gyroIntervalMs;inputCaptureWindowsSelectionPublishContext();check(std::atomic_load(&g_windowsSelectionWorkerContext)==first,"report interval metadata does not change processing ownership context");
+ check(g_windowsSelectionWorkerContext.load()==first,"stable sampling reuses immutable context without rebuilding JSON/model each tick");
+ ++g_sensorMeta.gyroIntervalMs;inputCaptureWindowsSelectionPublishContext();check(g_windowsSelectionWorkerContext.load()==first,"report interval metadata does not change processing ownership context");
  {WindowsSensorView privateScope;privateScope.privateSource=true;privateScope.metadata.gyroDeviceId="foreign-private-source";
   ymcc::sensors::view::ProcessingScope<InputCaptureSensorMeta> scope(privateScope,t_windowsProcessingMeta,t_windowsProcessingStamp,&t_windowsProcessingView);
   g_sensorMeta.gyroDeviceId="ACPI#updated#1#{GYRO}";inputCaptureWindowsSelectionPublishContext();
-  auto current=std::atomic_load(&g_windowsSelectionWorkerContext);
+  auto current=g_windowsSelectionWorkerContext.load();
   check(current!=first&&!first->active->load()&&current->defaultKey=="pinned-default-key:"+g_sensorMeta.gyroDeviceId,"publisher explicitly pins real default calibration under a surrounding private TLS view");}
- first=std::atomic_load(&g_windowsSelectionWorkerContext);first->active->store(false);inputCaptureWindowsSelectionPublishContext();
- check(std::atomic_load(&g_windowsSelectionWorkerContext)!=first,"same fingerprint with revoked ownership mints a new immutable context");
- fixtureModelBound=false;inputCaptureWindowsSelectionPublishContext();check(!inputCaptureWindowsSelectionContextCurrent(std::atomic_load(&g_windowsSelectionWorkerContext)),"actual model binding revocation closes request context");
- fixtureModelBound=true;inputCaptureWindowsSelectionPublishContext();check(inputCaptureWindowsSelectionContextCurrent(std::atomic_load(&g_windowsSelectionWorkerContext)),"valid model binding can create a new request context");
- g_powerLifecycle=PowerLifecycle::Suspended;inputCaptureWindowsSelectionPublishContext();check(!inputCaptureWindowsSelectionContextCurrent(std::atomic_load(&g_windowsSelectionWorkerContext)),"suspended lifecycle cannot publish an admissible request context");
- g_powerLifecycle=PowerLifecycle::Ready;inputCaptureWindowsSelectionPublishContext();first=std::atomic_load(&g_windowsSelectionWorkerContext);
+ first=g_windowsSelectionWorkerContext.load();first->active->store(false);inputCaptureWindowsSelectionPublishContext();
+ check(g_windowsSelectionWorkerContext.load()!=first,"same fingerprint with revoked ownership mints a new immutable context");
+ fixtureModelBound=false;inputCaptureWindowsSelectionPublishContext();check(!inputCaptureWindowsSelectionContextCurrent(g_windowsSelectionWorkerContext.load()),"actual model binding revocation closes request context");
+ fixtureModelBound=true;inputCaptureWindowsSelectionPublishContext();check(inputCaptureWindowsSelectionContextCurrent(g_windowsSelectionWorkerContext.load()),"valid model binding can create a new request context");
+ g_powerLifecycle=PowerLifecycle::Suspended;inputCaptureWindowsSelectionPublishContext();check(!inputCaptureWindowsSelectionContextCurrent(g_windowsSelectionWorkerContext.load()),"suspended lifecycle cannot publish an admissible request context");
+ g_powerLifecycle=PowerLifecycle::Ready;inputCaptureWindowsSelectionPublishContext();first=g_windowsSelectionWorkerContext.load();
  ++g_windowsSourceModuleLifetime;check(!inputCaptureWindowsSelectionContextCurrent(first),"native source lifetime change immediately invalidates prior bridge");
- inputCaptureWindowsSelectionPublishContext();check(std::atomic_load(&g_windowsSelectionWorkerContext)!=first,"new native source lifetime gets a new BUS snapshot");
- g_inputCaptureReady=false;inputCaptureWindowsSelectionPublishContext();check(!inputCaptureWindowsSelectionContextCurrent(std::atomic_load(&g_windowsSelectionWorkerContext)),"disabled capture closes context even while model data is retained");g_inputCaptureReady=true;
+ inputCaptureWindowsSelectionPublishContext();check(g_windowsSelectionWorkerContext.load()!=first,"new native source lifetime gets a new BUS snapshot");
+ g_inputCaptureReady=false;inputCaptureWindowsSelectionPublishContext();check(!inputCaptureWindowsSelectionContextCurrent(g_windowsSelectionWorkerContext.load()),"disabled capture closes context even while model data is retained");g_inputCaptureReady=true;
  inputCaptureWindowsSelectionLifecycle();resetView();
 }

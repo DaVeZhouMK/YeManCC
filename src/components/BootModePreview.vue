@@ -9,7 +9,9 @@ const root = ref<HTMLElement | null>(null), video = ref<HTMLVideoElement | null>
 const pageActive = ref(true), onScreen = ref(false), uiVisible = ref(isUiVisible());
 const videoFailed = ref(false), posterFailed = ref(false), playing = ref(false);
 const media = computed(() => BOOT_MODE_PREVIEWS[props.mode]);
-const running = computed(() => props.active && pageActive.value && onScreen.value && uiVisible.value && !videoFailed.value);
+const visible = computed(() => props.active && pageActive.value && onScreen.value && uiVisible.value);
+const playbackAdmitted = ref(false);
+const running = computed(() => visible.value && playbackAdmitted.value && !videoFailed.value);
 let observer: IntersectionObserver | undefined, stopVisibility: (() => void) | undefined;
 let playGeneration = 0;
 
@@ -48,6 +50,13 @@ function failed() {
   if (running.value && video.value?.getAttribute('src') === media.value.src) videoFailed.value = true;
 }
 watch(() => props.mode, () => { release(); videoFailed.value = false; posterFailed.value = false; }, { flush: 'sync' });
+watch(visible, (value, _, onCleanup) => {
+  playbackAdmitted.value = false;
+  if (!value) return;
+  // Paint the poster first and skip decoder startup during brief route visits.
+  const timer = window.setTimeout(() => { playbackAdmitted.value = true; }, 350);
+  onCleanup(() => window.clearTimeout(timer));
+}, { flush: 'sync' });
 watch([video, running, () => media.value.src], playback, { flush: 'post' });
 onMounted(() => {
   observer = new IntersectionObserver(entries => { onScreen.value = entries.some(entry => entry.isIntersecting); });

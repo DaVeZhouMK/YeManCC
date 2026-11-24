@@ -32,7 +32,7 @@ try {
   )) {
     $exe = Join-Path $out ($test.Name + '.exe')
     $obj = Join-Path $out ($test.Name + '.obj')
-    $commands += "cl /nologo /std:c++17 /EHsc /utf-8 /I`"$(Join-Path $root 'deps/json')`" /Fe:`"$exe`" /Fo:`"$obj`" `"$($test.Source)`""
+    $commands += "cl /nologo /std:c++20 /EHsc /utf-8 /I`"$(Join-Path $root 'deps/json')`" /Fe:`"$exe`" /Fo:`"$obj`" `"$($test.Source)`""
     $commands += 'if errorlevel 1 exit /b 1'
     $commands += "`"$exe`""
     $commands += 'if errorlevel 1 exit /b 1'

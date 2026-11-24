@@ -8,7 +8,10 @@ namespace ymcc {
 inline bool gameInputOverrideActive(const nlohmann::json&, const std::string&) {
     return false;
 }
-inline nlohmann::json effectiveGameInput(const nlohmann::json& input, const std::string&) {
+inline const nlohmann::json& effectiveGameInputView(const nlohmann::json& input, const std::string&) {
     return input;
+}
+inline nlohmann::json effectiveGameInput(const nlohmann::json& input, const std::string& session) {
+    return effectiveGameInputView(input, session);
 }
 }

@@ -130,6 +130,7 @@ static void sgAbnormalStop(const char*){}
 static void sgStopMonitorEntryFailureTimer(const char*){}
 static void sgHandleModernStandbyWake(bool,ULONGLONG=0){++uiRecoveryCalls;}
 static void sleepRecoveryAutoArm(ULONGLONG){++uiRecoveryCalls;}
+static void sgReportSleepDisplayRelight() noexcept {} // UI diagnostics outside this fixture.
 static const char* sgKernelPowerReasonName(int){return "inert-reason-label";}
 #else
 static bool sgNonUserWakeGuardEnabled(){return false;}
@@ -152,7 +153,7 @@ static void sgCancelEntryFailureRetry(const char*,SgRetryKind only=SgRetryKind::
 static void sgClearUnexpectedWake(const char*,bool){}
 #endif
 static void sgClearInternalSleepRequest(const char*){++markerClears;g_sgInternalSleepRequest={};}
-static void sgMarkInternalSleepRequest(SgRetryKind kind){g_sgInternalSleepRequest={kind,fixtureTick,fixtureFileTime};}
+static std::string sgFormatFactFileTime(ULONGLONG time){return std::to_string(time);}
 static bool sgPrepareSleepPrivilege(SgSystemSleepRequestResult& result){result.privilegeRequired=true;result.shutdownPrivilegeEnabled=!privilegeDenied;result.shutdownPrivilegeError=privilegeDenied?ERROR_NOT_ALL_ASSIGNED:ERROR_SUCCESS;const auto hook=std::move(afterPrivilege);afterPrivilege=nullptr;if(hook)hook();return result.shutdownPrivilegeEnabled;}
 static void stopPowerResumeWatchdog(){}
 static void closeHardwareWriteGate(const char*){}
@@ -317,8 +318,8 @@ template<class F> static void scenario(const std::string& name,F body){
 }
 } // namespace sleep_timeout_fixture
 static void sgSleepTimeoutObserveCompleted(const json& evidence,unsigned long long at,unsigned long long generation,int reason) noexcept {sleep_timeout_fixture::sgSleepTimeoutObserveCompleted(evidence,at,generation,reason);}
-[[maybe_unused]] static unsigned sleepTimeoutNativeTests(){
-    using namespace sleep_timeout_fixture;
+namespace sleep_timeout_fixture {
+static unsigned runTests(){
     const auto initial=sleepEvidenceChecks;scenarios=json::array();
     check(g_sgRetrySleepTimeout,"actual main.cpp timeout default is true");
     scenario("239999ms early tick preserves original deadline",[]{arm();const auto first=timers.at(timeoutTimerId);at(239999);sgSleepTimeoutTick();check(g_sgSleepTimeoutWindow.waiting&&!apiCalls&&!sgSleepRetryActive()&&timers.at(timeoutTimerId)==first,"early tick rearms only remaining one millisecond");check(timerWrites==2,"early delivery has bounded single remaining timer");});
@@ -378,6 +379,56 @@ static void sgSleepTimeoutObserveCompleted(const json& evidence,unsigned long lo
     scenario("positive507 after actual dispatch log vetoes",[]{originalEntry();arm();deadline();afterLog=[](const char* event){if(std::string(event)=="sleep-request-dispatch"){const auto us=(fixtureFileTime-epoch)/10;completed(windowsSession(us,us-1),fixtureFileTime);}};dispatch();check(!apiCalls,"real sender repeats the completed-session veto at the final API boundary");});
     scenario("doublezero507 is neither failure nor success",[]{originalEntry();arm();at(1000);completed("<Data Name=\"DurationInUs\">1000000</Data><Data Name=\"DripsResidencyInUs\">0</Data><Data Name=\"HwDripsResidencyInUs\">0</Data><Data Name=\"SleepEntered\">true</Data>",fixtureFileTime);check(!apiCalls&&g_sgSleepTimeoutWindow.waiting&&!sgSleepTimeoutSuccessAfter(epoch),"DRIPS and SleepEntered without sleep duration are insufficient");deadline();dispatch();check(apiCalls==1,"elapsed policy remains independent of DRIPS");});
     scenario("Windows completed session with zero DRIPS",[]{originalEntry();arm();at(1000);completed(windowsSession(1000000,990000)+"<Data Name=\"DripsResidencyInUs\">0</Data><Data Name=\"HwDripsResidencyInUs\">0</Data>",fixtureFileTime);deadline();dispatch();check(!apiCalls&&!g_sgSleepTimeoutWindow.active(),"explicit Windows completed sleep is independent of zero DRIPS");});
+    scenario("Intel G3E continuing sleep then separate screen-off failure",[]{
+        // 2026-11-22 G3E export, sleep-facts.log lines 818, 848, 849, 870.
+        originalEntry();arm();at(7220392);
+        const auto continuingAt=fixtureFileTime;
+        const auto continuing=windowsSession(7220391475ULL,7220340182ULL)+
+            "<Data Name=\"IsCsSessionInProgressOnExit\">true</Data>";
+        const auto continuingXml="<Event><EventData>"+continuing+"</EventData></Event>";
+        sgSleepTimeoutRecordKernel(507,55,continuingAt,771);
+        check(!::productionCapture(true,continuingXml,continuingAt,771,55),
+            "G3E continuing 507 cannot be forwarded as an exit");
+        check(::captured.size()==1&&::captured.front().second.at("windowsEntryOutcome")=="entered",
+            "G3E continuing 507 preserves the Windows sleep evidence");
+        ::captured.clear();
+        check(sgSleepTimeoutSuccessAfter(epoch),"G3E continuing 507 denies retry of the matched original intent");
+        check(!g_sgKernelCycles.latestCompletedAfter(epoch,continuingAt,55,771,SG_S0_ENTRY_FAILURE_WINDOW_MS),
+            "G3E continuing 507 is not a completed exit for the in-flight retry branch");
+        at(7220393);const auto laterEntry=fixtureFileTime;
+        sgSleepTimeoutRecordKernel(506,55,laterEntry,771);
+        at(7225476);
+        const auto noEntry=windowsSession(5083507,0,"false")+
+            "<Data Name=\"IsCsSessionInProgressOnExit\">false</Data>";
+        sgSleepTimeoutRecordKernel(507,32,fixtureFileTime,771);
+        check(::productionCapture(true,"<Event><EventData>"+noEntry+"</EventData></Event>",fixtureFileTime,771,32),
+            "G3E second 507 is forwarded as a real exit from the screen-off phase");
+        check(::captured.size()==1&&::captured.front().second.at("windowsEntryOutcome")=="not-entered",
+            "G3E screen-off-only 507 explicitly reports no sleep in the ordinary export");
+        ::captured.clear();
+        check(sgSleepTimeoutSuccessAfter(epoch)&&!sgSleepTimeoutSuccessAfter(laterEntry),
+            "G3E later no-entry does not erase original entry or borrow its success");
+        sgSleepTimeoutTick();check(!apiCalls&&!sgSleepRetryActive()&&!g_sgSleepTimeoutWindow.active(),
+            "G3E evidence does not authorize a new request for a non-button entry");
+    });
+    scenario("Continuing bit preserves manual and hibernate arbitration",[]{
+        const auto xml="<Event><EventData>"+windowsSession(1000000,990000)+
+            "<Data Name=\"IsCsSessionInProgressOnExit\">true</Data></EventData></Event>";
+        at(1000);
+        for(const int reason:{1,20}) {
+            check(::productionCapture(true,xml,fixtureFileTime,771,reason),
+                "explicit human wake and Windows hibernate handoff still reach the original classifier");
+            ::captured.clear();
+        }
+    });
+    scenario("Windows entry accounting stays unknown for contradictory or missing fields",[]{
+        for(const auto& fields:{windowsSession(5000000,0),windowsSession(5000000,10,"false"),
+            windowsSession(5000000,5000001),windowsSession(5000000,0,"false")+"<Data Name=\"SleepEntered\">true</Data>",
+            std::string("<Data Name=\"SleepEntered\">false</Data>")}) {
+            const auto evidence=ymcc::sleep_residency::makeEvidence("<Event><EventData>"+fields+"</EventData></Event>");
+            check(evidence.at("windowsEntryOutcome")=="unknown","missing or contradictory Windows accounting is unknown");
+        }
+    });
     scenario("missing malformed and old507 cannot veto new intent",[]{originalEntry();arm();at(1000);completed(windowsSession(1000000,0,"false"),fixtureFileTime);at(2000);completed(windowsSession(100,101),fixtureFileTime);at(3000);completed(windowsSession(1000000,990000),epoch-1);at(4000);completed(windowsSession(4000000,3900000)+"<Data Name=\"SleepEntered\">false</Data>",fixtureFileTime);deadline();dispatch();check(apiCalls==1,"explicit no-entry, incompatible clocks, duplicate flag and old timestamps cannot fabricate completion");});
     scenario("positive witness highwater cannot roll back",[]{originalEntry();at(4000);completed(windowsSession(4000000,3950000),fixtureFileTime);completed(windowsSession(2000000,1900000),epoch+20000000);check(sgSleepTimeoutSuccessAfter(epoch)&&!sgSleepTimeoutSuccessAfter(epoch+1),"old callback cannot erase or broaden the exact settled intent");});
     scenario("unrelated later session cannot settle old intent",[]{originalEntry();arm();at(230000);sgSleepTimeoutRecordKernel(506,3,fixtureFileTime,772);at(239000);completed(windowsSession(9000000,8900000),fixtureFileTime,5,772);check(!sgSleepTimeoutSuccessAfter(epoch),"future completion is not yet current");fixtureGeneration=772;check(!sgSleepTimeoutSuccessAfter(epoch)&&sgSleepTimeoutSuccessAfter(epoch+2300000000ULL),"later entry and completion cannot be borrowed by the old intent");g_sgLatestSleepEntryFileTime=epoch+2300000000ULL;deadline();dispatch();check(!apiCalls,"original sender cancels when it sees a newer entry");});
@@ -470,6 +521,20 @@ static void sgSleepTimeoutObserveCompleted(const json& evidence,unsigned long lo
             g_sgAutomaticSleepBudget.requests()==SG_MAX_ENTRY_RETRIES&&!g_sgSleepTimeoutWindow.requested,
             "elapsed deadline cannot retire or send over a last accepted call");});
     scenario("rejected shared API uses existing delayed retry budget",[]{arm();deadline();apiAccepted=false;dispatch();check(apiCalls==1&&g_sgAutomaticSleepBudget.requests()==1&&timers.count(retryTimerId),"rejection uses original delayed scheduler");dispatch();dispatch();check(apiCalls==3&&g_sgAutomaticSleepBudget.requests()==3&&!sgSleepRetryActive(),"original three-attempt budget remains bounded");});
+    for(const char* event:{"internal-sleep-request-armed","sleep-request-route","sleep-request-dispatch",
+            "sleep-request-route-result","sleep-retry-request"}) {
+        scenario(event,[&]{
+            arm();deadline();apiAccepted=false;throwLogEvent=event;
+            bool escaped=false;
+            try {dispatch();} catch(const std::runtime_error&) {escaped=true;}
+            check(!escaped,"ordinary retry fact failure must not interrupt the shared sender");
+            check(apiCalls==1&&g_sgAutomaticSleepBudget.requests()==1&&timers.count(retryTimerId)&&
+                g_sgInternalSleepRequest.kind==SgRetryKind::None,"one rejected call clears its marker and schedules the original next attempt");
+            dispatch();dispatch();
+            check(apiCalls==3&&g_sgAutomaticSleepBudget.requests()==3&&!sgSleepRetryActive()&&!timers.count(retryTimerId),
+                "repeated journal failures exhaust only the original budget and retire the retry");
+        });
+    }
     scenario("classic S3 routes through same tripleFALSE sender",[]{modern=false;arm();deadline();dispatch();check(apiCalls==1&&g_sgAutomaticSleepTarget==ymcc::sleeprequest::Mode::Sleep,"modern unavailable classic capability uses actual shared API");});
     scenario("all automatic sleep capabilities unavailable does not S4",[]{modern=classic=false;arm();deadline();dispatch();check(!apiCalls&&g_sgAutomaticSleepBudget.requests()==1&&!g_sgRetryDueTick&&!sgSleepRetryActive(),"unsupported route retires without forging a Windows failure or S4 fallback");});
     scenario("ordinary logs independent of detail logging and IO failure",[]{throwLogEvent="sleep-timeout-armed";arm();check(g_sgSleepTimeoutWindow.waiting,"arm log failure preserves elapsed policy");throwLogEvent="sleep-timeout-due";deadline();dispatch();check(apiCalls==1,"timeout fact IO cannot grant repeat or block power");for(const auto& fact:facts)if(fact.first=="sleep-timeout-armed"||fact.first=="sleep-timeout-due")check(fact.second.at("detailLogsRequired")==false&&fact.second.at("mandatoryEvidence")==true,"ordinary timeout facts explicitly mandatory without detailed logging");});
@@ -479,3 +544,5 @@ static void sgSleepTimeoutObserveCompleted(const json& evidence,unsigned long lo
     reset();g_sgRetrySleepTimeout=false;::captured.clear();
     return sleepEvidenceChecks-initial;
 }
+} // namespace sleep_timeout_fixture
+[[maybe_unused]] static unsigned sleepTimeoutNativeTests(){return sleep_timeout_fixture::runTests();}

@@ -101,8 +101,16 @@ function evaluate(file,imports={},rtssIoState=null) {
   const globals={console,setTimeout:options.rtssProcessIoOnly&&rtssIoState?((fn,ms)=>{(rtssIoState.waits??=[]).push(ms);fn();return 0;}):setTimeout,clearTimeout,performance:{now:()=>Date.now()},window:windowPort,document:documentPort,CustomEvent:customEvent};
   Object.assign(windowPort,{setTimeout:globals.setTimeout,clearTimeout:globals.clearTimeout});
   const actualModules=new Map(),actualPaths={'./uiLifecycle':'src/bridge/uiLifecycle.ts','./bridge/uiLifecycle':'src/bridge/uiLifecycle.ts','../scheduler':'src/scheduler.ts','../robust/repairModel':'src/robust/repairModel.ts','@/robust/repairModel':'src/robust/repairModel.ts','./tdpCircuitBreaker':'src/bridge/tdpCircuitBreaker.ts','./powerSource':'src/bridge/powerSource.ts'};
+  if(options.rtssProcessIoOnly)Object.assign(actualPaths,{
+    './steamInstallationFacts':'src/bridge/steamInstallationFacts.ts','./bootModeGlobalPreferences':'src/bridge/bootModeGlobalPreferences.ts',
+    './inputConfigHash':'src/bridge/inputConfigHash.ts','./settingsBaseline':'src/bridge/settingsBaseline.ts',
+  });
   const loadActual=relative=>{if(actualModules.has(relative))return actualModules.get(relative);const input=selectedInput(path.join(repoRoot,relative)),key=input.file+'#production-pure-dependency';if(!selectedCode.has(key))selectedCode.set(key,transformSync(input.text,{loader:'ts',format:'cjs'}).code);const loaded={exports:{}};actualModules.set(relative,loaded.exports);vm.runInNewContext(selectedCode.get(key),{...globals,module:loaded,exports:loaded.exports,require:requireActual});actualModules.set(relative,loaded.exports);if(relative==='src/scheduler.ts')fixtureCleanups.add(()=>{for(const name of loaded.exports.getScheduledTaskNames())loaded.exports.unregisterScheduledTask(name);});return loaded.exports;};
-  function requireActual(name){if(Object.hasOwn(actualPaths,name))return loadActual(actualPaths[name]);if(Object.hasOwn(imports,name))return imports[name];if(name==='vue')return vue;throw Error('Unexpected import '+name);}
+  function requireActual(name){
+    if(options.rtssProcessIoOnly && name==='../../PowerControl/settings-baseline.json')return JSON.parse(selectedInput(path.join(repoRoot,'PowerControl/settings-baseline.json')).text);
+    if(options.rtssProcessIoOnly && (name==='./powerLifecycleState'||name==='./bridge/powerLifecycleState'))return {onSharedPowerLifecycle:()=>()=>{}};
+    if(Object.hasOwn(actualPaths,name))return loadActual(actualPaths[name]);if(Object.hasOwn(imports,name))return imports[name];if(name==='vue')return vue;throw Error('Unexpected import '+name);
+  }
   vm.runInNewContext(code,{...globals,module,exports:module.exports,require:requireActual});
   return module.exports;
 }
@@ -118,19 +126,20 @@ function rtssProcessIoPort(state,cmd,args) {
     if(reply instanceof Error)throw reply;return reply;
   }
   if(cmd==='fs.exists')return take(state.existsReplies,false);
+  if(cmd==='fs.stat')return {...(state.fileFacts?.[args.path]??{isFile:false})};
+  if(cmd==='env.get')return state.envRoots?.[args.name]??null;
+  if(cmd==='fs.readTextFile')return 'Limit=60';
   if(cmd==='proc.running') {
     const family=args.names.includes('RTSSHooksLoader*');
     return take(family?state.familyReplies:state.runningReplies,Object.fromEntries(args.names.map(name=>[name,!family])));
   }
   if(cmd==='shell.hidden')return {ok:true,pid:701};
-  if(cmd==='shell.run') {
-    if(args.program==='cmd')return {exitCode:0,stdout:'',stderr:''};
-    const script=args.args?.at(-1);
-    if(/^powershell(?:\.exe)?$/i.test(args.program)&&typeof script==='string'&&script.includes('$c=@(')) {
-      (state.directoryScripts??=[]).push(script);
-      const reply=take(state.directoryReplies,'');if(reply instanceof Error)throw reply;
-      return {exitCode:0,stdout:reply,stderr:''};
-    }
+  if(cmd==='shell.run'&&args.program==='cmd')return {exitCode:0,stdout:'',stderr:''};
+  if(cmd==='rtss.findRegisteredInstall') {
+    state.onDirectory?.();
+    const reply=take(state.directoryReplies,'');if(reply instanceof Error)throw reply;
+    const receipt=directory=>typeof directory==='string'?{known:true,directory}:directory;
+    return reply instanceof Promise ? reply.then(receipt) : receipt(reply);
   }
   throw Error('Unexpected RTSS process I/O IPC '+cmd);
 }
@@ -234,32 +243,46 @@ async function runRtssProcessIoCases() {
     const row={name,status:'FAIL',failures:[]};let state;
     try {const f=fixture();state=f.state;await run(f.bridge,state);}
     catch(error){row.failures.push({assertion:'actual private consumer',error:errorText(error)});}
-    row.calls=state?.calls??[];row.directoryScripts=state?.directoryScripts??[];
+    row.calls=state?.calls??[];
     row.affinityResults=state?.affinityResults??[];row.waits=state?.waits??[];
     try {
       assert(calls({calls:row.calls},'proc.identities').length>0,'consumer must request native identities');
       for(const call of row.calls) {
-        assert(['proc.identities','rtss.setAffinityExact','fs.exists','proc.running','shell.run','shell.hidden'].includes(call.cmd),'unexpected IPC '+call.cmd);
-        if(call.cmd==='shell.run')for(const arg of call.args.args??[])assert(!/Get-Process|ProcessorAffinity/i.test(String(arg)),'no PowerShell process discovery or affinity fallback');
+        assert(['proc.identities','rtss.setAffinityExact','rtss.findRegisteredInstall','fs.exists','fs.stat','env.get','fs.readTextFile','proc.running','shell.run','shell.hidden'].includes(call.cmd),'unexpected IPC '+call.cmd);
+        if(call.cmd==='shell.run')assert.equal(call.args.program,'cmd','no PowerShell discovery or affinity fallback');
       }
     } catch(error){row.failures.push({assertion:'native identities and no process scripts',error:errorText(error)});}
     row.status=row.failures.length?'FAIL':'PASS';rows.push(row);
   }
   const seed=(state,affinity=known([]))=>{state.identityReplies=[known([identity()]),affinity];state.directoryReplies=[firstDir];};
+  await checkIo('verified running installation skips PowerShell and environment reads',async(bridge,state)=>{
+    seed(state);
+    state.fileFacts={[firstDir+'\\RTSS.exe']:{isFile:true},[firstDir+'\\RTSSHooks64.dll']:{isFile:true}};
+    assert.equal(await resolve(bridge),firstDir);
+    assert.equal(calls(state,'shell.run').length,0);assert.equal(calls(state,'env.get').length,0);noWrites(state);
+  });
+  await checkIo('a directory at the running hook path does not mask the standard installation',async(bridge,state)=>{
+    seed(state);
+    const standard='C:\\Program Files (x86)\\RivaTuner Statistics Server';
+    state.envRoots={'ProgramFiles(x86)':'C:\\Program Files (x86)'};
+    state.fileFacts={[firstDir+'\\RTSS.exe']:{isFile:true},[firstDir+'\\RTSSHooks64.dll']:{isDir:true,isFile:false},
+      [standard+'\\RTSS.exe']:{isFile:true},[standard+'\\RTSSHooks64.dll']:{isFile:true}};
+    assert.equal(await resolve(bridge),standard);
+    assert.equal(calls(state,'shell.run').length,0);noWrites(state);
+  });
   await checkIo('native running path precedes environment and registry candidates',async(bridge,state)=>{
-    seed(state);state.directoryReplies=['noise\n\\\\server\\share\n'+firstDir+'\n'];
+    seed(state);state.directoryReplies=[secondDir];
+    state.fileFacts={[firstDir+'\\RTSS.exe']:{isFile:true},[firstDir+'\\RTSSHooks64.dll']:{isFile:true}};
     assert.equal(await resolve(bridge),firstDir);
     assert.deepEqual(calls(state,'proc.identities').map(call=>call.args),[{names:['RTSS']}]);
-    const script=state.directoryScripts[0];
-    assert(script.startsWith("$c=@('D:\\Running RTSS\\RTSS.exe')"));
-    assert(script.indexOf("'D:\\Running RTSS\\RTSS.exe'")<script.indexOf('$env:ProgramFiles'));
-    assert(script.includes('RTSSHooks64.dll')&&script.includes('Test-Path -LiteralPath'));noWrites(state);
+    assert.equal(calls(state,'rtss.findRegisteredInstall').length,0);noWrites(state);
   });
-  await checkIo('apostrophe dollar and backtick paths remain single-quoted PS literals',async(bridge,state)=>{
+  await checkIo('apostrophe dollar and backtick paths remain literal file paths',async(bridge,state)=>{
     const hostile="D:\\O'Brien\\$cache\\\u0060tick\\RTSS.exe",directory="D:\\O'Brien\\$cache\\\u0060tick";
-    state.identityReplies=[known([identity('RTSS',701,birth,hostile)])];state.directoryReplies=[directory];
+    state.identityReplies=[known([identity('RTSS',701,birth,hostile)])];
+    state.fileFacts={[hostile]:{isFile:true},[directory+'\\RTSSHooks64.dll']:{isFile:true}};
     assert.equal(await resolve(bridge),directory);
-    assert(state.directoryScripts[0].startsWith("$c=@('D:\\O''Brien\\$cache\\\u0060tick\\RTSS.exe')"));noWrites(state);
+    assert.equal(calls(state,'rtss.findRegisteredInstall').length,0);noWrites(state);
   });
   await checkIo('live cache hit avoids second identity and directory queries',async(bridge,state)=>{
     seed(state);state.existsReplies=[true];assert.equal(await resolve(bridge),firstDir);
@@ -270,7 +293,24 @@ async function runRtssProcessIoCases() {
     state.identityReplies=[known([identity()]),known([identity('RTSS',702,birth,secondDir+'\\RTSS.exe')])];
     state.directoryReplies=[firstDir,secondDir];state.existsReplies=[false];
     assert.equal(await resolve(bridge),firstDir);assert.equal(await resolve(bridge),secondDir);
-    assert.equal(calls(state,'proc.identities').length,2);assert.equal(state.directoryScripts.length,2);
+    assert.equal(calls(state,'proc.identities').length,2);assert.equal(calls(state,'rtss.findRegisteredInstall').length,2);
+  });
+  await checkIo('retired RTSS discovery cannot replace the later current directory',async(bridge,state)=>{
+    let release,enter,current=true;
+    const entered=new Promise(resolve=>enter=resolve),held=new Promise(resolve=>release=resolve);
+    state.onDirectory=enter;
+    state.directoryReplies=[held,secondDir];state.existsReplies=[true,true,true];
+    const old=capture(()=>bridge.readRtssLimit(()=>current));
+    try{
+      let timer;
+      try{await Promise.race([entered,new Promise((_,reject)=>timer=setTimeout(()=>reject(Error('Old read did not start directory discovery')),1200))]);}finally{clearTimeout(timer);}
+      current=false;
+      assert.equal(await bridge.readRtssLimit(()=>true),60);
+      release(firstDir);
+      assert.deepEqual(await old,{rejected:true,kind:'Error',message:'RTSS_LIMIT_READ_RETIRED'});
+      assert.equal(await resolve(bridge),secondDir);
+      assert.deepEqual(calls(state,'fs.readTextFile').map(call=>call.args.path),[path.win32.join(secondDir,'Profiles','Global')]);noWrites(state);
+    }finally{release(firstDir);await old;}
   });
   await checkIo('known empty with no file candidates preserves NotInstalled',async(bridge,state)=>{
     state.identityReplies=[known([])];const result=await capture(()=>resolve(bridge));
@@ -278,7 +318,11 @@ async function runRtssProcessIoCases() {
   });
   await checkIo('native unknown can still use a valid environment or registry file',async(bridge,state)=>{
     state.identityReplies=[{known:false,processes:[],reason:'query-failed'}];state.directoryReplies=[secondDir];
-    assert.equal(await resolve(bridge),secondDir);assert(state.directoryScripts[0].startsWith('$c=@()'));noWrites(state);
+    assert.equal(await resolve(bridge),secondDir);assert.deepEqual(calls(state,'rtss.findRegisteredInstall').map(call=>call.args),[{}]);noWrites(state);
+  });
+  await checkIo('incomplete registry read is distinct from a confirmed absent install',async(bridge,state)=>{
+    state.directoryReplies=[{known:false,directory:''}];const result=await capture(()=>resolve(bridge));
+    assert(result.rejected);assert.equal(result.kind,'Error');assert.match(result.message,/待确认/);noWrites(state);
   });
   const unknownReplies=[
     ['native-reject',new Error('identity query failed')],['unknown',{known:false,processes:[]}],
@@ -289,14 +333,14 @@ async function runRtssProcessIoCases() {
   for(const [label,reply] of unknownReplies)await checkIo('unknown directory is not NotInstalled / '+label,async(bridge,state)=>{
     state.identityReplies=[reply];const result=await capture(()=>resolve(bridge));
     assert(result.rejected);assert.equal(result.kind,'Error');assert.match(result.message,/待确认/);
-    assert.equal(state.directoryScripts.length,1);assert(state.directoryScripts[0].startsWith('$c=@()'));noWrites(state);
+    assert.equal(calls(state,'rtss.findRegisteredInstall').length,1);noWrites(state);
   });
   await checkIo('restart forwards exact native PID birth string and path only',async(bridge,state)=>{
     const identities=[identity(),identity('EncoderServer64',702,'133413576000000003'),identity('RTSSHooksLoader64',703,'000133413576000000005')];
     seed(state,known(identities));await restart(bridge);
     assert.deepEqual(calls(state,'proc.identities').map(call=>call.args),[{names:['RTSS']},{names:['RTSS','EncoderServer64','RTSSHooksLoader64']}]);
     assert.deepEqual(calls(state,'rtss.setAffinityExact').map(call=>call.args),identities.map(row=>({pid:row.pid,processCreated:row.processCreated,path:row.path})));
-    assert.equal(calls(state,'shell.hidden').length,1);assert.equal(state.directoryScripts.length,1);
+    assert.equal(calls(state,'shell.hidden').length,1);assert.equal(calls(state,'rtss.findRegisteredInstall').length,1);
   });
   const malformedRows=[
     ['pid-zero',identity('RTSS',0)],['pid-negative',identity('RTSS',-1)],['pid-fraction',identity('RTSS',1.5)],
@@ -310,7 +354,7 @@ async function runRtssProcessIoCases() {
   ];
   for(const [label,bad] of malformedRows)await checkIo('malformed identity rejects whole affinity receipt without writes / '+label,async(bridge,state)=>{
     seed(state,known([identity('EncoderServer64',702),bad]));await restart(bridge);
-    noWrites(state);assert.equal(calls(state,'shell.hidden').length,1);assert.equal(state.directoryScripts.length,1);
+    noWrites(state);assert.equal(calls(state,'shell.hidden').length,1);assert.equal(calls(state,'rtss.findRegisteredInstall').length,1);
   });
   const affinityUnknown=[['known-empty',known([])],['native-reject',new Error('inventory unavailable')],['unknown',{known:false,processes:[]}],['null',null],['empty-object',{}],['array',[]],['known-error',{known:true,processes:[identity()],error:5}]];
   for(const [label,reply] of affinityUnknown)await checkIo('optional affinity unknown never retries launch / '+label,async(bridge,state)=>{

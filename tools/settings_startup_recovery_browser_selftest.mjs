@@ -100,6 +100,28 @@ try{
  await check('corrupt main without backup initializes safe defaults after exact original archive',async()=>{const g=await fixture('{broken-main');assert.equal((await g.page.evaluate(()=>window.__boot)).ready,true);assert.equal(await g.page.locator('#yemancc-route-fallback').count(),0);const state=await g.page.evaluate(()=>window.__repo.getSettingsRecoveryState());assert.equal(state.status,'ready');assert.equal(state.persisted,true);assert.equal(g.fx.archives.length,1);assert.equal(g.fx.files.get(key(g.fx.archives[0])),'{broken-main');assert.equal(g.fx.writes.length,1);assert.equal(g.fx.writes[0].initialize,true);assert.equal(JSON.parse(g.fx.files.get(key(g.fx.file))).input.applyStatus,'safe-stop');await g.page.evaluate(()=>window.__show('配置恢复','schedule',true));assert.equal(await recover(g.page).isEnabled(),true)});
  await check('reload button really navigates during failed auto-preservation and does not reset',async()=>{const g=await fixture('{broken-main',{archiveFailure:true});await g.page.evaluate(()=>window.__show('配置恢复','schedule',true,window.__repo.getSettingsRecoveryState().message));const reload=g.page.waitForEvent('load');await g.page.getByRole('button',{name:'重新加载',exact:true}).click();await reload;assert.equal((await g.page.evaluate(()=>window.__boot)).ready,true);assert.equal(g.fx.resets,0);assert.equal(g.fx.files.get(key(g.fx.file)),'{broken-main')});
  await check('legacy schema remains compatible and preserves unrelated/protected branches',async()=>{const g=await fixture({schemaVersion:0,tdp:{tdpMax:37},input:{revision:48},future:{kept:true}});assert.equal((await g.page.evaluate(()=>window.__boot)).ready,true);const saved=JSON.parse(g.fx.files.get(key(g.fx.file)));assert.equal(saved.schemaVersion,1);assert.equal(saved.tdp.tdpMax,37);assert.equal(saved.input.revision,48);assert.equal(saved.future.kept,true);assert.equal(g.fx.resets,0)});
+ await check('deep legacy launch list cannot veto migration of the main configuration',async()=>{
+  const file=key('G:\\fixture-override\\PowerControl\\launch_apps.json');
+  const defaults=await f.page.evaluate(()=>window.__repo.normalizeSettings({}).quickApps.apps);
+  const nested=levels=>'['.repeat(levels)+'0'+']'.repeat(levels);
+  for(const deep of [nested(64),nested(10000)])for(const raw of [deep,'{"apps":'+deep+'}']){
+   const g=await fixture({schemaVersion:0,ui:{theme:'preserved'},tdp:{tdpMax:37},input:{revision:48}},{files:new Map([[file,raw]])});
+   assert.equal((await g.page.evaluate(()=>window.__boot)).ready,true);
+   assert.equal((await g.page.evaluate(()=>window.__repo.getSettingsRecoveryState())).status,'ready');
+   const saved=JSON.parse(g.fx.files.get(key(g.fx.file)));
+   assert.equal(saved.ui.theme,'preserved');assert.equal(saved.tdp.tdpMax,37);assert.equal(saved.input.revision,48);
+   assert.deepEqual(saved.quickApps.apps,defaults);assert.equal(saved.configurationBaseline.legacyImported,true);
+   assert.equal(g.fx.files.get(file),raw);assert.equal(g.fx.writes.length,1);assert.equal(g.fx.resets,0);
+   await g.page.reload();assert.equal((await g.page.evaluate(()=>window.__boot)).ready,true);
+   assert.equal(g.fx.writes.length,1);await g.page.close();
+  }
+  const legacyApps=[{path:'C:/fixture/valid.exe',name:'Valid'}];
+  for(const raw of [JSON.stringify(legacyApps),JSON.stringify({apps:legacyApps})]){
+   const g=await fixture(null,{files:new Map([[file,raw]])});
+   assert.deepEqual(JSON.parse(g.fx.files.get(key(g.fx.file))).quickApps.apps,legacyApps);
+   await g.page.close();
+  }
+ });
  await check('future baseline is inspectable and explicit archived reset establishes the current receipt',async()=>{
   const g=await fixture({schemaVersion:1,configurationBaseline:{id:'ymcc-settings',revision:2,legacyImported:true},input:{revision:48,marker:'protected'},fan:{marker:'protected'},future:{marker:'protected'}});
   assert.equal((await g.page.evaluate(()=>window.__boot)).ready,true);assert.match((await g.page.evaluate(()=>window.__repo.getSettingsRecoveryState())).message,/配置基准/);await g.page.evaluate(()=>window.__show('配置恢复','schedule',true,window.__repo.getSettingsRecoveryState().message));

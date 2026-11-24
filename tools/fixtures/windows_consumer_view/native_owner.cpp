@@ -27,7 +27,7 @@ static void ownerProcess(){
  auto processed=ymcc::windows_motion::forProcessing(raw.submission,ownerCpu);
  if(raw.submission.publication&&!ymcc::windows_motion::currentForOutput(processed))observedPendingClosed=true;
  if(ownerFault=="no-processing"||(ownerFault=="default-no-processing"&&!raw.privateSource))return;
- const auto context=std::atomic_load(&g_windowsSelectionWorkerContext);if(!context)return;
+ const auto context=g_windowsSelectionWorkerContext.load();if(!context)return;
  ymcc::sensors::processing::Identity id;id.source=processed;id.privateSource=raw.privateSource;id.power=currentPower;
  id.epoch=1;id.captureRequest=raw.captureRequestId;id.choiceRequest=raw.choiceRequestId;
  id.recipe={context->deviceClass,context->selector,context->gyro,context->accel,context->digest,true};
@@ -49,12 +49,12 @@ static void ownerRefreshContext(){
  context->model=model();context->metadata=g_sensorMeta;context->lifetime=g_windowsSourceModuleLifetime.load();context->revision=1;
  context->deviceClass=model().deviceClass;context->selector="controlled-selector";context->gyro=model().gyroMatrixId;context->accel=model().accelMatrixId;
  context->digest=std::string(64,'c');context->defaultProfile="retained-default-profile";context->defaultKey="retained-default-key";
- std::atomic_store(&g_windowsSelectionWorkerContext,std::shared_ptr<const WindowsSelectionWorkerContext>(context));
+ g_windowsSelectionWorkerContext.store(std::shared_ptr<const WindowsSelectionWorkerContext>(context));
 }
 static void ownerReset(){
  inputCaptureWindowsSelectionLifecycle();g_sensorThreadMailbox.close();g_sensorThreadMailbox.open();resetSdk();resetView();
  std::atomic_store(&g_windowsDefaultSelectedRoute,std::shared_ptr<const ss::ActiveSource>{});
- std::atomic_store(&g_windowsSelectionWorkerContext,std::shared_ptr<const WindowsSelectionWorkerContext>{});
+ g_windowsSelectionWorkerContext.store(std::shared_ptr<const WindowsSelectionWorkerContext>{});
  std::atomic_store(&g_windowsProcessingReceipt,std::shared_ptr<const ymcc::sensors::processing::ReceiptCache>{});
  ownerCpu->store(false);ownerCpu=std::make_shared<std::atomic<bool>>(true);ownerRaw={};ownerFault.clear();ownerPumpHook={};
  observedPendingClosed=observedDefaultWhilePrivate=false;g_powerLifecycle=PowerLifecycle::Ready;inputCaptureWindowsSelectionSetStaOpen(true);ownerRefreshContext();
@@ -102,7 +102,7 @@ static void ownerTests(){
  auto returnRequest=inputCaptureWindowsSourceSelectionRequest(json::object(),true);inputCaptureRunWindowsSelection();state=inputCaptureWindowsSourceSelectionStatus();
  check(returnRequest.value("accepted",false)&&state.value("phase",std::string{})=="rolled-back-input-observed"&&state["selected"].value("privateSource",false),"failed default processing rolls back to retained private capture with fresh proof");
  check(g_windowsSelectionLeaseCount==1,"default rollback retains active private native lease");
- ownerReset();state=ownerSelect();auto retiredContext=std::atomic_load(&g_windowsSelectionWorkerContext);retiredContext->active->store(false);ownerRefreshContext();
+ ownerReset();state=ownerSelect();auto retiredContext=g_windowsSelectionWorkerContext.load();retiredContext->active->store(false);ownerRefreshContext();
  inputCaptureRunWindowsSelection();check(!ownerOutput(),"same-fingerprint replacement context retires old native capture and publication");
  auto replacedReturn=inputCaptureWindowsSourceSelectionRequest(json::object(),true);inputCaptureRunWindowsSelection();state=inputCaptureWindowsSourceSelectionStatus();
  check(replacedReturn.value("accepted",false)&&state.value("inputProcessingCommitted",false)&&!state["selected"].value("privateSource",true),"new valid worker context can explicitly restore default under fresh proof");
@@ -117,7 +117,7 @@ static void ownerTests(){
  check(state.value("inputProcessingCommitted",false)&&!state["selected"].value("privateSource",true),"existing WinRT default restores under its original transform policy without a fabricated native-frame observation");
  ownerReset();intervalValue=0;state=ownerSelect();check(state.value("inputProcessingCommitted",false)&&subscribed==0,"zero-report-interval native source commits via polling without writes");
  const auto readsBefore=currentReads;fakeNow+=16;inputCaptureRunWindowsSelection();check(currentReads>readsBefore&&g_windowsSelectionLeaseCount==1,"adopted zero-interval source keeps polling after preparation");
- const auto retainedView=std::atomic_load(&g_windowsPrivateConsumerProjection);const auto oldReports=retainedView->source->evidence(fakeNow,retainedView->parent).sources[0].observations.distinct;
+ const auto retainedView=g_windowsPrivateConsumerProjection.load();const auto oldReports=retainedView->source->evidence(fakeNow,retainedView->parent).sources[0].observations.distinct;
  onOpen=[](unsigned kind){if(kind==0)fakeNow+=16;};failOpenKind=1;state=ownerSelect("C");
  check(!state.value("inputProcessingCommitted",true)&&g_windowsSelectionLeaseCount==1&&ownerOutput(),"failed candidate preparation preserves the already committed private output");
  check(retainedView->source->evidence(fakeNow,retainedView->parent).sources[0].observations.distinct>oldReports,"existing zero-interval source keeps receiving polled raw reports during a later native preparation");
@@ -125,7 +125,7 @@ static void ownerTests(){
  ownerPumpHook=[id=cancelRequest["requestId"]]{inputCaptureWindowsSourceSelectionCancel({{"requestId",id}});};
  inputCaptureRunWindowsSelection();check(!inputCaptureWindowsSourceSelectionStatus().value("inputProcessingCommitted",true)&&opened==closed,"cancellation during preparation closes typed native resources");
  ownerReset();auto cancelAfterAdopt=inputCaptureWindowsSourceSelectionRequest(ownerArgs());bool didCancel=false;
- ownerPumpHook=[&]{if(!didCancel&&std::atomic_load(&g_windowsPrivateConsumerProjection)){didCancel=true;inputCaptureWindowsSourceSelectionCancel({{"requestId",cancelAfterAdopt["requestId"]}});}};
+ ownerPumpHook=[&]{if(!didCancel&&g_windowsPrivateConsumerProjection.load()){didCancel=true;inputCaptureWindowsSourceSelectionCancel({{"requestId",cancelAfterAdopt["requestId"]}});}};
  inputCaptureRunWindowsSelection();state=inputCaptureWindowsSourceSelectionStatus();
  check(didCancel&&!state.value("inputProcessingCommitted",true)&&g_windowsSelectionLeaseCount==0&&opened==closed,"cancellation after tentative adoption retires native candidate without an idle polling leak");
  ownerPumpHook={};auto afterCancelReturn=inputCaptureWindowsSourceSelectionRequest(json::object(),true);inputCaptureRunWindowsSelection();state=inputCaptureWindowsSourceSelectionStatus();
@@ -138,7 +138,7 @@ static void ownerTests(){
  inputCaptureWindowsSelectionSetStaOpen(false);inputCaptureWindowsSelectionLifecycle();
  check(!ymcc::windows_motion::current(beforeLifecycle.submission)&&opened==closed&&handlers.empty(),"shutdown retires source tokens before private native resources are released");
  check(!inputCaptureWindowsSourceSelectionRequest(ownerArgs()).value("ok",true),"closed admission rejects requests after apartment cleanup");
- std::atomic_store(&g_windowsSelectionWorkerContext,std::shared_ptr<const WindowsSelectionWorkerContext>{});
+ g_windowsSelectionWorkerContext.store(std::shared_ptr<const WindowsSelectionWorkerContext>{});
  std::atomic_store(&g_windowsDefaultSelectedRoute,std::shared_ptr<const ss::ActiveSource>{});g_sensorThreadMailbox.close();
  onPump={};ownerPumpHook={};resetView();
 }

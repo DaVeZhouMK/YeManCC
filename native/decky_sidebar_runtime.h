@@ -13,6 +13,7 @@
 #include "decky_sidebar_temp.h"
 #include "decky_sidebar_launch.h"
 #include "decky_sidebar_recovery.h"
+#include "decky_bigpicture_recovery.h"
 #include "steam_command_coordinator.h"
 #include "decky_sidebar_health.h"
 #include "steam_failure_diagnostics.h"
@@ -32,12 +33,49 @@
 #include <cwchar>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <cstring>
 #include <thread>
 #include <vector>
 
 namespace ymcc::deckysidebar {
+enum class LoaderPathState { unknown, absent, file };
+inline LoaderPathState observeLoaderPath(const std::wstring& path) noexcept {
+    const auto attrs=GetFileAttributesW(path.c_str());
+    if(attrs!=INVALID_FILE_ATTRIBUTES){
+        return (attrs&(FILE_ATTRIBUTE_REPARSE_POINT|FILE_ATTRIBUTE_DIRECTORY))?LoaderPathState::unknown:LoaderPathState::file;
+    }
+    const auto error=GetLastError();
+    return error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND?LoaderPathState::absent:LoaderPathState::unknown;
+}
+// This is a cold-start observation only. Do not change the shared launcher:
+// an unknown token must still reach its existing checks, and no result grants launch.
+inline bool coldDefaultElevatedShellObserved() noexcept {
+    try {
+        ymcc::deckylaunch::Handle caller;
+        DWORD size=0;TOKEN_ELEVATION elevation{};TOKEN_ELEVATION_TYPE type{};
+        if(!OpenProcessToken(GetCurrentProcess(),TOKEN_QUERY,&caller.value)||
+           !GetTokenInformation(caller.value,TokenElevation,&elevation,sizeof(elevation),&size)||!elevation.TokenIsElevated||
+           !GetTokenInformation(caller.value,TokenElevationType,&type,sizeof(type),&size)||type!=TokenElevationTypeDefault)return false;
+        const auto window=GetShellWindow();DWORD pid=0;
+        if(!window||!GetWindowThreadProcessId(window,&pid)||!pid)return false;
+        ymcc::deckylaunch::Handle process,token;
+        process.value=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,pid);
+        if(!process.value)return false;
+        wchar_t image[32768],windows[MAX_PATH];DWORD imageSize=static_cast<DWORD>(_countof(image));
+        if(!QueryFullProcessImageNameW(process.value,0,image,&imageSize))return false;
+        const auto windowsSize=GetWindowsDirectoryW(windows,static_cast<UINT>(_countof(windows)));
+        if(!windowsSize||windowsSize>=_countof(windows)||
+           _wcsicmp(image,(std::filesystem::path(windows)/L"explorer.exe").c_str()))return false;
+        TOKEN_TYPE tokenType{};DWORD observed=0;
+        return OpenProcessToken(process.value,TOKEN_QUERY,&token.value)&&
+            GetTokenInformation(token.value,TokenType,&tokenType,sizeof(tokenType),&size)&&tokenType==TokenPrimary&&
+            GetTokenInformation(token.value,TokenElevation,&elevation,sizeof(elevation),&size)&&elevation.TokenIsElevated&&
+            GetShellWindow()==window&&GetWindowThreadProcessId(window,&observed)&&observed==pid&&
+            WaitForSingleObject(process.value,0)==WAIT_TIMEOUT;
+    }catch(...){return false;}
+}
 // Host-side launch configuration for the OFFICIAL Loader; no changes to upstream Python.
 // Its optional interpreter probe must not activate Microsoft Store aliases. This changes
 // only our child PATH, keeps real Python/search entries, and never edits the user's PATH.
@@ -70,6 +108,10 @@ struct DiagnosticProcessIds {
 struct DiagnosticLoaderOwner {
     const char* state="unknown"; DWORD error=ERROR_NOT_READY,pid=0;
     ULONGLONG birth=0; bool exitCodeKnown=false; DWORD exitCode=0;
+};
+struct DiagnosticRuntimeThreadCpu {
+    DWORD id=0;
+    ULONGLONG birth=0,kernel=0,user=0;
 };
 struct State {
     bool enabled = false;
@@ -167,9 +209,9 @@ public:
     void completed() { stop(); known_ = false; attempts_ = 0; }
 };
 
-#ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
-enum class BindingMode { prepare, refresh, retained };
 enum class AdmissionRefreshReceipt { none, notified, retainedRequested, retainedPending, finalQueued, finalPending };
+#ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
+enum class BindingMode { prepare, refresh, retained, retainedExact };
 struct BindingPlan {
     nlohmann::json request; std::string reason;
     std::shared_ptr<ymcc::steamsession::IdentityDelegation> delegation;
@@ -190,8 +232,9 @@ struct Config {
     std::function<HANDLE()> takeContextProcess; // Transfers a verified read-only process lease; never a kill target.
 #else
     std::shared_ptr<ymcc::deckybinding::Client> ownedBinding;
-    // Typed request construction only. Transport/bootstrap/watch execute in the owned child.
-    std::function<BindingPlan(BindingMode, std::uint64_t)> bindingPlan;
+    // Parent broker changes must check the borrowed current-intent predicate.
+    // Bootstrap/watch transport still executes in the owned child.
+    std::function<BindingPlan(BindingMode, std::uint64_t, const std::function<bool()>&)> bindingPlan;
     std::function<void(const nlohmann::json&)> bindingDiagnostic; // Legacy owned-row callback, retained for existing consumers.
     // Preferred in-process consumer: both arguments are borrowed for this call only.
     // Keep the original packet immutable; append metadata only in an already-owned output.
@@ -218,6 +261,8 @@ struct Config {
     // Appended for existing aggregate callers. Exceptions never affect recovery.
     std::function<ymcc::steamfailure::FailureContext()> failureContext;
     std::function<void(const nlohmann::json&,const ymcc::steamfailure::FailureContext&)> failureDiagnostic;
+    // Borrowed for this synchronous call only. Stops IO when its launch is revoked.
+    std::function<std::string(const std::function<bool()>&)> scopedPreflight;
 };
 class Runtime {
     std::mutex lifecycleMutex_, stateMutex_, ownedLeaseMutex_;
@@ -243,6 +288,8 @@ class Runtime {
     unsigned long long lastBindingGeneration_ = 0;
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
     std::uint64_t bindingRequestGeneration_ = 0; // Per-attempt IPC identity; never a retry-budget or power-generation reset.
+    ymcc::deckybinding::DiagnosticContextProcess diagnosticContext_; // Protected by stateMutex_.
+    unsigned long long diagnosticContextIntent_=0;
 #endif
     unsigned long long lastPreparationGeneration_ = 0, preparationEpoch_ = 0;
     bool preparationActive_ = false; // Existing worker callback only; guarded by stateMutex_.
@@ -251,6 +298,7 @@ class Runtime {
     ymcc::steamfailure::FailureContext activeBindingFailure_; // Original admitted action, guarded by stateMutex_.
     bool transportRecoveryRequested_ = false;
     bool connectionCheckRequested_ = false;
+    std::optional<unsigned long long> connectionPublicationIntent_; // Current read or parked for shared proof; guarded by stateMutex_.
     inline static std::atomic<std::uint64_t> failureActionSerial_{0};
     std::uint64_t failureEpisode_=0; // Existing owner worker only; diagnostic correlation.
     bool retainedAdmissionRefreshRequested_ = false; // Observation only; worker owns admission/launch.
@@ -332,6 +380,15 @@ class Runtime {
         std::lock_guard lock(stateMutex_);
         return !exitFenced_.load(std::memory_order_acquire) && !pendingSafetyStop_.active(intent_) && !stopping_ && state_.enabled && state_.steamKnown && state_.steamRunning && intent_ == intent;
     }
+    std::string runLaunchPreflight(unsigned long long intent) {
+        try {
+            if(config_.scopedPreflight){
+                const std::function<bool()> current=[this,intent]{return launchAllowed(intent);};
+                return current()?config_.scopedPreflight(current):"preparation-cancelled";
+            }
+            return config_.preflight?config_.preflight():std::string{};
+        } catch(...) { return "preflight-failed"; }
+    }
     bool beginPending(unsigned long long intent) {
         std::lock_guard lock(stateMutex_);
         if(exitFenced_.load(std::memory_order_acquire) || pendingSafetyStop_.active(intent_) || stopping_ || !state_.enabled || !state_.steamKnown || !state_.steamRunning || intent_!=intent)return false;
@@ -362,7 +419,7 @@ class Runtime {
         BindingWaitLeases(const BindingWaitLeases&)=delete;
     };
     bool stopOwnedBinding(DWORD waitMs=1500) noexcept {
-        {std::lock_guard lock(stateMutex_);activeBindingFailure_={};}
+        {std::lock_guard lock(stateMutex_);activeBindingFailure_={};diagnosticContext_={};}
         if(!config_.ownedBinding)return true;
         try {
             const auto stopped=config_.ownedBinding->stop(waitMs);
@@ -433,17 +490,22 @@ class Runtime {
                                     BindingPlan* completed=nullptr) {
         revalidateSession=false;
         if(!config_.ownedBinding||!config_.bindingPlan)return "owned-binding-required";
+        const std::function<bool()> current=[this,intent]{return launchAllowed(intent);};
+        if(!current())return "mirror-bootstrap-canceled";
         BindingPlan plan;
         // Demand-only markers isolate parent plan/resource work from the child
         // bootstrap deadline. An unfinished pair diagnoses a blocked parent;
         // neither marker starts recovery or grants any operation authority.
-        const char* scope=mode==BindingMode::retained?"binding-plan-retained":mode==BindingMode::prepare?"binding-plan-prepare":"binding-plan-refresh";
+        const char* scope=mode==BindingMode::retainedExact?"binding-plan-retained-exact":mode==BindingMode::retained?"binding-plan-retained":mode==BindingMode::prepare?"binding-plan-prepare":"binding-plan-refresh";
         optionalBindingDiagnostic([&]{return nlohmann::json{{"bootstrapStage","plan-started"},{"scope",scope}};},"diagnostic");
         const auto planStarted=GetTickCount64();
-        try {plan=config_.bindingPlan(mode,++bindingRequestGeneration_);}
+        try {plan=config_.bindingPlan(mode,++bindingRequestGeneration_,current);}
         catch(...){optionalBindingDiagnostic([&]{return nlohmann::json{{"bootstrapStage","plan-finished"},{"scope",scope},{"elapsedMs",GetTickCount64()-planStarted},{"ok",false},{"reason","mirror-binding-request-failed"}};},"diagnostic");return "mirror-binding-request-failed";}
         optionalBindingDiagnostic([&]{return nlohmann::json{{"bootstrapStage","plan-finished"},{"scope",scope},{"elapsedMs",GetTickCount64()-planStarted},{"ok",plan.reason.empty()},{"reason",plan.reason}};},"diagnostic");
         if(!plan.reason.empty())return plan.reason;
+        if(mode==BindingMode::retainedExact&&(!plan.request.value("retainedFrontendOnly",false)||
+           !plan.request.contains("bootstrap")||plan.request.at("bootstrap").contains("retainedFrontendBuildId")))
+            return "mirror-retained-frontend-changed";
         if(!launchAllowed(intent))return "mirror-bootstrap-canceled";
         FailureTrace trace(*this,ymcc::steamfailure::Operation::Binding,intent);
         const auto started=config_.ownedBinding->begin(plan.request,intent,plan.delegation);
@@ -553,6 +615,31 @@ class Runtime {
         LoaderTemporaryRun temporary;
         unsigned long long attempted=~0ULL,launchAttempted=~0ULL;
         unsigned long long preparedEpoch=~0ULL, preparationAttemptEpoch=~0ULL, preparationAttemptIntent=~0ULL;
+        std::optional<std::pair<unsigned long long,unsigned long long>> parkedPreparation;
+        const auto runPreparation=[&](unsigned long long intent,unsigned long long epoch,unsigned long long admissionEpoch){
+            preparationAttemptEpoch=epoch;preparationAttemptIntent=intent;
+            const std::function<bool()> canContinue=[this,intent,epoch]{
+                std::lock_guard lock(stateMutex_);
+                return !stopping_ && state_.enabled && state_.steamKnown && intent_==intent && preparationEpoch_==epoch;
+            };
+            if(!canContinue())return false;
+            // Keep same-source UI hints from retiring this intent between the
+            // callback return and recording its preparation result.
+            struct PreparationActivity {
+                Runtime& owner;
+                explicit PreparationActivity(Runtime& value):owner(value){std::lock_guard lock(owner.stateMutex_);owner.preparationActive_=true;}
+                ~PreparationActivity(){std::lock_guard lock(owner.stateMutex_);owner.preparationActive_=false;}
+            } active(*this);
+            if(!canContinue())return false;
+            std::string result;
+            try { result=config_.prepareEnvironment(canContinue); }
+            catch (...) { result="preparation-failed"; }
+            if(!canContinue())return false;
+            if(result.empty())preparedEpoch=epoch;
+            else if(result=="resource-worker-deadline"||result=="resource-worker-cleanup-incomplete")
+                parkedPreparation=std::pair{epoch,admissionEpoch};
+            return true;
+        };
         ymcc::steamsession::RetryWindow retries; // Reuse unchanged 1/3/8/20-second budget.
         AdmissionWindow admissionChecks;
         // A cold resource worker may miss its 2.5s deadline even with valid
@@ -561,13 +648,13 @@ class Runtime {
         // budgets, or retry bad hashes/incomplete worker cleanup.
         ymcc::steamsession::RetryWindow resourceRetries;
         unsigned long long resourceAdmissionEpoch=~0ULL,resourcePreparationEpoch=~0ULL;
-        bool resourceWindowOpened=false,resourcePending=false,resourceDue=false;
-        // Park scheduling while admission is absent; retain the original clock
-        // and remaining attempts. Clearing it here makes a later verified mode
-        // return lose recovery forever, or tempts a refill on every UI event.
-        const auto cancelResourceRetry=[&]{resourcePending=false;resourceDue=false;};
+        bool resourceWindowOpened=false;
+        const char* pendingResourceFailure=nullptr;
+        // A pending mode read parks the timer, not its absolute deadlines.
+        // Consume a slot only at the admitted launch branch, never on a wake.
+        const auto cancelResourceRetry=[&]{pendingResourceFailure=nullptr;};
         const auto resourceRetryQueued=[&](ULONGLONG now){
-            return resourcePending&&(resourceDue||resourceRetries.timeout(now)!=INFINITE);
+            return pendingResourceFailure&&resourceRetries.timeout(now)!=INFINITE;
         };
         // Both the initial read and the recheck AFTER a deferred bootstrap share
         // this one finite window. A network delay must not turn a later clean
@@ -577,13 +664,23 @@ class Runtime {
         const auto rejectedResources=[&](const std::string& failure){
             if(failure=="resource-worker-deadline"||failure=="resource-worker-prewrite-memory-unavailable"){
                 if(!resourceWindowOpened){resourceWindowOpened=true;resourceRetries.begin(GetTickCount64());}
-                resourcePending=true;
+                pendingResourceFailure=failure=="resource-worker-deadline"?"resource-worker-deadline":"resource-worker-prewrite-memory-unavailable";
             }else cancelResourceRetry();
         };
         ConnectionRetryWindow outage,loaderRecovery;
         ConnectionRecoveryWindow connectionFallback;
         bool healthReadUnavailable=false; // Diagnostic edge only; never an action budget.
         LaunchPolicyStop launchPolicy;bool launchPolicyReported=false;
+        [[maybe_unused]] bool launchPolicyObservedBeforeCreate=false;
+        [[maybe_unused]] bool launchPermissionProbeReported=false;
+        bool loaderPathObservedAbsent=false;
+        unsigned long long parkedPreparationSeen=~0ULL;
+        ymcc::deckylaunch::Result pathLaunchFailure;
+        const auto publishLaunchStop=[&]{
+            if(launchPolicy.cause()==LaunchPolicyStop::Cause::loaderPathUnavailable)
+                publish("failed","launch-failed",pathLaunchFailure.error,0,false,0,pathLaunchFailure.stage,pathLaunchFailure.mode);
+            else publish("failed","launch-failed",ERROR_ACCESS_DENIED,0,false,0,"shell-token-elevated");
+        };
         const auto reportConnection=[&](ConnectionRecoveryWindow::Action action,const ConnectionHealth& health,ULONGLONG now,bool blocked=false,bool bindingReused=false){
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
             using Action=ConnectionRecoveryWindow::Action;if(action==Action::none)return;
@@ -601,7 +698,7 @@ class Runtime {
             }
             // Verified YMCC controls can end a recovery without an open official socket.
             const char* recoveredStage=health.reason=="sidebar-native-confirmed-official-backend-unavailable"?"decky-sidebar-only":"decky-channels";
-            bindingDiagnostic({{"scope","global-connection"},{"recoveryEpisode",connectionFallback.episode()},
+            nlohmann::json connectionDetail={{"scope","global-connection"},{"recoveryEpisode",connectionFallback.episode()},
                 {"recoveryPhase",action==Action::recovered?"connected":action==Action::stopped?"stopped":action==Action::exhausted?"manual-required":blocked?"blocked":"recovering"},
                 {"stage",action==Action::recovered?recoveredStage:action==Action::stopped?"eligibility-lost":action==Action::exhausted?"recovery-exhausted":blocked?"owner-safety-stop":action==Action::reopen?"reopen-bigpicture":action==Action::rebuild?"rebuild-ui-document":action==Action::recycle?(process?"recycle-owned-loader":"no-owned-loader"):"reconnect"},
                 {"reason",blocked&&recovering?"owner-safety-stop":health.reason},{"runtimeReason",observed.reason},
@@ -611,7 +708,14 @@ class Runtime {
                 {"phase",observed.phase},{"pid",observed.pid},{"attempted",recovering&&!blocked},{"bindingReused",bindingReused},
                 {"connected",health.connected},{"bindingAttempts",connectionFallback.attempts()},
                 {"elapsedMs",connectionFallback.elapsed(now)},{"nextRetryMs",connectionFallback.timeout(now)},
-                {"stageBudgetMs",connectionFallback.stageBudget()},{"stageRemainingMs",connectionFallback.remaining(now)},{"recoveryTrigger",connectionFallback.trigger()}},"diagnostic");
+                {"stageBudgetMs",connectionFallback.stageBudget()},{"stageRemainingMs",connectionFallback.remaining(now)},{"recoveryTrigger",connectionFallback.trigger()}};
+            if(action==Action::recovered&&health.authenticatedPeerAgeMs)
+                connectionDetail["authenticatedPeerAgeMs"]=*health.authenticatedPeerAgeMs;
+            if(action==Action::recovered&&health.sharedModeObservationAgeMs)
+                connectionDetail["sharedModeObservationAgeMs"]=*health.sharedModeObservationAgeMs;
+            if((action==Action::rebuild||action==Action::reopen)&&health.sidebarVerifiedDuringBackendOutage.has_value())
+                connectionDetail["sidebarVerifiedDuringBackendOutage"]=*health.sidebarVerifiedDuringBackendOutage;
+            bindingDiagnostic(connectionDetail,"diagnostic");
             }catch(...){} // Optional reporting cannot interrupt recovery or teardown.
 #endif
         };
@@ -646,6 +750,7 @@ class Runtime {
         auto closeContext=[&]{
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
             heldLaunchUntil=0;preparedLaunch={};
+            if(context){std::lock_guard lock(stateMutex_);diagnosticContext_={};}
 #endif
             if(context){CloseHandle(context);context=nullptr;}
         };
@@ -743,18 +848,24 @@ class Runtime {
             reportStop(true,empty);
 #endif
         };
-        auto takeContext=[&](std::string& reason){
+        auto takeContext=[&](std::string& reason,unsigned long long bindingIntent){
 #ifdef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
+            (void)bindingIntent;
             if(!config_.takeContextProcess)return;
             HANDLE next=config_.takeContextProcess();
 #else
-            HANDLE next=config_.ownedBinding?config_.ownedBinding->takeContextProcess():nullptr;
+            ymcc::deckybinding::DiagnosticContextProcess diagnostic;
+            HANDLE next=config_.ownedBinding?config_.ownedBinding->takeContextProcess(&diagnostic):nullptr;
             if(!next&&reason.empty()){reason="mirror-bootstrap-context-watch-unavailable";return;}
 #endif
             if(!next)return;
             if(!reason.empty()){CloseHandle(next);return;}
             if(WaitForSingleObject(next,0)!=WAIT_TIMEOUT){CloseHandle(next);reason="mirror-bootstrap-context-exited";return;}
             closeContext();context=next;
+#ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
+            // Reloading the document does not change this WebHelper process.
+            std::lock_guard lock(stateMutex_);diagnosticContext_=diagnostic;diagnosticContextIntent_=bindingIntent;
+#endif
         };
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
         // A null blocker is the original reuse decision. Report the first
@@ -905,8 +1016,15 @@ class Runtime {
                 const auto directory=std::filesystem::path(config_.executable).parent_path().wstring();
                 const auto launch=ymcc::deckylaunch::create(config_.executable,command,env.data(),directory,startup,child);
                 if(!launch.created){
-                    closeOwned("launch-failed");publish("failed","launch-failed",launch.error,0,false,attempts,launch.stage,launch.mode);
-                    if(launchPolicy.failed(launch.stage,launch.error,GetTickCount64())){launchPolicyReported=false;notifyListenerFacts();}
+                    closeOwned("launch-failed");
+                    if(launchPolicy.failed(launch.stage,launch.error,GetTickCount64())){
+                        if(launchPolicy.cause()==LaunchPolicyStop::Cause::loaderPathUnavailable){
+                            pathLaunchFailure=launch;
+                            loaderPathObservedAbsent=observeLoaderPath(config_.executable)==LoaderPathState::absent;
+                        }
+                        launchPolicyObservedBeforeCreate=false;launchPolicyReported=false;launchPermissionProbeReported=false;notifyListenerFacts();
+                    }
+                    publish("failed","launch-failed",launch.error,0,false,attempts,launch.stage,launch.mode);
                     return;
                 }
                 process=child.hProcess;
@@ -944,9 +1062,9 @@ class Runtime {
             }catch(...){closeOwned("environment-failed");publish("failed","environment-failed");}
         };
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
-        bool listenerBoundaryBlocked=false;unsigned long long listenerBoundaryIntent=0;
+        bool listenerBoundaryBlocked=false,listenerColdAfterPolicy=false;unsigned long long listenerBoundaryIntent=0;
         BindingMode listenerBoundaryMode=BindingMode::retained;
-        const auto parkListenerBoundary=[&](const std::string& reason,unsigned long long intent,BindingMode mode,bool retrySafe){
+        const auto parkListenerBoundary=[&](const std::string& reason,unsigned long long intent,BindingMode mode,bool retrySafe,bool beforeWrite=false){
             if(!ymcc::deckybinding::Client::listenerBoundaryFailure(reason))return false;
             if(!launchAllowed(intent))return true;
             unsigned long long observationEpoch=0;
@@ -956,6 +1074,7 @@ class Runtime {
             const bool mayRead=retrySafe&&ymcc::deckybinding::Client::listenerTransientFailure(reason)&&
                 ownedBindingCleanupError_.load()==ERROR_SUCCESS;
             admissionChecks.blocked(observationEpoch,GetTickCount64(),mayRead);
+            listenerColdAfterPolicy=mayRead&&beforeWrite&&mode==BindingMode::retained&&launchPolicy.blocked();
             listenerBoundaryBlocked=true;listenerBoundaryIntent=intent;listenerBoundaryMode=mode;closeContext();
             publish(process?"loader-started":"unavailable",reason,0,process?GetProcessId(process):0,false,attempts);
             return true;
@@ -975,7 +1094,7 @@ class Runtime {
                 {std::lock_guard lock(stateMutex_);preparedAt=preparationEpoch_;}
                 reason=performOwnedBinding(intent,beforeLaunch?BindingMode::prepare:BindingMode::refresh,revalidateSession,beforeLaunch?&completed:nullptr);
 #endif
-                takeContext(reason);
+                takeContext(reason,intent);
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
                 if(reason.empty()&&beforeLaunch)preparedLaunch=std::move(completed);
 #endif
@@ -1001,9 +1120,7 @@ class Runtime {
                 retries={};outage.reset();outageWatchRequested=false;outageDue=false;retryDue=false;
                 if(beforeLaunch){
                     // A delayed launch revalidates resources once, not once per network retry.
-                    if(deferredLaunch&&config_.preflight){
-                        try{reason=config_.preflight();}catch(...){reason="preflight-failed";}
-                    }
+                    if(deferredLaunch)reason=runLaunchPreflight(intent);
                     if(!launchAllowed(intent))return;
                     launchPending=false;deferredLaunch=false;
                     if(reason.empty())startOwned(intent);
@@ -1026,7 +1143,10 @@ class Runtime {
                 publish(beforeLaunch?"unavailable":"loader-started",reason,0,process?GetProcessId(process):0,pending,attempts);
             }
         };
-        const auto attachRetained=[&](unsigned long long intent,unsigned long long launchIntent){
+        const auto attachRetained=[&](unsigned long long intent,unsigned long long launchIntent,bool exactOnly=false){
+#ifdef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
+            (void)exactOnly;
+#endif
             cancelResourceRetry();
                     if(intent!=attempted)stopWindow();
                     attempted=intent;launchAttempted=launchIntent;retryDue=false;outageDue=false;
@@ -1041,9 +1161,9 @@ class Runtime {
 #ifdef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
                         failure=config_.retainedBinding?config_.retainedBinding():"mirror-retained-binding-unavailable";
 #else
-                        failure=performOwnedBinding(intent,BindingMode::retained,revalidateSession);
+                        failure=performOwnedBinding(intent,exactOnly?BindingMode::retainedExact:BindingMode::retained,revalidateSession);
 #endif
-                        takeContext(failure);
+                        takeContext(failure,intent);
                     }catch(...){failure="mirror-binding-failed";}
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
                     if(!failure.empty()){
@@ -1069,7 +1189,7 @@ class Runtime {
 #endif
 
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
-                    if(parkListenerBoundary(failure,intent,BindingMode::retained,true))return;
+                    if(parkListenerBoundary(failure,intent,BindingMode::retained,true,revalidateSession))return;
 #endif
                     if(!failure.empty())connectionFallback.failed(ConnectionRecoveryWindow::Action::reconnect,GetTickCount64());
                     const bool retry=!failure.empty()&&(revalidateSession||retryableBinding(failure));
@@ -1106,7 +1226,7 @@ class Runtime {
                 // Ready may arrive during this already admitted resource wait.
                 // Retain the pending attempt, then reread admission; Ready alone
                 // gives no new launch authority and cannot wake healthy owners.
-                if(resourcePending)launchAttempted=~0ULL;
+                if(pendingResourceFailure)launchAttempted=~0ULL;
                 cancelResourceRetry();resourceRetries={};resourceWindowOpened=false;
             }
             if(safetyPending){
@@ -1128,18 +1248,36 @@ class Runtime {
             if(crashEpoch!=crashResetEpoch){
                 const auto now=GetTickCount64();const ConnectionHealth health{false,false,"steam-session-changed"};
                 reportConnection(connectionFallback.observe(now,health),health,now);
-                launchPolicy.reset();launchPolicyReported=false;
+                launchPolicy.reset();launchPolicyReported=false;loaderPathObservedAbsent=false;parkedPreparationSeen=~0ULL;
                 crashEpoch=crashResetEpoch;crashBudget.reset();loaderRecovery.reset();loaderRecoveryDue=false;healthRequested=true; // New verified session must check now, not wait for the idle backstop.
             }
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
-            if(listenerBoundaryBlocked&&listenerBoundaryIntent==intent&&enabled&&known&&steam&&
-               (!process||WaitForSingleObject(process,0)!=WAIT_OBJECT_0)){
+            const bool listenerBoundaryCurrent=listenerBoundaryBlocked&&listenerBoundaryIntent==intent&&enabled&&known&&steam&&
+                (!process||WaitForSingleObject(process,0)!=WAIT_OBJECT_0);
+            const bool policyOwnsListenerRetry=listenerBoundaryCurrent&&!process&&launchPolicy.blocked()&&
+                listenerBoundaryMode==BindingMode::retained&&ownedBindingCleanupError_.load()==ERROR_SUCCESS&&
+                admissionChecks.timeout(GetTickCount64())!=INFINITE;
+            if(listenerBoundaryCurrent&&!policyOwnsListenerRetry){
+                if(!process&&launchPolicy.blocked()){
+                    // Terminal or unreturned listeners cannot borrow the permission retry.
+                    WaitForSingleObject(wake_,INFINITE);continue;
+                }
                 const auto now=GetTickCount64();
                 if(admissionChecks.take(now)){
                     LaunchAdmission permission;
                     try{permission=config_.launchAdmission?config_.launchAdmission():LaunchAdmission{false};}
                     catch(...){permission={false,"steam-ui-state-pending",true};}
                     if(!launchAllowed(intent))continue;
+                    // A returned, explicitly pre-write retained attempt has nothing to replay.
+                    // After a launch stop clears, a verified unloaded document can take the normal cold path.
+                    if(listenerColdAfterPolicy&&!process&&permission.allowed&&!permission.bindingOnly&&
+                       permission.bindingScope.verified()&&ownedBindingCleanupError_.load()==ERROR_SUCCESS){
+                        listenerBoundaryBlocked=false;admissionChecks.completed();
+                        attempted=~0ULL;launchAttempted=~0ULL;
+                        optionalBindingDiagnostic([&]{return nlohmann::json{{"scope","global-connection"},
+                            {"stage","listener-cold-admission"},{"reason","retained-binding-no-write"},{"attempted",false}};},"diagnostic");
+                        continue;
+                    }
                     // Keep the originally selected operation. Unknown initial
                     // mutation cannot become a fresh-context prepare replay.
                     const bool permitted=permission.allowed&&
@@ -1166,25 +1304,97 @@ class Runtime {
                 continue;
             }
 #endif
-            // Stop BEFORE generic recovery, admission, hashing and bootstrap.
-            // Rebinding/rebuilding Big Picture cannot manufacture an ordinary
-            // desktop token. Unknown probe results keep the original refusal.
+            LaunchAdmission admission{};
+            const auto readAdmission=[&]{
+                if(enabled && known && steam && !process && config_.launchAdmission){
+                    try { admission=config_.launchAdmission(); }
+                    catch (...) { admission={false,"steam-ui-state-pending",true,"admission-read-failed"}; }
+                }
+            };
+            const auto exactRetained=[&]{return admission.allowed&&admission.bindingOnly&&admission.reason=="retained-frontend-rebind";};
+            bool sampledAdmission=false,transportOnly=false;
+            // Keep the cold-launch stop even when an exact existing frontend
+            // can attach. Requiring a connected mirror here would block its own attach.
             if(launchPolicy.blocked()&&enabled&&known&&steam&&!process){
+                const bool pathStopped=launchPolicy.cause()==LaunchPolicyStop::Cause::loaderPathUnavailable;
+                const bool liveRetained=retainedFrontend&&context&&WaitForSingleObject(context,0)==WAIT_TIMEOUT;
+                bool pathPrepared=false;
+                if(pathStopped&&loaderPathObservedAbsent&&!context&&!retainedFrontend&&config_.prepareEnvironment&&
+                   preparedEpoch!=preparationEpoch&&preparationAttemptEpoch!=preparationEpoch&&parkedPreparationSeen!=preparationEpoch&&
+                   ownedBindingCleanupError_.load()==ERROR_SUCCESS
+#ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
+                   &&!listenerBoundaryCurrent
+#endif
+                   ){
+                    // An admitted Ready can repair the missing file using the original
+                    // preparation owner. An idle retry or a same-Ready wake cannot.
+                    parkedPreparationSeen=preparationEpoch;
+                    readAdmission();sampledAdmission=true;
+                    if(!launchAllowed(intent))continue;
+                    if(!(admission.allowed&&admission.bindingOnly)){
+                        if(!runPreparation(intent,preparationEpoch,admissionEpoch))continue;
+                        sampledAdmission=false;
+                        pathPrepared=preparedEpoch==preparationEpoch&&observeLoaderPath(config_.executable)==LoaderPathState::file;
+                        if(pathPrepared)launchPolicy.reset();
+                    }
+                }
                 const auto now=GetTickCount64();
-                if(launchPolicy.recheck(now,[&]{
-                    // A separately restored verified frontend may already have
-                    // both channels. Let original retained admission attach it;
-                    // it needs no new Loader or ordinary-token launch grant.
-                    return ymcc::deckylaunch::ordinarySourceObserved()||
-                        (config_.connectionHealth&&config_.connectionHealth().connected);
+                if(pathPrepared||launchPolicy.recheck(now,[&]{
+                    if(pathStopped){
+                        // An already-present file can still have failed on a missing
+                        // dependency. Do not retry on its mere continued existence.
+                        const auto path=observeLoaderPath(config_.executable);
+                        if(path==LoaderPathState::file&&loaderPathObservedAbsent)return true;
+                        if(path==LoaderPathState::absent)loaderPathObservedAbsent=true;
+                    }else{
+                        const bool ordinary=ymcc::deckylaunch::ordinarySourceObserved();
+#ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
+                        // Report the first negative check and a later positive edge, not every idle retry.
+                        if((ordinary||!launchPermissionProbeReported)&&launchAllowed(intent)){
+                            launchPermissionProbeReported=true;
+                            optionalBindingDiagnostic([&]{return nlohmann::json{{"scope","global-connection"},
+                                {"stage","launch-permission-recheck"},
+                                {"reason",ordinary?"ordinary-source-observed":"ordinary-source-unconfirmed"},
+                                {"attempted",false}};},"diagnostic");
+                        }
+#endif
+                        if(ordinary)return true;
+                    }
+                    // Keep the existing shared read renewal; its mirror result
+                    // provides neither document admission nor Loader authority.
+                    try{if(config_.connectionHealth)(void)config_.connectionHealth();}catch(...){}
+                    if(!liveRetained){readAdmission();sampledAdmission=true;}
+                    return false;
                 })){
-                    attempted=~0ULL;launchAttempted=~0ULL;healthRequested=true;
+#ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
+                    if(policyOwnsListenerRetry)continue; // Resume the original listener gate, not cold start.
+#endif
+                    // Permission to cold-launch does not invalidate a live retained binding.
+                    // A newly admitted cold document still needs the original launch attempt.
+                    if(liveRetained&&attempted==intent&&launchAttempted==launchIntent){
+                        readAdmission();sampledAdmission=true;
+                        if(!launchAllowed(intent))continue;
+                    }
+                    if(!sampledAdmission||!liveRetained||!exactRetained()){
+                        attempted=~0ULL;launchAttempted=~0ULL;
+                    }
+                    healthRequested=true;
+                }else if(liveRetained||(sampledAdmission&&exactRetained())){
+                    transportOnly=true;
+                    if(!liveRetained){attempted=~0ULL;launchAttempted=~0ULL;}
                 }else{
+                    if(!launchAllowed(intent))continue;
+                    if(retainedFrontend){
+                        closeOwned("launch-policy-blocked");
+                        publishLaunchStop();
+                    }
                     const ConnectionHealth health{false,false,"launch-policy-blocked"};
                     reportConnection(connectionFallback.observe(now,health),health,now);
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
                     if(!launchPolicyReported)bindingDiagnostic({{"scope","global-connection"},{"stage","launch-policy-blocked"},
-                        {"reason","shell-token-elevated"},{"recoveryPhase","blocked"},{"attempted",false},{"nextRetryMs",launchPolicy.timeout(now)}},"diagnostic");
+                        {"reason",pathStopped?"loader-path-unavailable":"shell-token-elevated"},{"recoveryPhase","blocked"},{"attempted",false},
+                        {"launchPolicySource",launchPolicyObservedBeforeCreate?"cold-preflight-observed":"loader-create-refused"},
+                        {"nextRetryMs",launchPolicy.timeout(now)}},"diagnostic");
 #endif
                     launchPolicyReported=true;
                     WaitForSingleObject(wake_,launchPolicy.timeout(now));continue;
@@ -1212,14 +1422,30 @@ class Runtime {
             // UI tiers are separate bounded callbacks, never a Steam process restart,
             // business-write replay, or automatic refund of a durable reservation.
             const auto healthNow=GetTickCount64();
-            if(config_.connectionHealth&&(healthRequested||recoveryRequested||connectionFallback.timeout(healthNow)==0||!enabled||!known||!steam)){
+            const bool genericRebindDue=outageDue&&!outageWatchRequested;
+            if(!transportOnly&&config_.connectionHealth&&(healthRequested||recoveryRequested||genericRebindDue||connectionFallback.timeout(healthNow)==0||!enabled||!known||!steam)){
                 ConnectionHealth health;bool readUnavailable=false;
-                if(enabled&&known&&steam){try{health=config_.connectionHealth();}catch(...){
-                    // A failed read is uncertainty, not OFF. Keep the original
-                    // episode/stage/deadline; fresh health must still prove recovery.
-                    health.paused=true;readUnavailable=true;
-                    try{health.reason="connection-health-unavailable";}catch(...){} // Optional text cannot abort observation.
-                }}
+                if(enabled&&known&&steam){
+                    {
+                        std::lock_guard lock(stateMutex_);
+                        if(intent_!=intent)continue;
+                        // Arm before sampling the cache so publication cannot fall between
+                        // observing a miss and parking. The callback only queues a reread.
+                        connectionPublicationIntent_=intent;
+                    }
+                    try{health=config_.connectionHealth();}catch(...){
+                        // A failed read is uncertainty, not OFF. Keep the original
+                        // episode/stage/deadline; fresh health must still prove recovery.
+                        health.paused=true;readUnavailable=true;
+                        try{health.reason="connection-health-unavailable";}catch(...){} // Optional text cannot abort observation.
+                    }
+                    // Exceptions also park this check. Keep the same-intent
+                    // publication wake armed until a conclusive read returns.
+                    if(!health.paused){
+                        std::lock_guard lock(stateMutex_);
+                        connectionPublicationIntent_.reset();
+                    }
+                }
                 else health.reason=!enabled?"decky-off":!known?"steam-state-unknown":"steam-not-running";
                 // Never let a read that outlived its intent finish the old recovery episode.
                 if(enabled&&known&&steam&&!launchAllowed(intent))continue;
@@ -1239,11 +1465,10 @@ class Runtime {
                 // fault must use normal recovery, not this binding's old grace.
                 if(health.connected)boundStarted=0;
 #endif
-                // Fresh complete health retires only a queued generic repair.
-                // Its old 250ms retry must not tear down a recovered mirror.
-                // A watch fault still needs its own binding/watch replacement,
-                // even when the shared page health is already connected.
-                if(health.connected&&!outageWatchRequested){outage.reset();outageDue=false;}
+                // A peer can return and vanish before the queued retry fires.
+                // Full UI proof still cancels early; transport alone cancels
+                // only at the original due check. An independent watch fault wins.
+                if(!outageWatchRequested&&(health.connected||(genericRebindDue&&health.required&&health.transportConnected))){outage.reset();outageDue=false;}
                 // Local native cleanup is not a Steam page failure. Park the
                 // existing ladder without spending a page step or reservation.
                 if(retainedLoaderNativeGeneration_.load()&&health.required&&!health.connected)health.paused=true;
@@ -1251,6 +1476,8 @@ class Runtime {
                 // Do not rebuild Steam's page before that resource check can run.
                 if(!process&&health.required&&!health.connected&&resourceRetryQueued(healthNow))health.paused=true;
                 health.coldLoaderStarted=process&&!loaderWasHealthy?loaderStarted:0;
+                if(health.coldLoaderStarted&&connectionFallback.awaitingRefusedRebuildLoader()&&
+                   WaitForSingleObject(process,0)!=WAIT_TIMEOUT)health.coldLoaderStarted=0;
                 const bool blocked=crashBudget.blocked()||ownedBindingCleanupError_.load()!=ERROR_SUCCESS;
                 // Cleanup or the existing crash fuse grants no recovery step.
                 // Park the same deadline until the original owner can act again.
@@ -1298,7 +1525,12 @@ class Runtime {
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
                 if(reuseFreshBinding){connectionFallback.started(action,bindingStart);watchAttachedAt=0;}
 #endif
-                reportConnection(action,health,healthNow,blocked,reuseFreshBinding||preserveRetainedTransport);
+                // The owned Loader's cold wait can outlast the fresh-binding
+                // window. A connected mirror still needs no replacement at this
+                // rung unless a separate watch recovery is already pending.
+                const bool observeOwnedTransport=action==Action::reconnect&&process&&health.transportConnected&&
+                    !recoveryRequested&&!outageWatchRequested;
+                reportConnection(action,health,healthNow,blocked,reuseFreshBinding||preserveRetainedTransport||observeOwnedTransport);
                 if(recovering&&!blocked&&launchAllowed(intent)){
                     bool keptTransport=preserveRetainedTransport;
                     if(action==Action::recycle){
@@ -1336,15 +1568,20 @@ class Runtime {
                                 trace.complete(receipt);
                                 const bool noEffect=receipt.contains("ok")&&receipt["ok"]==false&&receipt.contains("mutated")&&receipt["mutated"]==false&&
                                     (!receipt.contains("uncertain")||receipt["uncertain"]==false);
+                                const bool awaitObservedHealth=action==Action::reopen&&noEffect&&
+                                    receipt.value("reason",nlohmann::json{})==deckyrepair::bigpicture::alreadyHealthy;
+                                const bool identityDeferred=noEffect&&receipt.value("awaitCurrentIdentity",nlohmann::json{})==true&&
+                                    receipt.value("cleanupNotStarted",nlohmann::json{})==true&&
+                                    receipt.value("reason",nlohmann::json{})=="decky-cleanup-account-unconfirmed";
                                 keptTransport=defer&&!teardownEntered&&noEffect;
                                 if(receipt.value("ok",false)&&receipt.value("mutated",false)&&!receipt.value("uncertain",false))
                                     connectionFallback.started(action,GetTickCount64());
-                                else if(keptTransport&&receipt.value("awaitCurrentIdentity",nlohmann::json{})==true&&
-                                        receipt.value("cleanupNotStarted",nlohmann::json{})==true&&
-                                        receipt.value("reason",nlohmann::json{})=="decky-cleanup-account-unconfirmed")
+                                else if(keptTransport&&identityDeferred)
                                     connectionFallback.parkUnstartedPage(action,GetTickCount64());
-                                else if(noEffect)
-                                    connectionFallback.failed(action,GetTickCount64());
+                                // The child vetoed the mode switch. Keep the original deadline
+                                // until the shared health read confirms recovery or expires.
+                                else if(noEffect&&!awaitObservedHealth)
+                                    connectionFallback.failed(action,GetTickCount64(),identityDeferred);
                             }catch(...){/* Possible dispatch: leave the bounded observation, never replay. */}
                             if(!launchAllowed(intent))continue;
                             if(defer&&!keptTransport){
@@ -1358,7 +1595,7 @@ class Runtime {
                     // run again; no alternate launch path bypasses them.
                     // A live retained binding already owns this reconnect attempt.
                     // Re-arming it here would replace the listener before its first peer.
-                    if(!process&&!launchPending&&!resourcePending&&!reuseFreshBinding&&!keptTransport){attempted=~0ULL;launchAttempted=~0ULL;}
+                    if(!process&&!launchPending&&!pendingResourceFailure&&!reuseFreshBinding&&!keptTransport){attempted=~0ULL;launchAttempted=~0ULL;}
                     // A newly created Loader can still be opening its official
                     // backend after the authenticated mirror is already usable.
                     // Keep the original cold-start observation; rebuilding that
@@ -1367,17 +1604,18 @@ class Runtime {
                     if(!keptTransport&&(action!=Action::reconnect||(!health.transportConnected&&!reuseFreshBinding)))recoveryRequested=true;
                 }
             }
-            LaunchAdmission admission;
-            const auto readAdmission=[&]{
-                if(enabled && known && steam && !process && config_.launchAdmission){
-                    try { admission=config_.launchAdmission(); }
-                    catch (...) { admission={false,"steam-ui-state-pending",true,"admission-read-failed"}; }
-                }
-            };
             // An already verified frontend only needs transport attachment; its
             // original retained-binding worker rechecks that exact document.
             // Do not put disk preparation in front of this existing consumer.
-            readAdmission();if(enabled&&known&&steam&&!process&&!launchAllowed(intent))continue;
+            if(!sampledAdmission)readAdmission();
+            if(enabled&&known&&steam&&!process&&!launchAllowed(intent))continue;
+            const auto pendingRetained=[&]{return retainedFrontend&&context&&intent==attempted&&!admission.allowed&&admission.retryable&&
+                admission.reason=="steam-ui-state-pending"&&(admission.detail=="shared-mode-pending"||admission.detail=="live-busy");};
+            if(transportOnly&&!exactRetained()&&!pendingRetained()){
+                closeOwned("launch-policy-blocked");
+                publishLaunchStop();
+                continue;
+            }
             // A terminal admission cannot execute a reconnect. Hand that known
             // failure to the existing ladder instead of spending its 7s grace.
             // Pending mode reads and valid retained bindings keep their wait.
@@ -1394,29 +1632,14 @@ class Runtime {
             // lease before the new watch arrives; that handoff still has
             // priority over optional resource maintenance on this worker.
             // Deferred preparation grants no rebind, restart or launch authority.
-            // Unfinished/failed work can retry on a NEW intent/Ready, never an idle timer or spin.
+            // After a deadline or unconfirmed cleanup, a mode hint is not new
+            // resource demand. Steam source/Ready changes and admitted launch
+            // preflight keep their independent attempts.
             if(enabled && known && !process && !context && !retainedFrontend && !(admission.allowed&&admission.bindingOnly) && config_.prepareEnvironment && preparedEpoch!=preparationEpoch &&
+                parkedPreparation!=std::pair{preparationEpoch,admissionEpoch} &&
                 (preparationAttemptEpoch!=preparationEpoch || preparationAttemptIntent!=intent)) {
-                preparationAttemptEpoch=preparationEpoch;preparationAttemptIntent=intent;
-                const std::function<bool()> canContinue=[this,intent,preparationEpoch]{
-                    std::lock_guard lock(stateMutex_);
-                    return !stopping_ && state_.enabled && state_.steamKnown && intent_==intent && preparationEpoch_==preparationEpoch;
-                };
-                if(!canContinue())continue;
-                std::string result;
+                if(!runPreparation(intent,preparationEpoch,admissionEpoch))continue;
                 preparationRan=true;
-                {
-                    struct PreparationActivity {
-                        Runtime& owner;
-                        explicit PreparationActivity(Runtime& value):owner(value){std::lock_guard lock(owner.stateMutex_);owner.preparationActive_=true;}
-                        ~PreparationActivity(){std::lock_guard lock(owner.stateMutex_);owner.preparationActive_=false;}
-                    } active(*this);
-                    if(!canContinue())continue;
-                    try { result=config_.prepareEnvironment(canContinue); }
-                    catch(...) { result="preparation-failed"; }
-                }
-                if(!canContinue())continue;
-                if(result.empty())preparedEpoch=preparationEpoch;
             }
             // Preparation may yield across a Steam mode/session change. Keep
             // the original fresh admission read after any resource work; it
@@ -1451,10 +1674,15 @@ class Runtime {
                 // Never fall through to process creation, including a failed binding.
                 // Exact-target validation runs inside retainedBinding before credentials change.
                 if(intent!=attempted||launchIntent!=launchAttempted||retryDue||outageDue){
-                    attachRetained(intent,launchIntent);
+#ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
+                    if(policyOwnsListenerRetry){
+                        if(!exactRetained()||ownedBindingCleanupError_.load()!=ERROR_SUCCESS)continue;
+                        listenerBoundaryBlocked=false;
+                    }
+#endif
+                    attachRetained(intent,launchIntent,transportOnly);
                 }
-            }else if(!process && retainedFrontend && context && intent==attempted && !admission.allowed && admission.retryable &&
-                     admission.reason=="steam-ui-state-pending" && (admission.detail=="shared-mode-pending"||admission.detail=="live-busy")){
+            }else if(!process && pendingRetained()){
                 // A shared refresh or local try-lock miss is not evidence that
                 // this attached document/transport was lost. live-busy performs
                 // no Steam IO. Keep the original context/watch and admission
@@ -1466,18 +1694,18 @@ class Runtime {
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
             }else if(heldLaunchUntil){
                 if(admission.allowed){
-                    std::string failure;
-                    try{if(config_.preflight)failure=config_.preflight();}catch(...){failure="preflight-failed";}
+                    const auto failure=runLaunchPreflight(intent);
                     if(!launchAllowed(intent))continue;
                     if(failure.empty()){cancelResourceRetry();startOwned(intent,true);}
                     else{releasePreparedBinding();rejectedResources(failure);publish("unavailable",failure,0,0,false,attempts);}
                 }
 #endif
             }else if(!process && !admission.allowed){
-                if(resourcePending)launchAttempted=~0ULL;
-                cancelResourceRetry();
                 // Preserve a pending owned-loader restart while its UI mode is temporarily unavailable.
-                if(!admission.retryable){loaderRecovery.reset();loaderRecoveryDue=false;}
+                if(!admission.retryable){
+                    if(pendingResourceFailure)launchAttempted=~0ULL;
+                    cancelResourceRetry();loaderRecovery.reset();loaderRecoveryDue=false;
+                }
                 // If mode confirmation disappeared during binding, its recovery starts a fresh validated attempt.
                 if(launchPending)launchAttempted=~0ULL;
                 stopWindow(); closeContext();
@@ -1495,11 +1723,23 @@ class Runtime {
                 else publish("loader-started","mirror-handshake-pending",0,GetProcessId(process));
             }else if(!process&&crashBudget.blocked()){
                 loaderRecovery.cancel();loaderRecoveryDue=false;publish("failed","loader-crash-loop",lastLoaderExit);
-            }else if(!process&&(launchIntent!=launchAttempted||loaderRecoveryDue||(resourcePending&&resourceDue))){
-                loaderRecoveryDue=false;resourceDue=false;resourcePending=false;
-                attempted=intent;launchAttempted=launchIntent;closeContext();stopWindow();publish("starting");
+            }else if(!process&&(pendingResourceFailure?resourceRetries.take(GetTickCount64()):(launchIntent!=launchAttempted||loaderRecoveryDue))){
+                loaderRecoveryDue=false;cancelResourceRetry();
+                attempted=intent;launchAttempted=launchIntent;closeContext();stopWindow();
+                // A confirmed refusal cannot be fixed by a preflight or a Steam page bootstrap.
+                // Retained attachment has its own preceding branch and never uses this probe.
+                if(coldDefaultElevatedShellObserved()){
+                    if(!launchAllowed(intent))continue;
+                    cancelResourceRetry();
+                    publish("failed","launch-failed",ERROR_ACCESS_DENIED,0,false,0,"shell-token-elevated","verified-shell-primary-default-token");
+                    if(launchPolicy.failed("shell-token-elevated",ERROR_ACCESS_DENIED,GetTickCount64())){
+                        launchPolicyObservedBeforeCreate=true;launchPolicyReported=false;launchPermissionProbeReported=false;notifyListenerFacts();
+                    }
+                    continue;
+                }
+                publish("starting");
                 std::string failure;
-                try{if(!beginPending(intent))continue;if(config_.preflight)failure=config_.preflight();}
+                try{if(!beginPending(intent))continue;failure=runLaunchPreflight(intent);}
                 catch(...){failure="preflight-failed";}
                 if(!launchAllowed(intent))continue;
                 if(failure.empty())cancelResourceRetry();
@@ -1518,6 +1758,10 @@ class Runtime {
 #ifdef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
                 else startOwned(intent);
 #endif
+            }else if(!process&&pendingResourceFailure){
+                // Mode is back, but a retry is not yet due (or is exhausted).
+                // Leave the admission-wait phase so repeated mode hints go quiet.
+                publish("unavailable",pendingResourceFailure);
             }else if(retryDue||outageDue){
                 retryDue=false;outageDue=false;
                 if(launchPending)bind(intent,true,true);
@@ -1532,9 +1776,12 @@ class Runtime {
             // recovery and the following generic failed/unavailable acceleration.
             if(listenerBoundaryBlocked&&listenerBoundaryIntent==intent)continue;
 #endif
+            // Route a fresh creation refusal to its park before page recovery.
+            // Steam absence/unknown still needs to reach the original idle wait.
+            if(!transportOnly&&enabled&&known&&steam&&!process&&launchPolicy.blocked())continue;
             // Automatic and manual share the same repair orchestrator/budget.
             // Its exact state/session/resource checks run only on this owner.
-            if(enabled&&known&&steam&&!exitFenced_.load(std::memory_order_acquire)&&config_.connectionRecovery){try{config_.connectionRecovery();}catch(...){}}
+            if(!transportOnly&&enabled&&known&&steam&&!exitFenced_.load(std::memory_order_acquire)&&config_.connectionRecovery){try{config_.connectionRecovery();}catch(...){}}
             // This branch consumes only phase. Keep its original fresh lock;
             // copying every presentation string adds allocations on watch wakes.
             bool failedOrUnavailable=false;
@@ -1563,14 +1810,18 @@ class Runtime {
             if(bindingLeases.child)handles[bindingChildIndex]=bindingLeases.child;
 #endif
             const auto now=GetTickCount64();
-            DWORD timeout=(std::min)({retries.timeout(now),admissionChecks.timeout(now),outage.timeout(now),loaderRecovery.timeout(now),resourcePending?resourceRetries.timeout(now):INFINITE});
+            const DWORD resourceTimeout=pendingResourceFailure&&admission.allowed&&!admission.bindingOnly&&!crashBudget.blocked()?resourceRetries.timeout(now):INFINITE;
+            DWORD timeout=(std::min)({retries.timeout(now),admissionChecks.timeout(now),outage.timeout(now),loaderRecovery.timeout(now),resourceTimeout});
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
             if(heldLaunchUntil)timeout=(std::min)(timeout,heldLaunchUntil<=now?0u:static_cast<DWORD>(heldLaunchUntil-now));
 #endif
-            if(enabled&&known&&steam&&config_.connectionRecoveryTimeout)
-                timeout=(std::min)(timeout,config_.connectionRecoveryTimeout());
-            if(enabled&&known&&steam&&config_.connectionHealth)
-                timeout=(std::min)(timeout,connectionFallback.timeout(now));
+            if(transportOnly)timeout=(std::min)(timeout,launchPolicy.timeout(now));
+            else{
+                if(enabled&&known&&steam&&config_.connectionRecoveryTimeout)
+                    timeout=(std::min)(timeout,config_.connectionRecoveryTimeout());
+                if(enabled&&known&&steam&&config_.connectionHealth)
+                    timeout=(std::min)(timeout,connectionFallback.timeout(now));
+            }
             bool factsReady=false;
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
             factsReady=config_.ownedBinding&&config_.ownedBinding->listenerReplyReady();
@@ -1588,7 +1839,7 @@ class Runtime {
             // A completion can arrive while the ordinary timed wait returns.
             if(result==WAIT_TIMEOUT&&!factsReady&&config_.ownedBinding)factsReady=config_.ownedBinding->listenerReplyReady();
 #endif
-            if(result==WAIT_TIMEOUT&&!factsReady){if(earlyRecheck)continue;const auto due=GetTickCount64();retryDue=retries.take(due);outageDue=outage.take(due);loaderRecoveryDue=loaderRecovery.take(due);admissionChecks.take(due);resourceDue=resourcePending&&resourceRetries.take(due);continue;}
+            if(result==WAIT_TIMEOUT&&!factsReady){if(earlyRecheck)continue;const auto due=GetTickCount64();retryDue=retries.take(due);outageDue=outage.take(due);loaderRecoveryDue=loaderRecovery.take(due);admissionChecks.take(due);continue;}
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
             if((result==WAIT_TIMEOUT&&factsReady)||(bindingLeases.ready&&result==WAIT_OBJECT_0+bindingEventIndex)||(bindingLeases.child&&result==WAIT_OBJECT_0+bindingChildIndex)){
                 auto packet=config_.ownedBinding->next();using Packet=decltype(packet);
@@ -1716,11 +1967,36 @@ public:
     // Reuse the existing explicit-enable/verified-session epoch. This is only
     // observation lifetime, never a new recovery permission or budget refund.
     unsigned long long connectionEvidenceEpoch() { std::lock_guard lock(stateMutex_); return crashResetEpoch_; }
-    bool tryDiagnosticState(State& result) {
+    bool tryDiagnosticState(State& result
+#ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
+        ,ymcc::deckybinding::DiagnosticContextProcess* context=nullptr
+#endif
+    ) {
         std::unique_lock lock(stateMutex_, std::try_to_lock);
         if (!lock.owns_lock()) return false;
         result = state_;
+#ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
+        if(context)*context=state_.enabled&&!stopping_&&!exitFenced_.load(std::memory_order_acquire)&&diagnosticContextIntent_==intent_
+            ?diagnosticContext_:ymcc::deckybinding::DiagnosticContextProcess{};
+#endif
         return true;
+    }
+    // Sample only the already-held Runtime thread. Never wait for shutdown,
+    // duplicate a handle, or use diagnostic counters to drive recovery.
+    std::optional<DiagnosticRuntimeThreadCpu> diagnosticRuntimeThreadCpu() noexcept {
+        const DWORD savedError=GetLastError();
+        struct RestoreError{DWORD value;~RestoreError(){SetLastError(value);}} restore{savedError};
+        try{
+            std::unique_lock lock(lifecycleMutex_,std::try_to_lock);
+            if(!lock.owns_lock()||!worker_.joinable())return std::nullopt;
+            const HANDLE thread=worker_.native_handle();
+            const DWORD id=GetThreadId(thread);
+            FILETIME born{},exited{},kernel{},user{};
+            if(!id||!GetThreadTimes(thread,&born,&exited,&kernel,&user)||WaitForSingleObject(thread,0)!=WAIT_TIMEOUT)return std::nullopt;
+            const auto ticks=[](const FILETIME& t){return (static_cast<ULONGLONG>(t.dwHighDateTime)<<32)|t.dwLowDateTime;};
+            if(!ticks(born))return std::nullopt;
+            return DiagnosticRuntimeThreadCpu{id,ticks(born),ticks(kernel),ticks(user)};
+        }catch(...){return std::nullopt;}
     }
     DiagnosticLoaderOwner diagnosticLoaderOwner() noexcept {
         const DWORD savedError=GetLastError();
@@ -1893,7 +2169,7 @@ public:
         if(receipt)*receipt=observation;
         return true;
     }
-    bool requestConnectionCheck() {
+    bool requestConnectionCheck(bool waitingForPublicationOnly=false) {
         std::lock_guard lock(stateMutex_);
         if(exitFenced_.load(std::memory_order_acquire))return false;
         if(pendingSafetyStop_.active(intent_) || stopping_||!state_.enabled||!state_.steamKnown||!state_.steamRunning)return false;
@@ -1902,6 +2178,9 @@ public:
         if(state_.phase!="frontend-attached"&&!(state_.pid&&state_.phase=="loader-started")&&
            !(state_.phase=="waiting-manual-steam"&&state_.reason=="decky-context-already-loaded")&&
            !(retainedLoaderNativeGeneration_.load()&&state_.phase=="failed"&&state_.reason=="owned-loader-cleanup-pending"))return false;
+        if(waitingForPublicationOnly&&connectionPublicationIntent_!=intent_)return false;
+        // The worker consumes and clears this flag under the same lock.
+        if(connectionCheckRequested_)return true;
         connectionCheckRequested_=true;
         notifyListenerFacts();return true;
     }

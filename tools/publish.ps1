@@ -19,6 +19,8 @@ param(
   [switch]$TestExport,
   [switch]$FullAcceptance,
   [switch]$FastRelease,
+  [string]$ExpectedVersion = $env:YEMAN_EXPECTED_VERSION,
+  [string]$ExpectedCommit = $env:YEMAN_EXPECTED_COMMIT,
   [string]$ReleaseBugPlan='',
   [ValidateRange(1,1800)][int]$FixtureBudgetSeconds=1800
 )
@@ -31,6 +33,8 @@ param(
   [switch]$TestExport,
   [switch]$FullAcceptance,
   [switch]$FastRelease,
+  [string]$ExpectedVersion = $env:YEMAN_EXPECTED_VERSION,
+  [string]$ExpectedCommit = $env:YEMAN_EXPECTED_COMMIT,
   [string]$ReleaseBugPlan='',
   [ValidateRange(1,1800)][int]$FixtureBudgetSeconds=1800
 )
@@ -47,6 +51,11 @@ try {
   if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
     $env:YEMAN_WORKSPACE_ROOT = [IO.Path]::GetFullPath($WorkspaceRoot)
   }
+  if ([string]::IsNullOrWhiteSpace($env:YEMAN_WORKSPACE_ROOT)) {
+    $env:YEMAN_WORKSPACE_ROOT = [IO.Path]::GetFullPath((Join-Path $ProjectRoot '..\..'))
+  }
+  . (Join-Path $PSScriptRoot 'release-version-readback.ps1')
+  $sourceVersion = Assert-YmccExportSourceVersion $ProjectRoot $ExpectedVersion $ExpectedCommit
   # Explicit test export is local-only; ordinary export defaults to no fixtures; FullAcceptance is explicit.
   if ($TestExport -and $FullAcceptance) { throw 'Choose ordinary export or explicit FullAcceptance.' }
   if($ReleaseBugPlan -and -not $FastRelease){throw 'ReleaseBugPlan requires explicit FastRelease; full acceptance remains separate.'}
@@ -73,9 +82,6 @@ try {
   } else {
     # Use the same original build/package entries as the other modes. Package-manager
     # run preflights can reinstall or purge an already restored dependency tree.
-    if ([string]::IsNullOrWhiteSpace($env:YEMAN_WORKSPACE_ROOT)) {
-      $env:YEMAN_WORKSPACE_ROOT = [IO.Path]::GetFullPath((Join-Path $ProjectRoot '..\..'))
-    }
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot 'tools\build-workspace.ps1') -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -TestExport
     if ($LASTEXITCODE -ne 0) { throw "Ordinary export build failed: exit=$LASTEXITCODE" }
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot 'tools\package-release.ps1') -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -TestExport
@@ -83,6 +89,9 @@ try {
   if ($LASTEXITCODE -ne 0) {
     throw "Release build failed: exit=$LASTEXITCODE"
   }
+  $null = Assert-YmccExportSourceVersion $ProjectRoot $sourceVersion $ExpectedCommit
+  $readback = Assert-YmccExportPackageVersion $env:YEMAN_WORKSPACE_ROOT $sourceVersion
+  $readback | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:YEMAN_WORKSPACE_ROOT 'Build/Validation/ExportIdentity/PACKAGE-VERSION-READBACK.json') -Encoding UTF8
   if ($DeployInstalled) {
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot 'tools\deploy-installed.ps1') -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT
     if ($LASTEXITCODE -ne 0) {
@@ -110,6 +119,8 @@ if ($DeployInstalled) {
 if ($MyInvocation.InvocationName -ne '.') {
   if ($FullAcceptance) {
     if ($TestExport -or $FastRelease -or $ReleaseBugPlan) { throw 'FullAcceptance is separate from ordinary/Fast/ReleaseBugPlan.' }
+    . (Join-Path $PSScriptRoot 'release-version-readback.ps1')
+    $null = Assert-YmccExportSourceVersion (Split-Path -Parent $PSScriptRoot) $ExpectedVersion $ExpectedCommit
     $publishStartedAtUnixMs=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     . (Join-Path $PSScriptRoot 'ymcc_sim/optimization/release-full-budget.ps1')
     Invoke-YmccFullReleasePublishInvocation -ProjectRoot (Split-Path -Parent $PSScriptRoot) -WorkspaceRoot $WorkspaceRoot -DeployInstalled:$DeployInstalled -BudgetSeconds $FixtureBudgetSeconds -StartedAtUnixMs $publishStartedAtUnixMs

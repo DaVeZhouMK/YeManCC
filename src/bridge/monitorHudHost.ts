@@ -22,7 +22,7 @@ export function startMonitorHudHost() {
   let cpuName='';void readMonitorCpuName().then(value=>{if(!ended)cpuName=value;});
   let ready=false,ended=false,restoring=false,queued=false,version=0,availabilityVersion=0,lastAttemptKey='';
   let activePreferences:MonitorOutputPreferences|null=null;
-  let desktopCloseSerial=0,applying=false,settling=false,settleRevision=0;
+  let desktopCloseSerial=0,applying=false,applyRevision=0;
   let recoveryWrite:BootPreferenceWrite={},latestIntent=0,preferenceRevision=0,intentPreferenceRevision=0;
   // Only failed startup/control operations retain this temporary wake lease.
   // Native pulses drive the deadline while the main WebView is hidden; the
@@ -31,7 +31,8 @@ export function startMonitorHudHost() {
   let retryTimer:number|null=null,retryAt=0,retryLease:(()=>void)|null=null,retrySerial=0;
   let settingsPending=false,settingsReading=false,settingsAttempts=0,restoreAttempts=0;
   let requestRevision=0,lastApplyOk=false,powerHeld=true,powerGeneration=-1,committedPowerGeneration=-1;
-  let powerNotificationSequence:number|undefined;
+  let powerNotificationSequence:number|undefined,powerSuspendSerial:number|undefined;
+  let availabilityScope=new AbortController();
   let readyTask:Promise<void>|null=null,preferenceDraft:MonitorOutputPreferences|null=null;
   let diagnosticRows=0,visibilityLease:(()=>void)|null=null;
   function note(stage:string,phase=''){
@@ -62,8 +63,8 @@ export function startMonitorHudHost() {
   const relay=createSteamHudRelay({externalClock:true,acquireClock:clock.acquire,now:Date.now,session:()=>crypto.randomUUID(),sample:source.sample,acquire:source.acquire,
     reply:(connection,message,current)=>invoke<boolean>('deckySidebar.mirrorReply',{connection,message,...(current?.bootContext?{origin:'boot-mode',bootContext:structuredClone(current.bootContext)}:{})},{timeoutMs:3000}),
     setTimer:(fn,ms)=>window.setTimeout(fn,ms),clearTimer:id=>window.clearTimeout(id as number),statusChanged:()=>invalidate()});
-  const desktop=createDesktopHudOwner({externalClock:true,acquireClock:clock.acquire,visibilityTerminal:()=>releaseVisibilityLease(),availabilityRecovered:()=>{restoreAttempts=0;lastAttemptKey='';cancelRetry();note('native-ready-again');invalidate();},visibilityProblem:(reason,repairs)=>note('visibility-repair',reason+':'+repairs),visibilityAllowed:()=>ready&&!ended&&!powerHeld&&!applying&&!settling&&activePreferences?.enabled===true&&activePreferences.output==='ymcc',scope:'global',target:()=>null,policyGame:getPolicyGame,mouseMode:()=>mouseModeState.value,nonce:()=>crypto.randomUUID(),now:Date.now,
-    sample:source.sample,acquire:source.acquire,invoke:(cmd,args)=>invoke(cmd,args as Record<string,unknown>), // owner bounds calls; retain late native descriptors
+  const desktop=createDesktopHudOwner({externalClock:true,acquireClock:clock.acquire,visibilityTerminal:()=>releaseVisibilityLease(),availabilityRecovered:()=>{restoreAttempts=0;lastAttemptKey='';cancelRetry();note('native-ready-again');invalidate();},visibilityProblem:(reason,repairs)=>note('visibility-repair',reason+':'+repairs),visibilityAllowed:()=>ready&&!ended&&!powerHeld&&!applying&&activePreferences?.enabled===true&&activePreferences.output==='ymcc',scope:'global',target:()=>null,policyGame:getPolicyGame,mouseMode:()=>mouseModeState.value,nonce:()=>crypto.randomUUID(),now:Date.now,
+    sample:source.sample,acquire:source.acquire,invoke:(cmd,args,signal)=>invoke(cmd,args as Record<string,unknown>,signal?{signal}:undefined),
     observe(listener){const stops=['desktopHud.ready','desktopHud.painted','desktopHud.prepared','desktopHud.visibility','desktopHud.closed','desktopHud.unavailable','desktopHud.expired','desktopHud.placement','desktopHud.template'].map(name=>on<DesktopHudEvent>(name,event=>{if(name==='desktopHud.closed')++desktopCloseSerial;listener(name,event);}));return()=>{for(const stop of stops)stop();};},
     placementChanged:value=>{void saveMonitorHudPlacement(value).catch(error=>console.warn('监控位置保存失败',error));},
     templateChanged:(template,revision)=>{void saveMonitorHudTemplate(template,revision).catch(error=>console.warn('监控模板保存失败',error));},
@@ -121,24 +122,29 @@ export function startMonitorHudHost() {
       settingsReading=false;
       if(!ended){
         if(activePreferences){configureSource(activePreferences);noticeHost.ready(activePreferences);}
-        const first=!ready;ready=true;if(first)relay.hello();note('preferences-loaded');
+        const first=!ready;ready=true;if(first)relay.preferencesReady();note('preferences-loaded');
         if(settingsPending)scheduleRetry();else invalidate();
       }
     }
   }
-  async function refreshAvailability(){const at=++availabilityVersion;const available=ready&&!ended&&await router.available();if(at===availabilityVersion&&!ended){syncVisibilityLease();publishMonitorHudAvailability(available);}}
+  async function refreshAvailability(){
+    if(!ready||ended||powerHeld)return;
+    const at=++availabilityVersion,scope=availabilityScope.signal;
+    const available=await router.available(undefined,scope);
+    if(at===availabilityVersion&&!ended&&!scope.aborted){syncVisibilityLease();publishMonitorHudAvailability(available);}
+  }
   function invalidate(){
     ++version;syncVisibilityLease();if(!ready||ended)return;void refreshAvailability();
     if(queued)return;queued=true;queueMicrotask(()=>{queued=false;void reconcile();});
   }
   const contextKey=(route:string|null)=>route+'|'+(route==='steam'?JSON.stringify(relay.inspect().status?.game??null):'')+'|'+desktopCloseSerial+'|'+(route==='desktop'?desktop.inspect().retirementRevision:0);
   async function reconcile(){
-    if(!ready||ended||powerHeld||settingsPending||restoring||applying||settling||retryAt||!wantsHud()||restoreAttempts>=maxAttempts||desktop.inspect().recoveryBlocked)return;
-    const revision=settleRevision,startedVersion=version;
-    const route=await router.kind(activePreferences!);
+    if(!ready||ended||powerHeld||settingsPending||restoring||applying||retryAt||!wantsHud()||restoreAttempts>=maxAttempts||desktop.inspect().recoveryBlocked)return;
+    const revision=applyRevision,startedVersion=version,scope=availabilityScope.signal;
+    const route=await router.kind(activePreferences!,scope);
     // Recheck intent after native IO. Same-output appearance drafts stay live,
     // but an explicit switch/OFF or a newer event invalidates this recovery.
-    if(!ready||ended||powerHeld||restoring||applying||settling||!wantsHud()||revision!==settleRevision||startedVersion!==version)return;
+    if(!ready||ended||powerHeld||scope.aborted||restoring||applying||!wantsHud()||revision!==applyRevision||startedVersion!==version)return;
     if(!route){++restoreAttempts;note('carrier-unavailable');scheduleRetry();return;}
     const desired=activePreferences!;
     const key=contextKey(route); // Default desktop never needs a game identity.
@@ -148,7 +154,7 @@ export function startMonitorHudHost() {
     try{
       const result=await monitorOutputCoordinator.apply(desired,captureBootPreferenceWrite(recoveryWrite),current);
       if(current()){
-        if(result.ok){lastAttemptKey=contextKey(route);restoreAttempts=0;cancelRetry();note('restored');}
+        if(result.ok){restoreAttempts=0;cancelRetry();note('restored');}
         else{note('apply-failed',result.phase);scheduleRetry();}
       }
     }catch(error){
@@ -188,17 +194,10 @@ export function startMonitorHudHost() {
       if(!intent.recovery){++requestRevision;restoreAttempts=0;lastAttemptKey='';cancelRetry();}
       activePreferences=normalizeMonitorOutput(intent.preferences);latestIntent=intent.id;recoveryWrite=captureBootPreferenceWrite(intent.write);intentPreferenceRevision=preferenceRevision;lastApplyOk=false;settingsPending=false;
     }
-    applying=value;const at=++settleRevision;
-    if(value){settling=false;return;}
-    if(!ready||ended)return;
-    // User-triggered switches own the queue too. Native close events from that
-    // transaction must not enqueue stale preferences behind the user's intent.
-    settling=true;
-    void router.kind(activePreferences??undefined).then(route=>{
-      if(at===settleRevision&&!applying&&!ended&&lastApplyOk)lastAttemptKey=contextKey(route);
-    }).catch(()=>{}).finally(()=>{
-      if(at===settleRevision&&!ended){settling=false;if(!lastApplyOk&&restoreAttempts>0)scheduleRetry();invalidate();}
-    });
+    applying=value;++applyRevision;
+    if(value||!ready||ended)return;
+    if(!lastApplyOk&&restoreAttempts>0)scheduleRetry();
+    invalidate();
   });
   const offApplied=onMonitorOutputApplied((prefs,result,intent)=>{
     if(intent&&(intent.id!==latestIntent||intentPreferenceRevision!==preferenceRevision))return;
@@ -207,30 +206,41 @@ export function startMonitorHudHost() {
     // so a later event cannot revive the previously selected custom HUD.
     activePreferences=normalizeMonitorOutput(prefs);
     lastApplyOk=result.ok;
-    if(result.ok){configureSource(activePreferences);restoreAttempts=0;cancelRetry();if(result.applied!=='ymcc')lastAttemptKey='';}});
+    if(result.ok){
+      configureSource(activePreferences);restoreAttempts=0;cancelRetry();
+      // The completed transaction already selected and confirmed a carrier.
+      // A later status read must not hold or reassign that completion.
+      const route=router.active();
+      const confirmed=route==='desktop'?desktop.inspect().owned?.prepared:route==='steam'&&relay.state()==='shown';
+      lastAttemptKey=result.applied==='ymcc'&&confirmed?contextKey(route):'';
+    }
+  });
   const offPower=onSharedPowerLifecycle(snapshot=>{
     const held=!isSharedPowerLifecycleAdmitted(snapshot),newGeneration=snapshot.generation!==powerGeneration;
-    const scopeChanged=snapshot.observedNotificationSequence!==powerNotificationSequence;
+    const suspendChanged=snapshot.suspendSerial!==powerSuspendSerial;
+    const scopeChanged=snapshot.observedNotificationSequence!==powerNotificationSequence||suspendChanged;
     if(ended||held===powerHeld&&!newGeneration&&!scopeChanged)return;
-    const readyAfterBoundary=!held&&(powerHeld||newGeneration);
+    const readyAfterBoundary=!held&&(powerHeld||newGeneration||suspendChanged);
     const retainedReadyAdvance=!held&&!powerHeld&&!newGeneration&&scopeChanged;
     ++requestRevision;powerHeld=held;powerGeneration=snapshot.generation;
-    powerNotificationSequence=snapshot.observedNotificationSequence;
+    powerNotificationSequence=snapshot.observedNotificationSequence;powerSuspendSerial=snapshot.suspendSerial;
+    availabilityScope.abort();availabilityScope=new AbortController();
     // A new public scope retires old requests without refunding the same
     // generation's attempts or shortening its existing retry delay.
     if(!retainedReadyAdvance)cancelRetry();
-    if(readyAfterBoundary)clock.reconcileAfterWake();
     syncVisibilityLease();
+    desktop.reconcileVisibilityAfterPowerChange(readyAfterBoundary);
+    if(readyAfterBoundary)clock.reconcileAfterWake();
     if(!held){
       if(snapshot.generation!==committedPowerGeneration){committedPowerGeneration=snapshot.generation;restoreAttempts=0;}
       if(settingsPending&&settingsAttempts<maxAttempts)void loadStartupPreferences();else invalidate();
     }
-  },{observeNotificationSequence:true});
+  },{observeNotificationSequence:true,observeSuspendSerial:true});
   return {
     async ready(){
       if(ended)return;if(!readyTask)readyTask=loadStartupPreferences();await readyTask;
     },
-    stop(){if(ended)return;ended=true;++requestRevision;cancelRetry();syncVisibilityLease();offPower();noticeHost.stop();ready=false;publishMonitorHudAvailability(false);offApplied();offApplying();offPreferences();offExtension();offSteamPresence();
+    stop(){if(ended)return;ended=true;++requestRevision;availabilityScope.abort();cancelRetry();syncVisibilityLease();offPower();noticeHost.stop();ready=false;publishMonitorHudAvailability(false);offApplied();offApplying();offPreferences();offExtension();offSteamPresence();
       relay.dispose();void desktop.dispose().finally(()=>{offClock();clock.dispose();});offAdapter();},
     inspect:()=>({steam:relay.inspect(),desktop:desktop.inspect(),carrier:router.active(),sampleUsers:source.users(),clock:clock.inspect(),restoring,
       recovery:{settingsPending,settingsAttempts,restoreAttempts,retryAt,powerHeld,powerGeneration,visibilityLease:!!visibilityLease}}),

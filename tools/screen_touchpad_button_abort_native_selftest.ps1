@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$OutputDirectory,
- [ValidateSet('default','wake','persistent','reentrant','late-fault','cumulative','independent-reset','channel-notify','channel-stop','channel-command','display-transition','channel-display','presentation-recovery','input-overflow','worker-retirement','worker-retirement-quota','manual-channel-recovery','channel-stage','channel-cleanup')][string]$CaseFilter='default')
+ [ValidateSet('default','wake','wake-timer','persistent','reentrant','late-fault','cumulative','independent-reset','channel-notify','channel-stop','channel-command','display-transition','channel-display','presentation-recovery','input-overflow','worker-retirement','worker-retirement-quota','manual-channel-recovery','channel-stage','channel-cleanup')][string]$CaseFilter='default')
 $ErrorActionPreference='Stop'
 function Set-IndependentSurfaceFixturePort([string]$Path) {
  $before=[IO.File]::ReadAllBytes($Path);$raw=[Text.Encoding]::UTF8.GetString($before)

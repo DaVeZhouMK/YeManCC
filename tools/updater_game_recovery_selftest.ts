@@ -15,6 +15,7 @@ const policy={enabled:true,bootId:'boot',lastNotifiedBoot:'',failureCount:0,next
 win.chrome={webview:{addEventListener(_name:string,cb:any){receive=cb;},postMessage(req:any){if(typeof req.id!=='number')return;calls.push(req);queueMicrotask(()=>{
  const ok=(result:any)=>receive({data:{id:req.id,result}}),fail=(error:string)=>receive({data:{id:req.id,error}});
  switch(req.cmd){
+ case 'power.lifecycle':ok({...((globalThis as any).__updateSharedPowerInput.snapshot)});break;
  case 'game.detect':io.reads++;if(io.error)fail('temporary game read failure');else ok({...io.game,pid:io.game?.pid??0,valid:!!io.game,generation:io.generation,identityGeneration:io.identityGeneration});break;
  case 'app.updatePredownloadActivity':gate=!!(req.args.known&&req.args.idle&&!activityFault);ok(!activityFault);break;
  case 'app.updatePredownloadRead':ok({...policy});break;
@@ -63,6 +64,24 @@ try{
  check('temporary native admission failure does not authorize background work',()=>assert.equal(pending,null));
  activityFault=false;await advance(60000);await advance(1000);
  check('periodic recovery retries admission and avoids a permanent pause',()=>{assert.ok(pending?.args.background);assert.equal(gate,true);});
+ const powerInput=(globalThis as any).__updateSharedPowerInput;
+ const publishPower=(fields:Record<string,unknown>)=>{
+  powerInput.snapshot={...powerInput.snapshot,...fields};
+  for(const listener of [...powerInput.listeners] as Array<(state:any)=>void>)listener(powerInput.snapshot);
+ };
+ publishPower({phase:'suspending',hardwareWritesAllowed:false,notificationPending:true,suspendSerial:1});await flush();
+ check('a new sleep boundary cancels the previous idle transfer',()=>{assert.equal(pending,null);assert.equal(gate,false);});
+ const beforeWake=networkCalls(),beforeGameRead=io.reads;
+ io.error=true;publishPower({phase:'ready',generation:2,hardwareWritesAllowed:true,notificationPending:false});
+ await advance(2500);
+ check('wake keeps predownload paused while the previous empty game snapshot is stale',()=>{
+  assert.equal(getPolicyGame(),null,'old display remains empty');assert.ok(io.reads>beforeGameRead,'detector must try a fresh read');
+  assert.equal(gate,false,'stale idle was published to Native after wake');assert.equal(networkCalls(),beforeWake);
+ });
+ io.error=false;await advance(5000);await advance(1000);
+ check('revalidating the unchanged empty game snapshot self-heals predownload',()=>{
+  assert.equal(gate,true);assert.ok(pending?.args.background);
+ });
  service.stop();await flush();
  console.log(JSON.stringify({status:'PASS',checks:records.length,records,scope:'Actual updater service/manager/scheduler, shared game detector and policy facade. Only native snapshot IO, browser event targets and time are injected; no copied hysteresis, real game, network or installation.'}));
 }finally{globalThis.setTimeout=saved.setTimeout;globalThis.clearTimeout=saved.clearTimeout;Date.now=saved.now;Object.defineProperty(globalThis,'performance',{configurable:true,value:saved.performance});}

@@ -2,7 +2,7 @@
 import { readonly, ref } from 'vue';
 import { tdpRuntimeStore } from './tdpRuntimeState';
 import { invoke, on } from './ipc';
-import { isUiVisible, onUiVisibilityChange } from './uiLifecycle';
+import { isUiPowerReady, isUiVisible, onUiVisibilityChange } from './uiLifecycle';
 import { onSharedPowerLifecycle } from './powerLifecycleState';
 
 export type PowerSourceMode = 'ac' | 'dc';
@@ -13,7 +13,7 @@ export interface PowerSourceSnapshot {
 let sourceVersion = 0, generation = 0, nativeRevision = -1;
 let nativeMode: PowerSourceMode | null | undefined, nativeBattery: boolean | null = null;
 let suspended = false, readEpoch = 0, attemptedVersion = -1;
-let readInFlight: { promise: Promise<boolean>; reconcile: boolean; epoch: number } | null = null;
+let readInFlight: { promise: Promise<boolean>; reconcile: boolean; epoch: number; abort: AbortController } | null = null;
 const sourceMode = ref<PowerSourceMode | null>(null);
 const batteryPresent = ref<boolean | null>(null);
 export const powerSourceMode = readonly(sourceMode);
@@ -102,7 +102,8 @@ async function refreshSnapshot(reconcile: boolean, boundaryEpoch = readEpoch): P
   const version = sourceVersion, epoch = boundaryEpoch;
   attemptedVersion = version;
   const current = () => epoch === readEpoch && !suspended;
-  const request = invoke<PowerSourceSnapshot>('power.sourceSnapshot', reconcile && batteryPresent.value !== false ? { refresh: true } : {}, { timeoutMs: 2000 })
+  const abort = new AbortController();
+  const request = invoke<PowerSourceSnapshot>('power.sourceSnapshot', reconcile && batteryPresent.value !== false ? { refresh: true } : {}, { timeoutMs: 2000, signal: abort.signal })
     .then(state => {
       if (!current()) return false;
       if (version !== sourceVersion) return sourceMode.value !== null;
@@ -114,7 +115,7 @@ async function refreshSnapshot(reconcile: boolean, boundaryEpoch = readEpoch): P
       ++sourceVersion; setMode(null); attemptedVersion = sourceVersion; return false;
     })
     .finally(() => { if (readInFlight?.promise === request) readInFlight = null; });
-  readInFlight = { promise: request, reconcile, epoch }; return request;
+  readInFlight = { promise: request, reconcile, epoch, abort }; return request;
 }
 /** All consumers share one passive read; failures stay unknown until the next real boundary. */
 export async function refreshPowerSourceSnapshot(reconcile = false): Promise<void> { await refreshSnapshot(reconcile); }
@@ -126,9 +127,16 @@ export async function readPowerSourceMode(): Promise<PowerSourceMode | null> {
 /** App owns the event lifetime. Every page/action observes the same receipt. */
 export function startForegroundPowerSourceRefresh(onForegroundSnapshot: SourceHandler): () => void {
   let active = true, visibilityEpoch = 0, queued = false, inFlightEpoch: number | null = null, followup = false;
+  let lifecycleKey = '';
   const fenceRead = (): void => { ++visibilityEpoch; ++readEpoch; };
+  const retireRead = (): void => {
+    fenceRead();
+    const retired = readInFlight;
+    readInFlight = null;
+    retired?.abort.abort();
+  };
   const request = (): void => {
-    if (!active || suspended || !isUiVisible()) return;
+    if (!active || !lifecycleKey || suspended || !isUiVisible()) return;
     if (inFlightEpoch !== null) { if (inFlightEpoch !== visibilityEpoch) followup = true; return; }
     if (queued) return;
     queued = true;
@@ -149,21 +157,25 @@ export function startForegroundPowerSourceRefresh(onForegroundSnapshot: SourceHa
     if (kind) notify(kind, mode);
     if (repair && before !== mode && sourceTransition === transition && sourceMode.value === mode) callConsumer(onForegroundSnapshot, mode);
   };
-  let lifecycleKey = '';
+  let suspendSerial = 0;
   const lifecycle = onSharedPowerLifecycle(state => {
     if (!active || state.generation < generation) return;
-    const blocked = state.known === false || state.phase !== 'ready';
-    const key = `${state.generation}:${blocked}`;
+    const blocked = !isUiPowerReady(state);
+    const nextSerial = state.suspendSerial ?? 0;
+    const key = `${state.generation}:${blocked}:${nextSerial}`;
     if (key === lifecycleKey) return;
+    const suspendChanged = lifecycleKey !== '' && nextSerial !== suspendSerial;
     lifecycleKey = key;
+    suspendSerial = nextSerial;
     if (state.generation > generation) {
       generation = state.generation; nativeRevision = -1; nativeMode = undefined; nativeBattery = null;
       batteryPresent.value = null; setMode(null);
     }
-    suspended = blocked; ++sourceVersion; attemptedVersion = -1; fenceRead();
-    if (blocked) { batteryPresent.value = null; setMode(null); }
-    else request(); // Same-generation shared Ready also releases a missed private hold.
-  });
+    // A coalesced Ready can supersede the response without publishing a pause.
+    suspended = blocked; ++sourceVersion; attemptedVersion = -1; retireRead();
+    if (blocked || suspendChanged) { batteryPresent.value = null; setMode(null); }
+    if (!blocked) request();
+  }, { observeSuspendSerial: true });
   const stops = [
     on<PowerSourceSnapshot>('power.sourceChanged', state => observe(state, false, 'immediate')),
     on<PowerSourceSnapshot>('power.acChanged', state => observe(state, false, 'settled')),
@@ -177,6 +189,6 @@ export function startForegroundPowerSourceRefresh(onForegroundSnapshot: SourceHa
   const showEvents = ['ipc:window.shown', 'ipc:window.maximized', 'ipc:window.summoned'];
   for (const event of showEvents) window.addEventListener(event, request);
   window.addEventListener('focus', request);
-  return () => { active = false; fenceRead(); followup = false; stops.forEach(stop => stop());
+  return () => { if (!active) return; active = false; retireRead(); followup = false; stops.forEach(stop => stop());
     for (const event of showEvents) window.removeEventListener(event, request); window.removeEventListener('focus', request); };
 }

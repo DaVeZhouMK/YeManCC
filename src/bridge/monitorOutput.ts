@@ -158,8 +158,11 @@ const outputCoordinator = createMonitorOutputCoordinator({
     const layout = show ? prefs.rtssTemplate : 'off'; const state = await setOverlayLayout(layout, show ? Math.round(prefs.rtssScale / 20) : undefined,current);
     if(current)await requireMonitorCurrent(current);
     const target = show ? ({ W: 'YeManOBS-W-1.ovl', L: 'YeManOBS-L-1.ovl', J: 'YeManOBS-JJ-1.ovl' })[prefs.rtssTemplate] : 'Empty.ovl';
-    let confirmed=false;if(state.mode==='live'){const loaded=await readOverlayLayout();if(current)await requireMonitorCurrent(current);confirmed=loaded===target;}
-    return { confirmed, reason: 'RTSS 模板加载/读回未确认；未继续开启目标。' };
+    // A stopped RTSS cannot draw; its OFF setting was saved and checked for
+    // the next start. Showing an output still requires a live template ACK.
+    const loaded = state.mode === 'live' ? await readOverlayLayout() : undefined;
+    if(current)await requireMonitorCurrent(current);
+    return { confirmed: state.mode === 'live' ? loaded === target : !show, reason: 'RTSS 模板加载/读回未确认；未继续开启目标。' };
   },
   async setYmcc(show, prefs,current) {
     if(current)await requireMonitorCurrent(current);

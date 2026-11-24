@@ -621,6 +621,8 @@ inline void delegatedQueuedSuccessRevocation(Context& context) {
 #ifdef YMCC_SOURCE_NOTIFICATION_DIAGNOSTIC_FIXTURE
 #include "../native/decky_sidebar_runtime.h"
 #include "../native/decky_sidebar_diagnostics.h"
+#include "../native/decky_sidebar_setup.h"
+#include "../native/decky_steam_restart_requirement.h"
 #include "fixtures/decky_source_notification_diagnostic_cases.inc"
 #endif
 int main(int argc, char** argv) {
@@ -658,8 +660,14 @@ int main(int argc, char** argv) {
         const auto before = threadCount(); DWORD handlesBefore = 0; need(GetProcessHandleCount(GetCurrentProcess(), &handlesBefore) != FALSE, "handle-baseline");
         need(bool(client.begin(request, 1)), "begin");
         auto first = receive(client); need(first.kind == Packet::message && first.value["kind"] == "result", "success-frame");
-        detail::Handle cef{client.takeContextProcess()}; need(cef.value && GetProcessId(cef.value) == worker::number(context.lease.at("pid")), "verified-cef-transfer");
-        need(client.takeContextProcess() == nullptr, "cef-transferred-twice");
+        DiagnosticContextProcess attribution;
+        const auto beforeTransfer=GetTickCount64();
+        detail::Handle cef{client.takeContextProcess(&attribution)}; need(cef.value && GetProcessId(cef.value) == worker::number(context.lease.at("pid")), "verified-cef-transfer");
+        need(attribution.pid==GetProcessId(cef.value)&&attribution.birth==worker::decimal(context.lease.at("birth"))&&
+             attribution.steamPid==worker::number(request.at("steam").at("pid"))&&attribution.steamBirth==worker::decimal(request.at("steam").at("created"))&&
+             attribution.observedAt>=beforeTransfer&&attribution.observedAt<=GetTickCount64(),"diagnostic-uses-verified-transfer-and-original-steam-birth");
+        need(client.takeContextProcess(&attribution) == nullptr, "cef-transferred-twice");
+        need(!attribution.pid&&!attribution.birth&&!attribution.steamPid&&!attribution.steamBirth&&!attribution.observedAt,"failed-transfer-clears-attribution");
         unsigned diagnostics = 0;
         for (;;) {
             const auto packet = receive(client); need(packet.kind == Packet::message && packet.value["kind"] == "diagnostic", "watch-frame"); ++diagnostics;

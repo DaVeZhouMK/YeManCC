@@ -7,7 +7,7 @@ export interface HudGameBinding {
   appId:number;gameId:string;browserGameId:string;overlayTitle:string;overlayPid:number;
   overlayBrowserId:number;ownerBrowserId:number;overlayBrowserType:number;overlayNativeAppId:number;
 }
-export interface HudReady {type:'hud-ready';protocol:1;runId:string;}
+export interface HudReady {type:'hud-ready';protocol:1;runId:string;snapshotRefresh?:false;}
 export interface HudFrame {
   type:'hud';protocol:1;runId:string;session:string;seq:number;operation:number;show:boolean;
   expiresAt:number;game:HudGameBinding|null;preferences:MonitorOutputPreferences;data:HudData;

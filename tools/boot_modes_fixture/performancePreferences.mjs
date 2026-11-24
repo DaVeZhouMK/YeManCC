@@ -113,7 +113,7 @@ export async function runPerformancePreferenceOwners({out,schedule,models,frameM
   const f=await buildFixture(mode),doc=structuredClone(f.document().extensions.bootModes);
   const limits=evaluate('src/bridge/frameRateLimits.ts',{'./settingsRepository':repository,'./frameRateModel':frameModel,
    './gamedetect':{isGameStatusCurrent:()=>true,isCurrentGameTarget:()=>true},'./gamePolicyTarget':target,'./yeman':yeman,
-   './powerSource':{powerSourceMode:source},'./api':{},'./performanceSchedule':{},'./autofloat':{}});
+   './powerSource':{powerSourceMode:source},'./api':{},'./powerLifecycleState':{},'./performanceSchedule':{},'./autofloat':{}});
   await limits.saveGlobalFrameRate('dc',{fps:45});assert.equal(global(f).frames.dc.fps,45);assert.equal(global(f).frames.ac.fps,120);
   assert.equal(f.document().rtss.frameRates.ac.fps,90);assert.equal(f.document().extensions.bootModes.revision,doc.revision+1);
   assert.deepEqual(global(f).controls,savedPerformance.controls);assert.deepEqual(f.document().extensions.bootModes.scenes,doc.scenes);
@@ -129,7 +129,7 @@ export async function runPerformancePreferenceOwners({out,schedule,models,frameM
     await schedule.updateContinuousPerformanceControls(snapshot.identity,{frameRate:{fps:45}});
    }else{
     const limits=evaluate('src/bridge/frameRateLimits.ts',{'./settingsRepository':repository,'./frameRateModel':frameModel,
-     './gamedetect':{isGameStatusCurrent:()=>true},'./gamePolicyTarget':target,'./yeman':yeman,'./powerSource':{powerSourceMode:source},'./api':{},'./performanceSchedule':{},'./autofloat':{}});
+     './gamedetect':{isGameStatusCurrent:()=>true},'./gamePolicyTarget':target,'./yeman':yeman,'./powerSource':{powerSourceMode:source},'./api':{},'./powerLifecycleState':{},'./performanceSchedule':{},'./autofloat':{}});
     await limits.saveGlobalFrameRate('dc',{fps:45});
    }
    assert.equal(global(f).frames.ac.fps,120,'editing DC adopted the computed desktop AC default');assert.equal(global(f).frames.dc.fps,45);
@@ -141,7 +141,7 @@ export async function runPerformancePreferenceOwners({out,schedule,models,frameM
   const f=await buildFixture('steam'),doc=structuredClone(f.document().extensions.bootModes);
   await f.repo.updateSettings(settings=>{delete settings.rtss.frameRates;});configure(await f.repo.loadSettings(),f.repo.getSettingsGeneration());
   const limits=evaluate('src/bridge/frameRateLimits.ts',{'./settingsRepository':repository,'./frameRateModel':frameModel,
-   './gamedetect':{isGameStatusCurrent:()=>true},'./gamePolicyTarget':target,'./yeman':yeman,'./powerSource':{powerSourceMode:source},'./api':{},'./performanceSchedule':{},'./autofloat':{}});
+   './gamedetect':{isGameStatusCurrent:()=>true},'./gamePolicyTarget':target,'./yeman':yeman,'./powerSource':{powerSourceMode:source},'./api':{},'./powerLifecycleState':{},'./performanceSchedule':{},'./autofloat':{}});
   await limits.ensureGlobalFrameRates();assert.deepEqual(f.document().extensions.bootModes,doc,'passive frame materialization became ordinary intent');
   rows.push({case:'passive frame materialization',runtimeOrigin:true});
  }

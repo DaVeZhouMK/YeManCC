@@ -3,10 +3,8 @@
 }
 
 .gpfocus .basicpartnereventspage_BasicPartnerEvent_2yuwU {
-  outline: none;
-  border: 2px solid rgba(255, 255, 255, 0.6);
-  border-radius: calc(var(--round-radius-size) + 2px);
-  margin: 54px auto 14px auto;
+  outline: 2px solid rgba(255, 255, 255, 0.6);
+  outline-offset: -2px;
 }
 
 .focusring_FocusRing_1IZrQ {
@@ -55,4 +53,4 @@
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-07e34e96ff7b3743: 1; }
 /* YMCC content receipt: exact bundled file revision. */
-:root { --ymcc-content-01fede0cb344dceb: 1; }
+:root { --ymcc-content-67560bb851c8b058: 1; }

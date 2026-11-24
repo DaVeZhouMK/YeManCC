@@ -241,7 +241,6 @@ async function quit() {
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
   white-space: nowrap;
 }
 .nav-item:hover {
@@ -303,10 +302,10 @@ async function quit() {
   box-shadow: var(--focus-ring);
 }
 
-/* Keep navigation ownership unchanged; only the selected item emits light. */
+/* Keep the selected row distinct without gradients or blurred shadows. */
 .nav-items>.nav-item{position:relative;isolation:isolate;border-radius:0}
-.nav-items>.nav-item.active{border-color:transparent;border-radius:0;background-color:color-mix(in srgb,var(--accent) 22%,var(--bg-panel));background-image:linear-gradient(100deg,color-mix(in srgb,var(--accent) 32%,transparent),color-mix(in srgb,var(--accent) 8%,transparent) 65%,transparent);color:var(--text);box-shadow:inset 3px 0 var(--accent),inset 0 1px 0 #b9e8ff1f,0 0 14px color-mix(in srgb,var(--accent) 10%,transparent)}
-.nav-items>.nav-item.active::before{content:"";position:absolute;left:0;top:2px;bottom:2px;width:3px;border-radius:2px;background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 35%,transparent),color-mix(in srgb,var(--accent) 45%,white) 42%,var(--accent) 78%,color-mix(in srgb,var(--accent) 40%,transparent));box-shadow:0 0 7px color-mix(in srgb,var(--accent) 60%,transparent),0 0 2px #d2f3ff80;pointer-events:none;opacity:.82}
+.nav-items>.nav-item.active{border-color:transparent;border-radius:0;background:color-mix(in srgb,var(--accent) 30%,var(--bg-panel));color:var(--text);box-shadow:inset 3px 0 var(--accent),inset 0 1px 0 #b9e8ff1f}
+.nav-items>.nav-item.active::before{content:"";position:absolute;left:0;top:2px;bottom:2px;width:3px;border-radius:2px;background:var(--accent);pointer-events:none;opacity:.82}
 .nav-items>.nav-item.active .nav-icon,.nav-items>.nav-item.active .nav-label{color:var(--text)}
 .nav-items>.nav-item.active:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 

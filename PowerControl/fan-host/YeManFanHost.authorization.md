@@ -1,8 +1,8 @@
-candidateOnly: true
+﻿candidateOnly: true
 releaseApproved: false
 installed: false
-sourceBatch: candidate-fan-shared-lease-settlement-20261121
-sourceSnapshotManifestSha256: 8e839285a2010ef58c7fc658954fcc1a6c1e0bff206d971665ace50ea80c70c4
+sourceBatch: candidate-onex-f1-fan-aliases-20261124
+sourceSnapshotManifestSha256: 88a501bbda40005f7584b35263b950559d3072f41c76bb665928e4389768798f
 
 # YeManFanHost 正式授权记录
 
@@ -13,7 +13,7 @@ hardwareWritesAuthorized: true
 allMappedFanRoutesAuthorized: true
 authorizationMode: production-gated
 approvedHostExeSha256: A3CE266B880F67045D3F895E2FC68B1FE81F641D5F1A08A01F0DE19D2458F733
-approvedHostDllSha256: 75CFBCACBB51D87EF6B20B07D0FF95D6C561D7CAF108D38458E028902AD716F0
+approvedHostDllSha256: 020547F3C334C3439A618661DC9582E3285DBD430234011A4BBBE20540F324CE
 approvedHcSha256: 08A386607A0E5E72C5FCAA98D3A6C0B3B256EB0FCA7D6547F6F124C1F1F33583
 baselineId: YMCC-DEVICECORE-20261018-v1
 previousBaseline: FAN-V6-mainline
@@ -96,3 +96,5 @@ fanColdWakePreparedCandidate: candidate-fan-parent-finalize-20261117; fan-only i
 fanColdWakePreparedCandidate: candidate-fan-win5-resume-20261118; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
 
 fanColdWakePreparedCandidate: candidate-fan-win5-resume-settlement-20261118; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-onex-f1-fan-aliases-20261124; fan-only initialization and authenticated on-demand handshake; staged-not-promoted

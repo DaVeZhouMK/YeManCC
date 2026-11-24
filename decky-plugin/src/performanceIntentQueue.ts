@@ -27,8 +27,10 @@ export class PerformanceIntentQueue<View> {
   // briefly restored old values and toggled the whole native panel's busy styles.
   snapshot() {
     const intent=this.pending??this.applying;
-    return intent?{...structuredClone(intent),phase:this.pending?(this.editing?'editing':'queued'):this.confirming?'confirming':'applying'}:null;
+    // Only scalar edits and their phase are for display; the source view stays in the queue.
+    return intent?{patch:{...intent.patch},phase:this.pending?(this.editing?'editing':'queued'):this.confirming?'confirming':'applying'}:null;
   }
+  hasWork(): boolean { return this.pending!==null||this.applying!==null; }
   subscribe(listener: () => void) { if(this.disposed)return () => {}; this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   private notify() { for (const listener of this.listeners) { try { listener(); } catch {} } }
   private valid(expected: View, patch: PerformancePatch, current: View | null): current is View {

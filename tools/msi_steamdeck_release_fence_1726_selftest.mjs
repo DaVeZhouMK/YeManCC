@@ -10,6 +10,15 @@ export function createOfflineHostFixture(out, host = path.join(repo, 'InputHost'
 const source = path.join(host, 'Program.cs');
 const text = fs.readFileSync(source, 'utf8');
 fs.mkdirSync(out, { recursive: true });
+const mandatoryPower=text.includes('private HostInputPowerBinding? _powerBindings;');
+const powerMode=options.powerBindingMode??null;
+if(powerMode!==null&&powerMode!=='authenticated-native')throw Error('Unknown offline Host powerBindingMode');
+if(mandatoryPower&&powerMode===null)throw Error('Mandatory Host power contract requires explicit authenticated-native fixture mode');
+if(!mandatoryPower&&powerMode!==null)throw Error('Selected power fixture mode requires paired current Host power contract');
+const powerRoot=path.resolve(host,'../native/SharedSleepPower');
+const powerCompilationInputs=mandatoryPower?[
+ path.join(host,'HostInputPowerBinding.cs'),path.join(powerRoot,'RemotePowerContracts.cs'),path.join(powerRoot,'RemoteNativePowerClient.cs')
+].map(file=>{const bytes=fs.readFileSync(file);return {path:file,bytes:bytes.length,sha256:crypto.createHash('sha256').update(bytes).digest('hex')};}):[];
 const receipt = [];
 const sha = s => crypto.createHash('sha256').update(s).digest('hex');
 function mask(s) {
@@ -17,7 +26,7 @@ function mask(s) {
 }
 function extract(name, file = source, kind = 'method', record = true) {
   const src = fs.readFileSync(file, 'utf8');
-  const rx = new RegExp(`^[ \\t]*(?:private|public) (?:static |sealed |readonly )*[^\\n]*\\b${name}${kind === 'field' ? '\\s*=' : kind === 'enum' ? '\\s*\\{' : '\\('}`, 'm');
+  const rx = new RegExp(`^[ \\t]*(?:private|public${mandatoryPower?'|internal':''}) (?:static |sealed |readonly )*[^\\n]*\\b${name}${kind === 'field' ? '\\s*=' : kind === 'enum' ? '\\s*\\{' : '\\('}`, 'm');
   const m = rx.exec(src); if (!m) throw Error('Missing current member ' + name);
   const start = m.index, s = mask(src.slice(start)); let end;
   if (kind === 'field') {
@@ -81,11 +90,12 @@ const frameTerminal = options.compactFrameReplyCost
 const frameEvent = options.compactFrameReplyCost ? '' : 'Fixture.Events.Add("frame");';
 if (options.compactFrameReplyCost) compactSubstitutions.push('Explicit cost-only SDK terminal: identical no-allocation counter/reference/elapsed assignment for both full and compact; no Events or FrameControllers append. Real SDK workers, device IO, encoder and motor callbacks are NOT_RUN.');
 if (options.compactFrameReply) compactSubstitutions.push('TrySubmitFrame is the existing inert SDK terminal, instrumented with call count, controller reference and deterministic per-call elapsed us; actual SDK/frame encoder is not executed.');
-const session = ['HostSession', 'Handle', ...(text.includes('public string HandleUtf8(') ? ['HandleUtf8'] : []), 'HandleLocked', 'ReleaseLocal', 'ReleaseLocalLocked', 'TryStopSteamDeckIdleForRelease', 'TryStopControllerOutputForRelease', 'TryCompleteIdleCtsRelease', 'RetainSdkDisposeFailure', 'RememberIdempotent', 'TryPrepare', 'SerializeResponse', 'Ack'].map(n => clock(extract(n)));
+const session = ['HostSession',...(mandatoryPower?['BindPowerParent','NeedsCommandPower','NeedsCommandHardware','BeginCommandPower','ReapCommandPower','HandleWithCommandPower','RequireFramePowerBeforeEffect']:[]), 'Handle', ...(text.includes('public string HandleUtf8(') ? ['HandleUtf8'] : []), 'HandleLocked', 'ReleaseLocal', 'ReleaseLocalLocked', 'TryStopSteamDeckIdleForRelease', 'TryStopControllerOutputForRelease', 'TryCompleteIdleCtsRelease', 'RetainSdkDisposeFailure', 'RememberIdempotent', 'TryPrepare', 'SerializeResponse', 'Ack'].map(n => clock(extract(n)));
+if(mandatoryPower){session.push(extract('CommandPowerCurrent',source,'field'));session.push(extract('CommandHardwareCurrent',source,'field'));}
 const closeFields=[...text.matchAll(/^        private (?:readonly )?[^\n]*\b_closeRefresh\w*[^\n]*;/gm)].map(m=>{receipt.push({name:'CloseRefresh field',file:source,sha256:sha(m[0])});return m[0];}).join('\n');
 const closeSupport=text.includes('private bool HasCloseRefreshPending(')?['HasCloseRefreshPending','TryCancelCloseRefresh'].map(n=>extract(n)).join('\n'):'private bool HasCloseRefreshPending()=>false;';
 const closeMethods=options.closeRefresh?['HandleCloseRefreshBegin','HandleCloseRefreshPoll'].map(n=>extract(n)).join('\n'):'private string HandleCloseRefreshBegin(CommandEnvelope e){Fixture.Events.Add(e.Command);return Ack(e,"fake-cycle-begin");}\nprivate string HandleCloseRefreshPoll(CommandEnvelope e){Fixture.Events.Add(e.Command);return Ack(e,"fake-cycle-poll");}';
-let fake = `using System.Diagnostics; using System.Security.Cryptography; using System.Text; using System.Text.Json; using System.Threading; using YeManInputHost.Diagnostics;
+let fake = `using System.Diagnostics; ${mandatoryPower?'using YeManCC.SharedSleepPower; ':''}using System.Security.Cryptography; using System.Text; using System.Text.Json; using System.Threading; using YeManInputHost.Diagnostics;
 internal sealed class HMProfile { public string Id=""; public bool RequiresUsbipBackend; public ushort VendorId=0x28de,Pid=0x1205; public ushort ProductId=>Pid; }
 ${gameOutputSdk}
 internal sealed class HMController : IDisposable { ${hasGameOutputObservation ? 'public event Action<HMController,HMOutputPacket>? OutputReceived;' : ''} public void Dispose(){Program.Fixture.Events.Add("controller-dispose");Program.Fixture.OnControllerDispose?.Invoke();if(Program.Fixture.ControllerThrows)throw new IOException("fake-controller");} }
@@ -117,7 +127,7 @@ internal static partial class Program {
  private static bool TryEnsureDriverInstalled(HMContext c,out string d,bool requireUsbip,UsbipSetupEvidence? usbipDiagnostics=null){d="fake-backend";return true;}
  private static T CreateTargetWithBackendWarning<T>(Func<(bool Ready,string Detail)> prepare,Func<T> create,out string receipt){receipt=prepare().Detail;return create();}
  private sealed partial class HostSession {
- private readonly object _lifecycleGate=new(); private HMContext? _context;private HMController? _controller;private HMController? _sonyRawReportOwner;private CommandEnvelope? _tuple;
+${mandatoryPower?' private HostInputPowerBinding? _powerBindings; private string _commandPowerFailure="command-power-unavailable";\n':''} private readonly object _lifecycleGate=new(); private HMContext? _context;private HMController? _controller;private HMController? _sonyRawReportOwner;private CommandEnvelope? _tuple;
  private readonly string _startupNonce,_hostInstanceId="fake-host";private readonly int _reportChainParentPid1410;private readonly Dictionary<string,IdempotentReply> _idempotentReplies=new(StringComparer.Ordinal);
  private Phase _phase=Phase.AwaitHello;private ulong _lastSequence;private long _lastActivityAt,_lastSubmitElapsedUs,_costJsonParseUsSum,_costJsonParseCount;private bool _costFlagEnabled,_assetVerified,_targetPnpAdmitted,_virtualEndpointReconciled;
  private VirtualEndpointObservation _virtualEndpoint=new(false,0,0,0,0,0,false,"pnp-not-observed");
@@ -172,14 +182,23 @@ if(text.includes('YeManInputHost.UsbipMaintenanceGate.TryEnter(')) {
  fake+='\nnamespace YeManInputHost { internal static class UsbipMaintenanceGate { internal static IDisposable TryEnter(bool required)=>new Lease(); private sealed class Lease:IDisposable { public void Dispose(){} } } }\nnamespace YeManCC { internal static class UsbipMaintenanceState { internal static bool Pending=>false; } }\n';
  receipt.push({name:'UsbipMaintenanceGate/UsbipMaintenanceState',file:source,substitution:'Inert external maintenance/registry terminal: scope admitted, no actual mutex, pending registry state, or driver IO. The actual TryPrepare body still creates and retains its dummy SDK controller.'});
 }
-if (fixtureOnly) return { fake, receipt, sourceSha256:sha(text), substitutions:compactSubstitutions };
+if(options.externalProcessExitOwner!==undefined&&typeof options.externalProcessExitOwner!=='boolean')throw Error('Invalid externalProcessExitOwner fixture selection');
+if(mandatoryPower&&text.includes('_terminalProcessExit')&&!options.externalProcessExitOwner){
+ // The standalone SDK-free Host extraction has no process entry. Retain an
+ // explicit inert diagnostic/deadline terminal; full primary-pipe builders
+ // supply the exact original field and must select externalProcessExitOwner.
+ fake+='\ninternal static partial class Program { private static OfflineProcessExit? _terminalProcessExit; private sealed class OfflineProcessExit { internal void Begin(){} } }\n';
+ receipt.push({name:'Standalone process-entry exit owner',file:source,substitution:'Explicit inert field/Begin leaf only; product entry/deadline not executed. Full pipe uses externalProcessExitOwner.'});
+}
+for(const input of powerCompilationInputs)receipt.push({name:'Shared input power compilation input',file:input.path,sha256:input.sha256,powerBindingMode:powerMode});
+if (fixtureOnly) return { fake, receipt, sourceSha256:sha(text), substitutions:compactSubstitutions,...(mandatoryPower?{powerBindingMode:powerMode,compilationInputs:powerCompilationInputs}:{}) };
 const fakeDir = path.join(out, 'fake'); fs.mkdirSync(fakeDir, { recursive: true });
 fs.writeFileSync(path.join(fakeDir, 'ExtractedHost.cs'), fake);
 const esc = s => s.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
 // Keep standalone execution on the original assertion set; the compatibility
 // declarations are the same inert shims used by the current lifecycle suite.
 fs.writeFileSync(path.join(fakeDir,'LegacyTest.cs'), fs.readFileSync(path.join(repo,'tools/msi_steamdeck_release_fence_1726_selftest.cs'),'utf8').replace('internal static class Fixture','internal static partial class Fixture'));
-const includes = ['MsiSteamDeckReleaseFence1726.cs', 'MsiVirtualReportChain1410.cs', 'CanonicalFrameFingerprintMemo.cs', 'HostResponseFields.cs', ...(hasCompactBinding ? ['CompactFrameReplyBinding.cs'] : [])].map(n => path.join(host, n)).concat(path.join(fakeDir,'LegacyTest.cs'),path.join(repo,'tools/inputhost_lifecycle_selftest.cs'));
+const includes = ['MsiSteamDeckReleaseFence1726.cs', 'MsiVirtualReportChain1410.cs', 'CanonicalFrameFingerprintMemo.cs', 'HostResponseFields.cs', ...(hasCompactBinding ? ['CompactFrameReplyBinding.cs'] : [])].map(n => path.join(host, n)).concat(path.join(fakeDir,'LegacyTest.cs'),path.join(repo,'tools/inputhost_lifecycle_selftest.cs'),...powerCompilationInputs.map(row=>row.path));
 fs.writeFileSync(path.join(fakeDir, 'Fake.csproj'), `<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems><NuGetAudit>false</NuGetAudit></PropertyGroup><ItemGroup><Compile Include="ExtractedHost.cs"/>${includes.map(p => `<Compile Include="${esc(p)}"/>`).join('')}</ItemGroup></Project>`);
 const hostDir = path.join(out, 'build'); fs.mkdirSync(hostDir, { recursive: true });
 function csFiles(dir) { return fs.readdirSync(dir,{withFileTypes:true}).flatMap(e => e.isDirectory() ? ['obj','bin'].includes(e.name) ? [] : csFiles(path.join(dir,e.name)) : e.name.endsWith('.cs') ? [path.join(dir,e.name)] : []); }

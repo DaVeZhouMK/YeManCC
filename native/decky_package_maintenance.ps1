@@ -145,18 +145,43 @@ function Move-YmccLegacyUpdateMetadata([string]$Root,[string]$Relative,[switch]$
     }
   }finally{Exit-YmccModuleMaintenance $lease}
 }
-function Resolve-YmccUpdateFileTarget([string]$Root,[string]$Relative) {
+function Get-YmccUpdateFileTargetFact([string]$Root,[string]$Relative) {
   $base=Resolve-YmccDeckyPath $Root;$raw=Join-Path $base $Relative.Replace('/','\')
   $item=Get-Item -LiteralPath $raw -Force -ErrorAction SilentlyContinue
-  if($item -and ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint))){Move-YmccLegacyUpdateMetadata $base $Relative -ManagedPayload}
-  return (Resolve-YmccDeckyPath $base $Relative)
+  return @{root=$base;relative=$Relative;needsRetire=($item -and ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)))}
 }
-function Assert-YmccUpdateTargetWritable([string]$Path) {
-  $attributes=[IO.File]::GetAttributes($Path)
-  if($attributes -band [IO.FileAttributes]::ReadOnly){[IO.File]::SetAttributes($Path,($attributes -band (-bnot [IO.FileAttributes]::ReadOnly)))}
+function Complete-YmccUpdateFileTarget($Fact) {
+  if($Fact.needsRetire){Move-YmccLegacyUpdateMetadata $Fact.root $Fact.relative -ManagedPayload}
+  return (Resolve-YmccDeckyPath $Fact.root $Fact.relative)
+}
+function Resolve-YmccUpdateFileTarget([string]$Root,[string]$Relative) {
+  return (Complete-YmccUpdateFileTarget (Get-YmccUpdateFileTargetFact $Root $Relative))
+}
+function Assert-YmccUpdateTargetWritable([string]$Path,[Nullable[IO.FileAttributes]]$KnownAttributes) {
+  $attributes=if($null -eq $KnownAttributes){[IO.File]::GetAttributes($Path)}else{$KnownAttributes}
+  if($attributes -band [IO.FileAttributes]::ReadOnly){
+    [IO.File]::SetAttributes($Path,($attributes -band (-bnot [IO.FileAttributes]::ReadOnly)))
+  }
   $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None);$stream.Dispose()
 }
-function Get-YmccDeckyPlan([string]$Source, [string]$Target, $Manifest, [string]$InstalledManifestPath='') {
+# Keep backend ownership out of the shared file-only bootstrap dependency graph.
+function Enter-YmccDeckyPreparationLease([ref]$Lease,[int]$BackendPort) {
+  if(!$Lease.Value){$Lease.Value=Open-YmccDeckyBackendLease $BackendPort}
+}
+function Resolve-YmccDeckyUpdateFileTarget([string]$Root,[string]$Relative,[ref]$Lease,[int]$BackendPort) {
+  $fact=Get-YmccUpdateFileTargetFact $Root $Relative
+  if($fact.needsRetire){Enter-YmccDeckyPreparationLease $Lease $BackendPort}
+  return (Complete-YmccUpdateFileTarget $fact)
+}
+function Get-YmccDeckyPlan {
+  [CmdletBinding()]
+  param([string]$Source, [string]$Target, $Manifest, [string]$InstalledManifestPath='',
+    [ValidateRange(0,65535)][int]$BackendPort=1337, [ref]$PreparationLease)
+  # Clean plans (including no-ops) do not claim the backend. If repair is
+  # required, the emitted updater keeps the same lease until Decky is installed.
+  $localLease=$null
+  $leaseState=if($PreparationLease){$PreparationLease}else{[ref]$localLease}
+  try {
   Assert-YmccDeckyManifest $Manifest
   $sourceHome=Resolve-YmccDeckyPath $Source
   $targetHome=Resolve-YmccDeckyPath $Target
@@ -185,6 +210,9 @@ function Get-YmccDeckyPlan([string]$Source, [string]$Target, $Manifest, [string]
     if(!$item){continue}
     try{[void](Resolve-YmccDeckyPath $targetHome $relative);$document=Read-YmccDeckyDocument $candidate;Assert-YmccDeckyManifest $document -Previous}
     catch{
+      # Optional legacy settings may be unmovable, but an occupied port must
+      # abort before any Decky file or metadata is changed.
+      Enter-YmccDeckyPreparationLease $leaseState $BackendPort
       if($relative -ceq 'settings/.ymcc-managed.json'){
         try{Move-YmccLegacyUpdateMetadata $targetHome $relative}catch{Write-Warning 'UPDATE_LEGACY_DECKY_SETTINGS_IGNORED'}
       }else{Move-YmccLegacyUpdateMetadata $targetHome $relative}
@@ -200,7 +228,7 @@ function Get-YmccDeckyPlan([string]$Source, [string]$Target, $Manifest, [string]
   # Old version labels cannot veto this already authorized installation.
   foreach ($file in @($Manifest.files)) {
     $src=Resolve-YmccDeckyPath $sourceHome $file.path
-    $dst=Resolve-YmccUpdateFileTarget $targetHome $file.path
+    $dst=Resolve-YmccDeckyUpdateFileTarget $targetHome $file.path $leaseState $BackendPort
     if (![IO.File]::Exists($src) -or ([IO.FileInfo]$src).Length -ne $file.bytes -or (Get-YmccDeckyHash $src) -cne $file.sha256) { throw ('DECKY_PACKAGE_HASH_MISMATCH '+$file.path) }
     $oldHash=$null
     if ([IO.File]::Exists($dst)) { $oldHash=Get-YmccDeckyHash $dst }
@@ -209,7 +237,7 @@ function Get-YmccDeckyPlan([string]$Source, [string]$Target, $Manifest, [string]
   }
   if ($previous) { foreach ($file in @($previous.files)) {
     if ($incoming.ContainsKey($file.path)) { continue }
-    $dst=Resolve-YmccUpdateFileTarget $targetHome $file.path
+    $dst=Resolve-YmccDeckyUpdateFileTarget $targetHome $file.path $leaseState $BackendPort
     if ([IO.File]::Exists($dst)) {
       if ((Get-YmccDeckyHash $dst) -ceq $file.sha256) { $entries+=[pscustomobject]@{path=$file.path;source=$null;before=$file.sha256;after=$null;remove=$true;bytes=$null} }
       else { $preserved+=$file.path }
@@ -234,9 +262,12 @@ function Get-YmccDeckyPlan([string]$Source, [string]$Target, $Manifest, [string]
   # File lock failure is detected before the first mutation; foreign Loader stays untouched.
   foreach ($entry in $entries) { if ($entry.before) {
     $file=Resolve-YmccDeckyPath $targetHome $entry.path
-    Assert-YmccUpdateTargetWritable $file
+    $attributes=[IO.File]::GetAttributes($file)
+    if($attributes -band [IO.FileAttributes]::ReadOnly){Enter-YmccDeckyPreparationLease $leaseState $BackendPort}
+    Assert-YmccUpdateTargetWritable $file $attributes
   } }
   return [pscustomobject]@{source=$sourceHome;target=$targetHome;manifest=$Manifest;entries=@($entries);preservedObsolete=@($preserved);legacyAdoption=($null -eq $previous)}
+  } finally { if($localLease){$localLease.Stop()} }
 }
 function Set-YmccDeckyAtomic([string]$Root, [string]$Relative, [string]$Source, [byte[]]$Bytes, [string]$Expected) {
   $destination=Resolve-YmccDeckyPath $Root $Relative
@@ -331,11 +362,17 @@ function Open-YmccDeckyBackendLease([ValidateRange(0,65535)][int]$Port=1337) {
   try { $lease.Start(); return $lease }
   catch { $lease.Stop(); throw ('DECKY_BACKEND_IN_USE_OR_UNAVAILABLE: '+$_.Exception.Message) }
 }
-function Install-YmccDeckyPackage($Plan, [string]$BackupRoot, [ValidateRange(0,65535)][int]$BackendPort=1337) {
+function Install-YmccDeckyPackage($Plan, [string]$BackupRoot, [ValidateRange(0,65535)][int]$BackendPort=1337,
+    [Net.Sockets.TcpListener]$PreparationLease) {
   $moduleLease=Enter-YmccModuleMaintenance
   $lease=$null
   try {
-    if (@($Plan.entries).Count) { $lease=Open-YmccDeckyBackendLease $BackendPort }
+    if($PreparationLease){
+      # Pending is a nonblocking active-listener check, not an accept or a wait.
+      try { [void]$PreparationLease.Pending() } catch { throw 'DECKY_PREPARATION_LEASE_INVALID' }
+      if(!$PreparationLease.ExclusiveAddressUse -or !$PreparationLease.LocalEndpoint.Address.Equals([Net.IPAddress]::Any) -or
+          ($BackendPort -and $PreparationLease.LocalEndpoint.Port -ne $BackendPort)){throw 'DECKY_PREPARATION_LEASE_INVALID'}
+    } elseif (@($Plan.entries).Count) { $lease=Open-YmccDeckyBackendLease $BackendPort }
     return Invoke-YmccDeckyInstall $Plan $BackupRoot
   } finally { try { if ($lease) { $lease.Stop() } } finally { Exit-YmccModuleMaintenance $moduleLease } }
 }

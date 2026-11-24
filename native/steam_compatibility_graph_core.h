@@ -146,14 +146,32 @@ inline bool importSpan(const GraphResolution& result,std::uint64_t rva,std::uint
     return bytes!=0;
 }
 inline bool referenceValue(const GraphSpec& spec,std::uint64_t rva,const void* expected,std::size_t bytes,bool required=false){
-    bool any=false;for(const auto& range:spec.ranges)if(overlaps(rva,bytes,range.refRva,range.size))any=true;
-    if(!any)return !required;
+    bool any=false;
+    std::size_t covered=0;
     const auto* wanted=static_cast<const unsigned char*>(expected);
-    for(std::size_t i=0;i<bytes;++i){bool found=false;
-        for(const auto& range:spec.ranges)if(rva+i>=range.refRva&&rva+i-range.refRva<range.size){
-            if(!range.bytes||range.bytes[rva+i-range.refRva]!=wanted[i])return false;found=true;
+    for(const auto& range:spec.ranges){
+        if(!overlaps(rva,bytes,range.refRva,range.size))continue;
+        any=true;
+        const auto offset=range.refRva>rva?static_cast<std::size_t>(range.refRva-rva):0;
+        const auto start=rva>range.refRva?static_cast<std::size_t>(rva-range.refRva):0;
+        const auto length=(std::min)(bytes-offset,range.size-start);
+        if(!range.bytes||std::memcmp(range.bytes+start,wanted+offset,length)!=0)return false;
+        if(offset<=covered)covered=(std::max)(covered,offset+length);
+    }
+    if(!any)return !required;
+    // All overlaps were checked, even after full coverage. Revisit only when
+    // split ranges may have arrived before the prefix that connects them.
+    while(covered<bytes){
+        const auto before=covered;
+        for(const auto& range:spec.ranges){
+            const auto next=rva+covered;
+            if(next>=range.refRva&&next-range.refRva<range.size){
+                const auto remaining=range.size-static_cast<std::size_t>(next-range.refRva);
+                covered+=(std::min)(bytes-covered,remaining);
+                if(covered==bytes)return true;
+            }
         }
-        if(!found)return false;
+        if(covered==before)return false;
     }
     return true;
 }

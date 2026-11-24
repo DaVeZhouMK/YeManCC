@@ -248,8 +248,14 @@ function confirmOemCombination(): void {
 }
 
 function commitCombination(inputs: ControllerShortcutInput[]): void {
+  const current = activeRule.value;
+  if (!current) return;
+  // A chord recorded in a different order is still the same binding.
+  const changed = inputs.length > 0 && (inputs.length !== current.inputs.length ||
+    inputs.some(input => !current.inputs.some(previous => inputIdentity(previous) === inputIdentity(input))));
   const clickOnly = inputs.some(input => input.source === 'oem' && oemKeys.value.keys.some(key => key.keyId === input.code && key.triggerCapability === 'click-only'));
-  updateRule({ inputs, ...(clickOnly && activeRule.value?.trigger !== 'press' && activeRule.value?.trigger !== 'double' ? { trigger: 'press' as const } : {}) });
+  const resetTrigger = changed || (clickOnly && current.trigger !== 'press' && current.trigger !== 'double');
+  updateRule({ inputs, ...(resetTrigger ? { trigger: 'press' as const } : {}) });
 }
 function stageCombination(inputs: ControllerShortcutInput[]): void {
   pendingCombination.value = null;
@@ -269,7 +275,7 @@ function toggleManualButton(code: string): void {
   const inputs = activeRule.value.inputs.filter(input => input.source === 'controller');
   const present = inputs.some(input => input.code === code);
   if (!present && inputs.length >= CONTROLLER_SHORTCUT_MAX_INPUTS) return;
-  updateRule({ inputs: present ? inputs.filter(input => input.code !== code) : [...inputs, { source: 'controller', code }] });
+  commitCombination(present ? inputs.filter(input => input.code !== code) : [...inputs, { source: 'controller', code }]);
 }
 function clearCombination(): void {
   if (inputMethod.value === 'oem') { pendingCombination.value = []; recordingStatus.value = '已清空选择，请选择专用键或背部按键。'; return; }

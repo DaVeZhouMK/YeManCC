@@ -112,6 +112,9 @@ static std::string documentChangedTargets="[]";
 static bool documentProbe=false,documentReplaced=false,documentTargetsChanged=false;
 static unsigned documentReplyId=1,documentTargetReads=0;
 static std::string documentTargets,documentExpression;
+#ifdef YMCC_STEAM_DOCUMENT_READ_ONLY
+static std::string documentEvaluationOverride;
+#endif
 static std::string documentHref="https://steamloopback.host/index.html";
 // Only the explicit listener inventory case enables these local API ports.
 static bool listenerEndpointProbe=false;
@@ -173,6 +176,10 @@ static DWORD WINAPI observedSocketReceive(HINTERNET h,PVOID b,DWORD cap,LPDWORD 
  }
  if(dispatchReplyHook){auto hook=std::move(dispatchReplyHook);dispatchReplyHook={};hook();}
 #ifdef YMCC_STEAM_DOCUMENT_READ_ONLY
+ if(documentProbe&&!documentEvaluationOverride.empty()){
+   *n=static_cast<DWORD>(documentEvaluationOverride.size());if(*n>cap)return ERROR_INSUFFICIENT_BUFFER;
+   memcpy(b,documentEvaluationOverride.data(),*n);*kind=WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE;return NO_ERROR;
+ }
  if(documentPopupMapping){const auto data=documentPopupReply(h);*n=static_cast<DWORD>(data.size());if(*n>cap)return ERROR_INSUFFICIENT_BUFFER;memcpy(b,data.data(),*n);*kind=WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE;return NO_ERROR;}
 #endif
  const std::string data=documentProbe?std::string("{\"id\":")+std::to_string(documentReplyId)+",\"result\":{\"result\":{\"type\":\"object\",\"value\":{\"sourceOrigin\":\"https://steamloopback.host\",\"sourceHref\":\""+documentHref+"\",\"documentKey\":\""+(documentReplaced&&documentReplyId==2?"successor":"original")+"\",\"protocol\":4,\"ready\":true,\"styles\":1,\"values\":[\"1\"],\"fileCounts\":[1]}}}}":std::string(R"({"id":1,"result":{"result":{"value":)")+dispatchReplyValue+"}}}";
@@ -1250,6 +1257,16 @@ static void mainSharedIdentityFixture(bool nativeOwnerOnly=false,const std::stri
 #ifdef YMCC_UI_RECEIPT_FIXTURE
 static std::vector<Json> modeReadDiagnosticRows;
 static bool modeReadTraceThrows=false;
+#ifndef YMCC_MODE_READ_CURRENT_FIXTURE
+static std::function<void()> modeReadProjectionHook;
+namespace ymcc::deckysession {
+static Json diagnosticWithIdentityForFixture(const steamsession::Session& session,const Json& state,
+        const std::shared_ptr<const steamsession::IdentitySnapshot>& identity){
+    if(modeReadProjectionHook)modeReadProjectionHook();
+    return diagnosticWithIdentity(session,state,identity);
+}
+}
+#endif
 static void deckySidebarDiagnostic(const char* event,const Json& detail,bool,
     const ymcc::steamfailure::FailureContext* context=nullptr){
     modeReadDiagnosticRows.push_back(context?ymcc::deckydiag::failureRecord(detail,*context):ymcc::deckydiag::record(event,detail));
@@ -1278,7 +1295,13 @@ static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,st
 #ifdef YMCC_UI_RECEIPT_OWNED_FIXTURE
 #define productionUiModeRead productionUiModeReadOwned
 #endif
+#ifndef YMCC_MODE_READ_CURRENT_FIXTURE
+#define diagnosticWithIdentity diagnosticWithIdentityForFixture
+#endif
 #include "main_ui_mode_read.inc"
+#ifndef YMCC_MODE_READ_CURRENT_FIXTURE
+#undef diagnosticWithIdentity
+#endif
 #ifdef YMCC_UI_RECEIPT_OWNED_FIXTURE
 #undef productionUiModeRead
 static json productionUiModeRead(const ymcc::steamsession::Session& session) {
@@ -1335,6 +1358,33 @@ static void uiReceiptFixture(bool lateCaughtOnly=false,bool clientStateOnly=fals
      expect(revoked?(!result.value("known",true)&&result.value("reason",std::string{})=="shared-mode-read-cancelled") : (!result.value("known",true)&&!result.contains("deckyClientState")),"optional client label preserves original power/account read-result contract");
    }
    setup();const auto result=productionUiModeRead(g_steamSettingsObserver.value);expect(result.value("known",false)&&!result.contains("deckyClientState"),"older frontend without optional state remains fully compatible");
+   for(const auto* mode:{"desktop","bigpicture"}){
+     setup();const auto requested=g_steamSettingsObserver.value;const auto sends=dispatchSends;
+     auto reply=Json::parse(dispatchReplyValue);reply["mode"]=mode;dispatchReplyValue=reply.dump();
+     unsigned projections=0;
+     modeReadProjectionHook=[&]{++projections;throw std::bad_alloc();};
+     Json observed=Json::object();
+     try{observed=productionUiModeRead(requested);}catch(const std::bad_alloc&){}
+     modeReadProjectionHook={};
+     expect(projections==1&&observed.value("known",false)&&observed.value("mode",std::string{})==mode&&
+            observed.value("pid",DWORD{})==requested.pid&&observed.value("birth",std::string{})==std::to_string(requested.created)&&
+            dispatchSends==sends+1&&modeReadDiagnosticRows.empty(),
+            "optional Decky mode projection failure preserves the verified mode and performs no extra read");
+   }
+   setup();const auto requested=g_steamSettingsObserver.value;
+   dispatchReplyValue=R"({"ok":false,"reason":"live-api-error","mutated":false,"steamFailure":{"schema":1,"domain":"javascript","sourceStage":"evaluate","codeKnown":false}})";
+   modeReadProjectionHook=[]{throw std::bad_alloc();};
+   const auto failed=productionUiModeRead(requested);modeReadProjectionHook={};
+   expect(failed.value("reason",std::string{})=="live-api-error"&&modeReadDiagnosticRows.size()==1&&
+          modeReadDiagnosticRows.front().value("event",std::string{})=="steam-recovery-trace",
+          "optional Decky mode projection failure does not hide a real read failure trace");
+#ifdef YMCC_UI_RECEIPT_OWNED_FIXTURE
+   setup();
+   modeReadProjectionHook=[]{++selectedPowerGeneration;throw std::bad_alloc();};
+   const auto retired=productionUiModeRead(g_steamSettingsObserver.value);modeReadProjectionHook={};
+   expect(!retired.value("known",true)&&retired.value("reason",std::string{})=="shared-mode-read-cancelled",
+          "optional Decky mode projection failure still honors the final power fence");
+#endif
    expect(processIdentityOpens==processIdentityCloses&&processIdentityUnexpected==0,"finite frontend diagnostic returns all actual process leases");
    expect(dispatchHttpOpen-httpBefore==dispatchHttpClose-closedBefore,"finite frontend diagnostic returns all actual HTTP/socket handles");
    dispatchProbe=processIdentityProbe=false;admissionProbe=false;
@@ -1566,6 +1616,25 @@ int main(int argc,char**argv){try{
  auto setup=[&]{processIdentityOpen=processIdentityPath=processIdentityTimes=processIdentityAlive=true;dispatchOwner=true;dispatchRead=documentTargetReads=0;dispatchExitOnUpgrade=dispatchSendFails=documentReplaced=documentTargetsChanged=false;dispatchReplyHook={};documentHref="https://steamloopback.host/index.html";documentTargets=pages().dump();ymcc::processInventory::invalidate();};
  auto attempt=[&]{return readStyles(expected,plan,[&]{return dispatchOwner;},4000);};
  const auto base=listenerChecks;
+ {
+  StylePlan mixed;
+  mixed.sp=Properties{{"--first","--second"},{"--first","--second"}};
+  mixed.mainMenu=mixed.sp;
+  mixed.quickAccess=Properties{{"--first","--second"},{"--second","--first"}};
+  validate(mixed.sp);validate(mixed.mainMenu);validate(mixed.quickAccess);
+  detail::RequestExpressions expressions(mixed);
+  // Use a menu first and interleave a different file-count order.
+  const auto& menu=expressions.get(Kind::MainMenu);
+  const auto& quick=expressions.get(Kind::QuickAccess);
+  const auto& main=expressions.get(Kind::BigPicture);
+  expect(&menu==&main&&main==expression(mixed.sp),"identical ordered plans share query code within one request");
+  expect(&quick!=&main&&quick!=main&&quick==expression(mixed.quickAccess),"different file-count order must retain a separate query");
+  auto changed=mixed;std::swap(changed.sp.values[0],changed.sp.values[1]);
+  detail::RequestExpressions next(changed);
+  validate(changed.sp);validate(changed.mainMenu);validate(changed.quickAccess);
+  const auto& nextMain=next.get(Kind::BigPicture);
+  expect(nextMain!=main&&nextMain==expression(changed.sp)&&next.get(Kind::MainMenu)==menu,"a new request does not borrow an older property order");
+ }
  setup();auto value=attempt();expect(value.value("ok",false)&&value.value("complete",false)&&value["documents"].size()==3,"public document reader observes actual three typed contexts in one serialized batch");
  expect(value["documents"][0].contains("sourceUrl")&&value["documents"][0]["value"].value("documentKey",std::string{})=="original","each document carries its own actual target and document source receipt");
  setup();documentTargets=pages(false,false).dump();value=attempt();expect(value.value("ok",false)&&!value.value("complete",true)&&value.value("sequential",false)&&value["documents"].size()==1,"uncreated auxiliary contexts are explicitly partial rather than fabricated by SharedJS");
@@ -1585,6 +1654,18 @@ int main(int argc,char**argv){try{
  setup();documentTargetsChanged=true;value=attempt();expect(!value.value("ok",true)&&value["documents"].empty(),"a changed final target set cannot publish a stale batch");
  setup();dispatchOwner=false;const auto before=admissionPortReads.load();value=attempt();expect(!value.value("ok",true)&&admissionPortReads==before,"expired ownership stops before discovery");
  setup();dispatchReplyHook=[] {dispatchOwner=false;};value=attempt();expect(!value.value("ok",true)&&value["documents"].empty(),"owner revocation during a reply cannot escape as success");
+ for(const auto& sample:std::vector<std::pair<std::string,const char*>>{
+   {R"({"id":1,"error":{}})","document-evaluation-unconfirmed"},
+   {R"({"id":1,"result":{"exceptionDetails":{}}})","document-evaluation-unconfirmed"},
+   {R"({"id":1,"result":{}})","document-reply-invalid"},
+   {R"({"id":1,"result":null})","document-reply-invalid"},
+   {R"({"id":1,"result":{"result":[]}})","document-reply-invalid"},
+   {R"({"id":1,"result":{"result":{"type":"object"}}})","document-reply-invalid"},
+   {R"({"id":1,"result":{"result":{"type":"object","value":[]}}})","document-reply-invalid"}}){
+  setup();documentEvaluationOverride=sample.first;value=attempt();documentEvaluationOverride.clear();
+  expect(!value.value("ok",true)&&value.value("reason",std::string{})==sample.second&&value["documents"].empty()&&!value.value("mutated",true),
+      "malformed Runtime.evaluate result is refused without publishing documents");
+ }
  setup();dispatchExitOnUpgrade=true;value=attempt();expect(!value.value("ok",true),"held original Steam exit stops document sends");
  setup();{std::lock_guard lock(transportMutex);value=attempt();}expect(!value.value("ok",true)&&value.value("reason",std::string{})=="live-busy","theme read never queues behind a shared Steam mutation");
  setup();auto tabs=pages();tabs[0]["webSocketDebuggerUrl"]="ws://example.invalid:8080/devtools/page/main";documentTargets=tabs.dump();value=attempt();expect(!value.value("ok",true),"foreign websocket URLs are refused by the shared reader");

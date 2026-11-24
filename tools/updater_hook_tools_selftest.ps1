@@ -16,7 +16,7 @@ try{
  Check 'same name at an unrelated path stays alive' {$foreign=Launch 'unrelated' 'LosslessScaling.exe' 'hung';$a=Launch 'owned' 'LosslessScaling.exe' 'hung';Stop-YmccUpdateHookTools @($a.exe) 0 2000;Need $a.process.HasExited 'owned process stayed alive';Need (!$foreign.process.HasExited) 'unrelated process was closed'}
  Check 'changed creation identity is rejected without closing' {$a=Launch 'identity' 'OptiscalerClient.exe' 'hung';$rejected=$false;try{Stop-YmccUpdaterParent $a.process.Id $a.exe '0' 0 1000}catch{$rejected=$_.Exception.Message -match 'IDENTITY_CHANGED'};Need $rejected 'wrong birth admitted';Need (!$a.process.HasExited) 'wrong identity killed'}
  Check 'all authenticated instances at the same path exit' {$a=Launch 'multi' 'OptiscalerClient.exe' 'normal';$b=Launch 'multi' 'OptiscalerClient.exe' 'hung';Stop-YmccUpdateHookTools @($a.exe) 100 2000;Need ($a.process.HasExited -and $b.process.HasExited) 'same-path instance survived'}
- Check 'watchdog relaunch aborts installation without repeated closing' {
+ Check 'watchdog relaunch is reported without repeated closing' {
   $a=Launch 'watchdog' 'LosslessScaling.exe' 'hung'
   $originalHookParentStop=(Get-Command Stop-YmccUpdaterParent -CommandType Function).ScriptBlock
   $script:hookWatchdogStopCalls=0;$script:hookWatchdogReplacement=$null

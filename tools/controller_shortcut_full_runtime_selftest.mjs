@@ -71,6 +71,7 @@ namespace ymcc::radial{static bool userAvailable(){return false;}static bool use
 static constexpr int kOemProducerCount=8;
 ${structure}
 static std::vector<NativeKeyboardShortcutRule> g_nativeKeyboardShortcuts;
+${source.match(/^static bool g_nativeShortcutNeedsLiveOem.*?;/m)?.[0]||''}
 static uint32_t g_nativeShortcutLegacyOverrideMask=0;
 static bool g_nativeShortcutRulesConfigured=false;
 ${inventoryDeclaration}
@@ -94,6 +95,10 @@ static json ymSettingsFields(const char* section, std::initializer_list<const ch
     }
     if(primaryRead)*primaryRead=fixtureSettingsPrimaryRead;
     return selected;
+}
+static std::shared_ptr<const json> ymSettingsSectionView(const char* section, bool* primaryRead=nullptr) {
+    if (primaryRead) *primaryRead = !fixtureSettingsReadFailure && fixtureSettingsPrimaryRead;
+    return std::make_shared<const json>(fixtureSettingsReadFailure ? json::object() : ymSettingsSection(section));
 }
 static bool nativeInputShortcutDesktopKey(const std::string&,WORD&);
 #ifdef SERIAL_CONFIG_SOURCE_ORIGIN_FIXTURE

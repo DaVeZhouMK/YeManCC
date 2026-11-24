@@ -204,6 +204,7 @@ if($PreMainOnly){
    $hp=Get-CslStagePin $cslHostPayload;$m.sourceBuild.host=$hp.sha256
    $m.sourceBuild|Add-Member -NotePropertyName hostSources -NotePropertyValue @(Get-CustomSteamLibrarySourceIndex $f.project host) -Force
    $m|Add-Member -NotePropertyName backgroundSharedSleepProtocol -NotePropertyValue 1 -Force
+   $m|Add-Member -NotePropertyName backgroundPlayback30Protocol -NotePropertyValue 1 -Force
    $entry=@($m.fileIndex|Where-Object{$_.path -ceq 'CustomSteamLibrary.exe'});$entry[0].bytes=$hp.bytes;$entry[0].sha256=$hp.sha256
    $m.generatedAt=[DateTimeOffset]::Now.ToString('o')
    $m|ConvertTo-Json -Depth 20|Set-Content -LiteralPath (Join-Path $root 'package-manifest.json') -Encoding UTF8

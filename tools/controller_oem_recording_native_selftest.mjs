@@ -551,6 +551,7 @@ ${fn('oemProducerTokensCurrent')}
 static bool g_nativeWmiAuthoritySeen=false;
 static uint32_t g_nativeOemEdgeEpochSeen=0,g_nativeShortcutLegacyOverrideMask=0;
 static bool g_nativeShortcutInventoryDirty=true;
+${source.match(/^static bool g_nativeShortcutNeedsLiveOem.*?;/m)?.[0] ? '#define YMCC_FIXTURE_OEM_DEMAND\n'+source.match(/^static bool g_nativeShortcutNeedsLiveOem.*?;/m)[0] : ''}
 static std::atomic<uint32_t>g_oemShortcutEdgePostFailures{0};
 static void nativeOemKeyboardConsumeMaintain(ULONGLONG){}
 static void nativeMsiWmiShortcutDrain(){}
@@ -566,6 +567,10 @@ static bool msiWmiGenerationCurrent(uint64_t){return false;}
 static json fixtureSettings={{"revision",1},{"virtualEnabled",false}};
 static json ymSettingsSection(const char*){return fixtureSettings;}
 static json ymSettingsFields(const char*,std::initializer_list<const char*>){return fixtureSettings;}
+static std::shared_ptr<const json> ymSettingsSectionView(const char* section, bool* primaryRead=nullptr) {
+    if (primaryRead) *primaryRead = true;
+    return std::make_shared<const json>(ymSettingsSection(section));
+}
 static uint64_t gameInputOwnerSession(){return 1;}
 namespace ymcc{static json inputShortcutContext(const json&,uint64_t){return json::object();}}
 static void nativeInputShortcutToggle(const std::string&,const std::string&,const json&){throw std::runtime_error("unselected input action");}

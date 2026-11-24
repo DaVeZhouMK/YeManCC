@@ -1,7 +1,7 @@
 import { fs, proc, registry } from './api';
 
-// Catalog compatibility with the installed 1.0.7.2 client. This is not an
-// anti-cheat override and does not transfer ownership of YMCC's file backups.
+// Catalog state only. The native card owner and the transaction helper own
+// card creation and file backups, respectively.
 interface ClientPaths { games: string; pending: string; clientDirectory: string; queueDirectory: string; }
 export function optiClientPaths(appData: string): ClientPaths {
   const root = appData.trim().replace(/\//g, '\\').replace(/\\+$/, '');
@@ -25,6 +25,7 @@ export interface OptiClientUpdate {
   name: string;
   installed: boolean;
   version?: string;
+  catalogMode?: 'existing';
 }
 export interface OptiClientSyncResult {
   status: 'synced' | 'pending' | 'error' | 'idle';
@@ -41,7 +42,8 @@ function validUpdate(value: unknown): value is OptiClientUpdate {
     && /\.exe$/i.test(item.executablePath) && !/[\x00-\x1f]/.test(item.executablePath)
     && !item.executablePath.split(/[\\/]/).some(part => part === '.' || part === '..')
     && typeof item.name === 'string' && typeof item.installed === 'boolean'
-    && (item.version === undefined || typeof item.version === 'string');
+    && (item.version === undefined || typeof item.version === 'string')
+    && (item.catalogMode === undefined || item.catalogMode === 'existing');
 }
 function directoryOf(executable: string): string {
   return executable.slice(0, executable.lastIndexOf('\\'));
@@ -57,7 +59,7 @@ export function mergeOptiClientGames(games: ClientGame[], updates: OptiClientUpd
     const directory = directoryOf(update.executablePath);
     let matches = merged.map((game, index) => ({ game, index }))
       .filter(({ game }) => optiExeKey(game.ExecutablePath) === key);
-    if (!matches.length) {
+    if (!matches.length && update.catalogMode === undefined) {
       matches = merged.map((game, index) => ({ game, index }))
         .filter(({ game }) => {
           if (game.ExecutablePath) return false;
@@ -72,6 +74,8 @@ export function mergeOptiClientGames(games: ClientGame[], updates: OptiClientUpd
     }
     // Do not pick between duplicate identities and overwrite somebody's settings.
     if (matches.length > 1) throw new Error('OPT 列表已有重复目标，请在客户端整理后重试');
+    if (!matches.length && update.catalogMode === 'existing' && update.installed) throw new Error('未找到与本次导入 EXE 对应的 OPT 游戏卡片');
+    if (!matches.length && update.catalogMode === 'existing') continue;
     let game: ClientGame;
     if (matches.length) {
       game = matches[0].game;
@@ -87,7 +91,7 @@ export function mergeOptiClientGames(games: ClientGame[], updates: OptiClientUpd
     if (update.installed && update.version) {
       const [version, extra] = update.version.split('/');
       game.OptiscalerVersion = version;
-      if (extra) game.Fsr4ExtraVersion = extra;
+      game.Fsr4ExtraVersion = extra || null;
     } else {
       // An original installation may survive a restore. If its version is not
       // known, clear measured version caches instead of retaining YMCC's version.
@@ -144,7 +148,7 @@ function validGame(game: unknown): game is ClientGame {
   return row.IsOptiscalerInstalled === undefined || row.IsOptiscalerInstalled === null || typeof row.IsOptiscalerInstalled === 'boolean';
 }
 interface PendingSnapshot { text: string | null; updates: OptiClientUpdate[]; }
-const pendingFields = new Set(['executablePath','name','installed','version']);
+const pendingFields = new Set(['executablePath','name','installed','version','catalogMode']);
 
 let syncQueue: Promise<unknown> = Promise.resolve();
 function serialized<T>(operation: () => Promise<T>): Promise<T> {
@@ -196,6 +200,10 @@ async function flushPendingLocked(paths: ClientPaths): Promise<OptiClientSyncRes
     return {status:'pending',message:'待登记记录含未确认的扩展或归属，已保留；未更新列表或清除记录。'};
   const original = await readCatalog(paths);
   const merged = mergeOptiClientGames(original.games, updates, () => crypto.randomUUID().slice(0, 8));
+  if (updates.every(item => item.catalogMode === 'existing') && JSON.stringify(original.games) === JSON.stringify(merged)) {
+    await writePending(paths, [], pending.text);
+    return { status: 'synced', message: 'OPT 列表无需变更。' };
+  }
   if (merged.length > 20000) throw new Error('OPT 游戏列表已满');
   const content = configBytes(merged);
   if (!(await fs.mkdir(paths.clientDirectory))) throw new Error('无法创建 OPT 配置目录');
@@ -222,19 +230,22 @@ async function flushPendingLocked(paths: ClientPaths): Promise<OptiClientSyncRes
 function failed(error: unknown): OptiClientSyncResult {
   return { status: 'error', message: `OPT 客户端登记未完成：${error instanceof Error ? error.message : String(error)}。不影响已完成的 OPT 文件操作。` };
 }
-export async function syncOptiClientGame(gamePath: string, installed: boolean, version?: string): Promise<OptiClientSyncResult> {
+export async function syncOptiClientGame(gamePath: string, installed: boolean, version?: string,
+  catalogMode?: OptiClientUpdate['catalogMode']): Promise<OptiClientSyncResult> {
   return serialized(async () => {
     try {
       const paths = await resolvePaths();
       const executablePath = gamePath.trim().replace(/\//g, '\\');
       const update: OptiClientUpdate = { executablePath,
-        name: executablePath.split('\\').pop()!.replace(/\.exe$/i, ''), installed, ...(version ? { version } : {}) };
+        name: executablePath.split('\\').pop()!.replace(/\.exe$/i, ''), installed,
+        ...(version ? { version } : {}), ...(catalogMode ? { catalogMode } : {}) };
       if (!validUpdate(update)) throw new Error('目标游戏 EXE 路径无效');
       const snapshot = await readPending(paths), pending = snapshot.updates;
       const index = pending.findIndex(item => optiExeKey(item.executablePath) === optiExeKey(executablePath));
       if (index >= 0) {
         pending[index] = {...pending[index],...update};
         if (update.version === undefined) delete pending[index].version;
+        if (update.catalogMode === undefined) delete pending[index].catalogMode;
       } else pending.push(update);
       if (pending.length > 1000) throw new Error('待登记队列已满');
       await writePending(paths, pending, snapshot.text);

@@ -162,7 +162,7 @@ static json queuedMouseReply;
 #include "steam_settings_runtime.h"
 static void steamOverlayFixKick(const char* reason){fixtureCapturing=true;fixtureOverlayEnqueue(reason);fixtureCapturing=false;fixtureDrain();}
 static json steamDeckMouseSet(const json& args){fixtureCapturing=true;auto result=fixtureMouseEnqueue(args);fixtureCapturing=false;fixtureDrain();if(!poolHold && result.value("ok",false)){auto state=steamDeckMouseGet();if(state.contains("error")&&!state["error"].get<std::string>().empty())state["ok"]=false;return state;}return result;}
-static std::atomic<bool> g_deckySteamRestartRequired{false};
+static struct {void observe(const ymcc::steamsession::IdentitySnapshot&) {}} g_deckySteamRestartRequired;
 static struct {void observeSteam(int,bool=false){}} g_deckySidebarRuntime;
 //__PRODUCTION_OBSERVER__
 

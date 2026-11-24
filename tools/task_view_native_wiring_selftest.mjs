@@ -34,9 +34,9 @@ try {
   assert.deepEqual(receipt.profiles.map(row=>row.profile),['Release','Checked']);
   assert(receipt.profiles.every(row=>row.pass && row.checks>0));
   result = {...result,pass:true,checks:receipt.profiles.reduce((n,row)=>n+row.checks,0),
-    profiles:receipt.profiles,functionHashes:receipt.functionHashes,
+    profiles:receipt.profiles,functionHashes:receipt.functionHashes,inputPins:receipt.inputPins,
     dispatcherHeaderSha256:receipt.dispatcherHeaderSha256,receiptHeaderSha256:receipt.receiptHeaderSha256,
-    ...(touchNative ? {selection:'touch-native',headerSha256:receipt.headerSha256,inputPins:receipt.inputPins,
+    ...(touchNative ? {selection:'touch-native',headerSha256:receipt.headerSha256,
       guardHash:receipt.guardHash,registrationHash:receipt.registrationHash} : {})};
 } catch(error) { result.error=String(error); }
 fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2)+'\n');

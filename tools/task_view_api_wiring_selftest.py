@@ -24,8 +24,21 @@ def main():
  parser_source=(REPO/'tools/virtual_sample_tree_perf_selftest.py').read_text(encoding='utf-8-sig');module=ast.parse(parser_source)
  selected=[n for n in module.body if isinstance(n,ast.FunctionDef) and n.name in ['clean','match_brace','source_function']]
  scope={'re':re};exec(compile(ast.Module(body=selected,type_ignores=[]),'<source-parser>','exec'),scope);extract=scope['source_function']
- signatures=['static bool taskViewContextCurrent(','static bool taskViewFocusHandoffPaused(','static void taskViewInvalidateHandover(','static void taskViewRememberHandover(','static bool taskViewHandoverCurrent(','static bool taskViewQueueHandover(','static bool taskViewConsumeHandover(','static bool taskViewWaitForPriorFocus(','static json taskViewForegroundContextEvidence(','static json taskViewInputContextEvidence(','static std::uint64_t nativeSendTaskView(','static ULONGLONG taskViewRequestDeadline(','static bool ipc_cmd_async(']
+ signatures=['static bool taskViewCapturePower(','static bool taskViewContextCurrent(','static bool taskViewFocusHandoffPaused(','static void taskViewInvalidateHandover(','static bool taskViewSharedPowerChanged(','static void taskViewRememberHandover(','static bool taskViewHandoverCurrent(','static bool taskViewQueueHandover(','static bool taskViewConsumeHandover(','static bool taskViewWaitForPriorFocus(','static json taskViewForegroundContextEvidence(','static json taskViewInputContextEvidence(','static std::uint64_t nativeSendTaskView(','static ULONGLONG taskViewRequestDeadline(','static bool ipc_cmd_async(']
  blocks={sig:extract(text,sig) for sig in signatures}
+ def ipc_blocks(source):
+  dispatch=extract(source,'static void ipc_dispatch(')
+  admission='        std::uint64_t taskViewNewFocusToken=0;\n        if (cmd == "shell.taskView") {'
+  rejection='            if (!queued) {\n                if(taskViewNewFocusToken'
+  worker='    ipc_on("shell.taskView", [](const json& args) -> json {'
+  def span(src,anchor):
+   assert src.count(anchor)==1,anchor
+   start=src.index(anchor)
+   return src[start:scope['match_brace'](src,src.index('{',start))+1]
+  return {'shell.taskView UI admission':span(dispatch,admission),
+          'shell.taskView pool rejection':span(dispatch,rejection),
+          'shell.taskView worker registration':span(source,worker)+');'}
+ ipc=ipc_blocks(text)
  assert not any(name in text for name in ['TaskViewKeyboardOps','g_taskViewKeyboardFallback','#include "task_view_keyboard_fallback.h"','#include "task_view_keyboard_windows.h"'])
  assert not any(name in '\n'.join(blocks.values()) for name in ['SendInput','GetAsyncKeyState','ymcc::taskView::keyboard::'])
  receipt_header=(REPO/'native/task_view_foreground_grant.h').read_bytes();rt=receipt_header.decode('utf-8-sig');receipt_types=rt[rt.index('enum class DeliveryStage'):rt.index('// YMCC') ]
@@ -37,9 +50,11 @@ def main():
  fixture=r"""
 #define NOMINMAX
 #include <windows.h>
+#include "sleep_power_observation.h"
 #include <algorithm>
 #include <atomic>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -85,18 +100,37 @@ static HWND g_hwnd=reinterpret_cast<HWND>(17);
 static struct {int family=0;} g_machineIdentity;
 static const char* ymccFamilyName(int){return "fixture";}
 static std::atomic<std::uint64_t> g_taskViewFocusToken{0};
+static std::atomic<std::uint64_t> g_taskViewFocusSerial{0};
 static ULONGLONG currentPowerGeneration(){return fake::powerReady?1:2;}
 enum class PowerLifecycle {Ready,Suspended};
 static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
 static unsigned long long g_taskViewFocusSession=0,g_focusSessionSequence=0;
 static ULONGLONG g_taskViewFocusUntil=0;
 __HANDOVER_TYPES__
-static std::atomic<std::shared_ptr<const TaskViewHandoverReceipt>> g_taskViewHandoverReceipt;
+static struct FixtureReceiptSlot : std::atomic<std::shared_ptr<const TaskViewHandoverReceipt>> {
+ void (*beforePublish)()=nullptr;
+ bool compare_exchange_weak(std::shared_ptr<const TaskViewHandoverReceipt>& expected,
+                            const std::shared_ptr<const TaskViewHandoverReceipt>& desired,std::memory_order order){
+   if(beforePublish)beforePublish();
+   return compare_exchange_strong(expected,desired,order);
+ }
+} g_taskViewHandoverReceipt;
 static std::atomic<std::uint64_t> g_taskViewHandoverSerial{0};
 static constexpr UINT WM_TASK_VIEW_HANDOVER=WM_APP+830;
 static std::atomic<bool> g_exitRequested{false};
+static ymcc::sleeppower::SharedPowerV1 g_taskViewFocusPower;
+static std::uint64_t fixtureSuspendSerial=0;
+static bool fixturePendingPower=false,fixturePowerKnown=true;
+static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,std::uint32_t size){
+ if(!fixturePowerKnown||g_exitRequested||size!=sizeof(*out))return 0;
+ *out={};out->generation=currentPowerGeneration();out->suspendSerial=fixtureSuspendSerial;
+ out->phase=g_powerLifecycle==PowerLifecycle::Ready?0u:2u;
+ out->flags=ymcc::sleeppower::kKnown|(fixturePendingPower?ymcc::sleeppower::kNotificationPending:0u);
+ return 1;
+}
 struct FocusLightHandoffState {std::atomic<bool> completed{false};struct {bool reclaimed=false;} result;};
 static std::atomic<std::shared_ptr<FocusLightHandoffState>> g_taskViewPriorFocusHandoff;
+static std::shared_ptr<FocusLightHandoffState> g_focusLightHandoff;
 static std::string fixturePersona="disabled";
 static unsigned fixturePersonaReads=0;
 static std::atomic<unsigned long long> g_inputHostEpochMirror{88};
@@ -122,6 +156,41 @@ class Dispatcher {public:Result request(WindowsOps& ops,const wchar_t* h,wchar_t
 static int g_asyncMode=0;
 static void appendNativeLifecycleLog(const char*,json row){if(fake::logThrows)throw std::runtime_error("sink allocation");fake::lastLog=std::move(row);}
 __FUNCTIONS__
+static unsigned fixturePoolAttempts=0,fixtureReplies=0,fixtureFocusRetires=0;
+static json fixtureReply;
+static void ipc_post_json(int,const json& resp){++fixtureReplies;fixtureReply=resp;}
+static void focusLosslessReturnYieldToTaskView(){++fixtureFocusRetires;}
+static constexpr UINT_PTR SUMMON_FOCUS_TIMER_ID=1,RETURN_GAME_FOCUS_TIMER_ID=2;
+static void fixtureKillTimer(HWND,UINT_PTR){}
+#define KillTimer fixtureKillTimer
+static void focusLightHandoffCancel(){}
+static void focusReleaseOwnedTopmost(){}
+static void fixtureQueueTaskView(json& args,bool queued){
+ const std::string cmd="shell.taskView";
+ const int targetChildId=0;
+ json resp=json::object();
+ __IPC_ADMISSION__
+ ++fixturePoolAttempts;
+ __IPC_REJECTION__
+}
+static std::function<json(const json&)> fixtureTaskViewWorker;
+static void ipc_on(const char* cmd,std::function<json(const json&)> fn){
+ fake::check(std::string(cmd)=="shell.taskView","wrong Task View registration");fixtureTaskViewWorker=std::move(fn);
+}
+static struct {std::uint64_t sequence=77;} taskViewActionEvidenceBegin(const json&,const char*){return {};}
+static void taskViewActionEvidenceEnd(const json&,const auto&,const char*,DWORD){}
+static void fixtureRegisterTaskView(){
+ __IPC_WORKER__
+}
+static auto nativeSendTaskView(ULONGLONG deadline=0,std::uint64_t evidence=0,ULONGLONG power=1,std::uint64_t token=0){
+ return nativeSendTaskView(deadline,evidence,power,token,0);
+}
+static auto taskViewWaitForPriorFocus(ULONGLONG deadline,ULONGLONG power,std::uint64_t token){
+ return taskViewWaitForPriorFocus(deadline,power,token,0);
+}
+static void taskViewRememberHandover(const json& args,ULONGLONG deadline,ULONGLONG power,std::uint64_t token,std::uint64_t invocation){
+ taskViewRememberHandover(args,deadline,power,token,invocation,0);
+}
 int main(){try{
  using namespace ymcc::taskView;using fake::check;
  for(int mode:{-1,0,1,2}){g_asyncMode=mode;check(ipc_cmd_async("shell.taskView"),"target must stay off UI in every async mode");check(!ipc_cmd_async("window.minimize"),"window control affinity changed");check(ipc_cmd_async("shell.run")==bool(mode>0),"unrelated shell async rule changed");}
@@ -206,22 +275,73 @@ int main(){try{
  for(int block:{1,2,3}){const auto before=fake::calls;fake::powerReady=block!=1;if(block==2)g_taskViewPriorFocusHandoff.store(std::make_shared<FocusLightHandoffState>());g_taskViewFocusToken=block==3?7:0;denied=false;try{nativeSendTaskView(777,0,1,block==3?6:0);}catch(const std::runtime_error&){denied=true;}check(denied&&fake::calls==before,"stale power/focus/prior helper reached API");fake::powerReady=fake::priorFocusReady=true;g_taskViewFocusToken=0;g_taskViewPriorFocusHandoff.store({});}
  planned={};planned.status=Status::Requested;g_taskViewFocusToken=9;nativeSendTaskView(777,0,1,9);check(g_taskViewFocusToken==9,"success resumed old focus before minimize");
  planned.status=Status::TimedOut;denied=false;try{nativeSendTaskView(777,0,1,9);}catch(const std::runtime_error&){denied=true;}check(denied&&g_taskViewFocusToken==0,"failed request retained focus pause");
- g_taskViewFocusToken=19;g_taskViewFocusSession=g_focusSessionSequence=6;g_taskViewFocusUntil=fake::tick+500;check(taskViewFocusHandoffPaused(),"pending old focus not paused");++g_focusSessionSequence;check(!taskViewFocusHandoffPaused(),"new explicit summon inherited old pause");g_focusSessionSequence=6;const auto saveTick=fake::tick;fake::tick+=500;check(!taskViewFocusHandoffPaused(),"pause exceeded bounded deadline");fake::tick=saveTick;
+ g_taskViewFocusToken=19;g_taskViewFocusSession=g_focusSessionSequence=6;g_taskViewFocusUntil=fake::tick+500;taskViewCapturePower(g_taskViewFocusPower);check(taskViewFocusHandoffPaused(),"pending old focus not paused");++g_focusSessionSequence;check(!taskViewFocusHandoffPaused(),"new explicit summon inherited old pause");g_focusSessionSequence=6;const auto saveTick=fake::tick;fake::tick+=500;check(!taskViewFocusHandoffPaused(),"pause exceeded bounded deadline");fake::tick=saveTick;
  auto prior=std::make_shared<FocusLightHandoffState>();g_taskViewPriorFocusHandoff.store(prior);fake::onPause=[&]{prior->result.reclaimed=true;prior->completed.store(true);};check(taskViewWaitForPriorFocus(fake::tick+500,1,19),"canceled prior helper did not settle");check(prior->completed&&prior->result.reclaimed,"cancel flag substituted for actual reclamation");fake::onPause={};prior->result.reclaimed=false;check(!taskViewWaitForPriorFocus(fake::tick+500,1,19),"unreclaimed helper authorized switch");g_taskViewPriorFocusHandoff.store({});g_taskViewFocusToken=0;
  for(int change:{1,2}){planned={};planned.status=Status::Requested;g_taskViewFocusToken=71;fake::powerReady=true;fake::onDispatch=[&]{if(change==1)fake::powerReady=false;else g_taskViewFocusToken=72;};bool staleAccepted=true;const auto beforeCalls=fake::calls;try{nativeSendTaskView(777,0,1,71);}catch(const std::runtime_error&){staleAccepted=false;}fake::onDispatch={};check(!staleAccepted,"late success crossed its original power/focus context");check(fake::calls==beforeCalls+1&&fake::inputCalls==0,"late success replayed system request");fake::powerReady=true;g_taskViewFocusToken=0;}
  const auto handoverArgs=json{{"diagnosticAction","game-recognition-switch-program"},{"diagnosticActionId","switch-program:fixture"}};
- const auto prepareHandover=[&]{fake::powerReady=true;g_exitRequested=false;g_taskViewFocusToken=81;g_taskViewFocusSession=g_focusSessionSequence=7;g_taskViewFocusUntil=fake::tick+2000;taskViewRememberHandover(handoverArgs,fake::tick+500,1,81,g_taskViewHandoverSerial.fetch_add(1)+1);return g_taskViewHandoverReceipt.load();};
+ const auto prepareHandover=[&]{fake::powerReady=true;g_exitRequested=false;g_taskViewFocusToken=81;g_taskViewFocusSession=g_focusSessionSequence=7;g_taskViewFocusUntil=fake::tick+2000;taskViewCapturePower(g_taskViewFocusPower);taskViewRememberHandover(handoverArgs,fake::tick+500,1,81,g_taskViewHandoverSerial.fetch_add(1)+1,fixtureSuspendSerial);return g_taskViewHandoverReceipt.load();};
  auto receipt=prepareHandover();check(receipt&&taskViewHandoverCurrent(receipt),"current accepted action lost handover");check(taskViewQueueHandover(handoverArgs)&&fake::postedSerial==receipt->serial,"accepted minimize did not post exact serial");check(taskViewConsumeHandover(receipt->serial),"current posted handover rejected");check(!taskViewConsumeHandover(receipt->serial)&&g_taskViewFocusToken==0,"handover was not one-use");
  for(int boundary:{0,1,2,3,4}){receipt=prepareHandover();const auto tick=fake::tick;if(boundary==0)fake::powerReady=false;if(boundary==1)g_taskViewFocusToken=82;if(boundary==2)++g_focusSessionSequence;if(boundary==3)fake::tick=receipt->expires;if(boundary==4)g_exitRequested=true;const auto posts=fake::posts;check(!taskViewQueueHandover(handoverArgs)&&fake::posts==posts,"stale handover was posted");check(!taskViewConsumeHandover(receipt->serial),"queued stale handover consumed new UI");fake::tick=tick;}
  receipt=prepareHandover();auto otherArgs=handoverArgs;otherArgs["diagnosticActionId"]="switch-program:new";check(!taskViewQueueHandover(otherArgs),"another action stole accepted receipt");check(!taskViewConsumeHandover(receipt->serial+1)&&g_taskViewHandoverReceipt.load()==receipt,"forged serial consumed receipt");taskViewRememberHandover(otherArgs,fake::tick+500,1,81,g_taskViewHandoverSerial.fetch_add(1)+1);const auto newer=g_taskViewHandoverReceipt.load();check(newer->serial!=receipt->serial&&!taskViewConsumeHandover(receipt->serial),"old queued message consumed newer receipt");check(!taskViewQueueHandover(handoverArgs)&&taskViewQueueHandover(otherArgs),"old action matched new return receipt");check(taskViewConsumeHandover(newer->serial),"new accepted action failed consumption");
  receipt=prepareHandover();const auto oldInvocation=receipt->serial;const auto laterInvocation=g_taskViewHandoverSerial.fetch_add(1)+1;taskViewRememberHandover(otherArgs,fake::tick+500,1,81,laterInvocation);const auto later=g_taskViewHandoverReceipt.load();taskViewRememberHandover(handoverArgs,fake::tick+500,1,81,oldInvocation);check(g_taskViewHandoverReceipt.load()==later&&!taskViewQueueHandover(handoverArgs),"late native completion replaced newer accepted action");
  receipt=prepareHandover();taskViewInvalidateHandover();check(!g_taskViewHandoverReceipt.load()&&g_taskViewFocusToken==0&&!taskViewConsumeHandover(receipt->serial),"session invalidation retained old handover");
  for(const auto& bad:std::vector<json>{nullptr,json::object(),json{{"diagnosticAction","other"}},json{{"diagnosticAction","game-recognition-switch-program"},{"diagnosticActionId",123}},json{{"diagnosticAction","game-recognition-switch-program"},{"diagnosticActionId",""}}}){taskViewRememberHandover(bad,777,1,0,0);check(!g_taskViewHandoverReceipt.load(),"malformed handover created a receipt");}
+ fixtureSuspendSerial=7;g_taskViewFocusToken=91;before=fake::calls;denied=false;
+ try{nativeSendTaskView(777,0,1,91,6);}catch(const std::runtime_error&){denied=true;}
+ check(denied&&fake::calls==before&&g_taskViewFocusToken==0,"old queued request crossed same-generation sleep");
+ for(int edge:{0,1,2}){
+   g_taskViewFocusToken=92;fixturePendingPower=edge==0;fixturePowerKnown=edge!=1;denied=false;before=fake::calls;
+   if(edge==2)fake::onDispatch=[] {++fixtureSuspendSerial;};
+   try{nativeSendTaskView(777,0,1,92,fixtureSuspendSerial);}catch(const std::runtime_error&){denied=true;}
+   check(denied&&fake::calls==before+(edge==2?1:0)&&g_taskViewFocusToken==0,"uncertain admission or old dispatcher completion held focus lease");
+   fixturePendingPower=false;fixturePowerKnown=true;fake::onDispatch={};
+ }
+ receipt=prepareHandover();check(receipt&&taskViewQueueHandover(handoverArgs),"accepted current Task View did not post a handover");
+ const auto stalePower=g_taskViewFocusPower;++fixtureSuspendSerial;
+ check(!taskViewFocusHandoffPaused()&&!taskViewConsumeHandover(receipt->serial),"posted stale handover minimized after same-generation sleep");
+ ymcc::sleeppower::SharedPowerV1 ready;check(taskViewCapturePower(ready)&&taskViewSharedPowerChanged(ready)&&!g_taskViewHandoverReceipt.load()&&g_taskViewFocusToken==0,"coalesced Ready did not clean retired Task View token and receipt");
+ const auto freshReceipt=prepareHandover();
+ check(taskViewSharedPowerChanged(stalePower)&&taskViewSharedPowerChanged(ready)&&freshReceipt&&taskViewHandoverCurrent(freshReceipt),"late Ready cleared a new Task View handover");
+ check(taskViewConsumeHandover(freshReceipt->serial),"fresh handover did not run after sleep cleanup");
+ taskViewInvalidateHandover();fixtureRegisterTaskView();
+ auto staleArgs=handoverArgs;
+ fixtureQueueTaskView(staleArgs,true);
+ check(fixturePoolAttempts==1&&fixtureFocusRetires==1&&staleArgs.at("_nativeTaskViewSuspendSerial")==fixtureSuspendSerial,"UI queue did not pin the public power scope");
+ ++fixtureSuspendSerial;check(taskViewCapturePower(ready)&&taskViewSharedPowerChanged(ready),"new Ready did not reach UI queue");
+ auto freshArgs=otherArgs;fixtureQueueTaskView(freshArgs,true);
+ check(fixtureTaskViewWorker(freshArgs)==true,"worker did not accept new queued arguments");
+ const auto afterWakeReceipt=g_taskViewHandoverReceipt.load();
+ check(afterWakeReceipt&&taskViewHandoverCurrent(afterWakeReceipt),"new worker did not publish a current receipt");
+ before=fake::calls;denied=false;
+ try{fixtureTaskViewWorker(staleArgs);}catch(const std::runtime_error&){denied=true;}
+ check(denied&&fake::calls==before&&taskViewHandoverCurrent(afterWakeReceipt),"stale queued worker invalidated new accepted receipt");
+ auto missing=freshArgs;missing.erase("_nativeTaskViewSuspendSerial");denied=false;
+ try{fixtureTaskViewWorker(missing);}catch(const std::runtime_error&){denied=true;}
+ check(denied&&fake::calls==before&&taskViewHandoverCurrent(afterWakeReceipt),"worker recaptured missing queued power scope");
+ auto rejectedArgs=handoverArgs;fixtureQueueTaskView(rejectedArgs,false);
+ check(fixtureReplies==1&&fixtureReply.contains("error")&&taskViewHandoverCurrent(afterWakeReceipt),"queue rejection cleared a reused token or did not report failure");
+ check(taskViewConsumeHandover(afterWakeReceipt->serial),"surviving receipt could not be consumed");
+ fixtureQueueTaskView(rejectedArgs,false);
+ check(fixtureReplies==2&&g_taskViewFocusToken==0&&!g_taskViewFocusPower.generation&&!g_taskViewHandoverReceipt.load(),"queue rejection retained its new token or receipt");
+ fixturePendingPower=true;rejectedArgs=handoverArgs;fixtureQueueTaskView(rejectedArgs,true);fixturePendingPower=false;
+ check(fixturePoolAttempts==4&&fixtureReplies==3&&fixtureFocusRetires==4&&!rejectedArgs.contains("_nativeTaskViewFocusToken"),"pending UI request entered the queue or took focus ownership");
+ auto publishingArgs=handoverArgs;fixtureQueueTaskView(publishingArgs,true);
+ const auto publishingSerial=fixtureSuspendSerial;
+ const auto publishingToken=publishingArgs.at("_nativeTaskViewFocusToken").get<std::uint64_t>();
+ const auto publishingInvocation=nativeSendTaskView(fake::tick+500,0,1,publishingToken,publishingSerial);
+ g_taskViewHandoverReceipt.beforePublish=[] {
+   g_taskViewHandoverReceipt.beforePublish=nullptr;
+   ++fixtureSuspendSerial;
+   ymcc::sleeppower::SharedPowerV1 next;
+   fake::check(taskViewCapturePower(next)&&taskViewSharedPowerChanged(next)&&g_taskViewFocusToken==0,"retirement during receipt preparation did not revoke focus");
+ };
+ taskViewRememberHandover(publishingArgs,fake::tick+500,1,publishingToken,publishingInvocation,publishingSerial);
+ check(!g_taskViewHandoverReceipt.beforePublish&&!g_taskViewHandoverReceipt.load(),"late receipt publication left ownership after public retirement");
  fake::powerReady=true;g_exitRequested=false;g_taskViewFocusToken=0;
  check(fake::inputCalls==0&&fake::keyReads==0,"producer performed keyboard operations");
  std::cout<<json{{"pass",true},{"checks",fake::checks},{"realOSInput",false},{"realProcessOperations",false},{"scope","actual producer/queue-budget/async code with fake dispatcher and OS; not dispatcher or COM acceptance"}}.dump()<<'\n';return 0;
  }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
-""".replace('__HANDOVER_TYPES__',handover_types).replace('__RECEIPT__',receipt_types).replace('__STATUS__',status).replace('__FUNCTIONS__','\n\n'.join(blocks.values()))
+""".replace('__HANDOVER_TYPES__',handover_types).replace('__RECEIPT__',receipt_types).replace('__STATUS__',status).replace('__FUNCTIONS__','\n\n'.join(blocks.values())).replace('__IPC_ADMISSION__',ipc['shell.taskView UI admission']).replace('__IPC_REJECTION__',ipc['shell.taskView pool rejection']).replace('__IPC_WORKER__',ipc['shell.taskView worker registration'])
  sdk=Path('C:/Program Files (x86)/Windows Kits/10')
  versions=sorted((sdk/'Include').iterdir(),key=lambda x:tuple(int(v) for v in x.name.split('.')),reverse=True)
  sdk_version=next((v.name for v in versions if all((sdk/sub/v.name/part/file).exists() for sub,part,file in [('Include','um','Windows.h'),('Include','ucrt','crtdbg.h'),('Lib','um/x64','kernel32.lib'),('Lib','ucrt/x64','ucrt.lib')])),None)
@@ -230,6 +350,8 @@ int main(){try{
  libs=';'.join(str(sdk/'Lib'/sdk_version/x/'x64') for x in ['ucrt','um'])
  preamble='@echo off\ncall "'+str(VC)+'" >nul\nif errorlevel 1 exit /b 1\nset "INCLUDE='+includes+';%INCLUDE%"\nset "LIB='+libs+';%LIB%"\n'
  (run/'fixture.cpp').write_text(fixture,encoding='utf-8');(run/'json.hpp').write_bytes((REPO/'deps/json/json.hpp').read_bytes());profiles=[]
+ sleep_headers={name:(REPO/'native'/name).read_bytes() for name in ['sleep_power_state.h','sleep_power_observation.h']}
+ for name,data in sleep_headers.items():(run/name).write_bytes(data)
  for profile,flags in [('Release',['/O2','/DNDEBUG','/MT']),('Checked',['/Od','/RTC1','/D_DEBUG','/MTd'])]:
   command=['cl','/nologo','/std:c++20','/utf-8','/EHsc','/W4',*flags,str(run/'fixture.cpp'),'/Fo'+str(run/(profile+'.obj')),'/Fe'+str(run/(profile+'.exe'))]
   batch=run/(profile+'.cmd');batch.write_text(preamble+subprocess.list2cmdline(command)+'\nif errorlevel 1 exit /b %errorlevel%\ndumpbin /imports "'+str(run/(profile+'.exe'))+'" > "'+str(run/(profile+'-imports.txt'))+'"\nexit /b %errorlevel%\n',encoding='utf-8')
@@ -237,6 +359,7 @@ int main(){try{
   imports=(run/(profile+'-imports.txt')).read_text(encoding='utf-8',errors='replace').lower();assert all(k not in imports for k in ['user32.dll','ole32.dll','shell32.dll','createprocessw','sendinput'])
   p=subprocess.run([str(run/(profile+'.exe'))],cwd=run,capture_output=True,encoding='utf-8',errors='replace',timeout=30);(run/(profile+'-result.json')).write_text(p.stdout,encoding='utf-8');(run/(profile+'-stderr.txt')).write_text(p.stderr,encoding='utf-8');assert p.returncode==0,p.stderr;result=json.loads(p.stdout);assert result['pass'];profiles.append({'profile':profile,**result})
  current=(REPO/'native/main.cpp').read_text(encoding='utf-8-sig');assert all(extract(current,sig)==body for sig,body in blocks.items());assert (REPO/'native/task_view_dispatch.h').read_bytes()==header;assert (REPO/'native/task_view_foreground_grant.h').read_bytes()==receipt_header
- result={'pass':True,'profiles':profiles,'run':str(run),'functionHashes':{sig:sha(body.encode()) for sig,body in blocks.items()},'dispatcherHeaderSha256':sha(header),'receiptHeaderSha256':sha(receipt_header),'realInputOrProductExecuted':False}
+ assert ipc_blocks(current)==ipc and all((REPO/'native'/name).read_bytes()==data for name,data in sleep_headers.items())
+ result={'pass':True,'profiles':profiles,'run':str(run),'functionHashes':{sig:sha(body.encode()) for sig,body in {**blocks,**ipc}.items()},'dispatcherHeaderSha256':sha(header),'receiptHeaderSha256':sha(receipt_header),'inputPins':{name:sha(data) for name,data in sleep_headers.items()},'realInputOrProductExecuted':False}
  (run/'result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n',encoding='utf-8');(output/'latest.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n',encoding='utf-8');print(json.dumps(result,ensure_ascii=False))
 if __name__=='__main__':main()

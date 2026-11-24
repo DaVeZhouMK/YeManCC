@@ -51,6 +51,7 @@ try{
  if($LASTEXITCODE -ne 0){throw 'Production manual CSS extraction failed'}
  $recipe=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'steam_cssloader_use_selftest.ps1') -Raw
  $recipe=$recipe.Substring($recipe.IndexOf('@"')+3);$recipe=$recipe.Substring(0,$recipe.IndexOf('"@'))
+ $recipe=$recipe.Replace('$sharedFlags','').Replace('$consumerArguments',('"'+$taskShortWork+'"'))
  $recipe=$recipe.Replace('$root',$repo).Replace('$OutputDirectory',$taskShortWork).Replace('steam_cssloader_use_selftest.cpp','steam_cssloader_manual_observation_selftest.cpp').Replace(' /I"'+$repo+'\native"',' /I"'+$taskShortWork+'" /I"'+$NativeRoot+'" /I"'+$repo+'\native" /I"'+$repo+'\deps\json"')
  $taskCmd=Join-Path $taskShortWork 'compile.cmd';[IO.File]::WriteAllText($taskCmd,$recipe,[Text.Encoding]::ASCII)
  Push-Location -LiteralPath $taskShortWork

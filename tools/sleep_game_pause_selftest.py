@@ -183,6 +183,7 @@ struct SgWorkItem {
     ULONGLONG pauseTriggerFileTime=0,pauseResumeSequence=0;
 };
 std::deque<SgWorkItem> g_sgWorkQ;
+static std::atomic<uint64_t> g_sharedPowerSuspendSerial{0};
 std::condition_variable g_sgWorkCv;
 bool g_sgWorkStop=false;
 unsigned long long g_sgWorkWakeRevision=0;
@@ -381,7 +382,8 @@ void inputHostRequestPowerRelease(ULONGLONG,const char*){++powerReleaseCalls;}
 void gamepadResetNativeState(bool){++resetCalls;}
 void sgHandheldSleepSensorsOnly(const char*){}
 void sgStopMonitorEntryFailureTimer(const char*){}
-void fanHostScheduleEmergencySuspend(const char*,ULONGLONG){}
+void fanHostScheduleEmergencySuspend(const char*,ULONGLONG,ULONGLONG=0){}
+void sleepRecoveryAutoCancelPreparedSuspend(){}
 bool sgPowerButtonSleepConfigured(){return true;}
 bool sgHibernateAvailable(){return true;}
 void sgQueueWork(SgWork work,ULONGLONG gen,ULONGLONG=0){queue.emplace_back(work,gen);}
@@ -440,9 +442,11 @@ preamble += '\nstatic SgResumeResult sgResumeSleepTarget(unsigned long long, boo
 preamble += '''
 int queuedGameRecovery=0;
 void msiVisibilityObserverNoteResume(unsigned long long){}
+void radialInputIsolationInvalidate(){}
+static struct {bool active() const {return false;} void shutdown(){}} g_radialOverlay;
 void inputHostArmWakePhysicalHold(const char*){}
 static void sleepRecoveryAutoArm(unsigned long long){} // automatic owner separately tested; this fixture keeps opt-in off
-static bool sgBeginWakeGameRecovery(unsigned long long generation){assert(generation==7);++queuedGameRecovery;return true;}
+static bool sgBeginWakeGameRecovery(unsigned long long generation,const SgWorkItem* =nullptr){assert(generation==7);++queuedGameRecovery;return true;}
 static void sgCancelWakeGameRecoveryUnlocked(const char* reason){++recoveryCancelCalls;g_sgWakeRecoveryPending=false;g_sgWakeRecovery={};sgReconcileSleepGameFlagsAfterRecoveryCancel(reason);}
 static void sgApplyLongSleepResumeGrace(unsigned long long){}
 static bool sgPrepareWakeRecoveryForSleep(unsigned long long,
@@ -922,19 +926,26 @@ auto fnNtSuspend=&pauseActualNtPort;
     functions=original+'\n'+functions
 
 if args.ordinary_pause_only:
-    # Actual sgQueueWork, with only Steam capture as a counted leaf. Its
-    # admission and queue lock/body are never reimplemented here.
+    # Execute the actual queue and Steam fan-out; replace only its three sinks.
     fake='void sgQueueWork(SgWork work,ULONGLONG gen,ULONGLONG=0){queue.emplace_back(work,gen);}'
     assert preamble.count(fake)==1
     ports=r"""
-static std::atomic<unsigned long long> g_sgExplicitGameWakeGeneration{0},g_sgExplicitGameWakePauseFence{0};
-static unsigned ordinarySteamCaptures=0;
+static SgWorkItem g_sgLastQueuedGameWake{};
+static unsigned ordinarySteamCaptures=0,ordinarySteamReadyCalls=0,ordinarySteamOriginalCalls=0,ordinarySteamFault=0;
+static ULONGLONG ordinarySteamBoundary=0;
 static std::function<void()> ordinaryCaptureHook;
-static void sleepRecoveryAutoCaptureSuspend(ULONGLONG){++ordinarySteamCaptures;if(ordinaryCaptureHook){auto hook=std::exchange(ordinaryCaptureHook,{});hook();}}
+namespace SleepSteamRecovery {
+static void captureSuspend(ULONGLONG,const std::shared_ptr<void>&,ULONGLONG boundary){ordinarySteamBoundary=boundary;++ordinarySteamCaptures;if(ordinaryCaptureHook){auto hook=std::exchange(ordinaryCaptureHook,{});hook();}if(ordinarySteamFault==1)throw std::bad_alloc();}
+}
+namespace SleepRecoveryAuto {
+static void captureReady(ULONGLONG){++ordinarySteamReadyCalls;if(ordinarySteamFault==2)throw std::bad_alloc();}
+}
+static void steamOriginalRecoverySuspend(ULONGLONG){++ordinarySteamOriginalCalls;if(ordinarySteamFault==3)throw std::bad_alloc();}
 static void sgQueueWork(SgWork,unsigned long long,ULONGLONG=0);
 """
     preamble=preamble.replace(fake,ports)
-    functions+='\n'+function('sgQueueWork')+'\n'
+    steam_auto=args.source.parent/'sleep_recovery_auto.h'
+    functions+='\n'+function('sleepRecoveryAutoCaptureSuspend',steam_auto.read_text(encoding='utf-8-sig'),'native/sleep_recovery_auto.h')+'\n'+function('sgQueueWork')+'\n'
 
 if args.returned_pause_only:
     choices=['normal','newer-entry','duplicate-queue','ordinary-already-queued','manual-before-queue','manual-after-queue','manual-and-new-entry','manual-at-metadata','manual-at-final-nt','changed-generation','phase-ready','exit-after-queue','pause-disabled','target-changed','partial-return','unknown-return','queue-stopped','option-at-metadata','guard-at-final-nt','repair-at-final-nt', 'public-auto-after-queue', 'public-user-after-queue', 'public-critical-after-queue', 'public-auto-at-metadata', 'public-auto-final-nt', 'public-auto-post-failed', 'public-auto-during-return', 'public-old-before-entry', 'public-unknown-before-queue', 'public-clock-back-after-queue', 'public-suspend-only', 'public-successor-after-stale-returned', 'public-successor-after-stale-ordinary']
@@ -955,6 +966,7 @@ int main(){
  const std::vector<std::string> selected=SELECTED_VALUES;
  json observations=json::array();
  for(const auto& scenario:selected){
+  std::cerr<<"RETURNED_PAUSE_BEGIN "<<scenario<<std::endl;
   returnedReset();freeze();
   if(scenario=="public-old-before-entry")returnedPublicPublish(18,50,true);
   if(scenario=="public-unknown-before-queue")returnedPublicPublish(18,0,true);
@@ -1035,6 +1047,7 @@ if args.ordinary_pause_only:
     cases=['normal', 'manual-after-queue', 'manual-during-capture', 'manual-at-metadata', 'manual-before-final-nt', 'manual-before-queue', 'manual-and-new-entry', 'old-manual-before-new-suspend', 'no-original-receipt-no-manual', 'no-original-receipt-after-manual', 'future-suspend-receipt', 'resume-before-queue', 'resume-after-queue', 'resume-at-final-nt', 'old-resume-before-new-suspend', 'duplicate-suspend-boundary', 'guard-off-still-capture', 'pause-off-still-capture', 'generation-after-queue', 'exit-after-queue', 'option-at-metadata', 'resume-sequence-with-older-time', 'successor-after-stale-ordinary-resume', 'successor-after-stale-ordinary-manual', 'successor-after-stale-ordinary-both', 'successor-after-stale-returned-resume', 'successor-after-stale-returned-manual', 'successor-after-stale-returned-both', 'current-returned-already-queued', 'legacy-pause-already-queued']
     if args.ordinary_pause_case=='recovery-queue-ownership':cases=['recovery-queue-ownership']
     if args.ordinary_pause_case=='pause-completion-ownership':cases=['pause-completion-ownership']
+    cases+=['steam-capture-failure','steam-ready-failure','steam-original-failure','steam-capture-failure-with-wake']
     if args.ordinary_pause_case is not None:
         if args.ordinary_pause_case not in cases:parser.error('unknown ordinary pause case')
         cases=[args.ordinary_pause_case]
@@ -1044,10 +1057,13 @@ int main(){
  json observations=json::array();
  for(const auto& scenario:std::vector<std::string>CASE_VALUES){
   reset();g_sgWorkQ.clear();g_sgWorkStop=false;ordinarySteamCaptures=0;ordinaryCaptureHook={};pauseFinalHook={};returnedPublicReset();
+  ordinarySteamReadyCalls=ordinarySteamOriginalCalls=0;
+  ordinarySteamBoundary=0;
+  ordinarySteamFault=scenario.starts_with("steam-capture-failure")?1:scenario=="steam-ready-failure"?2:scenario=="steam-original-failure"?3:0;
   g_sgTask.generation=7;g_sgRepairEligible=true;g_guardEnabled=true;
   g_sgLastPowerButtonSleepIntentFileTime=200;g_sgLatestSleepEntryFileTime=200;
   g_sgLatestUserSleepEntryFileTime=200;g_sgOriginalPowerButtonWakeFileTime=100;
-  if(scenario=="manual-during-capture")ordinaryCaptureHook=[]{g_sgOriginalPowerButtonWakeFileTime=300;};
+  if(scenario=="manual-during-capture"||scenario=="steam-capture-failure-with-wake")ordinaryCaptureHook=[]{g_sgOriginalPowerButtonWakeFileTime=300;};
   if(scenario=="manual-before-queue")g_sgOriginalPowerButtonWakeFileTime=300;
   if(scenario=="no-original-receipt-no-manual")g_sgOriginalPowerButtonWakeFileTime=0;
   if(scenario=="resume-before-queue")returnedPublicPublish(18,300,true);
@@ -1059,13 +1075,16 @@ int main(){
   const bool successor=scenario.starts_with("successor-after-stale-");
   if(scenario.find("stale-returned")!=std::string::npos||scenario=="current-returned-already-queued")g_sgWorkQ.push_back({SgWork::Suspend,7,200,100,100,1234});
   if(scenario=="legacy-pause-already-queued")g_sgWorkQ.push_back({SgWork::Suspend,7});
-  sgQueueWork(SgWork::Suspend,7,original);
+  try{sgQueueWork(SgWork::Suspend,7,original);}
+  catch(...){std::cerr<<"Steam capture must not strand the public Suspend queue: "<<scenario<<'\n';return 1;}
+  assert(!ordinarySteamCaptures||ordinarySteamBoundary==original);
   if(successor){
    assert(g_sgWorkQ.size()==1);
    if(!scenario.ends_with("manual"))returnedPublicPublish(18,300,true);
    if(!scenario.ends_with("resume"))g_sgOriginalPowerButtonWakeFileTime=300;
    g_sgLatestSleepEntryFileTime=400;g_sgLatestUserSleepEntryFileTime=400;g_sgLastPowerButtonSleepIntentFileTime=400;
    sgQueueWork(SgWork::Suspend,7,400);
+   assert(ordinarySteamBoundary==400);
    const auto resume=g_sleepPowerDispatch.latestResumeBoundary();
    std::cout<<"ORDINARY_QUEUE_SUCCESSOR "<<json({{"scenario",scenario},{"queued",g_sgWorkQ.size()},{"resumeSequence",resume.sequence},{"resumeTime",resume.fileTime100ns},{"captures",ordinarySteamCaptures}}).dump()<<std::endl;
    assert(g_sgWorkQ.size()==2&&"current ordinary sleep swallowed by stale queued ticket");
@@ -1087,7 +1106,15 @@ int main(){
   const bool expectedPause=scenario=="normal"||scenario=="old-manual-before-new-suspend"||scenario=="no-original-receipt-no-manual"||scenario=="old-resume-before-new-suspend"||scenario=="duplicate-suspend-boundary"||successor||scenario=="current-returned-already-queued"||scenario=="legacy-pause-already-queued";
   const bool preRejected=scenario=="manual-before-queue"||scenario=="resume-before-queue"||scenario=="no-original-receipt-after-manual"||scenario=="future-suspend-receipt";
   assert(ordinarySteamCaptures==(preRejected?0U:(scenario=="duplicate-suspend-boundary"||successor)?2U:1U));
-  assert(suspendCalls==(expectedPause?1:0)&&freezeDepth==(expectedPause?1:0)&&markerExists==expectedPause);
+  assert(ordinarySteamReadyCalls==ordinarySteamCaptures&&ordinarySteamOriginalCalls==ordinarySteamCaptures);
+  if(ordinarySteamFault){
+   const std::string stage=ordinarySteamFault==1?"steam-original-capture":ordinarySteamFault==2?"steam-wake-fact-join":"steam-original-recovery";
+   const auto found=std::count_if(facts.begin(),facts.end(),[&](const auto& fact){return fact.first=="sleep-suspend-consumer-failed"&&fact.second.at("consumer")==stage&&fact.second.at("generation")==7;});
+   assert(found==1);
+   assert(queued==(scenario=="steam-capture-failure-with-wake"?0U:1U));
+  }
+  const bool effectivePause=expectedPause||(ordinarySteamFault&&scenario!="steam-capture-failure-with-wake");
+  assert(suspendCalls==(effectivePause?1:0)&&freezeDepth==(effectivePause?1:0)&&markerExists==effectivePause);
  }
  std::cout<<"ORDINARY_PAUSE_MATRIX "<<json({{"status","PASS_ORDINARY_MANUAL_WAKE_BOUNDARIES"},{"count",observations.size()},{"cases",observations},{"physicalCalls",0}}).dump()<<'\n';return 0;
 }

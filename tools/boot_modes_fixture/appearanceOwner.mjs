@@ -14,10 +14,10 @@ export async function runAppearanceOwner(out,args=[]){
  const module=path.join(dir,'actual.mjs');fs.writeFileSync(module,build.outputFiles[0].text,{flag:'wx'});const m=await import(pathToFileURL(module)),q=m.q;
  const modes=['global','xbox','steam','xbox-steam'],kinds=['revision','hash','mode','result','observed','ack','unrelated','current'];
  const allPlans=[
-  {name:'apply-ready',method:'apply',cold:false,offline:false,stages:['dispatch','location-1','exists-1','policy-1','Status-1','policy-2','begin-1','location-2','exists-2','policy-3','Apply-1','policy-4','release-1']},
-  {name:'apply-offline',method:'apply',cold:false,offline:true,stages:['dispatch','location-1','exists-1','policy-1','Status-1','location-2','exists-2','policy-2','Apply-1']},
-  {name:'reset-ready',method:'reset',cold:false,offline:false,stages:['dispatch','location-1','exists-1','policy-1','Status-1','location-2','exists-2','policy-2','Reset-1','policy-3','begin-1','release-1']},
-  {name:'apply-cold',method:'apply',cold:true,offline:false,stages:['dispatch','Status-1','policy-2','begin-1','Apply-1','policy-4','ensure-1','delay-1','location-3','exists-3','policy-5','Status-2','release-1']},
+  {name:'apply-ready',method:'apply',cold:false,offline:false,reuseAfter:'begin-1',stages:['dispatch','location-1','exists-1','policy-1','Status-1','policy-2','begin-1','cached-location-2','exists-2','policy-3','Apply-1','policy-4','release-1']},
+  {name:'apply-offline',method:'apply',cold:false,offline:true,reuseAfter:'Status-1',stages:['dispatch','location-1','exists-1','policy-1','Status-1','cached-location-2','exists-2','policy-2','Apply-1']},
+  {name:'reset-ready',method:'reset',cold:false,offline:false,reuseAfter:'Status-1',stages:['dispatch','location-1','exists-1','policy-1','Status-1','cached-location-2','exists-2','policy-2','Reset-1','policy-3','begin-1','release-1']},
+  {name:'apply-cold',method:'apply',cold:true,offline:false,reuseAfter:'delay-1',stages:['dispatch','Status-1','policy-2','begin-1','Apply-1','policy-4','ensure-1','delay-1','cached-location-3','exists-3','policy-5','Status-2','release-1']},
   {name:'apply-takeover',method:'apply',cold:false,offline:false,extra:true,stages:['Prepare-1','Reload-1','release-1']},
   {name:'apply-reload',method:'apply',cold:false,offline:false,extra:true,stages:['Reload-1','release-1']},
   {name:'reset-previous',method:'reset',cold:false,offline:false,extra:true,stages:['Restore-1','release-1']},
@@ -30,7 +30,15 @@ export async function runAppearanceOwner(out,args=[]){
   q.calls=[];q.wire=[];q.effects=[];q.ownerReads=0;q.begin=q.end=q.ensure=0;q.clock=0;q.active=false;q.failEnd=q.failApply=false;q.hook=async()=>{};
   q.snapshot={controlProtocol:2,packAvailable:true,packPrepared:plan.name!=='apply-takeover',packOwned:plan.name!=='apply-takeover',packRepairRequired:false,backendReloadRequired:plan.name==='apply-reload',targetId:'a'.repeat(16),revision:'b'.repeat(64),linked:true,backendReady:!plan.cold&&!plan.offline,backendProcessCount:plan.offline?0:1,steamRunning:!plan.offline,configuredMatchesBackend:true,note:'inert appearance owner',themes:m.STEAM_APPEARANCE_THEMES.map(theme=>({name:theme.name,installed:true,configured:true,backendEnabled:true,parameterCount:0,error:''}))};
   const counts=new Map(),hit=async name=>{const count=(counts.get(name)||0)+1;counts.set(name,count);const label=name+'-'+count;q.calls.push(label);await q.hook(label);};
-  const service=m.createSteamAppearance({loadBootPreferences:async()=>{q.ownerReads++;return structuredClone(q.document);},
+  let guardsAfterPriorCall=0;
+  const service=m.createSteamAppearance({loadBootPreferences:async()=>{
+   q.ownerReads++;
+   // Prior owner completion, then pre/post directory resolution. The third guard
+   // replaces the retired repeat-location injection, before probing the file.
+   if(plan.reuseAfter&&q.calls.at(-1)===plan.reuseAfter&&++guardsAfterPriorCall===3)
+    await q.hook(plan.stages.find(stage=>stage.startsWith('cached-location-')));
+   return structuredClone(q.document);
+  },
    location:async()=>{await hit('location');return {directory:'Q:/owned/PowerControl'};},exists:async()=>{await hit('exists');return true;},hidden:async()=>{throw Error('Detached launch forbidden');},
    idlePolicy:async()=>{await hit('policy');return {supported:true,version:3,manualObservationProtocol:1,sharedSteamReadProtocol:1,processQuery:'Local\\YMCC.CssInventory.'+'a'.repeat(32),pid:42,birth:'100'};},
    beginUse:async()=>{q.begin++;q.active=true;q.effects.push('begin');await hit('begin');return {ok:true,token:'17',pid:42,birth:'100',backendPath:'Q:\\owned\\CssLoader-Standalone-Headless.exe'.replaceAll('\\\\','\\')};},
@@ -57,6 +65,10 @@ export async function runAppearanceOwner(out,args=[]){
   try{if(stage==='dispatch'){changed=true;at=q.effects.length;mutate(kind);}result=await invoke(f,plan);}catch(e){error=String(e);}
   const late=q.effects.slice(at).filter(effect=>effect!=='release'),row={mode,scenario:plan.name,stage,kind,allowed,changed,error,result,lateEffects:late,ownerReads:q.ownerReads,begin:q.begin,end:q.end,ensure:q.ensure,active:q.active,calls:q.calls,wire:q.wire};fs.appendFileSync(raw,JSON.stringify(row)+'\n');rows.push(row);
   assert(changed,'Selected appearance boundary not reached '+JSON.stringify(row));assert.equal(q.active,false,'Exact CSS lease leaked');assert.equal(q.end,q.begin,'Acquired ticket was not released exactly once');
+  if(!before){
+   assert(q.calls.filter(call=>call.startsWith('location-')).length<=1,'Boot request looked up the fixed directory again');
+   if(!allowed&&stage.startsWith('cached-location-'))assert(!q.calls.includes(stage.replace('cached-location-','exists-')),'Expired cached directory reached the next file probe');
+  }
   if(allowed){assert(!error,JSON.stringify(row));assert.equal(result?.ok,true,JSON.stringify(row));}
   else{assert.equal(late.length,0,'Expired appearance continued later operation '+JSON.stringify(row));assert.match(error,/BOOT_APPEARANCE_REQUEST_EXPIRED/,'Expired appearance returned old result '+JSON.stringify(row));}
   if(!before)for(const wire of q.wire){assert.equal(wire.options?.origin,'boot-mode');assert.deepEqual(wire.options.bootContext,f.expected);}

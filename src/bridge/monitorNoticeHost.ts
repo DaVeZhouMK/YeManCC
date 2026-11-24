@@ -23,6 +23,8 @@ export function startMonitorNoticeHost(){
  let attempts=0,retryTimer:ReturnType<typeof setTimeout>|null=null,retryRevision=0;
  let readyTimer:ReturnType<typeof setTimeout>|null=null,readyRevision=0;
  let powerHeld=true,powerGeneration:number|null=null,committedGeneration=-1,probeOwner=false;
+ let powerSuspendSerial:number|undefined;
+ let statusRequest:AbortController|null=null;
  let ambiguousCreate=false,ambiguousLease=0,carrierBlocked=false,lastRetiredLease=0;
  const retiring=new Map<number,Promise<boolean>>(),createRequests=new Map<number,AbortController>();
  let retirements=0,retirementFailures=0,fallbackRetirements=0,lastRetirement:Retirement|null=null;
@@ -82,8 +84,14 @@ export function startMonitorNoticeHost(){
   })();
   return pending;
  }
+ function retireStatus(){
+  const request=statusRequest;if(!request)return;
+  // Status owns no native lease. Release only the renderer wait and return its unused attempt.
+  statusRequest=null;opening=false;attempts=Math.max(0,attempts-1);request.abort();
+ }
  function close(){
   ++epoch;cancelRecovery();cancelReadyWait();prepareAgain=false;probeOwner=false;state.clear();
+  retireStatus();
   const old=own;own=null;earlyReady=null;closeNative(old);
  }
  function scheduleRecovery(){
@@ -118,11 +126,13 @@ export function startMonitorNoticeHost(){
   }
   if(opening){if(advanceScheduled)prepareAgain=true;return;}
   if(retryTimer!==null&&!advanceScheduled)return;
-  cancelRecovery();opening=true;++attempts;const ticket=++epoch,nonce=crypto.randomUUID();
+  cancelRecovery();opening=true;++attempts;const ticket=++epoch,nonce=crypto.randomUUID(),statusAbort=new AbortController();
+  statusRequest=statusAbort;
   let phase:'status'|'close'|'reserve'|'create'='status',retryNeeded=false,leaseId=0;const attemptStarted=diagnosticNow();note('attempt-start');
   try{
-   const status=await invoke<NoticeStatus>('monitorNotice.status',{}, {timeoutMs:3000});
-   if(!desired()||ticket!==epoch)return;
+   const status=await invoke<NoticeStatus>('monitorNotice.status',{}, {timeoutMs:3000,signal:statusAbort.signal});
+   if(statusAbort.signal.aborted||!desired()||ticket!==epoch)return;
+   statusRequest=null;
    if(!status||status.leaseProtocol!==1||typeof status.available!=='boolean'||!Number.isSafeInteger(status.id)||status.id<0)throw Error('Invalid notice status or lease protocol');
    note('status-result',own,{ok:true,statusReady:status.ready===true,available:status.available,recoveryBlocked:status.recoveryBlocked===true});
    if(status.recoveryBlocked===true){carrierBlocked=true;note('prepare-blocked',own,{reason:'carrier-blocked'});return;}
@@ -148,15 +158,19 @@ export function startMonitorNoticeHost(){
    own={id:created.id,leaseId,nonce,ready:earlyReadyFor(created.id,nonce),diagnosticEpoch:ticket};note('create-result',own,{ok:true});
    if(own.ready)healthy();else waitForReady(own);
   }catch(error){
+   if(statusAbort.signal.aborted)return;
    note('attempt-error',own,{reason:errorKind(error),phase,elapsedMs:elapsed(attemptStarted)});
    // An IPC timeout does not cancel native create. Keep its uncertainty visible
    // and do not multiply surfaces while that operation lacks a native receipt.
    if(phase==='create'&&!(error instanceof IpcRemoteError)&&leaseId>lastRetiredLease){ambiguousCreate=true;ambiguousLease=leaseId;}
    if(ticket===epoch){const old=own;own=null;earlyReady=null;cancelReadyWait();closeNative(old);retryNeeded=!ambiguousCreate;}
   }finally{
-   if(leaseId)createRequests.delete(leaseId);opening=false;const again=prepareAgain;prepareAgain=false;
-   if(retryNeeded&&ticket===epoch)scheduleRecovery();
-   if(again&&desired())void prepare(true);
+   if(!statusAbort.signal.aborted){
+    if(statusRequest===statusAbort)statusRequest=null;
+    if(leaseId)createRequests.delete(leaseId);opening=false;const again=prepareAgain;prepareAgain=false;
+    if(retryNeeded&&ticket===epoch)scheduleRecovery();
+    if(again&&desired())void prepare(true);
+   }
   }
  }
  async function send(value:ShortcutActionFeedback):Promise<boolean>{
@@ -181,7 +195,7 @@ export function startMonitorNoticeHost(){
  });
  const offClosed=on<{id:number;nonce:string}>('monitorNotice.closed',event=>{
   if(!own||own.nonce!==event.nonce||own.id>0&&own.id!==event.id){note('closed-rejected',own,{reason:'stale-owner'});return;}note('owner-lost');
-  ++epoch;own=null;earlyReady=null;cancelReadyWait();if(!pendingFeedbackId)state.clear();scheduleRecovery();
+  ++epoch;retireStatus();own=null;earlyReady=null;cancelReadyWait();if(!pendingFeedbackId)state.clear();scheduleRecovery();
  });
  const offFeedback=onShortcutActionFeedback(value=>{
   if(!desired()){note('feedback-rejected',own,{reason:ended?'ended':!preferences?.popupEnabled?'off':powerHeld?'power-held':carrierBlocked?'carrier-blocked':'ambiguous'});return;}if(!state.accept(value))return;pendingFeedbackId=value.id;flushPendingFeedback();if(pendingFeedbackId)void prepare(true);
@@ -200,7 +214,7 @@ export function startMonitorNoticeHost(){
  function holdPower(generation:number){
   powerGeneration=generation;
   if(powerHeld)return;
-  powerHeld=true;++epoch;note('power-held');cancelRecovery();cancelReadyWait();prepareAgain=false;state.clear();
+  powerHeld=true;++epoch;note('power-held');cancelRecovery();cancelReadyWait();prepareAgain=false;retireStatus();state.clear();
  }
  function resumePower(generation:number){
   const newGeneration=generation!==committedGeneration,wasHeld=powerHeld;
@@ -212,8 +226,12 @@ export function startMonitorNoticeHost(){
  }
  const offPower=onSharedPowerLifecycle(snapshot=>{
   if(ended)return;
+  const suspendChanged=snapshot.suspendSerial!==powerSuspendSerial;
+  powerSuspendSerial=snapshot.suspendSerial;
+  // Ready can arrive without a separate hold publication.
+  if(suspendChanged||powerGeneration!==null&&snapshot.generation!==powerGeneration)holdPower(snapshot.generation);
   if(isSharedPowerLifecycleAdmitted(snapshot))resumePower(snapshot.generation);else holdPower(snapshot.generation);
- });
+ },{observeSuspendSerial:true});
  requestSharedPowerLifecycleReconcile('monitor-notice-host');
  const onTheme=()=>{const value=state.inspect().current;if(value)void send(value);};
  window.addEventListener('theme:changed',onTheme);window.addEventListener('ui-settings:changed',onTheme);

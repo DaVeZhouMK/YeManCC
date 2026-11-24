@@ -84,6 +84,8 @@ await check('last intent checkpoint rejects cancellation before IPC and releases
 const view = fs.readFileSync('src/views/SteamView.vue', 'utf8');
 const script = parse(view).descriptor.scriptSetup.content;
 const ast = ts.createSourceFile('SteamView.ts', script, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+const viewCode = shortcutOnly ? '' : compileView();
+function compileView() {
 const functions = new Set(['steamReadVisible', 'detectSteamState', 'acceptSteamState', 'refreshSteamState',
   'queueSteamStateRefresh', 'queueSteamResumeRefresh', 'stopSteamPolling', 'finishSteamPower',
   'cancelSteamPowerWait', 'pollSteamState', 'launch', 'showNotice', 'switchSteamMode', 'toggleSteamPower', 'steamActionText']);
@@ -101,13 +103,14 @@ for (const node of ast.statements) {
   }
 }
 assert.equal(functions.size, 0, 'all exercised functions must be extracted from the real component');
-const viewCode = transformSync(selected.join('\n') + `
+return transformSync(selected.join('\n') + `
 export {launch, toggleSteamPower, refreshSteamState, queueSteamStateRefresh, queueSteamResumeRefresh, cancelSteamPowerWait};
 export function activate(){steamActive=true;}
 export function snapshot(){return {busy:busy.value, checking:steamChecking.value, pending:steamPowerPending,
  target:steamPendingTarget.value, running:running.value, known:steamRunKnown.value, state:steamUiState.value,
  notice:errMsg.value, action:steamActionText()};}
 `, { loader: 'ts', format: 'cjs' }).code;
+}
 const budgetSource = fs.readFileSync('src/bridge/steamReadBudget.ts', 'utf8');
 const budgetModule = { exports: {} };
 vm.runInNewContext(transformSync(budgetSource, { loader: 'ts', format: 'cjs' }).code,
@@ -274,16 +277,16 @@ if(shortcutOnly){
  const moduleCode=(rel)=>{const ast=ts.createSourceFile(rel,shortcutSources[rel],ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);return transformSync(ast.statements.filter(n=>!ts.isImportDeclaration(n)).map(n=>n.getText(ast)).join('\n'),{loader:'ts',format:'cjs'}).code;};
  const runtimeCode=moduleCode(runtimeRel),actionsCode=moduleCode(actionsRel);
  function shortcutFixture(f,path='X:/Steam/steam.exe'){
-  const h={now:100000,apps:[{path,name:'Selected app'}],power:{generation:7,phase:'ready',hardwareWritesAllowed:true},events:new Map(),complete:[],claims:0,releases:0,holds:0,holdSettings:null};
+  const h={now:100000,apps:[{path,name:'Selected app'}],power:{generation:7,phase:'ready',hardwareWritesAllowed:true,suspendSerial:1},events:new Map(),complete:[],claims:0,releases:0,holds:0,settingsReads:0,powerReads:0,holdPower:null,holdSettings:null};
   class Clock extends Date {static now(){return h.now;}}
-  const a={exports:{}};vm.runInNewContext(actionsCode,{module:a,exports:a.exports,Error,Promise,Date:Clock,Map,Set});
+  const a={exports:{}};vm.runInNewContext(actionsCode,{module:a,exports:a.exports,Error,Promise,Date:Clock,Map,Set,AbortController});
   const module={exports:{}},shell={execute:async(file,args)=>{assert.equal(args.length,0);f.shells.push(file);return f.shellResult;}};
   vm.runInNewContext(runtimeCode,{module,exports:module.exports,Error,Promise,
    createControllerShortcutActions:a.exports.createControllerShortcutActions,launchSteamAddon:f.addon,
-   shell,windowApi:{},powerLifecycle:{get:async()=>({...h.power})},
-   on:(name,fn)=>{h.events.set(name,fn);return()=>h.events.delete(name);},onSharedPowerLifecycle:()=>()=>{},
+   shell,windowApi:{getState:async()=>({})},powerLifecycle:{get:async()=>{h.powerReads++;const result={...h.power};if(h.holdPower)await h.holdPower;return result;}},
+   on:(name,fn)=>{h.events.set(name,fn);return()=>h.events.delete(name);},onSharedPowerLifecycle:(fn,options)=>{fn(h.power);h.publishPower=patch=>{const prior=h.power;h.power={...prior,...patch};if(prior.suspendSerial===h.power.suspendSerial||options?.observeSuspendSerial)fn(h.power);};return()=>{};},
    invoke:async(cmd,args)=>{if(cmd==='input.shortcutAction.claim'){h.claims++;return {ok:true};}assert.equal(cmd,'input.shortcutAction.complete');h.complete.push(args.outcome);return {ok:true};},
-   readSettingsSection:async name=>{assert.equal(name,'quickApps');if(h.holdSettings)await h.holdSettings;return {apps:h.apps};},
+   readSettingsSection:async name=>{assert.equal(name,'quickApps');h.settingsReads++;if(h.holdSettings)await h.holdSettings;return {apps:h.apps};},
    tryAcquireQuickAction:()=>{h.holds++;return()=>h.releases++;},
    createFanMirrorActions:()=>({stop(){}}),fanHostLifecycle:{},fanControlActive:{value:false},
    getFanSelectedPreset:()=>'',normalizeFanPresetCurves:()=>({}),saveFanPresetSelection:()=>{},setFanControlActive:()=>{},setFanNavigationDuty:()=>{},
@@ -291,7 +294,7 @@ if(shortcutOnly){
   });
   h.runtime=module.exports.startControllerShortcutRuntime();
   h.submit=(id='one',appPath=path)=>h.events.get('input.shortcutAction')({schemaVersion:1,id,actionId:'app.launchQuickApp',params:{appPath},issuedAtUnixMs:h.now,expiresAtUnixMs:h.now+30000,powerGeneration:7,inputRevision:3});
-  h.invalidate=()=>h.events.get('power.pending')({});h.stop=()=>h.runtime.stop();return h;
+  h.invalidate=()=>h.publishPower({notificationPending:true});h.stop=()=>h.runtime.stop();return h;
  }
  await check('shortcut app: actual request routes selected Steam through the common owner and deduplicates',async()=>{
   const f=fixture(),h=shortcutFixture(f);try{assert.equal(h.submit(),true);for(let i=0;i<100;i++)assert.equal(h.submit(),false);await h.runtime.idle();assert.equal(f.launches,1);assert.equal(f.arguments[0].args.selectedExecutable,'X:/Steam/steam.exe');assert.equal(f.shells.length,0);assert.equal(f.checks,0);assert.equal(h.complete.length,1);assert.equal(h.complete[0].state,'applied');assert.equal(h.holds,1);assert.equal(h.releases,1);}finally{h.stop();}
@@ -310,6 +313,24 @@ if(shortcutOnly){
  });
  await check('shortcut app: invalidation during settings wait retires old request without replay',async()=>{
   const f=fixture(),h=shortcutFixture(f);let release;h.holdSettings=new Promise(r=>release=r);try{h.submit();for(let i=0;i<20;i++)await Promise.resolve();h.invalidate();release();await h.runtime.idle();assert.equal(f.launches+f.shells.length,0);assert.equal(h.complete.length,0);assert.equal(h.releases,1);assert.equal(f.pending(),false);}finally{h.stop();}
+ });
+ await check('shortcut app: merged suspend releases stale power read before the old reply',async()=>{
+  const f=fixture(),h=shortcutFixture(f);let release,settled=false;h.holdPower=new Promise(r=>release=r);
+  const flush=async()=>{for(let i=0;i<80;i++)await Promise.resolve();};
+  try{h.submit();await flush();assert.equal(h.powerReads,1);h.publishPower({suspendSerial:2});h.holdPower=null;
+   h.submit('after');h.events.get('power.pending')?.({generation:7,suspendSerial:1});
+   void h.runtime.idle().then(()=>{settled=true;});await flush();
+   assert.equal(settled,true,'old shortcut read blocked the current request');assert.equal(f.launches,1);assert.equal(h.releases,2);assert.equal(h.complete.length,1);
+   release();await flush();assert.equal(f.launches,1);assert.equal(h.complete.length,1);
+  }finally{release();h.stop();await h.runtime.idle();}
+ });
+ await check('shortcut app: a committed launch keeps the queue across a merged suspend',async()=>{
+  const f=fixture(),h=shortcutFixture(f);let release;f.hold=new Promise(r=>release=r);
+  const flush=async()=>{for(let i=0;i<80;i++)await Promise.resolve();};
+  try{h.submit();await flush();assert.equal(f.launches,1);h.publishPower({suspendSerial:2});h.submit('after');await flush();
+   assert.equal(f.launches,1);assert.equal(h.settingsReads,1);assert.equal(h.releases,0);
+   f.hold=null;release();await h.runtime.idle();assert.equal(f.launches,2);assert.equal(h.complete.length,1);assert.equal(h.complete[0].state,'applied');
+  }finally{release();h.stop();await h.runtime.idle();}
  });
  await check('shortcut app: another public Steam flight rejects overlap and permits a fresh request',async()=>{
   const f=fixture(),h=shortcutFixture(f);let release;f.hold=new Promise(r=>release=r);const first=f.launch({userInitiated:true});try{h.submit();await h.runtime.idle();assert.equal(f.launches,1);assert.equal(h.complete.length,1);assert.equal(h.complete[0].state,'failed');assert.equal(f.shells.length,0);f.hold=null;release();await first;h.submit('two');await h.runtime.idle();assert.equal(f.launches,2);assert.equal(h.complete.length,2);assert.equal(h.complete[1].state,'applied');assert.equal(h.releases,2);}finally{release();h.stop();}

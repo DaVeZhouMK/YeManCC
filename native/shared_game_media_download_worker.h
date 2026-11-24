@@ -1,4 +1,6 @@
 #pragma once
+#include "shared_game_media_playback30_job.h"
+#include "shared_game_media_playback30_deadline.h"
 #include "power_source_channel.h"
 #include "sleep_power_native_task.h"
 #include "steam_source_lease_transfer.h"
@@ -1125,11 +1127,14 @@ inline std::optional<int> backgroundEntrypoint(const fs::path &appRoot) {
     wchar_t **p;
     ~Free() { LocalFree(p); }
   } free{argv};
-  if (argc < 2 || std::wstring_view(argv[1]) != L"--media-background")
+  if(argc<2)return std::nullopt;
+  const auto mode=std::wstring_view(argv[1]);
+  const bool playback=mode==L"--media-playback30";
+  if(!playback&&mode!=L"--media-background")
     return std::nullopt;
-  const bool sourceArguments=argc==13&&std::wstring_view(argv[5])==ymcc::steaminfo::transfer::argument;
-  const int powerSlot=sourceArguments?11:5;
-  if((argc!=7&&!sourceArguments)||std::wstring_view(argv[powerSlot])!=sleeppower::task::argument)return 10;
+  const bool sourceArguments=!playback&&argc==13&&std::wstring_view(argv[5])==ymcc::steaminfo::transfer::argument;
+  const int powerSlot=playback?8:sourceArguments?11:5;
+  if((playback?argc!=10:argc!=7&&!sourceArguments)||std::wstring_view(argv[powerSlot])!=sleeppower::task::argument)return 10;
   wchar_t *end = nullptr;
   const auto parentPid = wcstoul(argv[2], &end, 10);
   if (!parentPid || !end || *end)
@@ -1164,13 +1169,37 @@ inline std::optional<int> backgroundEntrypoint(const fs::path &appRoot) {
       if(!identity.source)return 11;
     }
     ymcc::powerSource::channel::Binding powerBinding(parentPower);
-    if (!Queue(root).allowed(token))
+    if (!playback&&!Queue(root).allowed(token))
       return 11;
-    SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_BEGIN);
+    // The converter retains Idle CPU and EcoQoS. Process background I/O and
+    // memory priorities can starve the Media Foundation MP4 finalizer.
+    if(!playback)SetPriorityClass(GetCurrentProcess(), PROCESS_MODE_BACKGROUND_BEGIN);
     // Windows background mode may report/restore Normal for the class.
     // Reassert Idle after entering that mode, preserving its IO/memory hints.
     SetPriorityClass(GetCurrentProcess(), IDLE_PRIORITY_CLASS);
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
+    if(playback){
+      const Json claim={{"key",utf8(argv[5])},{"id",utf8(argv[6])},{"revision",utf8(argv[7])}};
+      if(!safeKey(stringField(claim,"key"))||!safeKey(stringField(claim,"id"))||!safeKey(stringField(claim,"revision")))return 10;
+      const auto source=ymcc::powerSource::snapshot();
+      const auto deadline=GetTickCount64()+playback30::workerHardMs;
+      uint64_t checkedAt=0;
+      const auto check=[&](bool fresh){
+        const auto tick=GetTickCount64();
+        if(tick>=deadline)throw std::runtime_error("media-playback30-timeout");
+        if(WaitForSingleObject(sharedPermit->event(),0)!=WAIT_TIMEOUT||WaitForSingleObject(parent,0)!=WAIT_TIMEOUT)
+          throw std::runtime_error(sleeppower::task::paused);
+        if(!fresh&&checkedAt&&tick-checkedAt<100)return;
+        checkedAt=tick;
+        const auto current=ymcc::powerSource::snapshot();SYSTEM_POWER_STATUS status{};
+        if(!sharedPermit->current()||!source.known||source.ac!=1||!current.known||current.ac!=1||
+           current.revision!=source.revision||!ymcc::powerSource::read(status)||status.ACLineStatus!=1||status.SystemStatusFlag==1)
+          throw std::runtime_error(sleeppower::task::paused);
+      };
+      Store store(root);
+      try{return 20+static_cast<int>(playback30::prepare(store,claim,token,[&]{check(false);},[&]{check(true);}));}
+      catch(const std::exception& e){return std::string_view(e.what())==sleeppower::task::paused?17:24;}
+    }
     return Worker(root, token, parent,{},std::move(identity),{},std::move(sharedPermit)).run();
   } catch (...) {
     return 15;

@@ -115,7 +115,7 @@ namespace ymcc::desktophud {struct CarrierTestAccess {
   WNDCLASSW cls{};cls.hInstance=GetModuleHandleW(nullptr);cls.lpfnWndProc=Carrier::proc;cls.lpszClassName=L"YMCC_Storm_ActualHud";
   if(!RegisterClassW(&cls)&&GetLastError()!=ERROR_CLASS_ALREADY_EXISTS)throw std::runtime_error("HUD class");
   c.current=s;s->hwnd=CreateWindowExW(hudinput::requiredExStyle|WS_EX_TOPMOST,cls.lpszClassName,L"",WS_POPUP|WS_DISABLED,0,0,320,100,nullptr,nullptr,cls.hInstance,s.get());
-  need(s->hwnd!=nullptr,"actual HUD HWND");s->viewportKey=Carrier::viewportInfo(*s).dump();c.hook();c.refresh(s,true);return s->hwnd;
+  need(s->hwnd!=nullptr,"actual HUD HWND");s->lastViewport=Carrier::readViewport(*s);c.hook();c.refresh(s,true);return s->hwnd;
  }
  static void observed(HWND target){Carrier::observed(sharedHook(),EVENT_SYSTEM_FOREGROUND,target,OBJID_WINDOW,CHILDID_SELF,GetCurrentThreadId()+1,0);}
  static HWINEVENTHOOK sharedHook(){return Carrier::sharedHooks.empty()?nullptr:Carrier::sharedHooks.front();}

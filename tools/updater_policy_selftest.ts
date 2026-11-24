@@ -39,6 +39,7 @@ const root = process.cwd();
 const native = readFileSync(resolve(root, 'native/main.cpp'), 'utf8');
 const release = readFileSync(resolve(root, 'tools/package-release.ps1'), 'utf8');
 const parentMaintenance = readFileSync(resolve(root, 'native/module_package_maintenance.ps1'), 'utf8');
+const installRecovery = readFileSync(resolve(root, 'native/update_install_recovery.ps1'), 'utf8');
 for (const token of ['function Stop-YmccUpdaterParent', '$null=$process.Handle', 'Get-YmccUpdaterProcessIdentity -Process $process', '$identity.Creation -cne $CreationFileTime', 'UPDATE_PARENT_IDENTITY_CHANGED', '$process.CloseMainWindow()', '$process.WaitForExit($GraceMilliseconds)', '$process.Kill()', '$process.WaitForExit($ForceMilliseconds)', 'UPDATE_PARENT_EXIT_TIMEOUT']) {
   assert.ok(parentMaintenance.includes(token), `authenticated parent shutdown policy missing: ${token}`);
 }
@@ -47,6 +48,7 @@ const fanHostInstaller = readFileSync(resolve(root, 'PowerControl/fan-host/insta
 const fanHostVerifier = readFileSync(resolve(root, 'tools/verify-r5v9-fan-host-payload.ps1'), 'utf8');
 const fanHostPayloadManifest = JSON.parse(readFileSync(resolve(root, 'PowerControl/fan-host/YeManFanHost.payload.json'), 'utf8').replace(/^\uFEFF/, ''));
 const workflow = readFileSync(resolve(root, '.github/workflows/release.yml'), 'utf8');
+const candidateAction = readFileSync(resolve(root, '.github/actions/release-build/action.yml'), 'utf8');
 assert.ok(workflow.includes('Release/Packages/YeManCC.zip'));
 assert.ok(workflow.includes("$_.name -eq 'YeManCC-Complete.zip'"), 'CI must reject the incorrect alternate asset name');
 const yeman = readFileSync(resolve(root, 'src/bridge/yeman.ts'), 'utf8');
@@ -67,15 +69,13 @@ for (const token of [
   'Get-UpdateLayoutRoots',
   'return @($definitions.ToArray())',
   'YeManCC\\\\CustomSteamLibrary',
-  'Register-AdditionalLayoutRootsForRollback',
+  'Test-AdditionalLayoutRootPayloads',
   'Copy-AdditionalLayoutRootsChecked',
   'CustomSteamLibrary',
   '$customSteamLibrarySource',
   'Get-CustomManagedPaths',
-  'Register-CustomManagedFilesForRollback',
   'Copy-CustomManagedFilesChecked',
   'Get-GreenChildManagedPaths',
-  'Register-GreenChildManagedFiles',
   'Copy-GreenChildManagedFilesChecked',
   'Invoke-CustomSteamLibraryHealthCheck',
   'Close-CustomSteamLibraryHealthProcess',
@@ -89,7 +89,7 @@ for (const token of [
   'g_updateOperationMtx',
   'Stop-ResidentProcesses',
   'Get-ResidentUpdaterProcesses',
-  '$process.Kill(); $process.WaitForExit(15000)',
+  '$null=$process.Handle; $process.Kill()',
   'could not be force-closed before update',
   'YeManFanHost',
   'YeManInputHost',
@@ -103,15 +103,15 @@ for (const token of [
   'replace',
   'unable to verify the CustomSteamLibrary process executable path',
   'declared update root process path',
-  'phase\\":\\"committed',
+  "Write-YmccInstallState 'committed'",
   '$indexed = @($manifest.fileIndex)',
   'CustomSteamLibrary fileIndex SHA256 mismatch',
   'Stop-CustomSteamLibraryProcesses',
   '$parentExitMode = Stop-YmccUpdaterParent $parentPid $exePath $parentCreationFileTime',
   'f << ymcc::modulepackage::maintenanceScript()',
-  'Register-TreeForRollback',
+  'Copy-YmccManagedTree',
   'Restore-OrdinaryFiles',
-  '$rollbackAddedFiles',
+  '$ordinaryFileLedger',
   'Remove-Item -LiteralPath $rollbackRoot -Recurse -Force',
   'elseif ($rollbackSucceeded)',
   'UPDATE_HTTP_IO_TIMEOUT_MS = 120000',
@@ -132,7 +132,7 @@ for (const token of [
   '$handshakeTimeoutSeconds = 180',
   '$parentExitTimeoutSeconds = 180',
   '$recoveryProcess = Start-Process',
-  'Failed to clear stale update staging',
+  'staging-" + ymcc::updateconfig::suffix()',
   'helperScriptWritten',
   '下载中断，5秒后从 ',
   '下载失败，5秒后重新尝试第 ',
@@ -158,10 +158,11 @@ assert.ok(settings.includes("['available', 'failed', 'interrupted'].includes(upd
 assert.ok(settings.includes("updateSnapshot.stage === 'install' ? '重试安装'"), 'UI must distinguish install retry from download retry');
 
 assert.ok(native.includes("$playerBlacklistPath = Join-Path $pcDir 'Sleep\\\\player-blacklist.txt'"));
-assert.ok(native.includes("$playerBlacklistRollback = Join-Path $rollbackFiles 'PowerControl\\\\Sleep\\\\player-blacklist.txt'"));
-assert.ok(native.includes('player blacklist preservation'));
+assert.ok(native.includes("$powerControlExclusions += 'Sleep\\\\player-blacklist.txt'"), 'preserve user blacklist without rewriting it');
 assert.ok(native.includes("$systemBlacklistSource = Join-Path $powerControlSource 'Sleep\\\\system-blacklist.txt'"));
-assert.ok(native.includes('system blacklist update'));
+assert.ok(native.includes('system blacklist missing from update package'));
+assert.ok(installRecovery.includes('[IO.File]::Replace($temporary,$target,[NullString]::Value)'), 'replace shipped files atomically');
+assert.ok(installRecovery.includes("Add-YmccInstallIssue 'old-file-backup'"), 'old backup failure must not block a replacement attempt');
 assert.equal(native.includes('SG_GAME_LEGACY_BLACKLIST'), false, 'legacy exclude.txt constant must be removed');
 assert.equal(native.includes('sgMigrateLegacyGameBlacklist'), false, 'legacy exclude.txt migration must be removed');
 
@@ -225,9 +226,10 @@ assert.ok(native.includes('HC runtime manifest binding SHA256 mismatch'));
 assert.ok(release.includes('fanHostPayload = [ordered]@{'));
 assert.ok(release.includes('runtimeManifestSha256 = Get-Sha256'));
 assert.ok(native.includes('expectedFanHostV2LhmSha256'));
-assert.ok(workflow.includes("$expectedTag = \"v$version\""));
-assert.ok(workflow.includes('$requiredRoots = @($layoutManifest.requiredRoots'));
-assert.ok(workflow.includes('foreach ($definition in @($layoutManifest.roots))'));
+assert.ok(workflow.includes('uses: ./.github/actions/release-build'));
+assert.ok(candidateAction.includes('$tag = "v$version"') && candidateAction.includes('$env:GITHUB_REF_NAME -cne $tag'));
+assert.ok(candidateAction.includes('$requiredRoots = @($layoutManifest.requiredRoots'));
+assert.ok(candidateAction.includes('foreach ($definition in @($layoutManifest.roots))'));
 assert.ok(workflow.includes('Published asset SHA-256 mismatch'));
 assert.ok(workflow.includes('Refusing to replace main/version.json'));
 assert.ok(workflow.includes('name: Commit version manifest back to main via API'));

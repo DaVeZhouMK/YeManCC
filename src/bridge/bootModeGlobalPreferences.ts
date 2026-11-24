@@ -49,9 +49,7 @@ const paths: Array<{ from: string[]; to: string[]; booleanOnly?: boolean }> = [
   { from: ['ui', 'steamWallpaperBackgroundDownload'], to: ['steamWallpaper', 'download'] },
   { from: ['ui', 'steamWallpaperDownloadCpuThreshold'], to: ['steamWallpaper', 'cpuThreshold'] },
   { from: ['extensions', 'deckySidebar', 'enabled'], to: ['steamDecky', 'enabled'], booleanOnly: true },
-  { from: ['sleep', 'autoWakeRecovery'], to: ['sleep', 'steamAutoRecovery'], booleanOnly: true },
   { from: ['rtss', 'monitorOutput'], to: ['monitor', 'preferences'] },
-  { from: ['sleep'], to: ['sleep', 'config'] },
   { from: ['screenTouchpads', 'profiles'], to: ['touch', 'profiles'] },
 ];
 

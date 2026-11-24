@@ -9,6 +9,7 @@
 #include "decky_update_recovery.h"
 #include "decky_sidebar_session.h"
 #include "decky_sidebar_diagnostics.h"
+#include "steam_wallpaper_foreground.h"
 #include "json.hpp"
 #include <iostream>
 #include <fstream>
@@ -40,16 +41,19 @@ static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& out){
  return g_powerLifecycle==PowerLifecycle::Ready;
 }
 static std::atomic<unsigned> probes{0},helpers{0},modeReads{0};
-static unsigned failures=0,checks=0,consumerWakes=0;
+static unsigned failures=0,checks=0,consumerWakes=0,connectionWakes=0;
 static HANDLE helperLease=nullptr;
 static struct { HANDLE confirmAndIdle(const Session&,bool,bool,std::nullptr_t = nullptr,const ymcc::sleeppower::SharedPowerV1* = nullptr){++helpers;HANDLE duplicate=nullptr;DuplicateHandle(GetCurrentProcess(),helperLease,GetCurrentProcess(),&duplicate,0,FALSE,DUPLICATE_SAME_ACCESS);return duplicate;} } g_steamCssUse;
 static struct {
  std::mutex mutex;json state;
  bool requestRefresh(const Session&,bool=true){return true;}
+ bool requestDeckyHealthRefresh(const Session& session){return requestRefresh(session,false);}
  bool requestAdmissionRefresh(const Session& session,bool (*satisfied)(const Session&,const json&,bool)){return satisfied(session,current(),false)||requestRefresh(session);}
  void set(json value){std::lock_guard lock(mutex);state=std::move(value);}
  json current(){std::lock_guard lock(mutex);return state;}
- json snapshot(const Session&,ymcc::steamui::ModeCacheMiss* miss=nullptr){if(miss)*miss={};++modeReads;return current();}
+ json snapshot(const Session&,ymcc::steamui::ModeCacheMiss* miss=nullptr,void* =nullptr,std::uint64_t* publication=nullptr,ULONGLONG* observationTick=nullptr,unsigned long long* peerRevision=nullptr){
+    if(miss)*miss={};if(publication)*publication=0;if(observationTick)*observationTick=0;if(peerRevision)*peerRevision=0;++modeReads;return current();
+ }
  json snapshot(const Session& session,const ymcc::sleeppower::SharedPowerV1&){return snapshot(session);}
 } g_steamModeObserver;
 static struct {
@@ -57,34 +61,75 @@ static struct {
  ymcc::deckysidebar::State snapshot(){return state;}
  bool exitFenced()const{return false;}
  unsigned long long connectionEvidenceEpoch()const{return 1;}
- bool requestConnectionCheck(){return true;}
- bool requestLaunchAdmissionRefresh(){++consumerWakes;return true;}
+ bool requestConnectionCheck(bool=false){++connectionWakes;return true;}
+ bool requestLaunchAdmissionRefresh(bool=false,ymcc::deckysidebar::AdmissionRefreshReceipt* = nullptr){++consumerWakes;return true;}
 } g_deckySidebarRuntime;
-static struct {ymcc::steamcss::Runtime* actual=nullptr;void observeMode(const Session& s,const ymcc::steamcss::ModeSample& m){if(actual)actual->observeMode(s,m);}} g_steamCssGuard;
+static struct {ymcc::steamcss::Runtime* actual=nullptr;void observeMode(const Session& s,const ymcc::steamcss::ModeSample& m,bool stable=false){if(actual)actual->observeMode(s,m,stable);}} g_steamCssGuard;
 static void deckySidebarDiagnostic(const char*,const json&,bool=false){}
-static struct {bool connected=false;json status(){return {{"active",true},{"connected",connected}};}} g_deckyMirrorBroker;
+static struct {bool connected=false;std::optional<ULONGLONG> authenticatedPeerTick(unsigned long long* revision=nullptr){if(revision)*revision=connected?1:0;return connected?std::optional<ULONGLONG>{GetTickCount64()}:std::nullopt;}} g_deckyMirrorBroker;
 static void deckySidebarPost(const char*,const json&){}
 static void deckySidebarSessionDiagnostic(const Session&,const char*){}
-// Adjacent consumers are inert ports here; this fixture proves startup/CSS admission only.
+static void deckySidebarAdmissionWakeDiagnostic(ymcc::deckysidebar::AdmissionRefreshReceipt){}
+// Only the foreground mailbox is substituted. The lease owner is production code.
+static ymcc::steamwallpaperForeground::Authority wallpaperOwner("fixture");
 static unsigned wallpaperWakeSignals=0,managedModeSignals=0;
-static void steamWallpaperForegroundSignal(){++wallpaperWakeSignals;}
+[[maybe_unused]] static void steamWallpaperForegroundWake(){++wallpaperWakeSignals;}
+[[maybe_unused]] static void steamWallpaperForegroundSignal(){wallpaperOwner.revoke();steamWallpaperForegroundWake();}
 static void deckySidebarResumeManagedMode(const Session&){++managedModeSignals;}
 namespace ymcc::steamcss {inline Result fixtureProbeBackend(){++probes;return {nullptr,0,"missing",{},false};}}
-// Only external process IO is replaced. The four lambdas below are extracted
-// exactly from production main.cpp, not rewritten as a parallel policy.
+static std::atomic<bool> g_steamWallpaperForegroundPending{false};
+static json foregroundProof;
+static unsigned foregroundReads=0;
+namespace ymcc::media::steamDemand {static json foreground(){++foregroundReads;return foregroundProof;}}
+struct UiCostIpcScope {explicit UiCostIpcScope(const char*){}};
+static bool fixtureViewPresent=false;
+static HRESULT fixturePostResult=S_OK;
+static std::vector<json> fixturePosts,fixturePostFailures;
+static struct {
+ HRESULT PostWebMessageAsJson(const wchar_t* wire){fixturePosts.push_back(json::parse(std::wstring(wire)));return fixturePostResult;}
+} fixtureView;
+static auto ipc_view_for_child(int childId){return childId==0&&fixtureViewPresent?&fixtureView:nullptr;}
+static std::wstring U2W(const std::string& value){return {value.begin(),value.end()};} // ASCII fixture envelopes
+static void appendNativeLifecycleLog(const char* event,const json& data){fixturePostFailures.push_back({{"event",event},{"data",data}});}
+// Run the extracted main.cpp callbacks with in-memory sources and process IO.
 #define probeBackend fixtureProbeBackend
 #include "production-startup-callbacks.h"
 #undef probeBackend
 static void check(bool value,const char* label){++checks;if(!value)++failures;std::cout<<(value?"PASS ":"FAIL ")<<label<<'\n';}
+static void checkWallpaperDelivery(){
+ const auto wake=[] {g_steamWallpaperForegroundPending=true;steamWallpaperForegroundPublish();};
+ const auto lastIs=[](const json& proof){return !fixturePosts.empty()&&fixturePosts.back()==json{{"event","gameMedia.steamForegroundChanged"},{"data",proof}};};
+ foregroundProof={{"current",true},{"revision",1}};
+ wake();
+ check(fixturePosts.empty()&&!g_steamWallpaperForegroundPending&&foregroundReads==1,"missing main WebView returns without posting or scheduling another wake");
+ fixtureViewPresent=true;wake();
+ check(fixturePosts.size()==1&&lastIs(foregroundProof),"next wake delivers the same proof after the main WebView becomes available");
+ auto before=fixturePosts.size();for(unsigned i=0;i<64;++i)wake();
+ check(fixturePosts.size()==before,"successful foreground notification is deduplicated during 64 repeated wakes");
+ foregroundProof["revision"]=2;fixturePostResult=E_FAIL;wake();
+ check(fixturePosts.size()==before+1&&lastIs(foregroundProof)&&fixturePostFailures.size()==1&&
+       fixturePostFailures.back()["data"].value("eventName",std::string{})=="gameMedia.steamForegroundChanged"&&
+       !g_steamWallpaperForegroundPending,"rejected foreground post keeps bounded IPC failure evidence and does not schedule a retry");
+ fixturePostResult=S_OK;before=fixturePosts.size();wake();
+ check(fixturePosts.size()==before+1&&lastIs(foregroundProof),"next existing wake resends the same proof after the post was rejected");
+ foregroundProof["revision"]=3;fixturePostResult=E_FAIL;wake();
+ foregroundProof={{"current",false},{"revision",4}};fixturePostResult=S_OK;before=fixturePosts.size();wake();wake();
+ check(fixturePosts.size()==before+1&&lastIs(foregroundProof),"new revocation supersedes failed active proof and is deduplicated after acceptance");
+}
 template<class F>static bool until(F condition){const auto end=GetTickCount64()+2500;while(!condition()){if(GetTickCount64()>=end)return false;Sleep(2);}return true;}
 static void signal(const Session& s,const char* mode,const char* epoch="document-a:1",bool loaded=true,bool update=false){
  json state={{"known",std::string(mode)!="unknown"},{"running",true},{"mode",mode},{"pid",s.pid},{"birth",std::to_string(s.created)},{"modeEpoch",epoch},{"deckyFrontendLoaded",loaded}};
  if(update)state["deckyUpdateResidue"]={{"protocol",1},{"active",true},{"bridgePresent",true},{"frontendBuildId",std::string(64,'a')}};
- g_steamModeObserver.set(state);productionModeChanged(s,state);
+ const bool stable=g_steamModeObserver.current()==state;
+ g_steamModeObserver.set(state);
+ // The shared observer publishes Big Picture to CSS before Decky delivery.
+ if(state.at("mode")=="bigpicture")productionCssBigPicture(s,state,{},stable);
+ if(!stable&&state.at("known")==true)productionModeChanged(s,state);
 }
 int main(int argc,char** argv){try{
  if(argc!=2)throw std::runtime_error("isolated artifact directory required");
  const std::filesystem::path out=argv[1];std::filesystem::create_directories(out);
+ checkWallpaperDelivery();
  Session old{L"c:\\inert-steam",1,7,90},newer{L"c:\\inert-steam",2,7,110};
  helperLease=CreateEventW(nullptr,TRUE,FALSE,nullptr);if(!helperLease)throw std::runtime_error("fixture event unavailable");
  ymcc::steamcss::Config cssGuard;productionCssCallbacks(cssGuard);const auto valid=[] {return true;};
@@ -93,6 +138,56 @@ int main(int argc,char** argv){try{
  auto first=cssGuard.ensure({},old,valid);check(first.phase=="missing"&&probes==1,"already running Big Picture permits a CSS-only probe even without a manual Steam startup grant");
  auto ticket=cssGuard.confirmIdle(old,true,true);check(ticket&&helpers==1,"already running Big Picture can apply enabled appearance once");if(ticket)CloseHandle(ticket);
  auto sidebar=productionSidebarAdmission();check(!sidebar.allowed&&!sidebar.retryable,"ordinary startup preserves the already-loaded-document no-reinjection boundary");
+ {
+  using ymcc::steamwallpaperForeground::Facts;
+  Facts facts;facts.known=facts.physical=facts.enabled=facts.ready=true;
+  facts.pid=facts.steamPid=old.pid;facts.birth=facts.steamBirth=old.created;
+  facts.window=100;facts.power=1;facts.modeRevision=1;facts.modeEpoch="document-a:1";
+  const auto firstProof=wallpaperOwner.observe(facts,wallpaperOwner.ticket());
+  auto health=g_steamModeObserver.current();
+  const auto before=wallpaperWakeSignals;
+  const auto activeTicket=wallpaperOwner.ticket();
+  health["deckyClientVerified"]=false;productionModeChanged(old,health);
+  health["deckyClientVerified"]=true;productionModeChanged(old,health);
+  const auto sameProof=wallpaperOwner.observe(facts,wallpaperOwner.ticket());
+  check(wallpaperWakeSignals==before+2&&wallpaperOwner.ticket()==activeTicket&&sameProof==firstProof&&sameProof.value("current",false),
+      "Decky health-only change wakes the wallpaper reader without invalidating the live lease");
+  ++facts.suspendSerial;
+  const auto nextSuspendProof=wallpaperOwner.observe(facts,activeTicket);
+  const auto nextSuspendTicket=wallpaperOwner.ticket();
+  check(nextSuspendTicket!=activeTicket&&nextSuspendProof.value("current",false)&&
+      nextSuspendProof.at("ownerEpoch")!=sameProof.at("ownerEpoch"),"same-generation suspend scope retires the old wallpaper lease");
+  check(!wallpaperOwner.observe(facts,activeTicket).value("current",true),"old in-flight read cannot recapture the new scope");
+  check(wallpaperOwner.observe(facts,nextSuspendTicket)==nextSuspendProof&&wallpaperOwner.ticket()==nextSuspendTicket,
+      "duplicate suspend scope keeps the new wallpaper lease");
+  const auto previous=wallpaperOwner.ticket();
+  facts.modeRevision=2;facts.modeEpoch="document-b:1";
+  check(wallpaperOwner.observe(facts,previous).at("ownerEpoch")!=sameProof.at("ownerEpoch"),"new verified document retires the previous lease");
+  const auto beforeBlur=wallpaperOwner.ticket();steamWallpaperForegroundSignal();
+  check(!wallpaperOwner.observe(facts,beforeBlur).value("current",true),"physical foreground invalidation rejects an in-flight read");
+  facts.physical=false;
+  check(!wallpaperOwner.observe(facts,wallpaperOwner.ticket()).value("current",true),"lost foreground revokes wallpaper demand");
+  facts.physical=true;
+  const auto oldSessionProof=wallpaperOwner.observe(facts,wallpaperOwner.ticket());
+  facts.steamPid=newer.pid;facts.steamBirth=newer.created;
+  check(wallpaperOwner.observe(facts,wallpaperOwner.ticket()).at("ownerEpoch")!=oldSessionProof.at("ownerEpoch"),"new Steam session cannot reuse old wallpaper lease");
+ }
+ {
+  auto mode=g_steamModeObserver.current();
+  // A blocked/no-peer session can still deliver a closed-socket observation.
+  mode["deckyBackendConnected"]=false;mode["deckyBackendState"]="socket-closed";
+  g_steamModeObserver.set(mode);
+  const auto wallpaperBefore=wallpaperWakeSignals,healthBefore=connectionWakes,admissionBefore=consumerWakes;
+  for(unsigned i=0;i<64;++i)productionStableBigPicture(old);
+  check(wallpaperWakeSignals==wallpaperBefore,"stable Big Picture with no authenticated peer posts no wallpaper wake");
+  check(connectionWakes==healthBefore+64&&consumerWakes==admissionBefore+64,"no wallpaper peer does not gate Decky health or admission delivery");
+  g_deckyMirrorBroker.connected=true;
+  productionStableBigPicture(old);
+  check(wallpaperWakeSignals==wallpaperBefore+1,"the connected peer still receives the stable wallpaper wake");
+  g_deckyMirrorBroker.connected=false;
+  productionStableBigPicture(old);
+  check(wallpaperWakeSignals==wallpaperBefore+1,"detaching the peer stops only the passive wallpaper wake");
+ }
  // General policy: Steam may predate YMCC, offline/FSE/manual-origin are
  // not prerequisites. Loaded/foreign/unknown pages still cannot be injected.
  signal(old,"bigpicture","global-document:1",false);
@@ -218,6 +313,6 @@ int main(int argc,char** argv){try{
  g_steamSettingsObserver.session=newer;signal(newer,"bigpicture","new-steam:2",false);
  check(productionSidebarAdmission().allowed,"real account readiness immediately restores existing permitted startup");
  CloseHandle(helperLease);helperLease=nullptr;
- const json receipt={{"ok",failures==0},{"checks",checks},{"failures",failures},{"actualSteamActions",0},{"actualCssLaunches",0},{"source","Five exact production callbacks plus actual CSS worker; only external IO replaced"}};
+ const json receipt={{"ok",failures==0},{"checks",checks},{"failures",failures},{"actualSteamActions",0},{"actualCssLaunches",0},{"source","Exact startup callbacks, wallpaper publisher and JSON post; actual CSS worker and wallpaper authority with controlled inputs and receiver"}};
  std::ofstream(out/L"result.json")<<receipt.dump(2)<<'\n';std::cout<<receipt.dump()<<'\n';return failures?1:0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 2;}}

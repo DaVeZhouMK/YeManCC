@@ -18,6 +18,7 @@ static BOOL fixtureDestroy(HWND h){if(destroyFailures){--destroyFailures;failedD
 #include "shortcut_window_toggle.h"
 #include "window_taskbar_layout.h"
 #include "sleep_power_dispatch.h"
+#include "sleep_power_observation.h"
 #undef RemoveWindowSubclass
 using json=nlohmann::json;
 static ymcc::gameoverlay::Carrier g_gameOverlay;
@@ -82,10 +83,13 @@ static void focusShortcutInputEvidence(const char*,std::uint64_t,bool){}static v
 static std::atomic<bool> g_focusIsolationPrepared=false;
 static std::atomic<ULONGLONG> g_focusLightProofNotBefore=0;
 static std::pair<std::uint64_t,std::uint64_t> g_focusIsolationPowerPeriod;
+static std::pair<std::uint64_t,std::uint64_t> g_focusSessionPowerPeriod;
 static unsigned focusPowerReturns=0;
 static void focusPrepareIsolationBeforeShow(){g_focusIsolationPrepared=true;g_focusIsolationPowerPeriod={sharedPower.generation,sharedPower.suspendSerial};}
 static void focusEndIsolationOnUi(){g_focusIsolationPrepared=false;}
-static void focusClearSession(){++focusPowerReturns;g_focusSession={};g_gameOverlay.end("controller-focus-return");}
+static void focusClearSession(){++focusPowerReturns;g_focusSession={};g_focusSessionPowerPeriod={};g_gameOverlay.end("controller-focus-return");}
+static bool focusLosslessSharedPowerChanged(const ymcc::sleeppower::SharedPowerV1&){return true;}
+static bool taskViewSharedPowerChanged(const ymcc::sleeppower::SharedPowerV1&){return true;}
 static void focusBeginReturnToPreviousWindow(ULONGLONG){ShowWindow(g_hwnd,SW_HIDE);}
 static bool focusLightNoGameQualified(ULONGLONG){return false;}static bool focusLightIsolationCurrent(){return true;}
 static json nativeSummonCandidateSnapshot(const FocusTargetSnapshot&,std::uint64_t generation){return{{"generation",generation}};}
@@ -110,9 +114,12 @@ static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& value){
 static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& value){return ymcc::sleeppower::powerAdmitted(sharedPower)&&ymcc::sleeppower::samePowerRevocation(value,sharedPower);}
 struct MonitorPort{unsigned deliveries=0;void sharedPowerChanged(){++deliveries;}};static MonitorPort g_desktopMonitorHud,g_monitorNoticeCarrier;
 static std::mutex g_nativeMonitorMx;struct MonitorCvPort{unsigned notifications=0;void notify_all(){++notifications;}};static MonitorCvPort g_nativeMonitorCv;
+static std::atomic<bool> g_nativeMonitorPowerWaiting{false};
 static void monitorSnapshotInvalidate(){++monitorInvalidations;}
 static void inputCaptureResumeSensorsForPower(){++otherPowerConsumers;}
 static bool msiNativeForegroundSharedPowerReady(const ymcc::sleeppower::SharedPowerV1&){++otherPowerConsumers;return true;}
+static bool msiNativeForegroundSharedPowerBoundary(const ymcc::sleeppower::SharedPowerV1&){return true;}
+static bool radialOverlaySharedPowerChanged(const ymcc::sleeppower::SharedPowerV1&){return true;}
 static bool sharedSleepWakeClassified(std::uint64_t){return true;}static bool sgSleepRetryActive(){return false;}
 namespace ymcc::sleeppower {
 struct WakePort {struct Snapshot{std::uint64_t revision=1;};void ready(std::uint64_t){}Snapshot snapshot()const{return {};}};static WakePort nativeWakeFacts;
@@ -128,8 +135,16 @@ static void sleepPowerRedeliverCommitted(HWND){++otherPowerConsumers;}
 enum class FanReadyDelivery { Idle, Settled, Deferred };
 static std::uint64_t currentFanPowerGeneration(){return sharedPower.generation;}
 static FanReadyDelivery fanHostScheduleEmergencyResume(std::uint64_t){++otherPowerConsumers;return FanReadyDelivery::Settled;}
+static bool fanHostPhysicalWakeCurrent(){return false;}
+static FanReadyDelivery fanHostPublishPhysicalWake(std::uint64_t,bool){return FanReadyDelivery::Idle;}
 static void steamAppearancePublicReady(unsigned long long)noexcept{++otherPowerConsumers;}
+static bool nativeAyaLightingPublicReady(const ymcc::sleeppower::SharedPowerV1&){return true;}
+static bool projectPowerSourceRecovery(HWND,const ymcc::sleeppower::SharedPowerV1&){return true;}
+static bool deckySidebarRecheckPublicReady(const ymcc::sleeppower::SharedPowerV1&){return true;}
+static bool steamWallpaperForegroundSharedPowerChanged(const ymcc::sleeppower::SharedPowerV1&){return true;}
 static void sgOfferStartupResume(const ymcc::sleeppower::SharedPowerV1&){++otherPowerConsumers;}
+static void sgNotifyParkedWakeGameRecovery(){}
+static bool cpuUvTrialPowerChanged(){return false;}
 static json sharedPowerLifecycleSnapshot(){return {{"known",ymcc::sleeppower::powerObservationKnown(sharedPower)},
  {"hardwareWritesAllowed",ymcc::sleeppower::powerAdmitted(sharedPower)},{"generation",sharedPower.generation},{"phase",sharedPower.phase}};}
 #include "public-power-consumers.inc"

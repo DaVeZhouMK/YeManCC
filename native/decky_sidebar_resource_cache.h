@@ -73,6 +73,7 @@ inline Json readDocument(const std::filesystem::path& path,std::size_t limit){
     });
 }
 inline bool schemaOne(const Json& value){return value.is_object()&&value.contains("schemaVersion")&&value["schemaVersion"].is_number_integer()&&value["schemaVersion"]==1;}
+struct NoCacheNote { constexpr void operator()(const char*) const noexcept {} };
 
 class Cache {
     std::filesystem::path home_,root_;
@@ -216,7 +217,8 @@ public:
         for(const auto& entry:manifest_.at("files"))entries_.push_back({utf8Path(entry.at("path").get<std::string>()),entry.at("bytes").get<std::uintmax_t>(),entry.at("sha256").get<std::string>()});
         require(entries_.size()==7,"resource-cache-contract-invalid");
     }
-    Json run(){
+    template<class Note=NoCacheNote> Json run(const Note& note={}){
+        const auto notify=[&](const char* step) noexcept {try{note(step);}catch(...){}};
         Json result={{"resourceCacheAvailable",false},{"resourcesRepaired",0u},{"resourceRepairAttempted",false}};
         try{
             require(options_.enabled,"resource-cache-disabled");
@@ -226,6 +228,7 @@ public:
             require(lock.value!=INVALID_HANDLE_VALUE,"resource-cache-busy");BY_HANDLE_FILE_INFORMATION info{};
             require(GetFileInformationByHandle(lock.value,&info)&&!(info.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)),"resource-cache-unsafe-path");
             ownStaging();
+            notify("verify");
             auto slots=std::array<Slot,2>{readSlot(L"a"),readSlot(L"b")};
             struct Repair {std::size_t index;std::filesystem::path source;std::string before;};std::vector<Repair> pending;
             for(std::size_t i=0;i<entries_.size();++i){
@@ -239,22 +242,33 @@ public:
                 require(!source.empty(),"resource-cache-unavailable");pending.push_back({i,source,observed(live)});
             }
             if(!pending.empty()){
+                notify("repair");
                 require(mayRepair(),"resource-cache-write-cancelled");PortLease port(options_.backendPort);require(port.acquired(),"resource-cache-backend-in-use");
                 for(const auto& repair:pending){const auto& entry=entries_[repair.index];copyAtomic(repair.source,home_/entry.relative,entry,true,repair.before);result["resourcesRepaired"]=result.at("resourcesRepaired").get<unsigned>()+1;}
             }
             require(current(),"resource-cache-write-cancelled");
+            const auto completeSlotAvailable=[&]{
+                for(const auto& slot:slots)if(same(slot)&&slot.metadata.value("complete",false)){
+                    bool available=true;
+                    for(std::size_t i=0;i<entries_.size();++i){
+                        if(!matches(slot.root/(std::to_wstring(i)+L".bin"),entries_[i])){available=false;break;}
+                    }
+                    if(available){require(current(),"resource-cache-write-cancelled");return true;}
+                }
+                return false;
+            };
+            // With no repairs and a fully checked cache hit, the live sweep
+            // above is sufficient. Keep fresh live checks before any reseed
+            // and after any repair; a hit never grants a subsequent write.
+            if(pending.empty()&&completeSlotAvailable()){result["resourceCacheAvailable"]=true;return result;}
             for(const auto& entry:entries_)require(matches(home_/entry.relative,entry),"resource-cache-live-verification-failed");
-            // Reuse a completed matching slot without rewriting it. Hashes are
-            // always checked again before a cached blob is used for live repair.
-            for(const auto& slot:slots)if(same(slot)&&slot.metadata.value("complete",false)){
-                bool available=true;for(std::size_t i=0;i<entries_.size();++i){const auto blob=slot.root/(std::to_wstring(i)+L".bin");if(!matches(blob,entries_[i])){available=false;break;}}
-                if(available){result["resourceCacheAvailable"]=true;return result;}
-            }
+            if(!pending.empty()&&completeSlotAvailable()){result["resourceCacheAvailable"]=true;return result;}
             Slot* selected=nullptr;
             for(auto& slot:slots)if(same(slot)){selected=&slot;break;}
             if(!selected)for(auto& slot:slots)if(slot.empty){selected=&slot;break;}
             if(!selected)for(auto& slot:slots)if(slot.owned&&(!selected||slot.written<selected->written))selected=&slot;
             require(selected!=nullptr,"resource-cache-unowned-slots");
+            notify("seed");
             const Json metadata={{"schemaVersion",1},{"owner","YMCC"},{"complete",false},{"manifest",manifest_}};
             writeMetadata(selected->root,metadata);
             for(std::size_t i=0;i<entries_.size();++i){

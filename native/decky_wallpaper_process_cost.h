@@ -21,7 +21,6 @@ struct Target {
 inline std::wstring normalized(std::wstring value){std::replace(value.begin(),value.end(),L'/',L'\\');for(auto& c:value)c=static_cast<wchar_t>(towlower(c));return value;}
 inline ULONGLONG ticks(const FILETIME& t){return (ULONGLONG(t.dwHighDateTime)<<32)|t.dwLowDateTime;}
 struct CachedContext {
-    DWORD sharedPid=0,steamPid=0;ULONGLONG sharedBirth=0,steamBirth=0,identityTick=0;
     bool peerKnown=false,connected=false,visibleKnown=false,requestedVisible=false,enabledKnown=false,enabled=false,frameQueued=false;
     std::uint64_t seq=0,changeTick=0;std::string kind="unknown";
 };
@@ -29,17 +28,6 @@ class ContextCache {
     std::mutex mx_;CachedContext value_;
 public:
     CachedContext snapshot(bool& available){std::unique_lock lock(mx_,std::try_to_lock);available=lock.owns_lock();return available?value_:CachedContext{};}
-    void binding(const Json& detail,DWORD steamPid,ULONGLONG steamBirth,ULONGLONG now) noexcept {
-        try{std::unique_lock lock(mx_,std::try_to_lock);if(!lock)return;
-            const auto stage=detail.value("bootstrapStage",std::string{});
-            if(stage=="failed"||stage=="terminal"){value_.sharedPid=0;value_.sharedBirth=0;return;}
-            if(stage!="injected"&&stage!="context-attached")return;
-            const auto p=detail.find("contextPid"),b=detail.find("contextCreated");
-            if(p==detail.end()||b==detail.end()||!p->is_number_unsigned()||!b->is_number_unsigned())return;
-            const auto pid=p->get<std::uint64_t>(),birth=b->get<std::uint64_t>();if(!pid||pid>MAXDWORD||!birth)return;
-            value_.sharedPid=DWORD(pid);value_.sharedBirth=birth;value_.steamPid=steamPid;value_.steamBirth=steamBirth;value_.identityTick=now;
-        }catch(...){}
-    }
     void peer(bool connected,ULONGLONG now) noexcept {try{std::unique_lock lock(mx_,std::try_to_lock);if(!lock)return;value_.peerKnown=true;value_.connected=connected;value_.enabledKnown=false;value_.enabled=false;value_.visibleKnown=false;value_.requestedVisible=false;value_.frameQueued=false;value_.seq=0;value_.kind="unknown";value_.changeTick=now;}catch(...){}}
     void request(const Json& request,ULONGLONG now) noexcept {
         try{

@@ -296,11 +296,15 @@ function parseVdfValue(text: string, key: string): string {
   return text.match(new RegExp(`"${escaped}"\\s+"([^"]*)"`, 'i'))?.[1]?.replace(/\\\\/g, '\\') || '';
 }
 
-async function steamLibraryRoots(): Promise<string[]> {
+function inventoryReadInterrupted(signal:AbortSignal|undefined,error:unknown){
+  return !!signal&&(signal.aborted||(error as {code?:unknown}|null)?.code==='IPC_TIMEOUT');
+}
+async function steamLibraryRoots(signal?:AbortSignal): Promise<string[]> {
   // Installation metadata comes from the common native owner, without the
   // optional Presence mask or any live-account/write permission.
   const installations=await steamInformation.installationRoots();
-  if(installations===null)return [];
+  if(signal?.aborted)return [];
+  if(installations===null){if(signal)throw Error('Steam installation inventory unavailable');return [];}
   const unique:string[]=[],seen=new Set<string>();
   const add=(value:string)=>{
     const root=value.trim().replace(/\//g,'\\');
@@ -309,10 +313,11 @@ async function steamLibraryRoots(): Promise<string[]> {
   };
   for(const root of installations)add(root);
   for(const steamPath of [...unique]){
+    if(signal?.aborted)return [];
     try{
-      const text=await fs.readTextFile(`${steamPath}\\steamapps\\libraryfolders.vdf`,2*1024*1024);
+      const text=await fs.readTextFile(`${steamPath}\\steamapps\\libraryfolders.vdf`,2*1024*1024,signal?{signal,timeoutMs:5000}:undefined);
       for(const match of text.matchAll(/"path"\s+"([^"]+)"/gi))add(match[1].replace(/\\\\/g,'\\'));
-    }catch{/* Missing optional libraryfolders leaves its installation candidate. */}
+    }catch(error){if(inventoryReadInterrupted(signal,error))throw error;/* Missing optional libraryfolders leaves its installation candidate. */}
   }
   return unique;
 }
@@ -443,14 +448,15 @@ export function normalizeSteamMediaUrl(raw:string):string|null {
 }
 export interface WallpaperTarget { shortcutAppId?:string; steamAccount?:string; sourceTier?:number; chartRank?:number; catalogSource?:string; lastPlayed?:number; appId:number; name:string; executable?:string; gameDirectory?:string; verified?:boolean; legacyTarget?:{pid:number;processCreated:string}; }
 const identityInFlight=new Map<string,Promise<WallpaperTarget>>();
-export async function resolveSteamWallpaperIdentity(game:DetectedGame):Promise<WallpaperTarget> {
+export async function resolveSteamWallpaperIdentity(game:DetectedGame,signal?:AbortSignal):Promise<WallpaperTarget> {
+  if(signal)return resolveSteamWallpaperIdentityImpl(game,signal);
   const key=game.path.toLocaleLowerCase();const prior=identityInFlight.get(key);if(prior)return prior;
   const pending=resolveSteamWallpaperIdentityImpl(game);identityInFlight.set(key,pending);try{return await pending;}finally{if(identityInFlight.get(key)===pending)identityInFlight.delete(key);}
 }
-async function resolveSteamWallpaperIdentityImpl(game:DetectedGame):Promise<WallpaperTarget> {
+async function resolveSteamWallpaperIdentityImpl(game:DetectedGame,signal?:AbortSignal):Promise<WallpaperTarget> {
   // Local identity is enough for a cache hit. New file identification is owned
   // by the shared queue; title candidates never become an EXE binding here.
-  const local=await invoke<{appId?:number;name?:string;verified?:boolean}>('gameMedia.identity',{executable:game.path},{timeoutMs:12000}).catch(()=>null);
+  const local=await invoke<{appId?:number;name?:string;verified?:boolean}>('gameMedia.identity',{executable:game.path},{timeoutMs:12000,signal}).catch(()=>null);
   if(local?.verified&&Number.isSafeInteger(local.appId)&&Number(local.appId)>0&&Number(local.appId)<=0x7fffffff)return {appId:local.appId!,name:local.name||detectedGameTitle(game),executable:game.path,verified:true};
   return {appId:0,name:detectedGameTitle(game),executable:game.path,verified:false};
 }
@@ -467,13 +473,15 @@ export async function steamWallpaperCandidates(target:WallpaperTarget):Promise<{
   const urls=[...new Set([...chosen.urls,...(page.webms||[]),...(page.mp4s||[])].map(normalizeSteamMediaUrl).filter((url):url is string=>Boolean(url)))];
   return {name:app.data.name||target.name,urls,poster:normalizeSteamMediaUrl(app.data.background_raw||app.data.background||app.data.screenshots?.[0]?.path_full||'')||undefined};
 }
-export async function installedSteamWallpaperTargets():Promise<WallpaperTarget[]> {
+export async function installedSteamWallpaperTargets(signal?:AbortSignal):Promise<WallpaperTarget[]> {
   const targets=new Map<number,WallpaperTarget>();
-  for(const root of await steamLibraryRoots()){
-    let entries:Array<{name?:string;isFile?:boolean}>=[];try{entries=await fs.readDir(root+'\\steamapps');}catch{continue;}
-    for(const entry of entries.slice(0,10000)){if(!entry.isFile||!/^appmanifest_\d+\.acf$/i.test(entry.name||''))continue;
+  const options=signal?{signal,timeoutMs:5000}:undefined;
+  for(const root of await steamLibraryRoots(signal)){
+    if(signal?.aborted)return [];
+    let entries:Array<{name?:string;isFile?:boolean}>=[];try{entries=await fs.readDir(root+'\\steamapps',options);}catch(error){if(inventoryReadInterrupted(signal,error))throw error;continue;}
+    for(const entry of entries.slice(0,10000)){if(signal?.aborted)return [];if(!entry.isFile||!/^appmanifest_\d+\.acf$/i.test(entry.name||''))continue;
       try{
-        const text=await fs.readTextFile(root+'\\steamapps\\'+entry.name,256*1024);
+        const text=await fs.readTextFile(root+'\\steamapps\\'+entry.name,256*1024,options);
         const rawId=parseVdfValue(text,'appid').trim(),appId=Number(rawId);
         const fileId=Number(/^appmanifest_(\d+)\.acf$/i.exec(entry.name||'')?.[1]);
         const directory=parseVdfValue(text,'installdir').replace(/\\\\/g,'\\').replace(/\//g,'\\');
@@ -482,6 +490,6 @@ export async function installedSteamWallpaperTargets():Promise<WallpaperTarget[]
         const played=Number(parseVdfValue(text,'LastPlayed'));
         const lastPlayed=Number.isFinite(played)&&played>0?Math.min(Date.now(),played*1000):0;
         targets.set(appId,{appId,lastPlayed,name:parseVdfValue(text,'name'),gameDirectory:root+'\\steamapps\\common\\'+directory,verified:true});
-      }catch{}}
+      }catch(error){if(inventoryReadInterrupted(signal,error))throw error;}}
   }return [...targets.values()];
 }

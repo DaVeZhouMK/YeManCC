@@ -200,13 +200,49 @@ inline bool readWorkingSetHints(const std::vector<TopologyEntry>& topology,
     rows = std::move(staged);
     return true;
 }
+inline bool refreshForegroundWorkingSets(const std::vector<TopologyEntry>& topology,
+    const std::vector<OwnedEntry>& previous, WorkingSetReader reader,
+    const ymcc::processInventory::Snapshot& before, std::vector<OwnedEntry>& rows) {
+    // Bound work before falling back to a single full query on a busy host.
+    if (topology.size() > 128) return false;
+    std::vector<OwnedEntry> fresh;
+    if (!readWorkingSetHints(topology, reader, fresh)) return false;
+    std::vector<OwnedEntry> ordered;
+    ordered.reserve(fresh.size());
+    // Retain the full snapshot's ordering for ties and reject PID reuse even
+    // if it happened after the first Basic observation.
+    for (const auto& old : previous) {
+        const auto it = std::lower_bound(fresh.begin(), fresh.end(), old.pid,
+            [](const OwnedEntry& entry, DWORD pid) { return entry.pid < pid; });
+        if (it == fresh.end() || it->pid != old.pid) continue;
+        if (!old.processCreated || old.processCreated != it->processCreated ||
+            old.sequence != it->sequence || old.name != it->name) return false;
+        ordered.push_back(std::move(*it));
+    }
+    if (ordered.size() != fresh.size()) return false;
+
+    // Do not refresh an absence proof if the process population changed
+    // during the targeted reads. A fresh query bypasses Basic's cache.
+    const auto after = ymcc::processInventory::read(resolveQuery(),
+        ymcc::processInventory::currentTime, 0, false);
+    if (!after || after->basicStatus != ymcc::processInventory::Status::Complete ||
+        !std::equal(before.rows.begin(), before.rows.end(), after->rows.begin(), after->rows.end(),
+            [](const auto& a, const auto& b) {
+                return a.pid == b.pid && a.name == b.name && a.sequence == b.sequence;
+            })) return false;
+    rows = std::move(ordered);
+    return true;
+}
 struct Memo {
     TopologyFilter topologyFilter = nullptr;
     WorkingSetReader workingSetReader = nullptr;
     bool ready = false, available = false, wasForeground = false, resetProgress = true;
     ULONGLONG at = 0, fullAt = 0;
     bool topologyAvailable = false;
-    std::vector<TopologyEntry> topology, rawTopology;
+    std::vector<TopologyEntry> topology;
+    // rawOrder borrows immutable rows from rawSource across refreshes.
+    std::shared_ptr<const ymcc::processInventory::Snapshot> rawSource;
+    std::vector<const ymcc::processInventory::Entry*> rawOrder;
     std::vector<unsigned char> rawRelevant;
     std::string filterLocale;
     unsigned long long invalidationTicket = 0, version = 0;
@@ -231,16 +267,11 @@ inline const Memo& inventory(const RuleKey& rules, bool actualForeground, Topolo
             for (const auto& row : basic->rows) order.push_back(&row);
             std::sort(order.begin(), order.end(), [](const BasicRow* a, const BasicRow* b) { return a->pid < b->pid; });
         }
+        const auto sameRow = [](const BasicRow* row, const BasicRow* old) {
+            return row->pid == old->pid && row->name == old->name && row->sequence == old->sequence;
+        };
         const bool rawUnchanged = basicValid && memo.topologyAvailable &&
-            std::equal(order.begin(), order.end(), memo.rawTopology.begin(), memo.rawTopology.end(),
-                [](const BasicRow* row, const TopologyEntry& old) {
-                    return row->pid == old.pid && row->name == old.name && row->sequence == old.sequence;
-                });
-        std::vector<TopologyEntry> rawTopology;
-        if (basicValid && !rawUnchanged) {
-            rawTopology.reserve(order.size());
-            for (const auto* row : order) rawTopology.push_back({row->pid, row->name, row->sequence});
-        }
+            std::equal(order.begin(), order.end(), memo.rawOrder.begin(), memo.rawOrder.end(), sameRow);
         // Stable raw topology needs no repeated name normalization or rule
         // matching. Mandatory requests must still recompute the projection.
         const bool reuseProjection = !mandatory && rawUnchanged;
@@ -248,23 +279,22 @@ inline const Memo& inventory(const RuleKey& rules, bool actualForeground, Topolo
         std::vector<unsigned char> relevant;
         std::string filterLocale;
         if (!reuseProjection) {
-            const auto& raw = rawUnchanged ? memo.rawTopology : rawTopology;
-            topology.reserve(raw.size());
-            relevant.reserve(raw.size());
+            topology.reserve(order.size());
+            relevant.reserve(order.size());
             if (const auto* locale = std::setlocale(LC_CTYPE, nullptr)) filterLocale = locale;
             // This is a name hint only, never a cached live process decision.
             const bool reuseRows = !mandatory && memo.topologyAvailable &&
                 !filterLocale.empty() && filterLocale == memo.filterLocale &&
-                memo.rawRelevant.size() == memo.rawTopology.size();
+                memo.rawRelevant.size() == memo.rawOrder.size();
             const auto project = [&](bool reuse) {
                 size_t prior = 0;
-                for (const auto& entry : raw) {
-                    while (reuse && prior < memo.rawTopology.size() && memo.rawTopology[prior].pid < entry.pid) ++prior;
-                    const bool unchangedRow = reuse && prior < memo.rawTopology.size() && memo.rawTopology[prior] == entry;
+                for (const auto* entry : order) {
+                    while (reuse && prior < memo.rawOrder.size() && memo.rawOrder[prior]->pid < entry->pid) ++prior;
+                    const bool unchangedRow = reuse && prior < memo.rawOrder.size() && sameRow(entry, memo.rawOrder[prior]);
                     const bool selected = unchangedRow ? memo.rawRelevant[prior++] != 0 :
-                        !topologyFilter || topologyFilter({entry.pid, entry.name, entry.sequence, 0}, rules);
+                        !topologyFilter || topologyFilter({entry->pid, entry->name, entry->sequence, 0}, rules);
                     relevant.push_back(selected);
-                    if (selected) topology.push_back(entry);
+                    if (selected) topology.push_back({entry->pid, entry->name, entry->sequence});
                 }
             };
             project(reuseRows);
@@ -279,17 +309,23 @@ inline const Memo& inventory(const RuleKey& rules, bool actualForeground, Topolo
         }
         const bool unchanged = basicValid && memo.topologyAvailable && (reuseProjection || topology == memo.topology);
         memo.at = now;
-        if (!rawUnchanged) memo.rawTopology = std::move(rawTopology);
+        memo.rawOrder = std::move(order);
+        memo.rawSource = basicValid ? basic : nullptr;
         if (!reuseProjection) {
             memo.rawRelevant = std::move(relevant);
             memo.filterLocale = std::move(filterLocale);
         }
-        // Unknown Basic data is never a confirmed empty topology. Foreground
-        // uses the original 5s full cadence; background has a 30s WS backstop.
+        // Unknown Basic data is never a confirmed empty topology. Keep the
+        // foreground's 5s data cadence and background's 30s WS backstop.
         if (!mandatory && !actualForeground && unchanged && memo.available && now - memo.fullAt < 30000)
             return memo;
         const bool periodicWorkingSetRefresh = memo.available && now >= memo.fullAt && now - memo.fullAt >= 30000;
         const bool topologyWorkingSetRefresh = memo.available && memo.topologyAvailable && basicValid && !unchanged;
+        std::vector<OwnedEntry> foregroundRows;
+        const bool foregroundRefresh = actualForeground && !mandatory && manualDepth == 0 &&
+            memo.available && unchanged && workingSetReader && topologyFilter &&
+            refreshForegroundWorkingSets(reuseProjection ? memo.topology : topology,
+                memo.rows, workingSetReader, *basic, foregroundRows);
         memo.resetProgress = mandatory;
         memo.ready = true; memo.available = false; memo.fullAt = now;
         memo.invalidationTicket = ticket; memo.rules = rules;
@@ -299,12 +335,16 @@ inline const Memo& inventory(const RuleKey& rules, bool actualForeground, Topolo
         memo.rows.clear();
         // Existing complete receipts may refresh working-set hints from a
         // complete Basic topology, including relevant background topology changes.
-        // Startup, rules/invalidation, foreground/manual, unavailable Basic and
-        // failed-source recovery retain the original complete-snapshot path.
+        // Startup, rules/invalidation, focus entry, manual, unavailable Basic
+        // and failed-source recovery retain the original complete-snapshot path.
         const bool selective = workingSetReader && !mandatory && !actualForeground &&
             manualDepth == 0 && basicValid &&
             ((periodicWorkingSetRefresh && unchanged) || topologyWorkingSetRefresh);
-        if (selective && readWorkingSetHints(memo.topology, workingSetReader, memo.rows)) {
+        if (foregroundRefresh) {
+            memo.rows = std::move(foregroundRows);
+            memo.fullAt = (std::min)(now, basic->observedAt);
+            memo.available = true;
+        } else if (selective && readWorkingSetHints(memo.topology, workingSetReader, memo.rows)) {
             // A reused Basic table cannot acquire a later absence-proof age.
             memo.fullAt = (std::min)(now, basic->observedAt);
             memo.available = true;

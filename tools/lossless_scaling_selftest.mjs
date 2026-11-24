@@ -18,15 +18,28 @@ if(steamInstallations){
  fs.writeFileSync(path.join(task,'validation/LOSSLESS-STEAM-INSTALLATIONS.json'),JSON.stringify(record,null,2)+'\n',{flag:'wx'});require('esbuild').stop();console.log(JSON.stringify(record));process.exitCode=record.pass?0:1;
 }else if(runtimePower){
 const reports=[];let assertions=0;const verify=(value,message)=>{assertions++;assert.ok(value,message);},flush=async()=>{for(let i=0;i<60;i++)await Promise.resolve();};
-function runtimeFixture(initial={}){
+function runtimeFixture(initial={},detect=async()=>({known:true,running:false})){
  let snapshot={phase:'ready',generation:71,known:true,inputReady:true,hardwareWritesAllowed:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:1,...initial},seq=0,held=false,resolveWatch,rejectWatch,gameListener=null;
  const timers=new Map(),events=new Map(),watches=[],reads=[];const on=(name,fn)=>{if(!events.has(name))events.set(name,new Set());events.get(name).add(fn);return()=>{events.get(name).delete(fn);if(!events.get(name).size)events.delete(name);};};
  const globals={window:{},queueMicrotask,setTimeout:(fn,ms)=>{timers.set(++seq,{fn,ms});return seq;},clearTimeout:id=>timers.delete(id)};
  const power=load(fs.readFileSync(path.join(root,'src/bridge/powerLifecycleState.ts'),'utf8'),{'./ipc':{on,invoke:async(command,args,options)=>{assert.equal(command,'power.lifecycle');assert.equal(options.timeoutMs,3000);reads.push(command);return {...snapshot};}}},globals);
- const runtime=load(fs.readFileSync(path.join(root,'src/bridge/losslessRuntimeState.ts'),'utf8'),{'./api':{losslessRuntime:{detect:async()=>({known:true,running:false}),watch:(active,detailed)=>{watches.push({active,detailed});if(held){held=false;return new Promise((resolve,reject)=>{resolveWatch=resolve;rejectWatch=reject;});}return Promise.resolve(true);}}},'./ipc':{on},'./powerLifecycleState':power,'./gamePolicyTarget':{subscribePolicyGameStatus:fn=>{gameListener=fn;fn(null);return()=>{gameListener=null;};}}},globals);
+ const runtime=load(fs.readFileSync(path.join(root,'src/bridge/losslessRuntimeState.ts'),'utf8'),{'./api':{losslessRuntime:{detect,watch:(active,detailed)=>{watches.push({active,detailed});if(held){held=false;return new Promise((resolve,reject)=>{resolveWatch=resolve;rejectWatch=reject;});}return Promise.resolve(true);}}},'./ipc':{on},'./powerLifecycleState':power,'./gamePolicyTarget':{subscribePolicyGameStatus:fn=>{gameListener=fn;fn(null);return()=>{gameListener=null;};}}},globals);
  return {runtime,power,watches,timers,events,reads,holdNext:()=>held=true,release:()=>{resolveWatch?.(true);resolveWatch=null;},reject:()=>{rejectWatch?.(Error('owned earlier watch rejection'));rejectWatch=null;},game:value=>gameListener?.(value),publish:(patch={},raw=false)=>{assert.ok(events.has('power.lifecycleChanged'),'actual Native event subscription must be bound');snapshot={...snapshot,...patch,...(raw?{}:{publicationRevision:snapshot.publicationRevision+1,observedNotificationSequence:snapshot.observedNotificationSequence+1})};for(const fn of [...events.get('power.lifecycleChanged')??[]])fn({...snapshot});},inspect:()=>power.getSharedPowerLifecycleDiagnostics()};
 }
 const definitions=[];const scenario=(name,fn)=>definitions.push({name,fn});
+scenario('merged-suspend-releases-old-detect-without-replaying-watch',async()=>{
+ let release,calls=0;const held=new Promise(resolve=>{release=resolve;});
+ const f=runtimeFixture({suspendSerial:8},async()=>{const pid=++calls;if(pid===1)await held;return {known:true,running:false,pid};});
+ const stop=f.runtime.startLosslessRuntimeOwner(),off=f.runtime.retainLosslessObservation();let old,next,joined,oldResult,joinedResult;
+ try{await flush();const watches=f.watches.length;old=f.runtime.readLosslessRuntime().then(value=>{oldResult=value;});await flush();verify(calls===1,'first detect must be pending');
+ f.publish({publicationRevision:2},true);joined=f.runtime.readLosslessRuntime().then(value=>{joinedResult=value;});await flush();verify(calls===1,'diagnostic publication started a second detect');
+ f.publish({publicationRevision:3,suspendSerial:9},true);await flush();let current;next=f.runtime.readLosslessRuntime().then(value=>{current=value;return value;});await flush();
+ verify(current?.pid===2,'old detect blocked a read after same-generation merged suspend');verify(f.watches.length===watches,'merged suspend replayed an unchanged native watch');
+ verify(oldResult?.reason==='observation-invalidated'&&joinedResult?.reason==='observation-invalidated','old callers still waited for the revoked IPC');
+ release();await old;await joined;verify((await f.runtime.readLosslessRuntime()).pid===2,'late old detect overwrote the current observation');
+ }finally{release();await Promise.allSettled([old,next,joined]);off();stop();await flush();}
+ verify(f.timers.size===0&&f.events.size===0,'merged suspend retained source resources');
+});
 scenario('pending-and-closed-native-facts-retire-detailed-observation',async()=>{
  const f=runtimeFixture();const stop=f.runtime.startLosslessRuntimeOwner();let off=()=>{};try{await flush();off=f.runtime.retainLosslessObservation();await flush();verify(f.watches.at(-1).active&&f.watches.at(-1).detailed,'admitted detailed observation failed to start');f.publish({notificationPending:true});await flush();verify(f.watches.at(-1).active===false,'same-generation pending retained active Lossless observation');f.publish({notificationPending:false,hardwareWritesAllowed:false});await flush();verify(f.watches.at(-1).active===false,'closed native write gate reenabled Lossless observation');f.publish({hardwareWritesAllowed:true,inputReady:false});await flush();verify(f.watches.at(-1).active&&f.watches.at(-1).detailed,'current same-generation Native Ready did not restore detailed observation');const count=f.watches.length;f.publish({inputReady:true});f.publish({inputReady:true});await flush();verify(f.watches.length===count,'input or diagnostic metadata repeated Lossless interest');}finally{off();stop();f.release();await flush();}verify(f.timers.size===0&&f.events.size===0,'stopped Lossless owner retained source timers or subscriptions');
 });
@@ -41,6 +54,25 @@ scenario('cold-closed-and-reordered-ready-remain-denied-until-current-fact',asyn
 });
 scenario('shared-game-and-two-consumer-interest-keeps-reference-counts',async()=>{
  const f=runtimeFixture(),stopA=f.runtime.startLosslessRuntimeOwner(),stopB=f.runtime.startLosslessRuntimeOwner();let y=()=>{},decky=()=>{};try{await flush();f.game({pid:17});await flush();verify(f.watches.at(-1).active&&!f.watches.at(-1).detailed,'game-only observation lost its basic interest');y=f.runtime.retainLosslessObservation();decky=f.runtime.retainLosslessObservation();await flush();verify(f.watches.at(-1).detailed,'two visible consumers did not share detailed interest');const count=f.watches.length;y();await flush();verify(f.watches.length===count,'one consumer release stopped the remaining consumer');decky();await flush();verify(f.watches.at(-1).active&&!f.watches.at(-1).detailed,'game-only interest was lost after both detail consumers returned');stopA();await flush();verify(f.watches.at(-1).active,'one resident release stopped the remaining resident');}finally{y();decky();stopA();stopB();await flush();}verify(f.watches.at(-1).active===false&&f.timers.size===0&&f.events.size===0,'last resident failed to return native interest and source resources');
+});
+scenario('runtime-receipt-follows-current-public-scope-after-coalesced-wake',async()=>{
+ const receipt=(pid,sequence,serial,observedAt)=>({known:true,running:true,readable:true,pid,processCreated:'90',path:'observed.exe',button:'',status:'',reason:'',configRevision:0,observedAt,powerGeneration:71,powerNotificationSequence:sequence,powerSuspendSerial:serial});
+ const f=runtimeFixture({suspendSerial:1},async()=>receipt(202,2,2,200));
+ const stop=f.runtime.startLosslessRuntimeOwner(),off=f.runtime.retainLosslessObservation();
+ const deliver=value=>{for(const fn of [...f.events.get('lossless.runtime')??[]])fn(value);};
+ try{
+  await flush();deliver(receipt(101,1,1,100));verify((await f.runtime.readLosslessRuntime()).pid===101,'current observation was not adopted');
+  f.publish({suspendSerial:2});await flush();
+  deliver(receipt(111,1,1,150));
+  verify((await f.runtime.readLosslessRuntime()).pid===202,'old queued observation overwrote current scope after coalesced Ready');
+  deliver(receipt(303,3,3,300));
+  verify((await f.runtime.readLosslessRuntime()).pid===202,'future receipt was adopted before the matching public fact');
+  f.publish({suspendSerial:3});await flush();
+  verify((await f.runtime.readLosslessRuntime()).pid===303,'matching Ready failed to consume the observed future receipt');
+  deliver(receipt(111,2,2,400));
+  verify((await f.runtime.readLosslessRuntime()).pid===303,'retired scope bypassed the new cache with a later timestamp');
+ }finally{off();stop();await flush();}
+ verify(f.timers.size===0&&f.events.size===0&&f.watches.at(-1).active===false,'scoped observer retained resources after stop');
 });
 const selected=[];for(let i=2;i<process.argv.length;i++){if(process.argv[i]==='--runtime-power')continue;assert.equal(process.argv[i],'--case','unknown Lossless runtime selection');const value=process.argv[++i];assert(value&&definitions.some(x=>x.name===value)&&!selected.includes(value),'invalid or duplicate Lossless runtime case');selected.push(value);}
 for(const {name,fn}of definitions){if(selected.length&&!selected.includes(name))continue;try{await fn();reports.push({name,pass:true});}catch(error){reports.push({name,pass:false,error:String(error.message??error)});break;}}

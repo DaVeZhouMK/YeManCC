@@ -5,7 +5,9 @@
 #include "shared_game_media_identity_worker.h"
 #include "steam_source_lease.h"
 #include "shared_game_media_source_job.h"
+#include "shared_game_media_playback30_deadline.h"
 #include <atomic>
+#include <deque>
 
 namespace ymcc::media::downloads {
 class Supervisor {
@@ -28,6 +30,27 @@ class Supervisor {
   uint64_t nextLaunchAt_ = 0;
   unsigned launchFailures_ = 0;
   bool identityRecheckPending_ = true; // owner thread only; notifications coalesce
+  struct PlaybackSource {
+    std::string key,identity;
+    uint64_t bindingRevision=0;
+    bool olderThan(const PlaybackSource& other) const {
+      return bindingRevision&&bindingRevision<other.bindingRevision&&key==other.key&&identity!=other.identity;
+    }
+  };
+  struct PlaybackTask {Json claim;PlaybackSource source;uint64_t due=0,expires=0;bool failureRetried=false;};
+  struct PlaybackAttempt {int code=24;const char* stage="exception";DWORD error=0;};
+  std::mutex playbackMutex_;
+  std::deque<PlaybackTask> playbackPending_;
+  std::map<std::string,uint64_t> playbackDone_;
+  PlaybackSource playbackActive_;
+  // Low byte is the threshold (zero means unknown/blocked); high bits fence
+  // a job across a busy -> idle transition even if the owner wakes late.
+  // The retired Job ledger can outlive the Supervisor after a failed drain.
+  std::shared_ptr<std::atomic<uint64_t>> playbackPolicy_=std::make_shared<std::atomic<uint64_t>>(0);
+  CpuReader playbackCpu_;
+  CpuGate playbackCpuGate_;
+  uint64_t playbackCpuAt_=0;
+  std::optional<double> playbackCpuSample_;
   DWORD waitOwner(DWORD count,const HANDLE* events,BOOL all,DWORD timeout) {
     const auto result=WaitForMultipleObjects(count,events,all,timeout);
     if(result<WAIT_OBJECT_0+count&&events[result-WAIT_OBJECT_0]==wake_)identityRecheckPending_=true;
@@ -53,6 +76,125 @@ class Supervisor {
     }
     result.append(slashes * 2, L'\\');
     return result + L'\"';
+  }
+  bool playbackResources(uint64_t tick,uint64_t policy,int64_t* retry=nullptr) {
+    if(retry)*retry=20000;
+    if(tick-processStartedTick<limits_.startup||!sleeppower::task::allowed()||resources_.ac()!=1)return false;
+    const auto threshold=static_cast<int>(policy&0xff);
+    if(!threshold||playbackPolicy_->load(std::memory_order_acquire)!=policy||powerPolicy::blocked())return false;
+    SYSTEM_POWER_STATUS status{};
+    if(!ymcc::powerSource::read(status)||status.ACLineStatus!=1||status.SystemStatusFlag==1)return false;
+    if(!playbackCpuAt_||tick-playbackCpuAt_>=limits_.monitor){
+      playbackCpuAt_=tick;
+      playbackCpuSample_=resources_.cpu?resources_.cpu(tick):playbackCpu_.read(tick);
+    }
+    const auto reason=std::string_view(playbackCpuGate_.observe(playbackCpuSample_,threshold,tick));
+    if(retry){
+      if(reason=="cpu-recovering")*retry=CpuGate::calmWindowMs;
+      else if(!playbackCpuSample_)*retry=limits_.monitor;
+    }
+    return reason.empty();
+  }
+  PlaybackAttempt runPlayback30(const Json& claim,uint64_t policy) {
+    if(SourceJob::reap())return {17,"cleanup-pending"};
+    const auto manifest=read(executable_.parent_path()/L"package-manifest.json");
+    if(manifest.value("backgroundPlayback30Protocol",0)!=1)return {23,"package-protocol"};
+    const auto token=randomId();
+    const auto stage=custom_steam_library::ioPath(Store(queue_.root()).playback30Staging(token));
+    const auto permit=sleeppower::task::Scope::capture();
+    auto* transport=sleeppower::task::transport();
+    if(!permit||!transport)return {17,"power-not-ready"};
+    SourceJob job(nullptr,stage.native());
+    if(!job.transfer().prepare(token))return {24,"prepare-transfer"};
+    const auto parent=GetCurrentProcessId();const auto birth=processBirthToken(parent);
+    if(birth.empty())return {24,"parent-identity"};
+    const auto command=quote(executable_.wstring())+L" --media-playback30 "+std::to_wstring(parent)+L" "+quote(wide(birth))+
+      L" "+quote(wide(token))+L" "+quote(wide(stringField(claim,"key")))+L" "+quote(wide(stringField(claim,"id")))+
+      L" "+quote(wide(stringField(claim,"revision")))+job.transfer().arguments();
+    std::vector<wchar_t> line(command.begin(),command.end());line.push_back(0);
+    sleeppower::task::HandleList inherited({job.transfer().handle()});
+    if(!permit->current()||!playbackResources(GetTickCount64(),policy))return {17,"admission-withdrawn"};
+    PROCESS_INFORMATION child{};
+    if(!ymcc::processEfficiency::createProcess(executable_.c_str(),line.data(),nullptr,nullptr,TRUE,
+        CREATE_NO_WINDOW|CREATE_SUSPENDED|IDLE_PRIORITY_CLASS|EXTENDED_STARTUPINFO_PRESENT,
+        nullptr,executable_.parent_path().c_str(),inherited.startup(),&child))return {24,"create-process",GetLastError()};
+    if(!job.assign(child))return {24,"assign-job",GetLastError()};
+    sleeppower::remote::Key128 request;sleeppower::remote::RemoteOfferV1 offer;
+    if(!sleeppower::task::requestKey(token,request)||!transport->captureOwnedTask(job.power(),child.hProcess,job.get(),request,
+        [state=playbackPolicy_,permit,policy](auto purpose){return purpose==sleeppower::remote::Purpose::Observation&&
+            state->load(std::memory_order_acquire)==policy&&permit->current();},offer)||
+       !job.transfer().seal(offer)||!permit->current()||!playbackResources(GetTickCount64(),policy))return {17,"grant-withdrawn"};
+    if(ResumeThread(child.hThread)==DWORD(-1))return {24,"resume-process",GetLastError()};
+    const auto started=GetTickCount64();
+    playback30::Deadline budget;
+    for(;;){
+      const auto elapsed=GetTickCount64()-started;
+      if(elapsed>=budget.expires())return {24,"process-deadline"};
+      if(budget.shouldObserve(elapsed)){
+        std::error_code error;const auto bytes=fs::file_size(stage,error);
+        budget.observeFileSize(elapsed,bytes,error);
+        if(elapsed>=budget.expires())return {24,"process-deadline"};
+      }
+      HANDLE events[]={stop_,child.hProcess,job.power().cancellationEvent(),wake_};
+      const auto until=static_cast<DWORD>((std::min)(uint64_t{1000},budget.expires()-elapsed));
+      const auto result=waitOwner(static_cast<DWORD>(std::size(events)),events,FALSE,until);
+      if(result==WAIT_OBJECT_0+1){DWORD code=0;if(!GetExitCodeProcess(child.hProcess,&code))return {24,"exit-status",GetLastError()};return {static_cast<int>(code),"child-exit"};}
+      if(result==WAIT_OBJECT_0||result==WAIT_OBJECT_0+2)return {17,"cancelled"};
+      if(result==WAIT_FAILED)return {24,"wait-process",GetLastError()};
+      if(!permit->current()||!job.power().current(child.hProcess)||!playbackResources(GetTickCount64(),policy))return {17,"admission-withdrawn"};
+    }
+  }
+  int64_t servicePlayback30() {
+    const auto tick=GetTickCount64();PlaybackTask task;
+    const auto policy=playbackPolicy_->load(std::memory_order_acquire);
+    {
+      std::lock_guard lock(playbackMutex_);
+      if(playbackPending_.empty())return -1;
+      std::erase_if(playbackPending_,[&](const auto& pending){return tick>=pending.expires;});
+      if(playbackPending_.empty())return -1;
+      if(!(policy&0xff)){
+        // A missing idle grant can only change on a policy wake. Keep the
+        // expiry, but don't periodically probe power/CPU until granted.
+        const auto expires=std::min_element(playbackPending_.begin(),playbackPending_.end(),[](const auto& a,const auto& b){return a.expires<b.expires;})->expires;
+        return static_cast<int64_t>(expires-tick);
+      }
+      const auto due=std::min_element(playbackPending_.begin(),playbackPending_.end(),[](const auto& a,const auto& b){return a.due<b.due;})->due;
+      if(tick<due)return static_cast<int64_t>(due-tick);
+    }
+    int64_t retry=0;
+    if(!playbackResources(tick,policy,&retry))return retry;
+    {
+      std::lock_guard lock(playbackMutex_);
+      const auto next=std::find_if(playbackPending_.rbegin(),playbackPending_.rend(),[&](const auto& pending){return tick>=pending.due;});
+      if(next==playbackPending_.rend())return 20000;
+      task=std::move(*next);playbackPending_.erase(std::next(next).base());playbackActive_=task.source;
+    }
+    PlaybackAttempt attempt;
+    try{attempt=runPlayback30(task.claim,policy);}catch(...){ }
+    const auto completed=GetTickCount64();
+    const auto code=attempt.code;
+    std::string observedId;
+    if(resources_.playbackAttempt)observedId=stringField(task.claim,"id");
+    bool requeued=false,hasPending=false;
+    {
+      std::lock_guard lock(playbackMutex_);
+      playbackActive_={};
+      // Policy revocation retains its normal slow retry. A generic transient
+      // failure gets one retry, without repeatedly generating a bad asset.
+      // Do not requeue an old worker after a newer source has taken its place.
+      const bool retryable=(code==17&&completed<task.expires)||(code==24&&!task.failureRetried&&completed+retryMs<task.expires);
+      if(retryable&&playbackPending_.size()<8&&std::none_of(playbackPending_.begin(),playbackPending_.end(),
+          [&](const auto& pending){return task.source.olderThan(pending.source);})){
+        if(code==24)task.failureRetried=true;
+        task.due=completed+retryMs;playbackPending_.push_front(std::move(task));requeued=true;
+      }else{
+        if(playbackDone_.size()>=64){const auto earliest=std::min_element(playbackDone_.begin(),playbackDone_.end(),[](const auto& a,const auto& b){return a.second<b.second;});playbackDone_.erase(earliest);}
+        playbackDone_[task.source.identity]=completed+((code>=20&&code<=22)?60000:3600000);
+      }
+      hasPending=!playbackPending_.empty();
+    }
+    if(resources_.playbackAttempt)try{resources_.playbackAttempt(observedId,code,attempt.stage,attempt.error,completed-tick,requeued);}catch(...){ }
+    return hasPending?1000:-1;
   }
   std::string resourceReason(const std::string &token = {}) {
     const auto state = queue_.snapshot();
@@ -341,6 +483,7 @@ class Supervisor {
           const auto source=ymcc::steaminfo::acquireSourceV2();
           queue_.recoverIdentityPrerequisites(executable_.parent_path()/L"SteamArtworkLab.exe",[&](const Json& target){return readShortcutCurrentSource(target,source);},true);
         }
+        const auto playback=servicePlayback30();
         delay = armed_.load() ? queue_.delay() : -1;
         if (delay == 0 && GetTickCount64() < nextLaunchAt_)
           delay = static_cast<int64_t>(nextLaunchAt_ - GetTickCount64());
@@ -352,7 +495,7 @@ class Supervisor {
             const auto interval =
                 (blocked == "cpu-unknown" || blocked == "cpu-recovering" ||
                  (blocked == "cpu-busy"&&sampledBefore==sampledAt_)) ? limits_.monitor : limits_.recheck;
-            if (waitOwner(2, events, FALSE, interval) ==
+            if (waitOwner(2, events, FALSE, playback<0?interval:(std::min)(interval,static_cast<DWORD>(playback))) ==
                 WAIT_OBJECT_0)
               return;
             continue;
@@ -376,6 +519,7 @@ class Supervisor {
           if (delay == 0)
             delay = 3000;
         }
+        if(playback>=0)delay=delay<0?playback:(std::min)(delay,playback);
       } catch (...) {
         delay = retryMs;
       }
@@ -423,6 +567,7 @@ private:
     try{std::unique_lock lifecycle(lifecycleMutex_,std::defer_lock);
       if(waitForThread)lifecycle.lock();else if(!lifecycle.try_lock())return false;
       stopping_=true;
+      playbackPolicy_->store(0,std::memory_order_release);
       if(stop_&&!SetEvent(stop_))return false;
       if(thread_.joinable()){
         if(!waitForThread&&WaitForSingleObject(thread_.native_handle(),0)!=WAIT_OBJECT_0)return false;
@@ -437,6 +582,38 @@ public:
   bool finishForExit() noexcept {return finish(false);}
   ~Supervisor(){(void)finish(true);}
   Queue &queue() { return queue_; }
+  void configurePlayback30(bool idle,int threshold) {
+    const auto limit=idle?static_cast<uint64_t>((std::clamp)(threshold,5,90)):0;
+    auto policy=playbackPolicy_->load(std::memory_order_relaxed);
+    while((policy&0xff)!=limit){
+      if(playbackPolicy_->compare_exchange_weak(policy,((policy&~uint64_t{0xff})+0x100)|limit,std::memory_order_release,std::memory_order_relaxed)){wake();break;}
+    }
+  }
+  void requestPlayback30(Json claim) {
+    auto key=stringField(claim,"key");
+    const auto id=stringField(claim,"id"),revision=stringField(claim,"revision");
+    if(!safeKey(key)||!safeKey(id)||!safeKey(revision))return;
+    PlaybackSource source{std::move(key),id+":"+revision,claim.value("bindingRevision",uint64_t{0})};
+    const auto tick=GetTickCount64();
+    {
+      std::lock_guard lock(playbackMutex_);
+      const auto done=playbackDone_.find(source.identity);
+      if(playbackActive_.identity==source.identity||source.olderThan(playbackActive_)||
+         (done!=playbackDone_.end()&&tick<done->second))return;
+      for(auto& pending:playbackPending_){
+        if(source.olderThan(pending.source))return;
+        if(pending.source.identity==source.identity){
+          if(pending.source.key==source.key)
+            pending.source.bindingRevision=(std::max)(pending.source.bindingRevision,source.bindingRevision);
+          return;
+        }
+      }
+      std::erase_if(playbackPending_,[&](const auto& pending){return pending.source.olderThan(source);});
+      if(playbackPending_.size()>=8)playbackPending_.pop_front();
+      playbackPending_.push_back({std::move(claim),std::move(source),tick+3000,tick+20*60000});
+    }
+    wake();
+  }
   void wake(bool activate = false) {
     std::lock_guard lifecycle(lifecycleMutex_);if(stopping_)return;
     if (activate)
@@ -460,6 +637,7 @@ public:
       : owner_(root, std::move(executable), limits, std::move(resources)),
         watcher_(root, L"main",
                  [root, changed] { changed(Queue(root).snapshot()); }) {}
+  void requestPlayback30(Json claim) {if(!stopping_.load(std::memory_order_acquire))owner_.requestPlayback30(std::move(claim));}
   Json background(const Json &request) {
     if (!request.is_object())
       throw std::runtime_error("media-download-command-invalid");
@@ -469,10 +647,14 @@ public:
     if(stopping_.load(std::memory_order_acquire))throw std::runtime_error("media-download-owner-stopped");
     if(!steamDemand::allowed(request))return steamDemand::inactive();
     if(request.value("recheck",false))owner_.queue().recheck();
+    const bool hasPlaybackPolicy=request.contains("playback30Idle");
+    const bool playbackIdle=hasPlaybackPolicy&&request.value("playback30Idle",false)&&request.contains("pauseReason")&&stringField(request,"pauseReason").empty();
+    if(hasPlaybackPolicy&&!playbackIdle)owner_.configurePlayback30(false,0);
     if (request.contains("enabled"))
       owner_.queue().configure(request.value("enabled", true),
                                request.value("pauseReason", std::string{}),
                                request.value("cpuThreshold", 15));
+    if(playbackIdle)owner_.configurePlayback30(true,request.value("cpuThreshold",15));
     if(request.value("catalog",false)&&request.value("enabled",false)) owner_.queue().requestCatalog();
     if(request.value("manual",false))owner_.queue().requestSupplement(true);
     if(request.value("cancelManual",false))owner_.queue().cancelManual();

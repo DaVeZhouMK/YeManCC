@@ -101,11 +101,20 @@ function runPowerOrder(){
     const inputFiles=['native/msi_native_foreground_isolation_runtime.h','tools/fixtures/native_foreground_snapshot/fixture.cpp',
         'tools/native_foreground_latency_selftest.mjs','tools/fixtures/msi_owned_return_retired_io/source-binding.mjs',
         'tools/fixtures/hc_reviewed_calibration/toolchain.mjs','deps/json/json.hpp',
-        'tools/ymcc_sim/global/controller-foreground-latency/win5-power-field.json','native/sleep_power_state.h'];
+        'tools/ymcc_sim/global/controller-foreground-latency/win5-power-field.json','native/sleep_power_state.h','native/main.cpp'];
     const bytes=Object.fromEntries(inputFiles.map(file=>[file,fs.readFileSync(path.join(repo,file))]));
     const identities=inputFiles.map(file=>({file,bytes:bytes[file].length,sha256:hash(bytes[file])}));
     const runtime=bytes[inputFiles[0]].toString('utf8'),spans=[];
     const take=name=>extract(runtime,'function',name,inputFiles[0],spans);
+    const main=bytes[inputFiles[8]].toString('utf8');
+    const fromMain=(name,kind='function')=>extract(main,kind,name,inputFiles[8],spans);
+    const drain=fromMain('inputHostRunQueuedLifecycleWork');
+    const pop=drain.match(/reason = std::move\(g_inputHostLifecycleWorkQueue\.front\(\)\.reason\);[\s\S]*?g_inputHostLifecycleWorkQueue\.pop_front\(\);/)[0];
+    const dispatch=drain.match(/if \(reason == "msi-native-foreground"\) \{\s*msiNativeForegroundHandleWork\(foregroundReady\?&\*foregroundReady:nullptr\);\s*\}/)[0];
+    const queueForward=main.match(/^static bool inputHostQueueLifecycleWorkInternal\([^;]+;/m)[0];
+    // Keep source offsets while masking the default initializers in the declaration.
+    const queueDefinition=extract(main.replace(queueForward,queueForward.replace(/[{}]/g,' ')),
+        'function','inputHostQueueLifecycleWorkInternal',inputFiles[8],spans);
     const field=JSON.parse(bytes[inputFiles[6]].toString('utf8'));
     assert.equal(field.canonicalTestId,'controller.native-foreground-latency');
     assert.equal(field.archive.sha256,'b8930e6025774d57be6c1d1e7c5e843e2710cec9b7669e524e36a095ae54fd16');
@@ -117,9 +126,17 @@ function runPowerOrder(){
         `    {${row.event},${row.generation},PowerLifecycle::${phaseNames[row.phase]},${row.line}}`).join(',\n')+'\n};';
     const bindings={
         '@@POWER_FAMILY@@':take('nativeForegroundFamilyAllowed'),
+        '@@QUEUE_TYPES@@':['MsiNativeForegroundReadyWork','InputHostLifecycleWork'].map(name=>fromMain(name,'struct')).join('\n'),
+        '@@AUDIT_APPLIES@@':fromMain('inputHostSwitchAuditApplies'),
+        '@@QUEUE_FUNCTIONS@@':'static bool msiNativeForegroundReadyWorkCurrent(const MsiNativeForegroundReadyWork&) noexcept;\n'+queueForward+'\n'+
+            ['inputHostQueueLifecycleWork','inputHostQueueMsiNativeForegroundReady','inputHostSameForegroundReady','inputHostSleepRepairWork'].map(name=>fromMain(name)).join('\n')+'\n'+queueDefinition,
+        '@@QUEUE_POP@@':pop,
+        '@@QUEUE_DISPATCH@@':dispatch,
+        '@@POWER_QUEUE@@':['msiNativeForegroundReadyWorkCurrent','msiNativeForegroundDeferRevokedReady','msiNativeForegroundQueue'].map(take).join('\n'),
         '@@POWER_UI@@':take('msiNativeForegroundUiEvent'),
-        '@@POWER_EVENT@@':take('msiNativeForegroundPowerEvent'),
+        '@@POWER_EVENT@@':['msiNativeForegroundHoldPowerLocked','msiNativeForegroundPowerEvent'].map(take).join('\n'),
         '@@POWER_RELEASE@@':take('msiNativeForegroundTryReleasePowerHold'),
+        '@@POWER_READY@@':['msiNativeForegroundContinueDeferredReady','msiNativeForegroundSharedPowerReady','msiNativeForegroundReadyWorkAdmitted'].map(take).join('\n'),
         '@@POWER_FIELD@@':fieldBinding,
     };
     const maintenance=take('msiNativeForegroundMaintenance');
@@ -128,9 +145,9 @@ function runPowerOrder(){
     assert(bindings['@@POWER_EVENT@@'].includes('std::unique_lock powerLock(g_msiNativeForegroundPowerMx);'),'PowerEvent scalar transaction missing');
     assert(bindings['@@POWER_RELEASE@@'].includes('std::unique_lock powerLock(g_msiNativeForegroundPowerMx,std::try_to_lock);'),'TryRelease must defer when busy');
     for(const marker of ['@@POWER_EVENT@@','@@POWER_RELEASE@@'])
-        assert(/powerLock\.unlock\(\);\s*msiNativeForegroundUiEvent\(true\);/.test(bindings[marker]),'UI terminal must run after unlocking');
-    const oldPredicate='if(!broadcastResume && !sharedCommit)return false;';
-    assert.equal(bindings['@@POWER_RELEASE@@'].split(oldPredicate).length,2,'Exact final admission mutation anchor');
+        assert(/powerLock\.unlock\(\);\s*msiNativeForegroundUiEvent\(true(?:,false,&power)?\);/.test(bindings[marker]),'UI terminal must run after unlocking');
+    const sharedCommitPredicate='if(!sharedCommit)return false;';
+    assert.equal(bindings['@@POWER_RELEASE@@'].split(sharedCommitPredicate).length,2,'Exact final admission mutation anchor');
     // Select one existing cpp branch before generation: latency consumers are
     // neither extracted nor compiled in this explicitly directed invocation.
     const template=bytes[inputFiles[1]].toString('utf8');
@@ -150,12 +167,13 @@ function runPowerOrder(){
         defaultLatency:'NOT_RUN',fullMode:'NOT_RUN',hardwareAccess:false,maintenanceHook:'source-inspected; full maintenance not executed'});
     try{
         // Keep the original FAIL raw; a compile error can never kill this mutation.
-        for(const variant of [{name:'before-old-generation-only',mutation:true},{name:'current',mutation:false}]){
+        for(const variant of [{name:'before-old-generation-only',mutation:true},{name:'unbound-retry',queueMutation:true},{name:'current'}]){
             const directory=path.join(output,variant.name);fs.mkdirSync(directory);
             let code=base;
             for(const [marker,body] of Object.entries(bindings)){
-                const selected=variant.mutation&&marker==='@@POWER_RELEASE@@'?body.replace(oldPredicate,
-                    'if(!g_msiNativeForegroundResumePending.load(std::memory_order_acquire) || generation==g_msiNativeForegroundSuspendedGeneration.load(std::memory_order_acquire))return false;'):body;
+                const selected=variant.mutation&&marker==='@@POWER_RELEASE@@'?body.replace(sharedCommitPredicate,
+                    'if(!sharedCommit || generation==g_msiNativeForegroundSuspendedGeneration.load(std::memory_order_acquire))return false;'):
+                    variant.queueMutation&&marker==='@@POWER_QUEUE@@'?body.replace('try {if(inputHostQueueMsiNativeForegroundReady(*ready))return;}','try {if(inputHostQueueLifecycleWork("msi-native-foreground"))return;}'):body;
                 assert.equal(code.split(marker).length,2);code=code.replace(marker,()=>selected);
             }
             assert(!code.includes('@@'),'Unbound power-only source');
@@ -179,7 +197,7 @@ function runPowerOrder(){
             assert.equal(toolPaths.length,2,'Actual compiler/linker selection missing');
             fs.writeFileSync(path.join(directory,'tools.json'),JSON.stringify({tools:[process.execPath,vcvars,...toolPaths].map(file=>({file,sha256:hash(fs.readFileSync(file))})),
                 pathCharacters:(process.env.PATH||'').length,fullToolClosureVerified:false,cacheEligible:false},null,2)+'\n',{flag:'wx'});
-            const executed=invoke(path.join(directory,'Fixture.exe'),[path.join(directory,'RESULT.json'),...(variant.mutation?['old-generation-only']:[])],10000,'run');
+            const executed=invoke(path.join(directory,'Fixture.exe'),[path.join(directory,'RESULT.json'),...(variant.mutation?['old-generation-only']:variant.queueMutation?['queue-only']:[])],10000,'run');
             const result=JSON.parse(fs.readFileSync(path.join(directory,'RESULT.json'),'utf8'));
             assert.equal(result.mode,'power-order');assert.equal(result.caseNames.length,result.cases);
             if(variant.mutation){
@@ -196,20 +214,25 @@ function runPowerOrder(){
                     'gpd:field-win5-111926-notification-order:step-5-duplicate-is-inert']);
                 assert.deepEqual(fieldResult.fieldTrace.map(row=>row.sourceLine),field.observations.map(row=>row.line));
                 result.fieldReplayCounterexample=fieldResult;
+            }else if(variant.queueMutation){
+                assert.equal(executed.status,1);assert.equal(result.cases,3);
+                assert.deepEqual(result.failures,['msi:retry-queue-revocation:stale-retry-refused','msi:retry-queue-revocation:zero-action-deferred']);
             }else{
                 assert.equal(executed.status,0);assert.equal(result.passed,true);assert.deepEqual(result.failures,[]);
                 const scenarios=['ready-same-generation','cross-generation','late-suspend-same-generation','resume-without-suspended-owner','duplicate-notifications','input-not-ready',
-                    'power-not-ready','maintenance-observes-transition','two-rounds-no-transition-credit','resume-required','power-mutex-defers-new-suspend',
+                    'power-not-ready','maintenance-observes-transition','two-rounds-no-transition-credit','shared-ready-required','power-mutex-defers-new-suspend',
                     'missing-resume-new-commit','missing-resume-old-commit','missing-resume-wrong-generation','missing-resume-zero-commit',
                     'field-win5-111926-notification-order','repeated-sleep-wake-cycles','shared-commit-waits-input',
                     'next-suspend-rebases-commit','shared-commit-waits-power'];
-                assert.deepEqual(result.scenarios,['msi','rog','gpd'].flatMap(family=>scenarios.map(scenario=>family+':'+scenario)).concat('unsupported:no-business'));
-                assert.equal(result.cases,181);
+                assert.deepEqual(result.scenarios,['msi','rog','gpd'].flatMap(family=>scenarios.map(scenario=>family+':'+scenario)).concat('unsupported:no-business',
+                    ['retry-queue-revocation','dequeued-ready-revocation','raw-suspend-before-public-latch','new-ready-during-old-ui-read','bounded-allocation-failure','queue-must-not-coalesce-across-power'].map(scenario=>'msi:'+scenario)));
+                assert.equal(result.cases,195);
                 assert.deepEqual(result.fieldTrace.map(row=>row.family+':'+row.sourceLine),
                     ['msi','rog','gpd'].flatMap(family=>field.observations.map(row=>family+':'+row.line)));
             }
-            configurations.push({name:variant.name,...result,expectedFailure:variant.mutation,sourceSha256:hash(code),binarySha256:hash(fs.readFileSync(path.join(directory,'Fixture.exe')))});
-            console.log(variant.name+': '+result.cases+' checks, '+result.failures.length+' failures'+(variant.mutation?' (expected)':''));
+            const expectedFailure=Boolean(variant.mutation||variant.queueMutation);
+            configurations.push({name:variant.name,...result,expectedFailure,sourceSha256:hash(code),binarySha256:hash(fs.readFileSync(path.join(directory,'Fixture.exe')))});
+            console.log(variant.name+': '+result.cases+' checks, '+result.failures.length+' failures'+(expectedFailure?' (expected)':''));
         }
     }finally{
         const closing=inputFiles.map(file=>({file,sha256:hash(fs.readFileSync(path.join(repo,file)))}));
@@ -219,7 +242,7 @@ function runPowerOrder(){
     }
     save('result.json',{schema:1,id:'controller.native-foreground-latency',mode:'power-order',status:'PASS',passed:true,identities,spans,configurations,
         elapsedMs:Date.now()-started,defaultLatency:'NOT_RUN',fullMode:'NOT_RUN',hardwareAccess:false,realProcessLaunches:false,
-        coverage:'Extracted PowerEvent/TryRelease/UiEvent and family admission with controlled atomic facts. Lazy UI terminals; no downstream business writer, full maintenance, full MSI, or physical continuity proof.'});
+        coverage:'Extracted power consumers, lifecycle queue insertion, pop and foreground dispatch branch with controlled power facts and inert action terminal. No device writer, full maintenance, or physical continuity proof.'});
 }
 
 function runHelperExitQuery(){

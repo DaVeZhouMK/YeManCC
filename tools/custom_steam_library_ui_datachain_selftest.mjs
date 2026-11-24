@@ -63,7 +63,6 @@ run('different-steam-roots-same-account-are-retained', () => { const next = norm
 run('snapshot-normalization-does-not-mutate-prior-or-input', () => { const input = { library: { games: [{ gameDirectory: 'G:\\Games\\Bad', primaryExecutable: 7 }] } }; const before = JSON.stringify(input), prior = JSON.stringify(previous); normalize(input); assert.equal(JSON.stringify(input), before); assert.equal(JSON.stringify(previous), prior); });
 run('raw-download-result-is-not-treated-as-snapshot', () => { const result = { path: 'G:\\Images\\Cover.png' }; assert.equal(context.workspaceBridgeResult('downloadArtwork', result), result); });
 run('state-response-without-snapshot-is-rejected', () => assert.throws(() => context.workspaceBridgeResult('state', { path: 'file.png' })));
-run('steam-write-error-refreshes-durable-state', () => assert(source.includes("['commit', 'deleteFromSteam', 'refreshSteamArtwork'].includes(command)") && source.includes("applyLibrarySnapshot(await invoke('state'))")));
 run('steam-open-does-not-relabel-join-button', () => { assert(source.includes("const label = '点击加入';")); assert(!source.includes("const label = running === true ? '点击关闭Steam'")); assert(html.includes('点击加入 <span class="count-label">[已选0个]</span>')); });
 run('malformed-bridge-message-does-not-access-array-shape', () => {
   assert(source.includes('isWorkspaceRecord(event.data) ? event.data : {}'));
@@ -224,7 +223,7 @@ const legacyLookupMetrics=[];
 const lookupScope=callback=>typeof mergeContext.withLibraryPathLookups==='function'?mergeContext.withLibraryPathLookups(callback):callback();
 run('legacy-path-override-and-identity-lookups-have-linear-batch-work',()=>{
  const state=mergeFixture(400);state.gameMedia.entries={};state.manualOverrides.items={};state.resolvedIdentities={};
- for(let i=0;i<400;i++){const exe=state.library.games[i].primaryExecutable;state.manualOverrides.items[exe.toUpperCase().replaceAll('/','\\')+'\\']={name:'Manual '+i};state.resolvedIdentities['legacy-'+i]={executable:exe,formalName:'Resolved '+i};}
+ for(let i=0;i<400;i++){const exe=state.library.games[i].primaryExecutable;state.manualOverrides.items[exe.toUpperCase().replaceAll('/','\\')+'\\']={name:'Manual '+i};state.resolvedIdentities['legacy-'+i]={executable:exe,steamAppId:state.steamPlan.items[i].appId,formalName:'Resolved '+i};}
  mergeContext.snapshot=state;mergeContext.pathWork=0;const started=performance.now(),games=mergeContext.mergedGames();legacyLookupMetrics.push({games:400,pathNormalizations:mergeContext.pathWork,elapsedMs:performance.now()-started});
  assert(games.every((game,i)=>game.override.name==='Manual '+i&&game.resolvedIdentity.formalName==='Resolved '+i));assert(mergeContext.pathWork<=400*30,'Historical path spelling still makes every lookup scan the inventory');
 });
@@ -266,6 +265,92 @@ run('changed-primary-does-not-inherit-old-directory-plan-or-media',()=>{
 run('directory-plan-without-an-executable-retains-legacy-display-fallback',()=>{
  const state=mergeFixture(1);delete state.steamPlan.items[0].primaryExecutable;mergeContext.snapshot=state;assert.equal(mergeContext.mergedGames()[0].steam.appId,1000);
 });
+function manualRefreshFixture() {
+  let listener, invokeCount=0, refreshCount=0;
+  const notices=[], requests=[];
+  const button={disabled:false,classList:{toggle(){}},setAttribute(){}};
+  const labels={'#refresh-artwork-button':button,'#refresh-artwork-label':{}};
+  const fixture=vm.createContext({
+    window:{chrome:{webview:{addEventListener(type,callback){assert.equal(type,'message');listener=callback;}}}},
+    isWorkspaceRecord:context.isWorkspaceRecord,snapshot:{dataRoot:'D:/Fixture'},
+    silentRefreshEpoch:0,silentRefreshClosed:false,manualRefreshProgress:{phase:'idle',current:0,total:0},manualRefreshOwner:null,
+    libraryNotice:{},busyOwner:null,cancelInFlight:false,
+    $(id){return labels[id];},clearNotice(){},
+    setBusy(visible,title,detail,owner){fixture.busyOwner=visible?owner:null;},
+    invoke(command){assert.equal(command,'prepare');++invokeCount;return new Promise((resolve,reject)=>requests.push({resolve,reject}));},
+    preserveNewerEditorMedia(value){return value;},libraryRenderAllowed(){return false;},silentRenderPending:false,
+    scheduleCardOperationState(){},scheduleSilentRefresh(){++refreshCount;},
+    setScrapeProgressToast(){},finishScrapeProgressToast(message){notices.push(message);},
+    showNotice(message){notices.push(message);},showError(error){notices.push(error.message);}
+  });
+  vm.runInContext(normalizedPathSource,fixture);
+  const load=(start,end,includeEnd=false)=>{const a=source.indexOf(start),b=source.indexOf(end,a+start.length);assert(a>=0&&b>a);vm.runInContext(source.slice(a,b+(includeEnd?end.length:0)),fixture);};
+  load('function renderArtworkRefreshControl(', '\nfunction ');
+  load('function scrapeProgressText(', '\nfunction ');
+  load('async function startNonBlockingRefresh(', '\nasync function openLibraryView(');
+  load('function captureSteamActionContext(', '\nfunction closeSteamCommit(');
+  load("window.chrome.webview.addEventListener('message', event => {", '\n});',true);
+  return {
+    start:()=>fixture.startNonBlockingRefresh(),
+    emit(event, fields={}, mode='manual-refresh'){listener({data:{event,scrape:{mode,batchId:'fixture-batch',items:{}},...fields}});},
+    reply(queued=false){requests.shift().resolve({dataRoot:'D:/Fixture',scrape:{batchId:'ack-snapshot'},scrapeRequest:{started:!queued,queued}});},
+    fail(){requests.shift().reject(Error('prepare acknowledgement lost'));},
+    get phase(){return fixture.manualRefreshProgress.phase;},get progress(){return fixture.manualRefreshProgress;},
+    get disabled(){return button.disabled;},get batch(){return fixture.snapshot.scrape.batchId;},
+    get invokes(){return invokeCount;},get refreshes(){return refreshCount;},notices
+  };
+}
+for(const [event,phase,fields] of [
+  ['scrape-queue-started','running',{total:5}],
+  ['scrape-progress','running',{current:2,total:5,round:2,roundCurrent:1,roundTotal:3}],
+  ['scrape-complete','completed',{current:0,total:0}],
+  ['scrape-paused','paused',{current:1,total:4}],
+  ['scrape-error','failed',{error:'fixture early error'}]
+]){
+  const name=`manual-refresh-event-survives-late-prepare-${event}`;
+  try{
+    const f=manualRefreshFixture(),task=f.start();
+    assert.equal(f.phase,'starting');f.emit(event,fields);assert.equal(f.phase,phase);
+    f.reply();await task;
+    assert.equal(f.phase,phase);assert.equal(f.batch,'fixture-batch');assert.equal(f.disabled,phase==='running');
+    if(event==='scrape-progress')assert.equal(f.progress.current,2);
+    if(event==='scrape-complete'){
+      assert.equal(f.refreshes,1);assert.match(f.notices.at(-1),/没有需要处理/);
+      const retry=f.start();assert.equal(f.invokes,2);f.reply(true);await retry;assert.equal(f.phase,'queued');
+    }
+    reports.push({name,passed:true});
+  }catch(error){reports.push({name,passed:false,error:error.message});}
+}
+for(const completed of [false,true]){
+  const name=completed?'manual-refresh-terminal-survives-acknowledgement-failure':'manual-refresh-acknowledgement-failure-reenables-button';
+  try{
+    const f=manualRefreshFixture(),task=f.start();if(completed)f.emit('scrape-complete',{current:0,total:0});
+    f.fail();await task;assert.equal(f.phase,completed?'completed':'failed');assert.equal(f.disabled,false);
+    reports.push({name,passed:true});
+  }catch(error){reports.push({name,passed:false,error:error.message});}
+}
+for(const command of ['commit','deleteFromSteam','refreshSteamArtwork']){
+  const name=`steam-write-error-refreshes-durable-state-${command}`;
+  try{
+    const calls=[],writes=[],errors=[],fixture=vm.createContext({
+      snapshot:{dataRoot:'D:/Fixture'},busyOwner:null,silentRefreshEpoch:0,silentRefreshClosed:false,
+      cancelInFlight:false,libraryNotice:{},notice:{},
+      clearNotice(){},setBusy(visible,title,detail,owner){fixture.busyOwner=visible?owner:null;},
+      async invoke(request){calls.push(request);if(request===command)throw Error('fixture write failure');return {dataRoot:'D:/Fixture',committedAccounts:1};},
+      libraryRenderAllowed(){return false;},applyLibrarySnapshot(state,options){writes.push([state.committedAccounts,options.deferRender]);},
+      $(id){assert.equal(id,'#library-view');return {classList:{contains(){return false;}}};},
+      showSteamAddNotice(text,isError){errors.push([text,isError]);},showError(error){errors.push([error.message,true]);}
+    });
+    vm.runInContext(normalizedPathSource,fixture);
+    for(const [start,end] of [['async function runBusy(', '\nasync function startNonBlockingRefresh('],['function captureSteamActionContext(', '\nfunction admitWorkspaceActionReply(']]){
+      const a=source.indexOf(start),b=source.indexOf(end,a+start.length);assert(a>=0&&b>a);vm.runInContext(source.slice(a,b),fixture);
+    }
+    assert.equal(await fixture.runBusy(command,'Fixture',''),false);
+    assert.deepEqual(calls,[command,'state']);assert.deepEqual(writes,[[1,true]]);
+    assert.deepEqual(errors,[['fixture write failure',true]]);assert.equal(fixture.busyOwner,null);
+    reports.push({name,passed:true});
+  }catch(error){reports.push({name,passed:false,error:error.message});}
+}
 const report = { manualIdentityFeedback, legacyLookupMetrics, mergeMetrics, allPassed: reports.every(test => test.passed), caseCount: reports.length, fuzzCombinationCount: 1000, artworkPriorityCombinationCount: 1000, cases: reports, realSteamFilesModified: false };
 const build = path.resolve(root, '../../Build');
 const output = path.resolve(process.argv[2] || path.join(build, 'CustomSteamLibrary/ui-datachain-summary.json'));

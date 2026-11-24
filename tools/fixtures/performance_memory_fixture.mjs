@@ -35,6 +35,7 @@ export function createPerformanceMemoryFixture({side='ac',mode='manual',dedicate
       '../../PowerControl/settings-baseline.json':JSON.parse(fs.readFileSync('PowerControl/settings-baseline.json','utf8'))})});
   const sectionRevisions=new Map();
   const repo={rememberOrdinaryPerformancePreferences:bootPreferences.rememberOrdinaryPerformancePreferences,SETTINGS_FILE:customPath.replace('game-custom.json','yeman-settings.json'),loadSettings:async()=>{if(ports.beforeSettingsLoad)await ports.beforeSettingsLoad();return clone(settings)},getSettingsGeneration:()=>ports.generation??1,
+    validateSettingsRead:async()=>{await ports.beforeSettingsLoad?.();},
     getSettingsSectionRevision:key=>{const json=JSON.stringify(settings[key]??{}),previous=sectionRevisions.get(key);if(!previous||previous.json!==json)sectionRevisions.set(key,{json,revision:(previous?.revision||0)+1});return sectionRevisions.get(key).revision},
     assertSettingsGeneration:g=>assert.equal(g,ports.generation??1),mergeSettings:(a,b)=>({...a,...b}),
     readSettingsSection:async key=>{if(ports.beforeSettingsRead)await ports.beforeSettingsRead(key);return clone(settings[key]||{});},
@@ -71,7 +72,11 @@ export function createPerformanceMemoryFixture({side='ac',mode='manual',dedicate
     './api':{powerLifecycle:{get:async()=>ports.lifecycle??({phase:'ready',hardwareWritesAllowed:true,generation:1})},fs:{exists:async p=>files.has(p),readTextFile:async p=>{if(ports.beforeCustomRead)await ports.beforeCustomRead(p);if(ports.customReadFailure)throw Error('fixture-custom-read-denied');return files.get(p)},writeTextFileAtomic:async(p,v)=>{effects.push('file-save');files.set(p,v)},writeTextFile:async(p,v)=>{effects.push('file-save');files.set(p,v)}}},
     './frameRateLimits':frameRateService,
     './autofloat':{reassertContinuousFloatTdp:async()=>{if(!floating)return null;if(!ownerLease||!await ownerLease())return false;return yeman.setTdp(ownerSide,ownerWatts,{isCurrent:()=>ownerLease?.isCurrent?.()!==false})},pauseContinuousFloatForTdpEdit:async()=>{if(!ownerLease)return null;const prior=ownerLease;return {current:()=>ownerLease===prior,accept:(_requested,accepted)=>{ownerWatts=accepted??0},release(){}}},getFloatInfo:()=>({enabled:floating,tdpApplied:ownerWatts,tdpOwnerCurrent:!!ownerLease&&ownerLease.isCurrent?.()!==false}),disableFloat:async()=>{effects.push('stop-float');floating=false;ownerLease=null},updateContinuousFloatCoreRules:()=>effects.push('update-core-rules'),holdContinuousFloatAfterCoreChange:()=>effects.push('hold-core'),enableContinuousFloat:async(_bank,side,_target,current)=>{effects.push('start-float');floating=true;ownerLease=current;ownerSide=side;ownerWatts=_bank.tdp},cancelPendingRtssSync(){},setFloatRtssLinked(){}}
-  },ports.profileReadNow?{Date:class extends Date{static now(){return ports.profileReadNow();}}}:undefined);
+  },{
+    ...(ports.profileReadNow?{Date:class extends Date{static now(){return ports.profileReadNow();}}}:{}),
+    ...(ports.scheduleClone?{structuredClone:ports.scheduleClone}:{}),
+    ...(ports.scheduleStringify?{JSON:{parse:JSON.parse,stringify:ports.scheduleStringify}}:{}),
+  });
   const powerListeners=new Set(),tasks=new Map();
   const runtime=evaluatePerformanceModule(source('src/bridge/gamePolicyRuntime.ts'),{
     './powerResume':evaluatePerformanceModule(source('src/bridge/powerResume.ts')),

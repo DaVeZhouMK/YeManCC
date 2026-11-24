@@ -25,6 +25,6 @@ export async function addBootSharedApplication(name:string,path:string){apps.pus
 export async function readBootModeSupport(category?:string){
  memory.supportReads.push(category||'all');
  if(memory.holdSupportCategory===category){memory.holdSupportCategory='';await new Promise<void>(resolve=>memory.releaseSupportRead=resolve);memory.releaseSupportRead=null;}
- const keys=category==='performance'?['hybridCores','performance','charge','fan']:category==='sleep'?['hibernate']:category==='input'?['gyro']:category?[]:Object.keys(support);
+ const keys=category==='performance'?['hybridCores','performance','charge','fan']:category==='input'?['gyro']:category?[]:Object.keys(support);
  return Object.fromEntries(keys.filter(key=>key in support).map(key=>[key,copy(support[key])]));
 }

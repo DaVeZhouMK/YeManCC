@@ -45,6 +45,16 @@ try{
  });
  if(selectedCase==='all'){
 
+ run('MSI A2VM field receipt confirms only the observed rear key',()=>{
+  const usage=normalize({...raw,deviceClass:'HandheldCompanion.Devices.ClawA2VM'});
+  const receipt={schemaVersion:1,familyId:usage.familyId,deviceClass:usage.deviceClass,route:'msi-dinput',observedKeys:['m1','claw','qs','m1'],actionExecutionProven:false};
+  const observedKeys=observationKeys(receipt,usage);
+  assert.deepEqual(observedKeys,['m1']);
+  assert.equal(feature({...context,usage,virtualEnabled:true,persona:'dualsense-edge',observedKeys},'back').value,'\u5df2\u6536\u5230 1/2');
+  assert.deepEqual(observationKeys({...receipt,observedKeys:['m2']},usage),['m2']);
+  for(const bad of [{...receipt,route:'keyboard-chord'},{...receipt,route:undefined},{...receipt,deviceClass:raw.deviceClass},{...receipt,familyId:'gpd'}])assert.deepEqual(observationKeys(bad,usage),[]);
+  assert.deepEqual(observationKeys(receipt,{...usage,keys:usage.keys.map(key=>({...key,captureImplemented:false}))}),[]);
+ });
  run('unknown receipt cannot become absent hardware or a successful input',()=>{assert.equal(normalize({}),null);assert(statuses({...context,usage:null}).slice(0,2).every(x=>x.value==='待确认'));});
  run('MSI native rear stays admitted while automatic firmware writing is held',()=>{const r=feature(context,'back');assert.equal(r.value,'待按键确认');assert.equal(r.hint,'采集路线已接入');assert.match(r.detail,/F11／F14/);assert.match(r.detail,/不限制已有键盘输入/);assert.notEqual(r.tone,'on');});
  run('native dedicated source remains available for testing without a virtual target',()=>{const r=feature(context,'dedicated');assert.equal(r.value,'待按键确认');assert.match(r.detail,/不要求虚拟手柄/);});

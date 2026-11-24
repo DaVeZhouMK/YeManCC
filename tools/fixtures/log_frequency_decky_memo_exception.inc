@@ -122,6 +122,18 @@ int wmain(int argc,wchar_t** argv){try{
 
     reset(root,L"rotation");const std::string oversized(static_cast<size_t>(ymcc::deckydiag::maxBytes)+1,'X');boundarySeed(oversized);boundaryOffer();
     check("original-rotation-preserves-backup-and-new-active-starts-clean",boundaryRead(fspath::path(boundaryPath().wstring()+L".1"))==oversized&&readRows(L"decky-sidebar.log").size()==1&&boundaryRead(boundaryPath()).front()=='{');
+    reset(root,L"rotation-source-shared-without-delete");boundarySeed(oversized);path=boundaryPath();
+    const auto backup=fspath::path(path.wstring()+L".1");const auto previous=complete+"\n";
+    {std::ofstream seed(backup,std::ios::binary);seed<<previous;if(!seed.good())throw std::runtime_error("own backup seed failed");}
+    blocker=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    probe=CreateFileW(path.c_str(),DELETE,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);const auto deleteError=GetLastError();
+    const bool refusedRename=blocker!=INVALID_HANDLE_VALUE&&probe==INVALID_HANDLE_VALUE&&deleteError==ERROR_SHARING_VIOLATION;if(probe!=INVALID_HANDLE_VALUE)CloseHandle(probe);
+    boundaryOffer();if(blocker!=INVALID_HANDLE_VALUE)CloseHandle(blocker);
+    const auto afterBlockedRotation=boundaryRead(path);
+    check("blocked-rotation-still-appends-a-complete-row-to-active-log",refusedRename&&boundarySeparated(afterBlockedRotation,oversized));
+    check("blocked-rotation-keeps-previous-backup-byte-exact",boundaryRead(backup)==previous);
+    boundaryOffer();
+    check("next-offer-after-unlock-replaces-backup-with-complete-active-log",boundaryRead(backup)==afterBlockedRotation&&readRows(L"decky-sidebar.log").size()==1&&boundaryRead(path).front()=='{');
     reset(root,L"中文路径");const std::string unicode="{\"保留\":\"原始\"}";boundarySeed(unicode);boundaryOffer();
     check("unicode-path-and-original-utf8-history-remain-byte-exact",boundarySeparated(boundaryRead(boundaryPath()),unicode));
 #endif

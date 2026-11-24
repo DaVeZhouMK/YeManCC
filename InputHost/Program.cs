@@ -1,6 +1,7 @@
 // [AI:ENTRY:INPUTHOST] 控制器用户行为见 src/views/ButtonMappingView.vue [AI:USER:CONTROLLER]；总地图见 src/router.ts [AI:MAP]。
 // 用户动作说明用于守住功能含义；Host职责、协议和内部执行读实现，具体机型能力统一查询 capabilities/ 总库。
 using System.Diagnostics;
+using YeManCC.SharedSleepPower;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -76,7 +77,7 @@ internal static partial class Program
     {
         "protocolVersion", "command", "requestId", "sequence", "runId", "epoch",
         "powerGeneration", "targetId", "ownerIdentity", "persona", "profileIdentity",
-        "startupNonce", "configRevision", "configHash",
+        "startupNonce", "configRevision", "configHash", "sharedPowerBinding",
         "physicalBaseContainerInstanceId", "physicalDeviceInstanceId"
     };
     private static readonly HashSet<string> FrameFields = new(BaseFields, StringComparer.Ordinal)
@@ -373,6 +374,10 @@ internal static partial class Program
             return new(4, "connect-failed", DiagnosticDetail: ex.GetType().Name);
         }
 
+        if (!parentLifetime.IsPipeServer(pipe.SafePipeHandle))
+            return new(4, "connect-failed", DiagnosticDetail: "original-parent-pipe-identity-mismatch");
+        session.BindPowerParent(parentLifetime.Identity, parentLifetime.ImagePath);
+
         while (parentLifetime.IsAlive)
         {
             // The bound parent exit cancels even a pipe held open by another
@@ -482,6 +487,40 @@ internal static partial class Program
     // ── GP-CPU2（S0/验收）：非常驻探针 —— 同机同场景的「分配 / 尾延迟 / 协议差分」三合一 ──
     // 只调用现有生产入口（HostSession.Handle / ReadMessageAsync / WriteMessageAsync），
     // 不新增任何生产路径、不接触设备、非常驻。旧/新两次构建各跑一次即得对照表。
+    private sealed class OfflineProtocolPower(RemotePowerDescriptorV1 binding) : HostInputPowerBinding.ILease
+    {
+        private bool cancelled, returned;
+        public RemotePowerDescriptorV1 Binding => binding;
+        public bool Current(RemotePowerPurpose purpose) => !cancelled && !returned && purpose == binding.Purpose;
+        public bool LocalReturnComplete => returned;
+        public void CancelLocal() => cancelled = true;
+        public bool TryFinish(out RemotePowerSettlementV1 receipt)
+        {
+            receipt = new() { Size = 80, Version = 1, Scope = binding.Scope, Request = binding.Request,
+                Provider = binding.Provider, Consumer = binding.Consumer,
+                Outcome = RemotePowerSettlementOutcome.InputOperationReturned,
+                Flags = RemotePowerSettlementFlags.InputOperationFinished };
+            return !returned;
+        }
+        public RemoteSettlementDelivery Send(RemotePowerSettlementV1 receipt) => RemoteSettlementDelivery.Acknowledged;
+        public void Dispose() => returned = true;
+
+        internal static string WithOffer(string message, RemotePowerPurpose purpose)
+        {
+            const string stem = "YeManCC.SharedPower.v1.ExplicitOfflineFixture.000000000000000000000000";
+            var descriptor = new RemotePowerDescriptorV1
+            {
+                Size = 128, Version = 1, Purpose = purpose,
+                Scope = new() { Low = (ulong)purpose }, Request = new() { Low = 1 },
+                Provider = new() { Pid = 1, Birth100ns = 1 }, Consumer = new() { Pid = 2, Birth100ns = 2 },
+                Captured = new() { Size = 48, Version = 1, Generation = 1, Phase = 0, Flags = 3 }
+            };
+            Span<byte> bytes = stackalloc byte[128];
+            MemoryMarshal.Write(bytes, in descriptor);
+            return message[..^1] + ",\"sharedPowerBinding\":\"1 " + stem + " " + Convert.ToHexString(bytes) + "\"}";
+        }
+    }
+
     private static async Task<int> RunAllocProbeAsync()
     {
         const string hash = "a3d10d49211a38883c647eea27268b7639b414bb377d63f9419f2e54ce42e281";
@@ -496,17 +535,22 @@ internal static partial class Program
             $$"""{"protocolVersion":1,"command":"SUBMIT_FRAME","requestId":"f{{i}}","sequence":{{i + 2}},"runId":"run-1","epoch":1,"powerGeneration":1,"targetId":"target-1","ownerIdentity":"coordinator","persona":"dualsense-edge","profileIdentity":"dualsense-edge","startupNonce":"{{nonce}}","configRevision":1,"configHash":"{{hash}}","buttons":0,"lx":0,"ly":0,"rx":0,"ry":0,"lt":0,"rt":0,"sampleSequence":{{i + 1}},"monotonicTick":{{i + 1}},"normalizedInputHash":"{{frameHash}}","motionPairProofId":"pair-unproven-safe-zero"}""";
 
         // A) 解析 + 处理（合法帧路径）
-        var session = new HostSession(nonce);
+        var session = HostSession.CreateOfflineProtocolSelfTest(nonce);
         Console.WriteLine("PROBE-STAGE parse-begin");
-        var helloResp = session.Handle(Hello(), out _);
+        var helloWithOffer = OfflineProtocolPower.WithOffer(Hello(), RemotePowerPurpose.InputLifecycle);
+        var helloResp = session.Handle(helloWithOffer, out _);
+        using (var reply = JsonDocument.Parse(helloResp))
+            if (reply.RootElement.GetProperty("status").GetString() != "host-hello") return 3;
         Console.WriteLine("PROBE-STAGE hello " + (helloResp.Length > 90 ? helloResp[..90] : helloResp));
-        for (var i = 0; i < 200; ++i) session.Handle(Frame(i), out _);
+        var firstFrame = OfflineProtocolPower.WithOffer(Frame(0), RemotePowerPurpose.InputFrame);
+        session.Handle(firstFrame, out _);
+        for (var i = 1; i < 200; ++i) session.Handle(Frame(i), out _);
         var lat = new double[N];
         var alloc0 = GC.GetTotalAllocatedBytes(precise: false);   // 进程内单调；异步续体跨线程不受影响
         for (var i = 0; i < N; ++i)
         {
             var t0 = System.Diagnostics.Stopwatch.GetTimestamp();
-            session.Handle(Frame(i), out _);
+            session.Handle(Frame(i + 200), out _);
             lat[i] = System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalMicroseconds;
         }
         var parseAlloc = (GC.GetTotalAllocatedBytes(precise: false) - alloc0) / (double)N;
@@ -568,18 +612,18 @@ internal static partial class Program
         // C) 协议差分（逐字节回执；旧/新构建输出必须一致）
         var cases = new (string Name, string Message)[]
         {
-            ("legal-frame", Frame(0)),
+            ("legal-frame", firstFrame),
             ("unknown-field", Hello()[..^1] + ",\"unknown\":1}"),
             ("duplicate-field", Hello()[..^1] + ",\"epoch\":1}"),
             ("unknown-field+duplicate", Hello()[..^1] + ",\"unknown\":1,\"epoch\":1}"),
             ("unknown-command", Hello().Replace("\"HELLO\"", "\"BOGUS\"", StringComparison.Ordinal)),
             ("negative-zero", Frame(0).Replace("\"lx\":0", "\"lx\":-0", StringComparison.Ordinal)),
-            ("frame-before-prepare", Frame(0))
+            ("frame-before-prepare", firstFrame)
         };
         foreach (var (name, message) in cases)
         {
-            var s = new HostSession(nonce);
-            s.Handle(Hello(), out _);
+            var s = HostSession.CreateOfflineProtocolSelfTest(nonce);
+            s.Handle(helloWithOffer, out _);
             var preview = name == "legal-frame" ? null : s.Handle(message, out _);
             if (name == "legal-frame") preview = s.Handle(message, out _);
             Console.WriteLine("DIFF " + name + " " + preview);
@@ -640,13 +684,20 @@ internal static partial class Program
         var nonceMismatch = hello.Replace(nonce, nonce + "-mismatch", StringComparison.Ordinal);
         var negativeZero = frameBeforePrepare.Replace("\"lx\":0", "\"lx\":-0", StringComparison.Ordinal);
 
-        var session = new HostSession(nonce);
-        var helloResponse = session.Handle(hello, out var helloShutdown);
+        var session = HostSession.CreateOfflineProtocolSelfTest(nonce);
+        using (var unbound = JsonDocument.Parse(new HostSession(nonce).Handle(hello, out var unboundShutdown)))
+        {
+            if (unboundShutdown || unbound.RootElement.GetProperty("status").GetString() != "power-context-retired" ||
+                unbound.RootElement.GetProperty("powerSequenceConsumed").GetBoolean()) return false;
+        }
+        var helloResponse = session.Handle(OfflineProtocolPower.WithOffer(hello, RemotePowerPurpose.InputLifecycle), out var helloShutdown);
+        using (var response = JsonDocument.Parse(helloResponse))
+            if (helloShutdown || response.RootElement.GetProperty("status").GetString() != "host-hello") return false;
         var invalidResponse = session.Handle(unknownField, out var invalidShutdown);
         var nonceResponse = session.Handle(nonceMismatch, out var nonceShutdown);
         var negativeZeroResponse = session.Handle(negativeZero, out var negativeZeroShutdown);
         // F3-B（第八十一批 B-变体）：KEEPALIVE 已从协议删除，selftest 相应段移除。
-        var frameResponse = session.Handle(frameBeforePrepare, out var frameShutdown);
+        var frameResponse = session.Handle(OfflineProtocolPower.WithOffer(frameBeforePrepare, RemotePowerPurpose.InputFrame), out var frameShutdown);
         // 批次A（评审10 §3）：精简状态查询协议门。帧（sequence 2）已被消费，
         // 故这两条用 sequence 3/4；断言关注协议语义而非本机是否装有 HidHide：
         //   · 精简回执 detail 是可解析 JSON 且**不含 applications**；
@@ -784,6 +835,8 @@ internal static partial class Program
                !nonceDoc.RootElement.GetProperty("ok").GetBoolean() &&
                !negativeZeroDoc.RootElement.GetProperty("ok").GetBoolean() &&
                !frameDoc.RootElement.GetProperty("ok").GetBoolean() &&
+               frameDoc.RootElement.GetProperty("status").GetString() == "state-rejected" &&
+               frameDoc.RootElement.GetProperty("detail").GetString() == "frame-requires-neutral" &&
                slimDoc.RootElement.GetProperty("ok").GetBoolean() &&
                slimDoc.RootElement.GetProperty("status").GetString() == "hidhide-query-state" &&
                slimDetailDoc.RootElement.TryGetProperty("ok", out _) &&
@@ -1471,9 +1524,71 @@ internal static partial class Program
 
     private sealed class HostSession
     {
+        private bool _offlineProtocolSelfTest;
+        internal static HostSession CreateOfflineProtocolSelfTest(string nonce)
+        {
+            // The production pipe still binds the authenticated Native parent.
+            return new HostSession(nonce)
+            {
+                _offlineProtocolSelfTest = true,
+                _powerBindings = new HostInputPowerBinding((offer, _) => new OfflineProtocolPower(offer.Binding))
+            };
+        }
+
         // Scratch borrowed only by the synchronous Elite submit under _lifecycleGate.
         private Dictionary<HMAxis, float>? _eliteSubmitAxes;
         private readonly object _lifecycleGate = new();
+        private HostInputPowerBinding? _powerBindings;
+        private HostInputPowerBinding.Borrower? _commandPower, _closeRefreshPowerBorrower;
+        private string _commandPowerFailure = "command-power-unavailable";
+
+        internal void BindPowerParent(RemotePowerProcessV1 identity, string image)
+        {
+            lock (_lifecycleGate)
+            {
+                if (_powerBindings is not null) throw new InvalidOperationException("input-power-parent-already-bound");
+                _powerBindings = new HostInputPowerBinding(identity, image);
+            }
+        }
+        private static bool NeedsCommandPower(CommandEnvelope e) => e.Command is
+            "HELLO" or "PREPARE_TARGET" or "RECREATE_TARGET" or "SUBMIT_FRAME" or
+            "HIDHIDE_HIDE" or "HIDHIDE_APP_REG" or "HIDHIDE_CYCLE" or "HIDHIDE_CYCLE_BEGIN" ||
+            e.Command == "HIDHIDE_CLOAK" && e.HidHideCloak;
+        private bool BeginCommandPower(CommandEnvelope e)
+        {
+            if (!NeedsCommandPower(e)) return true;
+            if(_powerBindings is null||!_powerBindings.TryBorrow(new(e.RunId,e.Epoch,e.StartupNonce),
+                e.Command=="SUBMIT_FRAME"?RemotePowerPurpose.InputFrame:RemotePowerPurpose.InputLifecycle,
+                e.SharedPowerBinding,out _commandPower,out _commandPowerFailure))return false;
+            if(NeedsCommandHardware(e)&&!CommandHardwareCurrent)
+            { _commandPowerFailure="input-power-hardware-not-ready";return false; }
+            return true;
+        }
+        private bool CommandPowerCurrent => _commandPower is { Current: true };
+        private bool CommandHardwareCurrent => _commandPower is { HardwareCurrent: true };
+        private static bool NeedsCommandHardware(CommandEnvelope e) => e.Command is
+            "PREPARE_TARGET" or "RECREATE_TARGET" or "HIDHIDE_HIDE" or "HIDHIDE_APP_REG" or
+            "HIDHIDE_CYCLE" or "HIDHIDE_CYCLE_BEGIN" || e.Command == "HIDHIDE_CLOAK" && e.HidHideCloak;
+        internal void RequireFramePowerBeforeEffect()
+        { if(!CommandPowerCurrent)throw new OperationCanceledException("input-command-power-retired"); }
+        private void ReapCommandPower()
+        {
+            lock (_closeRefreshGate)
+            {
+                // Worker finally is earlier than Task completion. Only the
+                // original serial owner may return its retained borrower.
+                if (_closeRefreshTask is { IsCompleted: true })
+                { _closeRefreshPowerBorrower?.Dispose(); _closeRefreshPowerBorrower = null; }
+            }
+            _powerBindings?.Maintenance();
+        }
+        private string HandleWithCommandPower(string message, out bool shutdown, ReadOnlyMemory<byte>? utf8 = null)
+        {
+            ReapCommandPower();
+            try { return HandleLocked(message, out shutdown, utf8); }
+            finally { _commandPower?.Dispose(); _commandPower = null; ReapCommandPower(); }
+        }
+
         private HMContext? _context;
         private HMController? _controller;
         // The raw Edge writer owns sequencing after the SDK input clock is joined.
@@ -1639,13 +1754,13 @@ internal static partial class Program
         public string Handle(string message, out bool shutdown)
         {
             lock (_lifecycleGate)
-                return HandleLocked(message, out shutdown);
+                return HandleWithCommandPower(message, out shutdown);
         }
 
         public string HandleUtf8(ReadOnlyMemory<byte> message, out bool shutdown)
         {
             lock (_lifecycleGate)
-                return HandleLocked(string.Empty, out shutdown, message);
+                return HandleWithCommandPower(string.Empty, out shutdown, message);
         }
 
         private string HandleLocked(string message, out bool shutdown, ReadOnlyMemory<byte>? utf8Message = null)
@@ -1683,12 +1798,21 @@ internal static partial class Program
                 var fingerprint = JsonSerializer.Serialize(envelope);
                 if (prior.Fingerprint != fingerprint || prior.Command != envelope.Command)
                     return Error(envelope, "protocol-error", "request-id-content-mismatch");
+                if (!BeginCommandPower(envelope))
+                    return Error(envelope, "power-context-retired", _commandPowerFailure);
                 return prior.Response;
             }
 
             if (_phase == Phase.AwaitHello)
             {
                 if (envelope.Command != "HELLO") return Error(envelope, "protocol-error", "hello-required");
+                if (!BeginCommandPower(envelope))
+                {
+                    var rejected = Error(envelope, "power-context-retired", _commandPowerFailure);
+                    // HELLO did not publish its tuple/sequence. The original
+                    // native transaction must retain this same first sequence.
+                    return rejected[..^1] + ",\"powerSequenceConsumed\":false}";
+                }
                 if (!TryVerifyLockedAsset(out var assetDetail)) return Error(envelope, "asset-mismatch", assetDetail);
                 _assetVerified = true;
                 // R4: own Host identity, observed only after the existing SDK check.
@@ -1728,6 +1852,7 @@ internal static partial class Program
             if (envelope.Command == "SUBMIT_FRAME" && envelope.FrameReplyBinding is not null &&
                 !_compactFrameReplies.Matches(_controller, envelope.FrameReplyBinding))
                 return Error(envelope, "state-rejected", "frame-reply-binding-mismatch");
+            if (!BeginCommandPower(envelope)) return Error(envelope, "power-context-retired", _commandPowerFailure);
             if (envelope.Command is "PREPARE_TARGET" or "RECREATE_TARGET" or "QUIESCE" or "RELEASE_TARGET" or "SHUTDOWN")
                 _compactFrameReplies.Revoke();
 
@@ -1818,6 +1943,8 @@ internal static partial class Program
                         // failure cannot leave a logically connected writer
                         // available for a later frame. This is still only a
                         // local dispose result, never device-gone proof.
+                        if (frameDetail == "input-command-power-retired")
+                            return Error(envelope, "power-context-retired", frameDetail);
                         var frameReleaseOk = ReleaseLocalLocked(out var frameReleaseDetail);
                         _phase = LocalReleasePending ? Phase.Quiesced : Phase.Released;
                         var response = Error(
@@ -1911,6 +2038,10 @@ internal static partial class Program
                     return Ack(envelope, "hidhide-cycle-begin", "{\"accepted\":false,\"reason\":\"terminal\"}");
                 if (_closeRefreshTask is { IsCompleted: false })
                     return Ack(envelope, "hidhide-cycle-begin", "{\"accepted\":false,\"reason\":\"in-flight\"}");
+                var refreshPower = _commandPower?.Fork();
+                if (refreshPower is null)
+                    return Error(envelope, "power-context-retired", "close-refresh-original-power-unavailable");
+                _closeRefreshPowerBorrower = refreshPower;
                 _closeRefreshCancelled = false;
                 _closeRefreshInFlight = 1;
                 _closeRefreshState = "in-flight";
@@ -1921,7 +2052,7 @@ internal static partial class Program
                 _closeRefreshRunId = envelope.RunId;
                 _closeRefreshEpoch = envelope.Epoch;
                 _closeRefreshPowerGeneration = envelope.PowerGeneration;
-            _closeRefreshTask = Task.Run(() =>
+            try { _closeRefreshTask = Task.Run(() =>
             {
                 // 后台只做该物理刷新（与同步 HIDHIDE_CYCLE 同一 Nefarius CyclePort 语义）；
                 // 不碰虚拟目标/控制器，不写管道，不取 HidHideLock（HIDHIDE_* 命令不被拖住）。
@@ -1930,7 +2061,7 @@ internal static partial class Program
                 string detail = "close-refresh-cancelled";
                 try
                 {
-                    lock (_closeRefreshGate) { if (_closeRefreshCancelled) return; }
+                    lock (_closeRefreshGate) { if (_closeRefreshCancelled || !refreshPower.HardwareCurrent) return; }
                     var device = FindPhysicalDevice(bindingPath);
                     if (device is null)
                     {
@@ -1943,7 +2074,7 @@ internal static partial class Program
                         // Revalidate after both potentially delayed lookups.
                         // Admission is serialized with cancellation; after this
                         // boundary the synchronous call remains an owned Task.
-                        lock (_closeRefreshGate) { if (_closeRefreshCancelled) return; }
+                        lock (_closeRefreshGate) { if (_closeRefreshCancelled || !refreshPower.HardwareCurrent) return; }
                         usb.CyclePort();   // void；不抛 = 成功（HC PnPDetails.cs:143-144）
                         state = "done";
                         detail = "true";
@@ -1958,13 +2089,15 @@ internal static partial class Program
                 {
                     lock (_closeRefreshGate)
                     {
-                        _closeRefreshState = _closeRefreshCancelled ? "cancelled" : state;
-                        _closeRefreshDetail = _closeRefreshCancelled ? "close-refresh-cancelled" : detail;
+                        var retired = _closeRefreshCancelled || !refreshPower.Current;
+                        _closeRefreshState = retired ? "cancelled" : state;
+                        _closeRefreshDetail = retired ? "close-refresh-cancelled" : detail;
                         _closeRefreshElapsedMs = Environment.TickCount64 - t0;
                         _closeRefreshInFlight = 0;
                     }
                 }
-            });
+            }); }
+            catch { _closeRefreshPowerBorrower = null; refreshPower.Dispose(); _closeRefreshInFlight = 0; throw; }
             }
             return Ack(envelope, "hidhide-cycle-begin",
                 JsonSerializer.Serialize(new
@@ -2046,7 +2179,7 @@ internal static partial class Program
             });
         }
 
-        private static bool HidHideCliFallback(string arguments, out string detail)
+        private bool HidHideCliFallback(string arguments, out string detail)
         {
             detail = "";
             try
@@ -2069,6 +2202,8 @@ internal static partial class Program
                         CreateNoWindow = true
                     }
                 };
+                if(_commandPower is not null&&!CommandHardwareCurrent)
+                { detail="input-command-power-retired";return false; }
                 if (!p.Start()) { detail = "cli-start-failed"; return false; }
                 // HC fallback 用 3s（HidHide.cs WaitForExit(TimeSpan.FromSeconds(3))）；
                 // native 已删周期 CLI 探测，此处只需覆盖单条操作。
@@ -2088,6 +2223,8 @@ internal static partial class Program
             shutdown = false;
             lock (HidHideLock)
             {
+                if(NeedsCommandHardware(envelope)&&!CommandHardwareCurrent)
+                    return Error(envelope,"power-context-retired","input-command-power-retired");
                 switch (envelope.Command)
                 {
                     case "HIDHIDE_HIDE":
@@ -2098,8 +2235,9 @@ internal static partial class Program
                         {
                             try
                             {
-                                if (!svc.BlockedInstanceIds.Contains(envelope.HidHidePath))
-                                    svc.AddBlockedInstanceId(envelope.HidHidePath);
+                                var hidden=svc.BlockedInstanceIds.Contains(envelope.HidHidePath);
+                                if(!CommandHardwareCurrent)return Error(envelope,"power-context-retired","input-command-power-retired");
+                                if (!hidden) svc.AddBlockedInstanceId(envelope.HidHidePath);
                                 return Ack(envelope, "hidhide-hidden", "api-ok");
                             }
                             catch { apiDetail = "api-failed"; }
@@ -2132,6 +2270,8 @@ internal static partial class Program
                         {
                             try
                             {
+                                if(envelope.HidHideCloak&&!CommandHardwareCurrent)
+                                    return Error(envelope,"power-context-retired","input-command-power-retired");
                                 svc.IsActive = envelope.HidHideCloak;
                                 return Ack(envelope, envelope.HidHideCloak ? "hidhide-cloak-on" : "hidhide-cloak-off", "api-ok");
                             }
@@ -2151,6 +2291,8 @@ internal static partial class Program
                             {
                                 bool isReg = envelope.Command == "HIDHIDE_APP_REG";
                                 var contains = svc.ApplicationPaths.Contains(envelope.HidHidePath);
+                                if(isReg&&!CommandHardwareCurrent)
+                                    return Error(envelope,"power-context-retired","input-command-power-retired");
                                 if (isReg && !contains) svc.AddApplicationPath(envelope.HidHidePath);
                                 if (!isReg && contains) svc.RemoveApplicationPath(envelope.HidHidePath);
                                 return Ack(envelope, isReg ? "hidhide-app-registered" : "hidhide-app-unregistered", "api-ok");
@@ -2290,6 +2432,7 @@ internal static partial class Program
                             if (device is null)
                                 return Ack(envelope, "hidhide-cycle", "false-device-not-found");
                             var usb = device.ToUsbPnPDevice();
+                            if(!CommandHardwareCurrent)return Error(envelope,"power-context-retired","input-command-power-retired");
                             usb.CyclePort(); // void；不抛 = 成功（HC PnPDetails.cs:143-144）
                             return Ack(envelope, "hidhide-cycle", "true");
                         }
@@ -2316,8 +2459,10 @@ internal static partial class Program
                 timing?.End(HostReleaseTimingEvidence.Stage.LifecycleGate);
                 _releaseTimingEvidence = timing;
                 _releaseTimingBinding = timing is null ? null : releaseRequest;
+                bool powerReaped=false;
                 try
                 {
+                    if (terminal || releaseRequest?.Command == "SHUTDOWN") _powerBindings?.RetireAll();
                     // Terminal settlement includes parent loss even with no
                     // controller. Ordinary no-target cleanup preserves the
                     // legitimate close-return refresh requested afterwards.
@@ -2329,10 +2474,22 @@ internal static partial class Program
                         return false;
                     }
                     var ok = ReleaseLocalLocked(out detail, timing);
+                    // Consume the same original final maintenance before the
+                    // terminal receipt, including a completed Task borrower.
+                    // No second cleanup loop or remote terminal replay.
+                    powerReaped=true;ReapCommandPower();
+                    if((terminal||releaseRequest?.Command=="SHUTDOWN")&&
+                        _powerBindings is {HasUnreturnedLocalOwnership:true})
+                    {
+                        detail=string.IsNullOrEmpty(detail)?"input-power-local-return-pending":
+                            detail+";input-power-local-return-pending";
+                        _phase=Phase.Quiesced;ok=false;
+                    }
                     timing?.Complete(ok);
                     return ok;
                 }
-                finally { timing?.Finish(); }
+                finally
+                { try{timing?.Finish();}finally{if(!powerReaped)ReapCommandPower();} }
             }
         }
 
@@ -2730,6 +2887,7 @@ internal static partial class Program
             try
             {
                 usbipDiagnostics?.Stage("context-create-begin");
+                if (!CommandHardwareCurrent) { detail = "input-command-power-retired"; return false; }
                 _context = new HMContext();
                 _context.LoadDefaultProfiles();
                 XboxStage("context-profiles");
@@ -2758,6 +2916,7 @@ internal static partial class Program
                     _virtualEndpoint = WaitForEndpointFamilyRemoval(SwitchReconcileFamilyWaitMs, requireInstanceIds: _msiSteamDeckReleaseFence1726 is not null);
                     if (!_virtualEndpoint.IsFullyAbsent)
                     {
+                        if (!CommandHardwareCurrent) { detail = "input-command-power-retired"; return false; }
                         HMContext.RemoveAllVirtualControllers(true);
                         _virtualEndpointReconciled = true;
                         reconcilePath = "fallback-sweep";
@@ -2789,6 +2948,7 @@ internal static partial class Program
                 // A USB/IP reservation covers advisory install plus this factory; refusal blocks both.
                 _controller = CreateTargetWithBackendWarning(() =>
                 {
+                    if (!CommandHardwareCurrent) throw new OperationCanceledException("input-command-power-retired");
                     var ready = TryEnsureDriverInstalled(_context, out var backendDetail,
                         requireUsbip: profile.RequiresUsbipBackend, usbipDiagnostics: usbipDiagnostics);
                     XboxStage("profile-backend");
@@ -2799,6 +2959,7 @@ internal static partial class Program
                     usbipDiagnostics?.Stage("sdk-create-begin", backendReceipt);
                     if (envelope.Persona == PsEndpointOwnership.Persona)
                         _psEndpointOwnership.BeginCreate(PsOwnershipBinding(envelope));
+                    if (!CommandHardwareCurrent) throw new OperationCanceledException("input-command-power-retired");
                     return _context.CreateController(profile);
                 }, out backendReceipt);
                 if (envelope.Persona == PsEndpointOwnership.Persona)
@@ -2903,13 +3064,14 @@ internal static partial class Program
         // path) and, historically, the removed physical-xinput suspension
         // mechanism. Keep: HIDHIDE_CYCLE still resolves the target device
         // through the same Nefarius GetDeviceByInstanceId API.
-        private static PnPDevice? FindPhysicalDevice(string baseInstanceId)
+        private PnPDevice? FindPhysicalDevice(string baseInstanceId)
         {
+            if (_offlineProtocolSelfTest) return null;
             try { return PnPDevice.GetDeviceByInstanceId(baseInstanceId, DeviceLocationFlags.Normal); }
             catch { return null; }
         }
 
-        private static bool TryEnsureDriverInstalled(HMContext context, out string detail, bool requireUsbip = false,
+        private bool TryEnsureDriverInstalled(HMContext context, out string detail, bool requireUsbip = false,
             UsbipSetupEvidence? usbipDiagnostics = null)
         {
             if (requireUsbip)
@@ -2929,6 +3091,7 @@ internal static partial class Program
 
             try
             {
+                if(!CommandHardwareCurrent){detail="input-command-power-retired";return false;}
                 context.InstallDriver();
             }
             catch (Exception ex)
@@ -2949,7 +3112,7 @@ internal static partial class Program
 
         // Stock HIDMaestro 2.0.0 owns its bundled usbip-win2 0.9.8.1 installation.
         // No local transport fork or external-installer fallback.
-        private static bool TryEnsureUsbipBackend(out string detail, UsbipSetupEvidence? usbipDiagnostics = null)
+        private bool TryEnsureUsbipBackend(out string detail, UsbipSetupEvidence? usbipDiagnostics = null)
         {
             bool available;
             try {
@@ -2979,6 +3142,7 @@ internal static partial class Program
                 // 模式运行时亦可经由 SDK 例外抛出，不在此造轮子拉安装器。
                 usbipDiagnostics?.Stage("sdk-install-begin");
                 Action<string>? progress = usbipDiagnostics is null ? null : usbipDiagnostics.Report;
+                if(!CommandHardwareCurrent){detail="input-command-power-retired";return false;}
                 HMContext.InstallUsbipBackend(progress);
                 if (HMContext.IsUsbipBackendAvailable)
                 {
@@ -3100,13 +3264,15 @@ internal static partial class Program
             catch { tracker = null; frame = null; }
             // Keep the existing opt-in tracker. Its delegate is allocated only when armed.
             static void Tracked(MsiPersonaReportChain20261012 tracker, MsiReportChainFrame20261012 frame,
-                HMController controller, byte[] report) => tracker.InvokeRaw(frame, report, bytes => controller.SubmitRawReport(bytes));
+                HMController controller, byte[] report, HostSession owner, bool live) => tracker.InvokeRaw(frame, report, bytes =>
+                { if(live)owner.RequireFramePowerBeforeEffect();controller.SubmitRawReport(bytes); });
             try
             {
                 try
                 {
-                    if (tracker is not null && frame is not null) Tracked(tracker, frame, controller, report);
-                    else controller.SubmitRawReport(report);
+                    var live=canonical is null&&cause?.Command=="SUBMIT_FRAME";
+                    if (tracker is not null && frame is not null) Tracked(tracker, frame, controller, report, this, live);
+                    else {if(live)RequireFramePowerBeforeEffect();controller.SubmitRawReport(report);}
                 }
                 catch (Exception ex) { CompleteVirtualSignalEvidenceSafely(attempt, ex); throw; }
                 CompleteVirtualSignalEvidenceSafely(attempt, null);
@@ -3134,13 +3300,15 @@ internal static partial class Program
             try { PrepareReportChainInvocation1410(cause, null, reason, out tracker, out frame); }
             catch { tracker = null; frame = null; }
             static void Tracked(MsiPersonaReportChain20261012 tracker, MsiReportChainFrame20261012 frame,
-                HMController controller, HMGamepadState state) => tracker.InvokeUnencodedState(frame, () => controller.SubmitState(state));
+                HMController controller, HMGamepadState state, HostSession owner, bool live) => tracker.InvokeUnencodedState(frame, () =>
+                { if(live)owner.RequireFramePowerBeforeEffect();controller.SubmitState(state); });
             try
             {
                 try
                 {
-                    if (tracker is not null && frame is not null) Tracked(tracker, frame, controller, state);
-                    else controller.SubmitState(state);
+                    var live=canonical is null&&cause?.Command=="SUBMIT_FRAME";
+                    if (tracker is not null && frame is not null) Tracked(tracker, frame, controller, state, this, live);
+                    else {if(live)RequireFramePowerBeforeEffect();controller.SubmitState(state);}
                 }
                 catch (Exception ex) { CompleteVirtualSignalEvidenceSafely(attempt, ex); throw; }
                 CompleteVirtualSignalEvidenceSafely(attempt, null);
@@ -3171,6 +3339,7 @@ internal static partial class Program
                 _msiHostStageEvidence?.BeginBackend();
                 try
                 {
+                    if (!CommandPowerCurrent) { detail = "input-command-power-retired"; return false; }
                     switch (envelope.Persona)
                     {
                         case "steamdeck": SubmitSteamDeckWithScreenPads(_controller, profile, envelope, _costFlagEnabled, signalSession: this, signalCause: envelope); break;
@@ -3203,6 +3372,8 @@ internal static partial class Program
                 RecordCostFrame(_lastSubmitElapsedUs, rejected: false);
                 return true;
             }
+            catch (OperationCanceledException ex) when(ex.Message=="input-command-power-retired")
+            { detail="input-command-power-retired";return false; }
             catch (Exception ex)
             {
                 _lastSubmitElapsedUs = (long)(Stopwatch.GetElapsedTime(started).TotalMilliseconds * 1000.0);
@@ -3730,6 +3901,8 @@ internal static partial class Program
 
         private string SerializeResponse(CommandEnvelope? envelope, bool ok, string status, string detail, bool? firstFrame, string? releaseDisposition)
         {
+            if (ok && _commandPower is not null && !CommandPowerCurrent)
+            { ok = false; status = "power-context-retired"; detail = "command-power-retired-before-receipt"; }
             var compactReply = ok && status == "frame-accepted" && envelope?.Command == "SUBMIT_FRAME" &&
                 envelope.FrameReplyBinding is not null && _compactFrameReplies.Matches(_controller, envelope.FrameReplyBinding);
             var response = compactReply
@@ -4059,6 +4232,16 @@ internal static partial class Program
             }
 
             var parsed = new CommandEnvelope(command, requestId, sequence, runId, epoch, powerGeneration, targetId, ownerIdentity, persona, profileIdentity, startupNonce, configRevision, configHash);
+            if (properties.ContainsKey("sharedPowerBinding"))
+            {
+                // The public header has its own 319..419 ASCII grammar. The
+                // ordinary tuple string helper intentionally keeps its 160 cap.
+                var element = properties["sharedPowerBinding"];
+                var binding = element.ValueKind == JsonValueKind.String ? element.GetString() : null;
+                if (!RemotePowerOfferHeaderV1.TryParse(binding, out _))
+                { error = "invalid-shared-power-binding"; return false; }
+                parsed = parsed with { SharedPowerBinding = binding };
+            }
             if (properties.TryGetValue(MsiSteamDeckReleaseFence1726.PrepareField, out var releaseFence))
             {
                 if (command != "PREPARE_TARGET" || persona != "steamdeck" || profileIdentity != "steam-deck-composite" ||
@@ -4713,6 +4896,8 @@ internal static partial class Program
         public bool MsiSteamDeckReleaseFence { get; init; }
         [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         public string? FrameReplyBinding { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? SharedPowerBinding { get; init; }
         public int Buttons { get; init; }
         public float Lx { get; init; }
         public float Ly { get; init; }

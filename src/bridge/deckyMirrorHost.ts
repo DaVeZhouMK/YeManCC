@@ -25,12 +25,12 @@ import { VirtualStartProtectionView } from './virtualStartProtectionView';
 import { acceptVirtualOutputRuntime, virtualOutputPresentation, type VirtualOutputRuntimeState, type ExternalPriorityRuntimeState } from './virtualOutputStatus';
 import { invoke, on, getLastGamepadState } from './ipc';
 import { powerLifecycle } from './api';
-import { onSharedPowerLifecycle,isSharedPowerLifecycleAdmitted } from './powerLifecycleState';
+import { onSharedPowerLifecycle,isSharedPowerLifecycleAdmitted,type SharedPowerLifecycleSnapshot } from './powerLifecycleState';
 import { powerSourceMode, refreshPowerSourceSnapshot } from './powerSource';
 import { readLosslessScaling, losslessField, setLosslessFromMirror, onLosslessScalingChanged, type LsDocument } from './losslessScaling';
 import {retainLosslessObservation,readLosslessProgram} from './losslessRuntimeState';
 import { getPolicyGame, gamePolicyKey, subscribePolicyGameStatus, refreshPolicyGameStrict } from './gamePolicyTarget';
-import { getGameCustomConfig, loadGameCustomConfig, saveGameCustomConfig, loadPerformanceSchedule, onGameCustomConfigChanged, onPerformanceScheduleChanged,
+import { getGameCustomConfig, gameCustomDisplayMatches, loadGameCustomConfig, saveGameCustomConfig, loadPerformanceSchedule, onGameCustomConfigChanged, onPerformanceScheduleChanged,
   getContinuousPerformanceSnapshot, updateContinuousPerformanceControls, importGameCustomProfile, removeGameCustomProfile, restorePerformanceScheduleIfConfigured, type PerformanceScheduleConfig } from './performanceSchedule';
 import { fanFeatureEnabled, fanControlActive, getFanSelectedPreset, getFanPresetCurve, saveFanCurve,
   setFanControlActive, setFanNavigationDuty, recordFanHandshake, FAN_IMPORT_ENABLED, FAN_FORCE_PREVIEW } from './fanFeature';
@@ -130,7 +130,8 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
     side:()=>powerSourceMode.value,read:readGlobal,power:()=>powerLifecycle.get(),acquire:tryAcquireQuickAction,cas:compareAndSwapInputSettings,closeJoyxoff:closeJoyxoffIfRunning,finishInput,clearShortcut:()=>invoke('input.shortcutRuntime.clear',{observeProtection:true})});
   let performanceSource='',performanceRevision=0,profileSource='',profileRevision=0;
   const profileActions=createProfileMirrorActions({allowed:gameTargetReady,game:getPolicyGame,label:gameLabel,settingsGeneration:getSettingsGeneration,power:()=>powerLifecycle.get(),acquire:tryAcquireQuickAction,load:loadGameCustomConfig,schedule:loadPerformanceSchedule,currentSchedule:()=>schedule,snapshot:()=>getContinuousPerformanceSnapshot(),import:importGameCustomProfile,remove:removeGameCustomProfile,restore:()=>restorePerformanceScheduleIfConfigured()});
-  const performanceActions=createPerformanceMirrorActions({allowed:gameTargetReady,read:()=>getContinuousPerformanceSnapshot(),update:updateContinuousPerformanceControls,power:()=>powerLifecycle.get(),acquire:tryAcquireQuickAction});
+  const performanceActions=createPerformanceMirrorActions({allowed:gameTargetReady,read:()=>getContinuousPerformanceSnapshot(),update:updateContinuousPerformanceControls,power:()=>powerLifecycle.get(),acquire:tryAcquireQuickAction,
+    reportTdpSettled:detail=>invoke<boolean>('deckySidebar.mirrorDiagnostic',{event:'tdp-owner-settled',...detail},{timeoutMs:1000})});
   // Only this display can supply its captured profile. Ordinary action reads
   // keep fresh=true and ignore display data, including a supplied fourth arg.
   const readFrames=async(fresh=true,game=getPolicyGame(),readGlobalFrames=loadGlobalFrameRates,displayConfig?:ReturnType<typeof getGameCustomConfig>):Promise<FrameMirrorRead>=>{
@@ -157,20 +158,38 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
   const monitorActions = createMonitorMirrorActions({allowed:()=>hostReady&&!ended,power:()=>powerLifecycle.get(),
     read:readMonitorOutputPreferences,save:enabled=>saveSettingsSection('rtss',{monitorOutput:{enabled}}),apply:prefs=>monitorOutputCoordinator.apply(prefs)});
   const losslessDiagnostic:DeckyLosslessDiagnostic=(event,detail)=>{void invoke<boolean>('deckySidebar.mirrorDiagnostic',{event,...detail},{timeoutMs:1000}).catch(()=>{});};
-  // A snapshot consumes its own LS completions before publishing. A completion
-  // after that transaction still invalidates; unrelated source events always do.
+  // Game LS configuration can change admission; the program lamp cannot.
   type SnapshotReadLease={audioPending:boolean;powerSource:string|null;powerObservation:string|null};
   let snapshotReadLease:SnapshotReadLease|null=null,observedPowerSource:string|null=null;
   let beginAudioObservation:(()=>void)|null=null;
   // One notification's existing read, consumed once by its following snapshot.
   // Explicit demand and observer retirement discard it; actions still read fresh.
   let audioObservation:{read:ReturnType<typeof fxSound.read>;powerSource:string|null}|null=null;
-  const powerSnapshotSource=(value:{generation?:unknown;phase?:unknown;known?:unknown;hardwareWritesAllowed?:unknown;inputReady?:unknown})=>
-    JSON.stringify([value.generation,value.phase,value.known!==false,value.hardwareWritesAllowed,value.inputReady]);
+  // Controller recovery after power commit does not change sidebar admission.
+  // Its visible state is refreshed separately by gamepad.state.
+  const powerSnapshotSource=(value:SharedPowerLifecycleSnapshot)=>
+    JSON.stringify([value.generation,value.suspendSerial,value.phase,value.known!==false,value.hardwareWritesAllowed,value.notificationPending===true]);
   const losslessObserved=()=>{if(snapshotReadLease===null)relay.invalidate();};
   const losslessObservation=new DeckyLosslessObservation<LsDocument>(losslessObserved,losslessDiagnostic);
-  const losslessProgramObservation=new DeckyLosslessObservation<Awaited<ReturnType<typeof readLosslessProgram>>>(losslessObserved,losslessDiagnostic);
+  type LosslessProgram=Awaited<ReturnType<typeof readLosslessProgram>>;
   let lastReadView:RelayReadSnapshot|null=null;
+  const programKey=(generation:number)=>'program:'+generation+':ready';
+  const programLamp=(view:{document:LosslessProgram|null;pending:boolean;notice:string}):LosslessProgram=>
+    !view.pending&&!view.notice&&view.document?view.document:{known:false,running:false};
+  const losslessProgramObservation=new DeckyLosslessObservation<LosslessProgram>(()=>{
+    if(ended||snapshotReadLease!==null)return;
+    relay.afterSnapshotRead(()=>{
+      const snapshot=lastReadView;
+      if(ended||!snapshot?.ready||!snapshot.losslessProgram)return;
+      const view=losslessProgramObservation.peek(programKey(snapshot.generation));
+      if(!view)return;
+      const lamp=programLamp(view);
+      if(!relay.repaintLosslessProgram(snapshot.generation,lamp))return;
+      snapshot.losslessProgram=lamp;
+      // Only a superseding refresh still owed a read needs another snapshot.
+      if(view.needsRead)relay.invalidate('lossless');
+    });
+  },losslessDiagnostic);
   // Optional metadata belongs only to this visible relay's display. The shared
   // reader remains the facts owner; these DTOs never enter action admission.
   type GameSteamDisplay={identity:string;generation:number;value:RelayReadSnapshot['gameSteam']};
@@ -187,7 +206,10 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
       void gameSteamContext.refresh({signal:scope.cancellation.signal}).catch(()=>{});
   };
   const optionalGameSteam=(game:ReturnType<typeof getPolicyGame>,generation:number):GameSteamDisplay|undefined=>{
-    if(!game||!gameSteamDisplayVisible||!isGameStatusCurrent()){retireGameSteamDisplay();return;}
+    if(!game||!gameSteamDisplayVisible||!isGameStatusCurrent()){
+      if(gameSteamDisplayScope?.view)retireGameSteamDisplay();
+      return;
+    }
     const identity=gameMirrorIdentity(game);
     if(gameSteamDisplayScope?.view&&(gameSteamDisplayScope.view.identity!==identity||gameSteamDisplayScope.view.generation!==generation))retireGameSteamDisplay();
     const scope=gameSteamDisplayScope;if(!scope)return;
@@ -200,12 +222,27 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
       const observed=value?.game;
       if(!observed||(observed.pid===game.pid&&observed.processCreated===String(game.processCreated)&&observed.path===game.path&&
           observed.identityGeneration===game.identityGeneration&&(observed.powerGeneration===undefined||observed.powerGeneration===String(generation))))view.value=value;
-      // An in-flight core snapshot consumes this value at its final synchronous
-      // assembly. A later completion repaints once and never submits a warm.
-      if(snapshotReadLease===null && !relay.repaintGameSteam(identity,generation,view.value))relay.invalidate();
+      // A pending snapshot samples the current view at assembly. Otherwise
+      // repaint the clean cache only; optional metadata cannot retire core IO.
+      if(snapshotReadLease===null)relay.afterSnapshotRead(()=>{
+        if(current())relay.repaintGameSteam(identity,generation,view.value);
+      });
     };
     void Promise.resolve().then(()=>current()?gameSteamContext.read({signal:scope.cancellation.signal}):undefined).then(complete,()=>complete());
     return view;
+  };
+  const invalidateGameSteamDisplay=()=>{
+    const view=gameSteamDisplayScope?.view;
+    if(!view)return;
+    retireGameSteamDisplay();
+    const scope=gameSteamDisplayScope;
+    // An in-flight or dirty snapshot will re-read the display when it assembles.
+    // A clean snapshot can clear stale display facts without changing its admission.
+    if(snapshotReadLease===null)relay.afterSnapshotRead(()=>{
+      if(!scope||scope!==gameSteamDisplayScope||scope.view||!relay.repaintGameSteam(view.identity,view.generation,undefined))return;
+      const game=getPolicyGame();
+      if(gameMirrorIdentity(game)===view.identity)optionalGameSteam(game,view.generation);
+    });
   };
 
   // Pure existing owner state, including its independent cancel/intent gate.
@@ -225,8 +262,13 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
       retireGameSteamDisplay();warmGameSteamDisplay();
     },
     observeSteam(observation){
-      if(JSON.stringify(observation)===JSON.stringify(steam))return false;
-      steam=observation;return true;
+      const {availability,appId,gameId,runningCount}=observation;
+      if(availability===steam.availability&&appId===steam.appId&&gameId===steam.gameId&&runningCount===steam.runningCount)return false;
+      const next:SteamRunningObservation={availability};
+      if(appId!==undefined)next.appId=appId;
+      if(gameId!==undefined)next.gameId=gameId;
+      if(runningCount!==undefined)next.runningCount=runningCount;
+      steam=next;return true;
     },
     async read(trace) {
       const measure:NonNullable<typeof trace>['measure']=trace?.measure??(async(_stage,read)=>read());
@@ -235,10 +277,11 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
       if (!hostReady || ended) return makeEarly('YMCC 正在初始化，等待当前状态就绪');
       const observedAudio=audioObservation;audioObservation=null;
       const readLease:SnapshotReadLease={audioPending:true,powerSource:null,powerObservation:null};snapshotReadLease=readLease;
+      const readCurrent=()=>!ended&&snapshotReadLease===readLease&&(!trace||trace.isCurrent());
       try {
       // Power is one on-demand native read. Game/fan data is already held by the resident YMCC owner.
       const power=await measure('power',()=>powerLifecycle.get());
-      if(ended || snapshotReadLease!==readLease)throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');
+      if(!readCurrent())throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');
       readLease.powerSource=powerSnapshotSource(power);
       // A shared fact received during native IO is consumed by this read only
       // when it confirms the same state. A changed fact retires it before any
@@ -247,7 +290,8 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
         relay.invalidateFresh(true,'power');throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');
       }
       observedPowerSource=readLease.powerSource;
-      if(power.phase!=='ready'||power.hardwareWritesAllowed!==true){
+      if(!isSharedPowerLifecycleAdmitted(power)){
+        losslessProgramObservation.clear();
         retireGameSteamDisplay();
         // Recovery may observe only the native lifecycle fact while gated. Retain
         // display values, never their old admissions or a different game's target.
@@ -271,14 +315,15 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
       // prerequisite. Observe rejection immediately while other owners settle.
       const audioRead=measure('audio',readAudio).then(value=>({ok:true as const,value}),error=>({ok:false as const,error}));
       await measure('powerSource',refreshPowerSourceSnapshot);
-      if(ended || snapshotReadLease!==readLease)throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');
+      // The same visible lease may survive a relay source change while awaiting AC/DC.
+      if(!readCurrent())throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');
       // One current set of owner reads supplies this entire display. Start
       // independent capabilities while the shared schedule/profile IO settles.
       const scheduleGeneration=getSettingsGeneration(),previousSchedule=schedule;
       const game=getPolicyGame(),identity=gameMirrorIdentity(game),profileGeneration=scheduleGeneration;
       const scheduleRead=measure('schedule',loadPerformanceSchedule);
       // A power or other relay invalidation can retire this read without replacing the game.
-      const profileReadCurrent=()=>!ended&&snapshotReadLease===readLease&&(!trace||trace.isCurrent())&&gameMirrorIdentity(getPolicyGame())===identity;
+      const profileReadCurrent=()=>readCurrent()&&gameMirrorIdentity(getPolicyGame())===identity;
       const profileRead=game?measure('profile',()=>loadGameCustomConfig('read-only',{
         onTiming:trace?.profileStage,
         displayCurrent:profileReadCurrent,
@@ -287,7 +332,7 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
       // A failed first read does not consume monitor's independent recovery read.
       const rtssRead=readSettingsSection('rtss');
       const readMonitorRtss=()=>rtssRead.catch(()=>{
-        if(ended || snapshotReadLease!==readLease)throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');
+        if(!profileReadCurrent())throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');
         return readSettingsSection('rtss');
       });
       const globalFrameRates=loadGlobalFrameRates(()=>rtssRead);
@@ -301,8 +346,7 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
       // partial-read timer retry; transport and business intents are untouched.
       const independentConfigView=async(notice:string):Promise<RelayReadSnapshot>=>{
         const expectedSchedule=schedule;
-        const current=()=>schedule===expectedSchedule&&!ended&&snapshotReadLease===readLease&&getSettingsGeneration()===scheduleGeneration&&
-          gameMirrorIdentity(getPolicyGame())===identity;
+        const current=()=>schedule===expectedSchedule&&profileReadCurrent()&&getSettingsGeneration()===scheduleGeneration;
         if(!current())throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');
         const side=powerSourceMode.value,input=measure('input',()=>readSettingsSection('input'));
         const [touchpadRead,monitorRead]=await Promise.allSettled([
@@ -338,27 +382,27 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
       schedule=loaded;
       const snapshotSchedule=schedule;
       // External profile deletion remains observable through the original read.
-      const gameSteamDisplay=optionalGameSteam(game,power.generation);
+      optionalGameSteam(game,power.generation);
       let profileConfig:Awaited<typeof profileRead>;
       try{profileConfig=await profileRead;}
       catch(error){
         if(!profileReadCurrent())throw error;
         return await independentConfigView('游戏专属配置读取失败，相关控制暂不可用');
       }
-      const profileDocument=JSON.stringify(profileConfig);
-      const checkReadSource=()=>{
-        if(ended || snapshotReadLease!==readLease || gameMirrorIdentity(getPolicyGame())!==identity || schedule!==snapshotSchedule)throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');
-        // Return this accepted copy for the final synchronous profile receipt.
-        // Both pre-control and final fences still query the current owner.
-        const currentConfig=game?getGameCustomConfig():profileConfig;
-        if(game&&JSON.stringify(currentConfig)!==profileDocument)throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');
-        return currentConfig;
+      const checkReadScope=()=>{
+        if(!profileReadCurrent() || schedule!==snapshotSchedule)throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');
+      };
+      // An owner read may have returned before the sidebar retired its view.
+      checkReadScope();
+      const checkProfileDocument=()=>{
+        // The owner cache can also change without a notification.
+        if(game&&!gameCustomDisplayMatches(profileConfig))throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');
       };
       // Start non-blocking LS observation before the parallel control batch. The
       // same current-key views below consume completions without a second batch.
-      checkReadSource();
+      checkProfileDocument();
       const observeLossless=()=>game?.path?losslessObservation.view(identity+':'+power.generation+':'+power.phase,()=>readLosslessScaling(game.path)):null;
-      const observeProgram=()=>losslessProgramObservation.view('program:'+power.generation+':'+power.phase,readLosslessProgram);
+      const observeProgram=()=>losslessProgramObservation.view(programKey(power.generation),readLosslessProgram);
       if(!game)losslessObservation.clear();
       observeLossless();observeProgram();
       // Independent read-only owners join one snapshot. Share the input read and
@@ -385,11 +429,12 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
       // A concurrent source event also invalidates the relay. This local fence
       // prevents old reads from resetting a newer observation key or publishing
       // a mixed game/schedule view before that retry is delivered.
-      const confirmedProfileConfig=checkReadSource();
+      checkReadScope();
+      checkProfileDocument();
       const losslessView=observeLossless(),programView=observeProgram();
       const lossless=losslessView?.document??null,losslessError=losslessView?.notice??'';
       // Available even without a game or a matching EXE rule. No Decky-side probe.
-      const losslessProgram=programView.pending||programView.notice?{known:false,running:false}:programView.document??{known:false,running:false};
+      const losslessProgram=programLamp(programView);
       fields.losslessScaling = losslessField(lossless,losslessView?.pending===true);
       const frames=frameRead.status==='fulfilled'?frameRead.value:null;
       const touchpads=touchpadRead.status==='fulfilled'?touchpadRead.value:null;
@@ -411,7 +456,7 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
           if(global?.fields[key])global.fields[key]={...global.fields[key],supported:false};
         }
       }
-      const freshProfileSource=game?gameProfileRevision(confirmedProfileConfig,gamePolicyKey(game)):'';
+      const freshProfileSource=game?gameProfileRevision(profileConfig,gamePolicyKey(game)):'';
       if(freshProfileSource!==profileSource){profileSource=freshProfileSource;profileRevision++;}
       fields.profile={value:entry&&entry.enabled!==false?'dedicated':'global',choices:[{data:'global',label:'全局配置'},{data:'dedicated',label:'游戏专属'}],supported:!!entry&&entry.enabled!==false||!!performance&&!!frames,sourceRevision:String(profileRevision),inherited:!entry};
       const freshPerformanceSource=performance?performanceMirrorSource(performance):'';
@@ -421,7 +466,7 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
       const readyTrainer = game ? getReadyGameTrainer(gameLabel(game),game.path,game) : null;
       const trainer = trainerActions.view(game,readyTrainer);
       const fanView=readFanView();
-      const gameSteam=gameSteamDisplayScope?.view===gameSteamDisplay?gameSteamDisplay?.value:undefined;
+      const gameSteam=optionalGameSteam(game,power.generation)?.value;
       const view:RelayReadSnapshot={ gameAdmission:game ? {...makeGameMirrorAdmission(entry,schedule!,lossless?.xml),speed:JSON.stringify(speedState),profile:freshProfileSource,profileSource:performance?gameProfileImportSource(performance):undefined} : undefined,steam:structuredClone(steam),gameSteam,generation:power.generation,ready:power.phase === 'ready' && power.hardwareWritesAllowed === true,
         controlAdmission:{audioOptimization:JSON.stringify(audioOptimization),performance:performance?freshPerformanceSource:undefined,trainer:trainerMirrorSource(readyTrainer),frames:frames?.source,touchpads:touchpads?.source,global:global?.source,monitor:monitor?JSON.stringify(monitor):undefined},
         audioOptimization,losslessProgram,trainer,performance:performanceView,virtualController,
@@ -475,10 +520,21 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
       }}));}};
       beginAudioObservation=startAudio;
       // A failed unsubscribe must not strand the remaining independent observers.
-      const stopObservers=()=>{observing=false;if(beginAudioObservation===startAudio){beginAudioObservation=null;audioObservation=null;}gameSteamDisplayVisible=false;retireGameSteamDisplay();for(const stop of stops){try{stop();}catch{}}};
+      const stopObservers=()=>{
+        observing=false;
+        // Retire both observations so a reopen cannot publish a profile read
+        // from the retired demand, even with the same game and power generation.
+        losslessObservation.clear();losslessProgramObservation.clear();
+        if(beginAudioObservation===startAudio){beginAudioObservation=null;audioObservation=null;}
+        gameSteamDisplayVisible=false;retireGameSteamDisplay();
+        for(const stop of stops){try{stop();}catch{}}
+      };
       try {
-        const stopGameSteam=gameSteamContext.subscribeInvalidation?.(()=>{if(observing){retireGameSteamDisplay();invalidate('steam');}});
-        if(stopGameSteam)stops.push(stopGameSteam);
+        const refreshGameSteamDisplay=()=>{if(observing)invalidateGameSteamDisplay();};
+        // The shared reader already listens for context completion. Keep the
+        // raw event only for a reader without the invalidation callback.
+        const stopGameSteam=gameSteamContext.subscribeInvalidation?.(refreshGameSteamDisplay);
+        stops.push(stopGameSteam??on('gameSteam.context.changed',refreshGameSteamDisplay));
         stops.push(onPerformanceScheduleChanged(value => { if(!observing)return;schedule = value; invalidate('schedule'); }));
         stops.push(onGameCustomConfigChanged(()=>invalidate('profile')));
         stops.push(onFrameRatesChanged(()=>invalidate('frames')));
@@ -492,7 +548,6 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
           else invalidate('monitor');
         }));
         stops.push(on('screenTouchpads.updated',()=>invalidate('touchpads')));
-        stops.push(on('gameSteam.context.changed',()=>{if(!observing)return;retireGameSteamDisplay();invalidate('steam');}));
         let observedSteamSource='';
         stops.push(on('gameSteam.context.sourceChanged',(raw:unknown)=>{
           if(!observing)return;
@@ -516,23 +571,31 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
         }));
         let controllerTimer:ReturnType<typeof setTimeout>|null=null,controllerDeadline:number|null=null;
         // Native samples include timestamps/counters. Only a user-visible status or
-        // admission change may invalidate the sidebar, never the telemetry rate.
-        const controllerSignature=()=>JSON.stringify([currentVirtualTargetPolicy(),virtualOutputPresentation(controllerRuntime,controllerTarget.enabled,controllerTarget.persona,false,externalPriority),controllerProtection.read(performance.now()).locked]);
-        observeController(getLastGamepadState());
-        let observedController=controllerSignature();
+        // admission change may invalidate the sidebar. Compare that fixed view
+        // without serializing it on every input sample.
+        let observedControllerPolicy: boolean|undefined,observedControllerReason:string|undefined;
+        let observedControllerView:ReturnType<typeof virtualOutputPresentation>|undefined,observedControllerLocked:boolean|undefined;
+        const syncControllerView=(notify:boolean,observedLock?:boolean)=>{
+          const policy=currentVirtualTargetPolicy(),view=virtualOutputPresentation(controllerRuntime,controllerTarget.enabled,controllerTarget.persona,false,externalPriority);
+          const locked=observedLock??controllerProtection.read(performance.now()).locked;
+          if(policy?.steamDeckSelfOutputBlocked===observedControllerPolicy&&policy?.reason===observedControllerReason&&
+            view.text===observedControllerView?.text&&view.detail===observedControllerView?.detail&&view.tone===observedControllerView?.tone&&locked===observedControllerLocked)return;
+          observedControllerPolicy=policy?.steamDeckSelfOutputBlocked;observedControllerReason=policy?.reason;
+          observedControllerView=view;observedControllerLocked=locked;
+          if(notify)relay.invalidateFresh(false,'controller');
+        };
+        syncControllerView(false,observeController(getLastGamepadState()).locked);
         const refreshController=(raw:unknown)=>{
           if(!observing)return;
           const view=observeController(raw);
-          const next=controllerSignature();
-          if(next!==observedController){observedController=next;relay.invalidateFresh(false,'controller');}
+          syncControllerView(true,view.locked);
           if(view.deadline===controllerDeadline)return;
           if(controllerTimer!==null)clearTimeout(controllerTimer);
           controllerDeadline=view.deadline;controllerTimer=null;
           if(view.deadline!==null)controllerTimer=setTimeout(()=>{
             if(!observing)return;
             controllerTimer=null;controllerDeadline=null;
-            const next=controllerSignature();
-            if(next!==observedController){observedController=next;relay.invalidateFresh(false,'controller');}
+            syncControllerView(true);
           },Math.max(0,Math.ceil(view.deadline-performance.now())));
         };
         controllerFeedback=refreshController;
@@ -577,17 +640,20 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
         }));
         stops.push(on('input.shortcutRuntime',()=>invalidate('input')));
         stops.push(onInputSettingsChanged(()=>invalidate('input')));
-        // Pending intent only invalidates cached UI; it grants no sleep/Ready permission.
-        stops.push(on('power.pending',()=>{if(!observing)return;audioObservation=null;retireGameSteamDisplay();relay.invalidateFresh(true,'power');}));
-        let observedPower='',gameSteamReadyGeneration:number|null=null;
+        let observedPower='',observedSuspendSerial:number|undefined,gameSteamReadyGeneration:number|null=null;
         stops.push(onSharedPowerLifecycle(snapshot=>{
           if(!observing||ended)return;
           const next=powerSnapshotSource(snapshot);
           if(next===observedPower)return;
+          const suspendChanged=observedPower!==''&&observedSuspendSerial!==snapshot.suspendSerial;
           observedPower=next;
+          observedSuspendSerial=snapshot.suspendSerial;
           const ready=isSharedPowerLifecycleAdmitted(snapshot);
-          if(!ready||gameSteamDisplayScope?.view&&gameSteamDisplayScope.view.generation!==snapshot.generation)retireGameSteamDisplay();
-          const warm=ready&&gameSteamReadyGeneration!==snapshot.generation;
+          if(!ready||suspendChanged){
+            audioObservation=null;losslessObservation.clear();losslessProgramObservation.clear();
+          }
+          if(!ready||suspendChanged||gameSteamDisplayScope?.view&&gameSteamDisplayScope.view.generation!==snapshot.generation)retireGameSteamDisplay();
+          const warm=ready&&(suspendChanged||gameSteamReadyGeneration!==snapshot.generation);
           gameSteamReadyGeneration=ready?snapshot.generation:null;
           if(warm)warmGameSteam();
           const reading=snapshotReadLease;
@@ -595,8 +661,8 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
           // The same current native fact can arrive through the shared owner
           // after our direct read. It needs no second complete control batch.
           if(next===observedPowerSource)return;
-          relay.invalidateFresh(true,'power');
-        }));
+          relay.advancePowerScope();
+        },{observeSuspendSerial:true}));
         stops.push(on('fan.resume-ready',refreshFan));
         stops.push(onFanMirrorUiGate(refreshFan));
         stops.push(onFanMirrorDisplay(refreshFan));
@@ -665,8 +731,8 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
           if(provenance.kind!=='ymcc-native'||provenance.pid!==owner.pid){provenance = { kind: 'ymcc-native', pid: owner.pid }; relay.invalidate();}
         }
         if(observationEpoch!==transportObservationEpoch)return;
-        if (peer.connected && relay.connected(peer)) {
-          dispatchDeckyMirrorPeer(peer); relay.invalidate();
+        if (peer.connected && relay.connected(peer, true)) {
+          dispatchDeckyMirrorPeer(peer);
           void relay.refreshSnapshotAfterAttach(peer);
         }
       }).catch(() => {});

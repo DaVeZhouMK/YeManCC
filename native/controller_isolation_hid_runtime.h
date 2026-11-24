@@ -60,11 +60,11 @@ struct Port {
     static bool samePhysicalSource(const ymcc::isolationhid::Key& key,const std::wstring& path) {
         DEVINST node=0;std::wstring instance;
         return !path.empty() && ymccBackgroundUi::interfaceNode(path,node,instance) &&
-            sameXusbSource(path,key.slotPath) &&
+            sameXusbSource(path,key.slotPath,key.coldIntent!=0) &&
             ymcc::targetReturn::physicalPath::verify(W2U(key.root),W2U(instance)).proven();
     }
     enum class Probe {Other,Gamepad,Unknown};
-    static Probe probe(const std::wstring& path) noexcept {
+    static Probe probe(const std::wstring& path,bool cold) noexcept {
         const auto handle=CreateFileW(path.c_str(),0,FILE_SHARE_READ|FILE_SHARE_WRITE,
             nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
         if(handle==INVALID_HANDLE_VALUE)return Probe::Unknown;
@@ -74,7 +74,7 @@ struct Port {
             HidP_GetCaps(data,&caps)==HIDP_STATUS_SUCCESS;
         const bool freed=!data || HidD_FreePreparsedData(data);
         if(!CloseHandle(handle) || !freed || !known)return Probe::Unknown;
-        return attributes.VendorID==0x045e && attributes.ProductID==0x028e && caps.UsagePage==1 && caps.Usage==5
+        return (cold || (attributes.VendorID==0x045e && attributes.ProductID==0x028e)) && caps.UsagePage==1 && caps.Usage==5
             ?Probe::Gamepad:Probe::Other;
     }
     static bool findCurrentPath(const ymcc::isolationhid::Key& key,std::wstring& selected,
@@ -114,9 +114,9 @@ struct Port {
                 stage="current-interface-node-changed";
                 if(!ymccBackgroundUi::interfaceNode(candidate,listedNode,listedInstance) || listedNode!=nodes[index] ||
                    _wcsicmp(listedInstance.c_str(),instance.data())!=0)return false;
-                if(!sameXusbSource(candidate,key.slotPath))continue;
+                if(!sameXusbSource(candidate,key.slotPath,key.coldIntent!=0))continue;
                 stage="current-interface-probe-unavailable";
-                const auto suitability=probe(candidate);
+                const auto suitability=probe(candidate,key.coldIntent!=0);
                 if(suitability==Probe::Unknown)return false;
                 if(suitability!=Probe::Gamepad)continue;
                 stage="current-game-interface-ambiguous";
@@ -155,7 +155,7 @@ struct Port {
                 const bool bound=port.bound();
                 const BindFailure failure{preferredStage,stage,port.lastError,configResult};
                 const bool limitReached=!bound && attempt==ymcc::isolationhid::maxBindAttempts;
-                const char* boundary=bound?(port.haveBindFailure?"bound-after-failure":key.wakeSuspend?"bound-win5-wake":nullptr):
+                const char* boundary=bound?(port.haveBindFailure?"bound-after-failure":key.wakeSuspend?"bound-win5-wake":key.coldIntent?"bound-cold-fse":nullptr):
                     limitReached?"bind-attempt-limit":!port.haveBindFailure?"first-failure":
                     port.previousBindFailure!=failure?"failure-changed":nullptr;
                 port.haveBindFailure=!bound;
@@ -166,7 +166,7 @@ struct Port {
                     {"boundary",boundary?json(boundary):json(nullptr)},
                     {"error",port.lastError},{"power",key.power},{"edge",key.edge},{"topology",key.topology},
                     {"identity",key.identity},{"occupant",key.occupant},{"slot",key.slot},
-                    {"readerRole",key.wakeSuspend?"win5-kept-sd-wake":"original-isolation"},
+                    {"readerRole",key.wakeSuspend?"win5-kept-sd-wake":key.coldIntent?"cold-fse":"original-isolation"},
                     {"wakeSuspendSerial",key.wakeSuspend},{"wakeNotificationSequence",key.wakeNotice},
                     {"path",W2U(selected.empty()?key.preferredPath:selected)},{"preferredPath",W2U(key.preferredPath)},
                     {"root",W2U(key.root)},{"preferredStage",preferredStage},{"stage",stage},{"configRet",configResult},
@@ -175,6 +175,13 @@ struct Port {
         } receipt{*this,key,attempt};
         try {
             if(!canBind())return false;
+            if(key.coldIntent) {
+                receipt.stage="current-xinput-gamepad-subtype";
+                XINPUT_CAPABILITIES caps{};
+                if(!g_ymccXInputGetCapabilities14 || key.slot>=4 ||
+                   g_ymccXInputGetCapabilities14(key.slot,XINPUT_FLAG_GAMEPAD,&caps)!=ERROR_SUCCESS ||
+                   caps.Type!=XINPUT_DEVTYPE_GAMEPAD || caps.SubType!=XINPUT_DEVSUBTYPE_GAMEPAD)return false;
+            }
             if(bindPath(key,key.preferredPath,receipt.preferredStage)) {
                 receipt.stage="bound-preferred";return true;
             }
@@ -277,7 +284,7 @@ static bool haveKey=false;
 static std::uint64_t reportSequence=0;
 static std::atomic<bool> backgroundRetirementPending{false};
 static void retireSample() {
-    if(lane.hasSample() && !key.wakeSuspend) {
+    if(lane.hasSample() && !key.wakeSuspend && !key.coldIntent) {
         ymccCommonHid::lane.clear();
         uiRetirementPending.store(true,std::memory_order_release);
         backgroundRetirementPending.store(true,std::memory_order_release);
@@ -288,7 +295,7 @@ static std::uint64_t readSleepBoundary=0;
 static void withdraw() {
     // Keep servicing cancellation and handle-return debt after the key is gone.
     if(!haveKey && !lane.hasSample() && !reportSequence && !readSleepBoundary && reader.idle())return;
-    if(reader.awaitingFresh() && !key.wakeSuspend)ymccCommonHid::lane.clear();
+    if(reader.awaitingFresh() && !key.wakeSuspend && !key.coldIntent)ymccCommonHid::lane.clear();
     retireSample();haveKey=false;key={};reportSequence=0;readSleepBoundary=0;reader.withdraw();
 }
 // The retained virtual target still owns all output. Borrow only physical data
@@ -328,6 +335,39 @@ static bool currentWin5Wake(const Epoch& source,ymcc::isolationhid::Key& next,bo
         wakePower.suspendSerial,wakePower.observedNotificationSequence,demand};
     return true;
 }
+static bool coldScene() {
+    std::uint64_t intent=0,host=0;
+    if(!coldFseReaderCurrent(currentPowerGeneration(),intent,host))return false;
+    static bool entered=false,departed=false;
+    if(departed)return false;
+    if(!ymccBackgroundUi::fseActive()){
+        if(entered)departed=true;
+        return false;
+    }
+    entered=true;
+    return true;
+}
+static bool currentColdFse(const Epoch& source,ymcc::isolationhid::Key& next,bool& reuse) {
+    reuse=false;
+    std::uint64_t intent=0,host=0;
+    if(!coldScene() || !coldFseReaderCurrent(source.power,intent,host) || !g_realStickTest.virtualTargetEnabled ||
+       !g_inputReady.load(std::memory_order_acquire) || g_inputCaptureStop.load(std::memory_order_acquire) ||
+       g_inputHostPowerAdmissionRevoked.load(std::memory_order_acquire) || inputHostExitFenceRaised() ||
+       !g_xinputPhysicalSourceLocked)return false;
+    if(haveKey && key.coldIntent==intent && key.edge==host && key.power==source.power &&
+       key.topology==source.topology && key.identity==source.identity && key.occupant==source.occupant && key.slot==source.slot){
+        reuse=true;return true;
+    }
+    Epoch verified;std::wstring slotPath;
+    if(!context(verified,&slotPath) || verified!=source || slotPath.empty())return false;
+    std::unique_lock<std::mutex> physical(g_hidHidePhysicalIdentityMx,std::try_to_lock);
+    if(!physical.owns_lock())return false;
+    const auto& selected=g_hidHidePhysicalIdentity;
+    if(!selected.resolved || selected.baseContainerDeviceInstanceId.empty() || selected.sourcePath.empty())return false;
+    next={source.power,host,source.topology,source.identity,source.occupant,source.slot,
+        U2W(selected.baseContainerDeviceInstanceId),U2W(selected.sourcePath),std::move(slotPath),0,0,0,intent};
+    return true;
+}
 static bool current(ymcc::isolationhid::Key& next,bool retainPending=false) {
     const auto permit=g_controllerIsolationHidPermit.load(std::memory_order_acquire);
     if(!permit)return false;
@@ -356,7 +396,7 @@ static bool current(ymcc::isolationhid::Key& next,bool retainPending=false) {
 }
 static void pauseReadAtBoundary(std::uint64_t boundary) {
     retireSample();
-    if(!key.wakeSuspend)ymccCommonHid::lane.clear();
+    if(!key.wakeSuspend && !key.coldIntent)ymccCommonHid::lane.clear();
     readSleepBoundary=boundary;
     if(reader.port().bound())reader.pause();
 }
@@ -373,6 +413,10 @@ static bool sampleReadAllowed(bool allowed) {
     const auto boundary=g_sleepPowerDispatch.observedSleepBoundarySequence();
     if(readSleepBoundary!=boundary){pauseReadAtBoundary(boundary);return false;}
     if(pending || reader.awaitingFresh())return false;
+    if(key.coldIntent){
+        std::uint64_t intent=0,host=0;
+        return coldScene() && coldFseReaderCurrent(key.power,intent,host) && intent==key.coldIntent && host==key.edge;
+    }
     if(key.wakeSuspend)return currentPowerGeneration()==key.power &&
         g_sharedPowerSuspendSerial.load(std::memory_order_acquire)==key.wakeSuspend &&
         g_sleepPowerDispatch.observedSequence()==key.wakeNotice &&
@@ -380,11 +424,12 @@ static bool sampleReadAllowed(bool allowed) {
         inputHostEpochToken()==key.edge && win5WakeDemandReadable(key.wakeIntent);
     return true;
 }
-static void observe(bool ui,const Epoch& source) {
+static void observe(bool ui,const Epoch& source,bool coldPrimarySelected=false) {
     const auto boundary=g_sleepPowerDispatch.observedSleepBoundarySequence();
     ymcc::isolationhid::Key next;
     bool reuse=false;
-    if(!currentWin5Wake(source,next,reuse) && !current(next)){
+    if(!currentWin5Wake(source,next,reuse) &&
+       (coldPrimarySelected || !currentColdFse(source,next,reuse)) && !current(next)){
         if(!pausePending()){
             withdraw();if(!reader.port().returned())reader.port().serviceClosing();
         }
@@ -396,7 +441,7 @@ static void observe(bool ui,const Epoch& source) {
     if(!ui || !uiEvaluation)return;
     if(g_sleepPowerDispatch.pendingSuspend() || readSleepBoundary!=g_sleepPowerDispatch.observedSleepBoundarySequence())return;
     if(key.wakeSuspend && !win5WakeDemandReadable(key.wakeIntent))return;
-    if(reader.awaitingFresh() && !key.wakeSuspend)ymccCommonHid::lane.clear();
+    if(reader.awaitingFresh() && !key.wakeSuspend && !key.coldIntent)ymccCommonHid::lane.clear();
     ymcc::controllerhid::Frame frame;std::uint64_t observedSequence=0,observedTick=0;
     const bool observed=reader.read(&key,GetTickCount64(),frame,observedSequence,observedTick);
     if(observed) {
@@ -407,6 +452,11 @@ static void observe(bool ui,const Epoch& source) {
             bool sameKey=false;
             stillCurrent=eligible() && context(currentSource) &&
                 currentWin5Wake(currentSource,after,sameKey) && sameKey;
+        }else if(key.coldIntent) {
+            Epoch currentSource;
+            bool sameKey=false;
+            stillCurrent=eligible() && context(currentSource) &&
+                currentColdFse(currentSource,after,sameKey) && sameKey;
         }else stillCurrent=current(after) && key==after;
         if(!stillCurrent){
             if(!pausePending())withdraw();
@@ -421,6 +471,12 @@ static void observe(bool ui,const Epoch& source) {
         try{appendNativeLifecycleLog("gamepad-win5-kept-sd-wake-first-hid-report",{
             {"power",key.power},{"hostEpoch",key.edge},{"suspendSerial",key.wakeSuspend},
             {"notificationSequence",key.wakeNotice},{"reportSequence",observedSequence},
+            {"observedTick",observedTick},{"completeBasic",frame.completeBasic},
+            {"basicActive",ymcc::commonhid::basicActive(frame.pad)},{"gameConsumptionProven",false}});}catch(...){}
+    }
+    if(key.coldIntent && !reportSequence){
+        try{appendNativeLifecycleLog("gamepad-cold-fse-first-hid-report",{
+            {"power",key.power},{"hostEpoch",key.edge},{"reportSequence",observedSequence},
             {"observedTick",observedTick},{"completeBasic",frame.completeBasic},
             {"basicActive",ymcc::commonhid::basicActive(frame.pad)},{"gameConsumptionProven",false}});}catch(...){}
     }

@@ -14,6 +14,7 @@ export interface ShortcutExecutionContext {
   request: ShortcutActionRequest;
   checkpoint(): void;
   verify(): Promise<void>;
+  read<T>(load: () => Promise<T>): Promise<T>;
 }
 export const SHORTCUT_FRAME_RATES = [15,20,25,30,40,45,50,60,72,90,120,144,165,200,240,300] as const;
 export function parseUiShortcutParameters(actionId: string, raw: unknown): Record<string,string> | null {
@@ -57,22 +58,32 @@ export function createControllerShortcutActions(deps: {
   capture?:(request:ShortcutActionRequest)=>()=>boolean;
 }) {
   const clock=deps.clock??Date.now,seen=new Map<string,number>();
-  let ended=false,version=0,pending=0,queue:Promise<void>=Promise.resolve();
+  let ended=false,scope=new AbortController(),pending=0,queue:Promise<void>=Promise.resolve();
+  function invalidate(){const previous=scope;scope=new AbortController();previous.abort();}
   function enqueue(raw:unknown): boolean {
     const request=readShortcutActionRequest(raw,clock());if(!request||ended)return false;
     for(const[id,expires]of seen)if(expires<=clock())seen.delete(id);
     if(seen.has(request.id))return false;
     if(pending>=16){void deps.complete(request,shortcutActionFailure(request.actionId,new Error('SHORTCUT_BUSY'))).catch(()=>{});return false;}
     seen.set(request.id,request.expiresAtUnixMs);while(seen.size>128)seen.delete(seen.keys().next().value!);
-    const captured=version,isCurrent=deps.capture?.(request)??(()=>true);++pending;
-    const checkpoint=()=>{if(ended||captured!==version||!isCurrent()||request.expiresAtUnixMs<=clock())throw Error('SHORTCUT_SOURCE_CHANGED')};
+    const captured=scope.signal,isCurrent=deps.capture?.(request)??(()=>true);++pending;
+    const checkpoint=()=>{if(ended||captured.aborted||!isCurrent()||request.expiresAtUnixMs<=clock())throw Error('SHORTCUT_SOURCE_CHANGED')};
     const verify=async()=>{checkpoint();if(!await deps.claim(request))throw Error('SHORTCUT_SOURCE_CHANGED');checkpoint()};
+    // Only local/read-only work can release the queue on a power edge.
+    const read=async<T>(load:()=>Promise<T>):Promise<T>=>{
+      checkpoint();
+      let abort!:()=>void;
+      const revoked=new Promise<never>((_,reject)=>{abort=()=>reject(Error('SHORTCUT_SOURCE_CHANGED'));});
+      captured.addEventListener('abort',abort,{once:true});
+      try{const value=await Promise.race([revoked,Promise.resolve().then(()=>{checkpoint();return load();})]);checkpoint();return value;}
+      finally{captured.removeEventListener('abort',abort);}
+    };
     const run=queue.then(async()=>{
       // A result transport failure cannot undo an action or justify a second result.
-      try {await verify();const outcome=await deps.execute[request.actionId](request.params,{request,checkpoint,verify});checkpoint();await deps.complete(request,outcome).catch(()=>{});}
-      catch(error){if(!ended&&captured===version&&request.expiresAtUnixMs>clock())await deps.complete(request,shortcutActionFailure(request.actionId,error)).catch(()=>{});}
+      try {await verify();const outcome=await deps.execute[request.actionId](request.params,{request,checkpoint,verify,read});checkpoint();await deps.complete(request,outcome).catch(()=>{});}
+      catch(error){if(!ended&&!captured.aborted&&request.expiresAtUnixMs>clock())await deps.complete(request,shortcutActionFailure(request.actionId,error)).catch(()=>{});}
       finally {--pending;}
     });queue=run.catch(()=>{});return true;
   }
-  return {enqueue,invalidate(){++version},stop(){ended=true;++version;seen.clear()},idle(){return queue},get pending(){return pending}};
+  return {enqueue,invalidate,stop(){ended=true;invalidate();seen.clear()},idle(){return queue},get pending(){return pending}};
 }

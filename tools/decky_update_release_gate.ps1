@@ -469,6 +469,15 @@ try {
     if(-not(Test-Path -LiteralPath $packageReceiptPath -PathType Leaf)){throw 'DECKY_UPDATE_PACKAGE_RECEIPT_MISSING'}
     $r=Get-Content -LiteralPath $packageReceiptPath -Raw -Encoding UTF8|ConvertFrom-Json
     if($r.passed -ne $true -or $r.sourceDigest -ne $sourceDigest){throw 'DECKY_UPDATE_PACKAGE_RECEIPT_STALE'}
+    # The worker owns this budget session. A matching ZIP is not proof that this session installed it.
+    $sessionFile=$env:YMCC_RELEASE_FIXTURE_SESSION
+    $releaseSession=Get-Content -LiteralPath $sessionFile -Raw -Encoding UTF8|ConvertFrom-Json
+    $packageAttempts=@($releaseSession.attempts|Where-Object{$_.stage -ceq 'Package'})
+    if($packageAttempts.Count -ne 1 -or $packageAttempts[0].status -cne 'ORIGINAL_GATE_EXITED' -or
+        $packageAttempts[0].exitCode -ne 0 -or -not $packageAttempts[0].id -or
+        $r.fixtureBudgetSession -ine $sessionFile -or $r.fixtureBudgetAttempt -cne $packageAttempts[0].id){
+      throw 'DECKY_UPDATE_PACKAGE_SESSION_CHANGED'
+    }
     $releasePackage=Join-Path $WorkspaceRoot 'Release\Packages\YeManCC.zip'
     if((Get-FileHash -LiteralPath $releasePackage).Hash -ine $r.packageSha256){throw 'DECKY_UPDATE_RELEASE_PACKAGE_CHANGED'}
   }

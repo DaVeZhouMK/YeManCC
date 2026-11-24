@@ -205,8 +205,6 @@ function onHibernateConfirmBack(event: Event): void {
 
 const busy = ref(false);
 const msg = ref('');
-const sleepPreferenceWarnings = reactive<Record<string, string>>({});
-const sleepNotice = computed(() => [...new Set([msg.value, ...Object.values(sleepPreferenceWarnings)])].filter(Boolean).join('；'));
 const activeSchemeGuid = ref('');
 const isYemanScheme = computed(() => activeSchemeGuid.value === PW.YEMAN.toLowerCase());
 
@@ -399,9 +397,8 @@ async function onSleepTimeout(field: 'screen' | 'sleep' | 'hibernate', ac: boole
   sleepTimeouts[key] = next;
   busy.value = true;
   try {
-    const result = await setSleepTimeout(field, ac, next);
+    await setSleepTimeout(field, ac, next);
     msg.value = '';
-    showSleepPreferenceResult(key, result);
   } catch (e) {
     // A refresh can fail after the value was saved. Show the real stored
     // indexes instead of rolling the selector back to a value no longer true.
@@ -525,28 +522,20 @@ async function onSleepPowerPlanOptimization(v: boolean) {
 }
 
 // ── 电源按钮按下操作 ──
-function showSleepPreferenceResult(key: string, result: { preferenceSaved?: boolean; preferenceReason?: string } | void) {
-  if (!result) return;
-  if (result.preferenceSaved === true) { delete sleepPreferenceWarnings[key]; return; }
-  if (result.preferenceSaved !== false) return;
-  const warning = result.preferenceReason || '系统设置已保存，但开机全局睡眠偏好未保存';
-  sleepPreferenceWarnings[key] = warning;
-  if (!msg.value.includes(warning)) msg.value = [msg.value, warning].filter(Boolean).join('；');
-}
 async function onPwrBtn(ac: boolean, idx: PowerBtnIdx) {
   if (busy.value) return;
   const submitted = captureSleepPowerWrite();
   msg.value = '';
   busy.value = true;
   try {
-    showSleepPreferenceResult(ac ? 'acButton' : 'dcButton', await setPowerBtnIdx(ac, idx, submitted));
+    await setPowerBtnIdx(ac, idx, submitted);
     if (ac) acBtnIdx.value = idx; else dcBtnIdx.value = idx;
     // 联动：电源按钮选「S4 休眠到硬盘」时，若系统休眠当前为关闭，则自动开启休眠——否则 S4 不会生效。
     // 仅"开启"，绝不在选择其它按钮时关闭休眠；检测未知时不乱写。
     if (idx === 1) {
       if (hibernateOn.value === false) {
-        showSleepPreferenceResult('hibernate', await setHibernate(true, submitted));
-        if (hibSize.value !== null) showSleepPreferenceResult('hibernateSize', await setHibernateSize(hibSize.value, submitted));
+        await setHibernate(true, submitted);
+        if (hibSize.value !== null) await setHibernateSize(hibSize.value, submitted);
         else hibSize.value = await readHibernateSize();
         const enabled = await refreshHibernateState();
         if (enabled !== true) throw new Error('Windows 回读仍显示休眠未开启');
@@ -587,8 +576,8 @@ async function onHibernate(v: boolean) {
     msg.value = '';
     busy.value = true;
     try {
-      showSleepPreferenceResult('hibernate', await setHibernate(true, submitted));
-      if (hibSize.value !== null) showSleepPreferenceResult('hibernateSize', await setHibernateSize(hibSize.value, submitted));
+      await setHibernate(true, submitted);
+      if (hibSize.value !== null) await setHibernateSize(hibSize.value, submitted);
       else hibSize.value = await readHibernateSize();
       const enabled = await refreshHibernateState();
       if (enabled !== true) throw new Error('Windows 回读仍显示休眠未开启');
@@ -608,7 +597,7 @@ async function confirmHibernateOff() {
   msg.value = '';
   busy.value = true;
   try {
-    showSleepPreferenceResult('hibernate', await setHibernate(false));
+    await setHibernate(false);
     const enabled = await refreshHibernateState();
     if (enabled !== false) throw new Error('Windows 回读仍显示休眠未关闭');
   } catch (e) {
@@ -627,7 +616,7 @@ async function onHibSize(v: number) {
   msg.value = '';
   busy.value = true;
   try {
-    showSleepPreferenceResult('hibernateSize', await setHibernateSize(v));
+    await setHibernateSize(v);
     hibSize.value = await readHibernateSize();
   } catch (e) {
     hibSize.value = await readHibernateSize();
@@ -660,7 +649,7 @@ refresh();
 <template>
  <IntegratedPage title="睡眠优化">
   <div class="sleep-console">
-   <Transition name="notice-fade"><div v-if="sleepNotice" class="sleep-notice" :class="{'is-ok':!Object.keys(sleepPreferenceWarnings).length && /已启用|已关闭|已恢复|已暂停|完成/.test(msg)}" role="status">{{sleepNotice}}</div></Transition>
+   <Transition name="notice-fade"><div v-if="msg" class="sleep-notice" :class="{'is-ok':/已启用|已关闭|已恢复|已暂停|完成/.test(msg)}" role="status">{{msg}}</div></Transition>
    <SettingsSections :sections="sleepSections" label="睡眠优化">
     <template #protection>
      <div class="sleep-group">

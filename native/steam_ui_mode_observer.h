@@ -9,6 +9,7 @@
 #include <json.hpp>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <source_location>
 #include <thread>
 
@@ -17,9 +18,9 @@ using ModeJson = nlohmann::json;
 using ModeReadCurrent = std::function<bool()>;
 enum class ModeConsumer { Decky, Css };
 class ModeReadWindow {
-    ULONGLONG due_ = 0, next_ = 0;
+    ULONGLONG due_ = 0, next_ = 0, ordinaryDue_ = 0;
     unsigned attempts_ = 0;
-    bool armed_ = false;
+    bool armed_ = false, lastReadKnown_ = false;
     DWORD debounce_, gap_, failureGap_, lastGap_ = 0;
     ULONGLONG startupOpened_ = 0;
     unsigned startupReads_ = 0;
@@ -35,15 +36,24 @@ class ModeReadWindow {
 public:
     ModeReadWindow(DWORD debounce = 600, DWORD gap = 5000, DWORD failureGap = 30000)
         : debounce_(debounce), gap_(gap), failureGap_(failureGap) {}
-    void cancel(bool preserveAttempts = false) { armed_ = false; if (!preserveAttempts) attempts_ = 0; } // Keep rate-limit across disable/re-enable.
+    void cancel(bool preserveAttempts = false) { armed_ = false; ordinaryDue_ = 0; if (!preserveAttempts) attempts_ = 0; } // Keep rate-limit across disable/re-enable.
     void reset(bool preserveStartup = false) {
         cancel(preserveStartup); due_ = 0;
-        if (!preserveStartup) { next_ = 0; lastGap_ = gap_; startup_ = false; startupReads_ = 0; }
+        if (!preserveStartup) { next_ = 0; lastGap_ = gap_; startup_ = false; startupReads_ = 0; lastReadKnown_ = false; }
     }
     void beginStartup(ULONGLONG now) { startup_ = true; startupOpened_ = now; startupReads_ = 0; }
     bool request(ULONGLONG now, bool preserveAttempts = false) {
         if (armed_) return false;
         armed_ = true; if (!preserveAttempts) attempts_ = 0; due_ = (std::max)(now + debounce_, next_); return true;
+    }
+    // Move one existing slot; a failed, invalidated, or in-flight read cannot lend its cooldown.
+    bool expediteKnownRead(ULONGLONG now) {
+        if (!armed_ || ordinaryDue_ || !lastReadKnown_ || lastGap_ != gap_ || now + debounce_ >= due_) return false;
+        ordinaryDue_ = due_; due_ = now + debounce_; return true;
+    }
+    bool earlyReadDue(ULONGLONG now) const { return ordinaryDue_ && now >= due_ && now < ordinaryDue_; }
+    void restoreReadDeadline() {
+        if (ordinaryDue_) { due_ = ordinaryDue_; ordinaryDue_ = 0; }
     }
     DWORD timeout(ULONGLONG now) const {
         return !armed_ ? INFINITE : now >= due_ ? 0 : static_cast<DWORD>((std::min)(due_ - now, ULONGLONG{MAXDWORD - 1}));
@@ -51,12 +61,13 @@ public:
     bool withinReadGap(ULONGLONG now) const { return now < next_; }
     bool take(ULONGLONG now) {
         if (timeout(now)) return false;
-        armed_ = false; ++attempts_;
+        armed_ = false; ordinaryDue_ = 0; lastReadKnown_ = false; ++attempts_;
         if (startupAvailable(now)) ++startupReads_;
         lastGap_ = startupAvailable(now) ? (std::min)(gap_, startupGapMs) : gap_;
         next_ = now + lastGap_; return true;
     }
     void finish(ULONGLONG now, bool known, bool transientStartupRetry = false, bool localBusy = false) {
+        lastReadKnown_ = known;
         if (known) { attempts_ = 0; return; }
         // A try-lock miss performs no external IO. Within the finite short
         // startup slots, refund only this attempt (never prior IO failures).
@@ -140,6 +151,7 @@ struct ModeReadSuperseded {
 struct ModeObserverConfig {
     // The reader must retain the original verified-process and session checks.
     std::function<ModeJson(const steamsession::Session&)> read;
+    unsigned long long (*readDeckyPeerRevision)() = nullptr;
     std::function<void(const steamsession::Session&, const ModeJson&)> changed;
     DWORD debounceMs = 600, minimumGapMs = 5000, failureGapMs = 30000;
     // Read completion for a page that actually consumed pending; no mode action.
@@ -147,6 +159,9 @@ struct ModeObserverConfig {
     // A completed verified Big Picture read may match the last delivered mode
     // after a window hint made admission pending. Only waiting Decky consumes it.
     std::function<void(const steamsession::Session&)> stableBigPicture;
+    // Only the supplementary same-generation Decky wake needs delivery even
+    // when its shared read is unchanged or unconfirmed.
+    std::function<void(const steamsession::Session&, const sleeppower::SharedPowerV1&)> deckyResumeSettled;
     // Metadata can arrive late/out of order. Consumers reject older revisions.
     std::function<void(std::shared_ptr<const ModeSourceSnapshot>)> sourceChanged;
     std::function<void(std::uint64_t)> sourceInvalidated;
@@ -170,17 +185,25 @@ class ModeObserver {
     steamsession::Session session_;
     ModeJson cached_, delivered_;
     sleeppower::SharedPowerV1 cachedPower_, queuedResumePower_, queuedDeckyWake_;
-    sleeppower::SharedPowerV1 inFlightPower_;
+    sleeppower::SharedPowerV1 inFlightPower_, earlyReadPower_;
+    ModeConsumer earlyReadConsumer_ = ModeConsumer::Css;
+    std::uint64_t expeditedDeckyProbeGeneration_ = 0;
+    sleeppower::SharedPowerV1 deckyResumeHealth_; // Completion only; independent of read-slot ownership.
     ModeCacheMiss cacheMiss_;
     ModeCacheTiming cachedTiming_;
     std::uint64_t cacheMissSequence_ = 0;
     std::uint64_t publicationSequence_ = 0; // Only accepted reads, including unchanged facts.
     ULONGLONG publicationObservationTick_ = 0;
+    unsigned long long publicationDeckyPeerRevision_ = 0;
+    // Counters are sampled independently of the mode mutex and the log deduper.
+    std::atomic<std::uint64_t> readsStarted_{0}, deckyHealthSlotsArmed_{0};
     ModeReadWindow window_;
     // Transport calls readCurrent while holding its own mutex. Never take the
     // mode mutex there: these are projections of the original locked state.
     std::atomic<bool> stopping_{false}, decky_{false}, css_{false};
+    std::atomic<std::uint64_t> deckyDemandRevocations_{0}; // OFF stays visible to an early read even after ON.
     bool inFlight_ = false, inFlightDeckyWake_ = false, passivePending_ = false;
+    bool sawPositiveAccount_ = false;
     std::atomic<unsigned long long> generation_{0};
     unsigned long long hintGeneration_ = 0;
     unsigned long long inFlightGeneration_ = 0, inFlightHints_ = 0;
@@ -327,8 +350,9 @@ class ModeObserver {
         ymcc::threadRole::describe(L"YMCC.SteamMode");
         for (;;) {
             steamsession::Session session; unsigned long long generation = 0, hints = 0; DWORD timeout = INFINITE;
-            sleeppower::SharedPowerV1 readPower, deckyWake;
-            bool read = false;
+            sleeppower::SharedPowerV1 readPower, deckyWake, scopedPower;
+            bool read = false, earlyDeckyProbe = false;
+            std::uint64_t deckyDemandRevision = 0;
             {
                 std::lock_guard lock(mutex_);
                 if (stopping_) return;
@@ -339,12 +363,22 @@ class ModeObserver {
                      !sleeppower::powerCurrent(config_.admissionPowerReader, queuedPower))) {
                     queuedDeckyWake_ = {}; queuedResumePower_ = {}; window_.cancel(true);
                 }
+                if (window_.earlyReadDue(now)) {
+                    const bool deckyProbe = earlyReadConsumer_ == ModeConsumer::Decky;
+                    if ((deckyProbe ? decky_.load() : css_.load()) && sleeppower::powerCurrent(config_.admissionPowerReader, earlyReadPower_)) {
+                        scopedPower = earlyReadPower_; earlyDeckyProbe = deckyProbe;
+                        if (deckyProbe) deckyDemandRevision = deckyDemandRevocations_.load(std::memory_order_relaxed);
+                    } else window_.restoreReadDeadline();
+                }
                 if (demand() && validSession(session_) && window_.take(now)) {
+                    readsStarted_.fetch_add(1, std::memory_order_relaxed);
                     queuedResumePower_ = {};
                     deckyWake = queuedDeckyWake_; queuedDeckyWake_ = {};
+                    earlyReadPower_ = {};
                     read = inFlight_ = true; session = session_; generation = generation_; hints = hintGeneration_;
                     inFlightDeckyWake_ = deckyWake.generation != 0;
-                    if (deckyWake.generation) readPower = deckyWake;
+                    if (deckyWake.generation) scopedPower = deckyWake;
+                    if (scopedPower.generation) readPower = scopedPower;
                     else sleeppower::capturePower(config_.admissionPowerReader, readPower);
                     inFlightPower_ = readPower; inFlightGeneration_ = generation; inFlightHints_ = hints;
                     readDiscard_ = {}; readDiscard_.readStartedTick = now;
@@ -368,14 +402,22 @@ class ModeObserver {
                 continue;
             }
             ModeJson result;
+            unsigned long long readDeckyPeerRevision = 0;
             const auto lifecycleCurrent = [this, generation]() noexcept {
                 return !stopping_.load(std::memory_order_acquire) &&
                     generation_.load(std::memory_order_acquire) == generation && demand();
             };
+            const auto deckyProbeCurrent = [this, earlyDeckyProbe, deckyDemandRevision]() noexcept {
+                return !earlyDeckyProbe || (decky_ && deckyDemandRevocations_.load(std::memory_order_acquire) == deckyDemandRevision);
+            };
             try {
-                if (deckyWake.generation) {
-                    const ModeReadCurrent current = [this, lifecycleCurrent, deckyWake]() noexcept {
-                        return lifecycleCurrent() && sleeppower::powerCurrent(config_.admissionPowerReader, deckyWake);
+                // Stamp the peer before the read and outside the mode lock.
+                // A successful result that straddles a reconnect still belongs to the old peer.
+                if (decky_ && config_.readDeckyPeerRevision) readDeckyPeerRevision = config_.readDeckyPeerRevision();
+                if (scopedPower.generation) {
+                    const ModeReadCurrent current = [this, lifecycleCurrent, scopedPower, deckyProbeCurrent]() noexcept {
+                        return lifecycleCurrent() && deckyProbeCurrent() &&
+                            sleeppower::powerCurrent(config_.admissionPowerReader, scopedPower);
                     };
                     result = config_.readOwned(session, current);
                 } else result = config_.readOwned ? config_.readOwned(session, lifecycleCurrent) : config_.read(session);
@@ -387,6 +429,7 @@ class ModeObserver {
             const bool readCancelled = result.is_object() && readReason != result.end() && readReason->is_string() &&
                 readReason->get_ref<const std::string&>() == "shared-mode-read-cancelled";
             bool notify = false, settled = false, stableBigPicture = false;
+            sleeppower::SharedPowerV1 deckyResumeSettled;
             bool notifyCss = false;
             ModeCacheTiming cssTiming;
             SourceNotice sourceNotice;
@@ -396,6 +439,18 @@ class ModeObserver {
                 if (stopping_) return;
                 // Lifecycle invalidation cannot spend the replacement session/demand budget.
                 if (generation != generation_ || !(session == session_) || !demand()) continue;
+                // A retired early Decky sample must not publish for CSS or
+                // clear the independent successor's pending read.
+                if (earlyDeckyProbe) {
+                    const bool sameReady = sleeppower::powerCurrent(config_.admissionPowerReader, scopedPower);
+                    if (!sameReady || !deckyProbeCurrent()) {
+                        // OFF retired the borrowed slot, not the remaining shared demand.
+                        // Keep an existing successor; otherwise use the normal cooldown.
+                        // A new power scope must come from its own Ready request.
+                        if (sameReady) window_.request(GetTickCount64(), true);
+                        continue;
+                    }
+                }
                 const bool invalidated = hints != hintGeneration_;
                 const bool queuedDifferentReady = (invalidated || deckyWake.generation) && queuedResumePower_.generation &&
                     window_.timeout(GetTickCount64()) != INFINITE &&
@@ -456,6 +511,7 @@ class ModeObserver {
                     copyModeValue(cached_,delivered_);
                     ++publicationSequence_;
                     publicationObservationTick_ = returnedTick;
+                    publicationDeckyPeerRevision_ = readDeckyPeerRevision;
                     stableBigPicture = !notify && result.value("mode", std::string{}) == "bigpicture";
                 } else {
                     delivered_ = ModeJson{};
@@ -478,6 +534,12 @@ class ModeObserver {
                     notifyCss = true; cssTiming = cachedTiming_;
                 }
                 settled = passivePending_ && !notify; passivePending_ = false;
+                if (decky_ && deckyResumeHealth_.generation &&
+                    (sleeppower::samePowerRevocation(deckyResumeHealth_, readPower) ||
+                     sleeppower::samePowerRevocation(readPower, deckyResumeHealth_))) {
+                    if (!notify) deckyResumeSettled = deckyResumeHealth_; // Changed already wakes health.
+                    deckyResumeHealth_ = {};
+                }
             }
             if (notifyCss && css_ && lifecycleCurrent()) {
                 try { config_.cssBigPicturePublished(session, result, cssTiming, stableBigPicture); } catch (...) {}
@@ -488,10 +550,39 @@ class ModeObserver {
             if (notify && config_.changed) { try { config_.changed(session, result); } catch (...) {} }
             if (stableBigPicture && config_.stableBigPicture) { try { config_.stableBigPicture(session); } catch (...) {} }
             if (settled && config_.settled) { try { config_.settled(session); } catch (...) {} }
+            if (deckyResumeSettled.generation && decky_ && lifecycleCurrent() &&
+                sleeppower::powerCurrent(config_.admissionPowerReader, deckyResumeSettled)) {
+                try { config_.deckyResumeSettled(session, deckyResumeSettled); } catch (...) {}
+            }
         }
     }
 public:
     ~ModeObserver() { shutdown(); }
+    struct WorkerCpu {
+        DWORD id; ULONGLONG birth, kernel, user; bool cssDemand;
+        std::uint64_t readsStarted, deckyHealthSlotsArmed;
+    };
+    // Borrow the existing worker without waiting for initialize/shutdown.
+    // Even with CSS demand off, the sample is for the whole shared worker.
+    std::optional<WorkerCpu> diagnosticDeckyWorkerCpu() noexcept {
+        if (!decky_.load(std::memory_order_acquire)) return std::nullopt;
+        const DWORD savedError = GetLastError();
+        struct RestoreError { DWORD value; ~RestoreError() { SetLastError(value); } } restore{savedError};
+        try {
+            std::unique_lock lock(lifecycle_, std::try_to_lock);
+            if (!lock.owns_lock() || stopping_ || !decky_ || !worker_.joinable()) return std::nullopt;
+            const HANDLE thread = worker_.native_handle();
+            const DWORD id = GetThreadId(thread);
+            FILETIME born{}, exited{}, kernel{}, user{};
+            if (!id || !GetThreadTimes(thread, &born, &exited, &kernel, &user) ||
+                WaitForSingleObject(thread, 0) != WAIT_TIMEOUT || stopping_ || !decky_) return std::nullopt;
+            const auto ticks = [](const FILETIME& t) { return (static_cast<ULONGLONG>(t.dwHighDateTime) << 32) | t.dwLowDateTime; };
+            const auto birth = ticks(born);
+            if (birth) return WorkerCpu{id, birth, ticks(kernel), ticks(user), css_.load(std::memory_order_acquire),
+                readsStarted_.load(std::memory_order_relaxed), deckyHealthSlotsArmed_.load(std::memory_order_relaxed)};
+        } catch (...) {}
+        return std::nullopt;
+    }
     bool initialize(ModeObserverConfig config) {
         std::lock_guard lifecycle(lifecycle_);
         if (worker_.joinable()) { std::lock_guard lock(mutex_); return !stopping_; }
@@ -507,6 +598,7 @@ public:
         {
             std::lock_guard lock(mutex_); config_ = std::move(config); sourceCallbacks_ = std::move(sourceCallbacks); stopping_ = false;
             wake_ = wake; stop_ = stop; window_ = ModeReadWindow(config_.debounceMs, config_.minimumGapMs, config_.failureGapMs);
+            readsStarted_.store(0, std::memory_order_relaxed); deckyHealthSlotsArmed_.store(0, std::memory_order_relaxed);
             if (demand() && validSession(session_)) window_.request(GetTickCount64());
         }
         try { worker_ = std::thread([this] { run(); }); }
@@ -520,6 +612,9 @@ public:
             auto& flag = consumer == ModeConsumer::Decky ? decky_ : css_;
             if (stopping_ || flag == enabled) return;
             const bool hadDemand = demand(); flag = enabled;
+            if (consumer == ModeConsumer::Decky && !enabled) deckyDemandRevocations_.fetch_add(1, std::memory_order_release);
+            if (!decky_) deckyResumeHealth_ = {};
+            if (consumer == earlyReadConsumer_ && !enabled) { window_.restoreReadDeadline(); earlyReadPower_ = {}; }
             if (!decky_ && queuedDeckyWake_.generation) {
                 queuedDeckyWake_ = {}; queuedResumePower_ = {}; window_.cancel(true);
             }
@@ -536,13 +631,26 @@ public:
             if (stopping_ || session_ == session) return;
             const bool sameProcess = validSession(session_) && validSession(session) &&
                 session_.pid == session.pid && session_.created == session.created && session_.root == session.root;
+            const bool firstAccount = sameProcess && !sawPositiveAccount_ && session.account;
+            sawPositiveAccount_ = validSession(session) && (session.account || (sameProcess && sawPositiveAccount_));
+            // A missing-account Big Picture result can schedule a fresh read, not substitute for one.
+            const bool expedite = firstAccount && css_ && config_.readOwned && !inFlight_ &&
+                !queuedResumePower_.generation && !queuedDeckyWake_.generation && delivered_.is_object() &&
+                delivered_.value("mode", std::string{}) == "bigpicture" && !delivered_.contains("observedAccount") &&
+                sleeppower::powerCurrent(config_.admissionPowerReader, cachedPower_);
             revokeSourceLocked(notice);
             session_ = session; cached_ = delivered_ = ModeJson{}; queuedResumePower_ = {}; queuedDeckyWake_ = {}; passivePending_ = false; ++generation_;
+            deckyResumeHealth_ = {};
+            earlyReadPower_ = {};
             noteCacheClearLocked("session-changed");
             // Learning/changing the account in the same process must not refill startup.
             window_.reset(sameProcess);
-            if (validSession(session_) && !sameProcess) window_.beginStartup(GetTickCount64());
-            if (demand() && validSession(session_)) window_.request(GetTickCount64(),sameProcess);
+            const auto now = GetTickCount64();
+            if (validSession(session_) && !sameProcess) window_.beginStartup(now);
+            if (demand() && validSession(session_)) {
+                window_.request(now, sameProcess);
+                if (expedite && window_.expediteKnownRead(now)) { earlyReadPower_ = cachedPower_; earlyReadConsumer_ = ModeConsumer::Css; }
+            }
             if (wake_) SetEvent(wake_);
         }
         emitSource(std::move(notice));
@@ -560,13 +668,14 @@ private:
     bool requestRefreshImpl(const steamsession::Session& session, bool invalidate,
                             std::source_location origin, RefreshSatisfied satisfied,
                             const sleeppower::SharedPowerV1* resumePower = nullptr,
-                            std::string* reusedEpoch = nullptr, bool deckyWake = false) {
+                            std::string* reusedEpoch = nullptr, bool deckyWake = false, bool deckyHealth = false) {
         if (reusedEpoch) reusedEpoch->clear();
         SourceNotice notice;
         {
             std::lock_guard lock(mutex_);
             if (stopping_ || !demand() || !validSession(session_) || !(session_ == session)) return false;
             if (deckyWake && (!decky_ || !config_.readOwned)) return false;
+            if (deckyHealth && !decky_) return false;
             // Decide under the invalidation lock, and never substitute a pre-wake
             // receipt or a sample made to look recent by another in-flight read.
             const auto now = GetTickCount64();
@@ -591,6 +700,7 @@ private:
                 // and observer scope. An intervening hint can retire its page.
                 joinInFlight = config_.readOwned && inFlight_ && inFlightGeneration_ == generation_ &&
                     inFlightHints_ == hintGeneration_ && sleeppower::samePowerRevocation(inFlightPower_, current);
+                if (deckyWake && config_.deckyResumeSettled) deckyResumeHealth_ = *resumePower;
             }
             if (satisfied && cached_.is_object() && satisfied(session, cached_,
                 !inFlight_ && window_.withinReadGap(now) && sleeppower::powerCurrent(config_.admissionPowerReader, cachedPower_))) return true;
@@ -606,6 +716,7 @@ private:
             // publishes the in-flight result early nor consumes another slot.
             if (!joinInFlight) {
                 const bool newlyArmed = window_.request(GetTickCount64(), inFlight_);
+                if (newlyArmed && deckyHealth) deckyHealthSlotsArmed_.fetch_add(1, std::memory_order_relaxed);
                 // Only the requester that armed an otherwise empty slot owns
                 // its Decky wake scope. Another valid demand can use the slot.
                 if (deckyWake) {
@@ -635,6 +746,11 @@ public:
                         std::source_location origin = std::source_location::current()) {
         return requestRefreshImpl(session, invalidate, origin, nullptr);
     }
+    // Count newly queued slots, not joined requests or completed reads.
+    bool requestDeckyHealthRefresh(const steamsession::Session& session,
+                                   std::source_location origin = std::source_location::current()) {
+        return requestRefreshImpl(session, false, origin, nullptr, nullptr, nullptr, false, true);
+    }
     bool requestAdmissionRefresh(const steamsession::Session& session, RefreshSatisfied satisfied,
                                  std::source_location origin = std::source_location::current()) {
         return requestRefreshImpl(session, true, origin, satisfied);
@@ -645,18 +761,32 @@ public:
         return requestRefreshImpl(session, true, origin, nullptr, &power, reusedEpoch);
     }
     bool requestDeckyResumeRefresh(const steamsession::Session& session, const sleeppower::SharedPowerV1& power,
+                                   std::string* reusedEpoch = nullptr,
                                    std::source_location origin = std::source_location::current()) {
-        return requestRefreshImpl(session, true, origin, nullptr, &power, nullptr, true);
+        return requestRefreshImpl(session, true, origin, nullptr, &power, reusedEpoch, true);
     }
     // A Decky bridge/QAM event changes its connection observation, not the
     // verified Steam document/account association borrowed by CSS/wallpaper.
     // Keep that source lease during this read; actual session/mode/account
     // changes or a completed invalid read still revoke it in the original paths.
-    // No new reader, window, deadline, retries or action authority.
+    // No new reader, retries or action authority.
     bool requestConnectionRefresh(const steamsession::Session& session,
-                                  std::source_location origin = std::source_location::current()) {
+                                  std::source_location origin = std::source_location::current(),
+                                  ConnectionRefreshQueue* queue = nullptr, bool probeWithPeer = false) {
         std::lock_guard lock(mutex_);
         if (stopping_ || !decky_ || !validSession(session_) || !(session_ == session)) return false;
+        // Win5: the read still showed a connecting sidebar after wake. A
+        // completed current-peer probe can advance one existing read slot
+        // per wake. Mere open, healthy/unknown state and in-flight IO cannot.
+        const auto fieldIs = [&](const char* name, const auto& value) {
+            const auto field = delivered_.find(name); return field != delivered_.end() && *field == value;
+        };
+        const bool eligibleEarlyProbe = probeWithPeer && config_.readOwned && !inFlight_ &&
+            !queuedResumePower_.generation && !queuedDeckyWake_.generation && cachedPower_.generation != expeditedDeckyProbeGeneration_ &&
+            (cachedPower_.suspendSerial || cachedPower_.observedNotificationSequence) &&
+            fieldIs("mode", "bigpicture") && fieldIs("deckyBackendConnected", true) && fieldIs("deckyHooksInstalled", true) &&
+            fieldIs("deckyClientState", "socket-connecting") && fieldIs("deckyClientVerified", false) &&
+            sleeppower::powerCurrent(config_.admissionPowerReader, cachedPower_);
         supersedeInFlightLocked("connection-refresh", origin.line());
         if (!inFlight_ || queuedDeckyWake_.generation) queuedResumePower_ = {};
         queuedDeckyWake_ = {};
@@ -664,9 +794,16 @@ public:
             cached_ = ModeJson{};
             noteCacheClearLocked("connection-refresh", origin.line());
         }
-        const bool newlyArmed = window_.request(GetTickCount64(), inFlight_);
+        const auto now = GetTickCount64();
+        const bool newlyArmed = window_.request(now, inFlight_);
+        const bool expedited = eligibleEarlyProbe && window_.expediteKnownRead(now);
+        if (expedited) {
+            earlyReadPower_ = cachedPower_; earlyReadConsumer_ = ModeConsumer::Decky;
+            expeditedDeckyProbeGeneration_ = cachedPower_.generation;
+        }
+        if (queue) *queue = {window_.timeout(now), !newlyArmed, inFlight_};
         retainIndependentDeckySuccessorLocked();
-        if (newlyArmed && wake_) SetEvent(wake_);
+        if ((newlyArmed || expedited) && wake_) SetEvent(wake_);
         return true;
     }
     ModeSourceLease observedSource(const steamsession::Session& session) {
@@ -678,12 +815,14 @@ public:
             sourceDiagnostics_->signalFailed.load(),sourceDiagnostics_->closeFailed.load(),sourceDiagnostics_->lastError.load(),sourceDiagnostics_->publicationFailed.load(),sourceDiagnostics_->workerWaitFailed.load()};
     }
     ModeJson snapshot(const steamsession::Session& session, ModeCacheMiss* miss = nullptr, ModeCacheTiming* timing = nullptr,
-                      std::uint64_t* publication = nullptr, ULONGLONG* observationTick = nullptr) {
+                      std::uint64_t* publication = nullptr, ULONGLONG* observationTick = nullptr,
+                      unsigned long long* deckyPeerRevision = nullptr) {
         std::lock_guard lock(mutex_);
         if (miss) *miss = {};
         if (timing) *timing = {};
         if (publication) *publication = 0;
         if (observationTick) *observationTick = 0;
+        if (deckyPeerRevision) *deckyPeerRevision = 0;
         if (!stopping_ && session_ == session && cached_.is_object()) {
             if (miss) *miss = cachedLocalReadMiss_;
             if (timing) *timing = cachedTiming_;
@@ -691,6 +830,7 @@ public:
             if (delivered_.is_object()) {
                 if (publication) *publication = publicationSequence_;
                 if (observationTick) *observationTick = publicationObservationTick_;
+                if (deckyPeerRevision) *deckyPeerRevision = publicationDeckyPeerRevision_;
             }
             return cached_;
         }
@@ -780,7 +920,7 @@ public:
             { std::lock_guard lock(mutex_); stopping_ = true; revokeSourceLocked(notice); if (stop_) SetEvent(stop_); }
             if (worker_.joinable()) worker_.join();
             { std::lock_guard lock(mutex_); if (wake_) CloseHandle(wake_); if (stop_) CloseHandle(stop_);
-                wake_ = stop_ = nullptr; session_ = {}; cached_ = delivered_ = ModeJson{}; window_.reset(); queuedResumePower_ = {}; queuedDeckyWake_ = {}; passivePending_ = false; ++generation_; cacheMiss_ = {}; }
+                wake_ = stop_ = nullptr; session_ = {}; cached_ = delivered_ = ModeJson{}; window_.reset(); queuedResumePower_ = {}; queuedDeckyWake_ = {}; earlyReadPower_ = {}; deckyResumeHealth_ = {}; sawPositiveAccount_ = false; passivePending_ = false; ++generation_; cacheMiss_ = {}; }
         }
         emitSource(std::move(notice));
     }

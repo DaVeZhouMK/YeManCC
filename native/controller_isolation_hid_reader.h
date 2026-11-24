@@ -24,7 +24,7 @@ struct Key {
     std::uint64_t power=0,edge=0,topology=0,identity=0,occupant=0;
     unsigned slot=4;
     std::wstring root,preferredPath,slotPath;
-    std::uint64_t wakeSuspend=0,wakeNotice=0,wakeIntent=0;
+    std::uint64_t wakeSuspend=0,wakeNotice=0,wakeIntent=0,coldIntent=0;
     bool operator==(const Key&) const=default;
 };
 enum class ReadResult {Waiting,Frame,Failed};

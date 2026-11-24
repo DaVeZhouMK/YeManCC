@@ -20,8 +20,7 @@ import { deckySidebar } from './deckySidebar';
 import { getUiSettings, loadUiSettings, setUiSettings, type UiSettings } from './uiSettings';
 import { applyTheme } from './theme';
 import { setTrayResident } from './trayResident';
-import { shell, display, proc, fs, wakePassword } from './api';
-import { getAutomaticSleepRecovery, setAutomaticSleepRecovery } from './sleepRecovery';
+import { shell, display, proc, fs } from './api';
 import { normalizeInputStartupPreferences } from './inputStartupPolicy';
 import { gyroMotionParamsForPreset } from './gyroPresetModel';
 import { readBootDisplay, applyBootBrightness, readBootSteamStartup } from './bootModePlatform';
@@ -30,8 +29,7 @@ import {fxSound} from './fxSound';
 import { equalSettingsDocuments } from './settingsBaseline';
 import { computeInputConfigHash } from './inputConfigHash';
 import {bootStartupReceiptOwner, projectBootPreferenceExtensions, type BootStartupReceiptOwner, type BootPreferenceWrite} from './bootModeGlobalPreferences';
-import { readGamingHomeConfiguration, writeGamingHomeStartup, steamMasterSet, steamAddonExists, STEAM_ADDONS, fxExists, readHibernateState, readHibernateSize, readSleepTimeouts, setHibernate, setHibernateSize, setSleepTimeout, getPowerBtnIdx, setPowerBtnIdx, sleepGuardGet, sleepGuardSetConfig, getTdpExecutionCapability, detectCoreArchitecture, getSleepPowerPlanOptimizationEnabled, setSleepPowerPlanOptimizationEnabled, setStaticWakeAutoScanEnabled, reactivateCurrentScheme, captureSleepPowerWrite, type PowerBtnIdx } from './yeman';
-import type { SleepPowerWrite } from './yeman';
+import { readGamingHomeConfiguration, writeGamingHomeStartup, steamMasterSet, steamAddonExists, STEAM_ADDONS, fxExists, getTdpExecutionCapability, detectCoreArchitecture } from './yeman';
 const PERSONAS = ['disabled', 'elite', 'steamdeck', 'dualsense-edge'] as const;
 const MODULE_KEY = 'bootModes';
 const object = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
@@ -43,12 +41,14 @@ const READ_TIMEOUT_MS = 4000;
 const pendingReads = new Map<string, Promise<unknown>>();
 let readGeneration = -1;
 /** Read-only observations have a deadline. A timed-out request is reused until
- * it settles, so manual retry cannot accumulate requests against a stuck owner.
+ * it settles unless the observation is scoped to a single owner. A scoped
+ * caller waits for a new opportunity instead of reusing another owner's read.
  * Writes deliberately never use this helper: a timeout is not cancellation. */
-async function readOnce<T>(read: () => Promise<T>, label: string): Promise<T> {
+async function readOnce<T>(read: () => Promise<T>, label: string, reusePending = true): Promise<T> {
     const generation = getSettingsGeneration();
     if (readGeneration !== generation) { pendingReads.clear(); readGeneration = generation; }
     let pending = pendingReads.get(label) as Promise<T> | undefined;
+    if (pending && !reusePending) throw Error(label + '读取尚未结束，请稍后重试');
     if (!pending) {
         pending = Promise.resolve().then(read);
         pendingReads.set(label, pending);
@@ -95,7 +95,7 @@ function recordModule(receipt: BootModeReceipt, id: BootModeModule, state: BootM
 }
 let queue: Promise<unknown> = Promise.resolve();
 const serialized = <T>(run: () => Promise<T>): Promise<T> => { const result = queue.then(run); queue = result.catch(() => { }); return result; };
-const LABELS: Record<BootModeModule, string> = { performance: '性能调度', charge: '充电限制', input: '模拟鼠标', gyro: '陀螺仪', touch: '屏幕触摸配置', audioOptimization: '掌机音质优化', frameGeneration: '小黄鸭联动', softwareLaunch: '快捷应用联动', steamAppearance: 'Steam 美化', steamWallpaper: 'Steam 动态壁纸', steamDecky: 'Decky', monitor: '监控', display: '画面', background: 'YMCC 背景', sleep: '睡眠优化' };
+const LABELS: Record<BootModeModule, string> = { performance: '性能调度', charge: '充电限制', input: '模拟鼠标', gyro: '陀螺仪', touch: '屏幕触摸配置', audioOptimization: '掌机音质优化', frameGeneration: '小黄鸭联动', softwareLaunch: '快捷应用联动', steamAppearance: 'Steam 美化', steamWallpaper: 'Steam 动态壁纸', steamDecky: 'Decky', monitor: '监控', display: '画面', background: 'YMCC 背景' };
 const INPUT_PROOF_WAITING = '手柄输出：等待本次配置的原生输出回执';
 const GYRO_PROOF_WAITING = '陀螺仪：等待本次配置的原生传感器回执';
 const inputProofPending = (module: 'input' | 'gyro') => module === 'input' ? INPUT_PROOF_WAITING : GYRO_PROOF_WAITING;
@@ -122,20 +122,21 @@ const TOUCH_KEYS = Object.keys(screenTouchpadDefaults('disabled')) as Array<keyo
 function touchConfig(value: Partial<ScreenTouchpadConfig>) { const next=normalizeScreenTouchpadSummon(value);return Object.fromEntries(TOUCH_KEYS.filter(key => next[key] !== undefined).map(key => [key, next[key]])); }
 interface BootModeSharedReads {
     charge: ReturnType<typeof optional<Awaited<ReturnType<typeof batteryCharge.get>>>>;
-    hibernate: ReturnType<typeof optional<Awaited<ReturnType<typeof readHibernateState>>>>;
 }
 function sharedBootModeReads(): BootModeSharedReads {
-    return { charge: optional(() => batteryCharge.get(), '充电限制状态'), hibernate: optional(readHibernateState, '系统休眠能力') };
+    return { charge: optional(() => batteryCharge.get(), '充电限制状态') };
 }
-export async function captureBootModeSnapshot(shared?: BootModeSharedReads, observe?: (stage: string) => void): Promise<BootModeSnapshot> {
+export async function captureBootModeSnapshot(shared?: BootModeSharedReads, observe?: (stage: string) => void, options?: { skipAppearance?: boolean }): Promise<BootModeSnapshot> {
     const generation = getSettingsGeneration();
     observe?.('settings');
     const settings = await readOnce(loadSettings, '开机模式设置');
     observe?.('preferences');
     const [config] = await Promise.all([readOnce(loadPerformanceSchedule, '性能调度设置'), readOnce(loadUiSettings, '界面设置')]);
     observe?.('owners');
-    const [mouse, charge, monitor, hibernate, size, timeouts, acButton, dcButton, recovery, fx, scaling, appearance, decky, sleep, plan, screen, profiles] = await Promise.all([
-        optional(getMouseModeState, '模拟鼠标状态'), shared?.charge ?? optional(() => batteryCharge.get(), '充电限制状态'), readOnce(readMonitorOutputPreferences, '监控设置'), shared?.hibernate ?? optional(readHibernateState, '系统休眠能力'), optional(readHibernateSize, '休眠文件大小'), optional(readSleepTimeouts, '睡眠时间'), optional(() => getPowerBtnIdx(true), '交流电电源按钮'), optional(() => getPowerBtnIdx(false), '电池电源按钮'), optional(getAutomaticSleepRecovery, 'Steam 睡眠恢复设置'), optional(fxExists, '掌机音质优化'), optional(() => steamAddonExists('steamscale'), '小黄鸭联动设置'), optional(() => steamAppearance.read(), 'Steam 美化设置'), optional(() => deckySidebar.get(), 'Decky 状态'), optional(sleepGuardGet, '睡眠优化设置'), optional(getSleepPowerPlanOptimizationEnabled, '睡眠电源优化'), optional(readBootDisplay, '画面模式'),
+    const [mouse, charge, monitor, fx, scaling, appearance, decky, screen, profiles] = await Promise.all([
+        optional(getMouseModeState, '模拟鼠标状态'), shared?.charge ?? optional(() => batteryCharge.get(), '充电限制状态'), readOnce(readMonitorOutputPreferences, '监控设置'), optional(fxExists, '掌机音质优化'), optional(() => steamAddonExists('steamscale'), '小黄鸭联动设置'),
+        options?.skipAppearance ? null : optional(() => steamAppearance.read(), 'Steam 美化设置'),
+        optional(() => deckySidebar.get(), 'Decky 状态'), optional(readBootDisplay, '画面模式'),
         Promise.all(PERSONAS.map(async (persona) => [persona, await optional(() => screenTouchpadsGet(persona), '屏幕触摸配置 ' + persona)] as const)),
     ]);
     assertSettingsGeneration(generation);
@@ -163,17 +164,15 @@ export async function captureBootModeSnapshot(shared?: BootModeSharedReads, obse
         steamWallpaper: { enabled: getUiSettings().steamDynamicWallpaperEnabled, download: getUiSettings().steamWallpaperBackgroundDownload, cpuThreshold: getUiSettings().steamWallpaperDownloadCpuThreshold },
         steamDecky: { enabled: decky?.enabled ?? null }, monitor: { preferences: monitor },
         display: screen ?? { brightness: null, resolution: 'native', hz: 'native' }, background: { ui: backgroundSettings(getUiSettings()) },
-        sleep: { config: { ...(sleep ?? { ...settings.sleep }), staticWakeAutoScanEnabled: settings.sleep.staticWakeAutoScanEnabled, sleepPowerPlanOptimizationEnabled: plan }, acButton, dcButton, hibernate: hibernate?.enabledKnown ? hibernate.enabled : null, hibernateSize: size, timeouts, steamAutoRecovery: recovery?.ok ? recovery.enabled : null },
     } as unknown as BootModeSnapshot);
 }
 export async function readBootModeSupport(category?: BootModeCategory, shared?: BootModeSharedReads): Promise<BootDeviceCapabilities> {
     const generation = getSettingsGeneration();
-    const performance = !category || category === 'performance', sleep = !category || category === 'sleep';
-    const [core, tdp, charge, hib] = await Promise.all([
+    const performance = !category || category === 'performance';
+    const [core, tdp, charge] = await Promise.all([
         performance ? optional(detectCoreArchitecture, 'CPU 核心架构') : null,
         performance ? optional(getTdpExecutionCapability, '性能调度能力') : null,
         performance ? shared?.charge ?? optional(() => batteryCharge.get(), '充电限制状态') : null,
-        sleep ? shared?.hibernate ?? optional(readHibernateState, '系统休眠能力') : null,
     ]);
     assertSettingsGeneration(generation);
     return {
@@ -183,7 +182,6 @@ export async function readBootModeSupport(category?: BootModeCategory, shared?: 
             charge: { state: charge?.supported ? 'supported' : charge?.kind === 'unsupported' ? 'unsupported' : 'unknown', reason: charge?.reason || '充电能力尚未确认', choices: charge?.choices },
         } : {}),
         ...(!category || category === 'input' ? { gyro: { state: 'unknown', reason: '启用时由原输入接口确认设备与体感来源' } } : {}),
-        ...(sleep ? { hibernate: { state: hib?.supportedKnown ? (hib.supported ? 'supported' : 'unsupported') : 'unknown', reason: '以系统 S4 支持状态为准' } } : {}),
     };
 }
 /** Opaque renderer-local provenance for the first unsaved mode document.
@@ -195,7 +193,7 @@ function firstModeSourceValues(settings: UnifiedSettings): Record<string, unknow
     const values: Record<string, unknown> = {};
     const paths = ['performanceSchedule', 'rtss/frameRates', 'rtss/templateDefaults', 'rtss/monitorOutput',
         'startupDesired/virtualGamepadPersona', 'startupDesired/gyroPreset',
-        'gamepad/mouseMode', 'gamepad/mouseBackend', 'sleep', 'screenTouchpads/profiles',
+        'gamepad/mouseMode', 'gamepad/mouseBackend', 'screenTouchpads/profiles',
         'extensions/deckySidebar/enabled', 'extensions/bootModes', 'ui/theme', 'ui/dynamicBackgroundEnabled',
         'ui/backgroundOpacity', 'ui/backgroundBlur', 'ui/videoBatteryPause', 'ui/steamDynamicWallpaperEnabled',
         'ui/steamWallpaperBackgroundDownload', 'ui/steamWallpaperDownloadCpuThreshold'];
@@ -233,15 +231,12 @@ export function readStoredBootMode(settings: UnifiedSettings, baseline: BootMode
         const durable = savedOverviewSnapshot(settings, baseline.performance.schedule as any);
         for (const module of ['input', 'gyro', 'background', 'steamWallpaper', 'monitor'] as const)
             document.global[module] = cloneBootValue(durable[module]);
-        document.global.sleep.config = mergeBootConfig(object(document.global.sleep.config), object(durable.sleep.config));
         const profiles = object(object(settings.screenTouchpads).profiles);
         const savedProfiles = Object.fromEntries(PERSONAS.filter(persona => profiles[persona] && typeof profiles[persona] === 'object' && !Array.isArray(profiles[persona]))
             .map(persona => [persona, touchConfig(profiles[persona])]));
         document.global.touch = mergeBootConfig(document.global.touch, { profiles: savedProfiles });
         const decky = object(settings.extensions?.deckySidebar).enabled;
         if (typeof decky === 'boolean') document.global.steamDecky.enabled = decky;
-        if (typeof settings.sleep.autoWakeRecovery === 'boolean')
-            document.global.sleep.steamAutoRecovery = settings.sleep.autoWakeRecovery;
     }
     const startup = normalizeInputStartupPreferences(settings.startupDesired);
     const input = document.global.input;
@@ -288,7 +283,6 @@ function savedOverviewSnapshot(settings: UnifiedSettings, schedule = snapshotPer
         steamWallpaper: { enabled: ui.steamDynamicWallpaperEnabled, download: ui.steamWallpaperBackgroundDownload, cpuThreshold: ui.steamWallpaperDownloadCpuThreshold },
         steamDecky: { enabled: null }, monitor: { preferences: normalizeMonitorOutput(settings.rtss.monitorOutput) },
         display: { brightness: null, resolution: 'native', hz: 'native' }, background: { ui: backgroundSettings(ui) },
-        sleep: { config: settings.sleep, acButton: null, dcButton: null, hibernate: null, hibernateSize: null, timeouts: null, steamAutoRecovery: null },
     } as unknown as BootModeSnapshot);
 }
 function assertBootSettingsReady(): void {
@@ -753,71 +747,7 @@ async function writeBaseInput(snapshot: BootModeSnapshot, expected: number, isCu
         throw Error('全局输入配置冲突或写入未确认：' + result.reason);
     return result.value;
 }
-async function applySleep(value: any, before: any, receipt: BootModeReceipt, actionOwner?:MouseOwnerCheck, powerAdmission: SleepPowerWrite['powerAdmission'] = null) {
-    const sleepPowerWrite = () => ({ ...bootPreferenceWrite(actionOwner), powerAdmission });
-    const cfg = object(value.config), old = object(before.config);
-    const guardKeys = ['mode', 'pauseGameOnSleep', 'retryOnEntryFailure', 'retryOnSleepTimeout', 'retryOnNonUserWake'] as const;
-    const guard = Object.fromEntries(guardKeys.filter(key => cfg[key] !== undefined).map(key => [key, cfg[key]]));
-    if (guardKeys.some(key => !same(cfg[key], old[key])))
-        await ownedBootAction(actionOwner,()=>sleepGuardSetConfig(guard, bootPreferenceWrite(actionOwner)));
-    if (typeof cfg.wakePasswordEnabled === 'boolean' && cfg.wakePasswordEnabled !== old.wakePasswordEnabled) {
-        const result = await ownedBootAction(actionOwner,()=>wakePassword.set(cfg.wakePasswordEnabled, sleepPowerWrite()));
-        if (!result.ok || !result.known || result.enabled !== cfg.wakePasswordEnabled)
-            throw Error('唤醒密码设置未确认');
-        if (result.preferenceSaved === false)
-            throw Error('唤醒密码已设置，但配置记忆保存未确认');
-    }
-    if (typeof cfg.sleepPowerPlanOptimizationEnabled === 'boolean' && cfg.sleepPowerPlanOptimizationEnabled !== old.sleepPowerPlanOptimizationEnabled)
-        await ownedBootAction(actionOwner,()=>setSleepPowerPlanOptimizationEnabled(cfg.sleepPowerPlanOptimizationEnabled, bootPreferenceWrite(actionOwner)));
-    if (typeof cfg.staticWakeAutoScanEnabled === 'boolean' && cfg.staticWakeAutoScanEnabled !== old.staticWakeAutoScanEnabled)
-        await ownedBootAction(actionOwner,()=>setStaticWakeAutoScanEnabled(cfg.staticWakeAutoScanEnabled, bootPreferenceWrite(actionOwner)));
-    let powerChanged = false;
-    for (const side of ['ac', 'dc'] as const) {
-        const key = side + 'Button', idx = value[key];
-        if (Number.isInteger(idx) && idx >= 0 && idx <= 3 && idx !== before[key]) {
-            await ownedBootAction(actionOwner,()=>setPowerBtnIdx(side === 'ac', idx as PowerBtnIdx, sleepPowerWrite()));
-            if (await readOnce(() => getPowerBtnIdx(side === 'ac'), side === 'ac' ? '交流电电源按钮' : '电池电源按钮') !== idx)
-                throw Error('电源按钮回读不一致');
-            powerChanged = true;
-        }
-    }
-    const hibernateState = await readOnce(readHibernateState, '系统休眠能力');
-    const canHibernate = hibernateState.supportedKnown && hibernateState.supported;
-    const hibernateChanged = value.hibernate !== before.hibernate || (value.hibernate === true && (value.hibernateSize !== before.hibernateSize || ['acHibernate', 'dcHibernate'].some(key => value.timeouts?.[key] !== before.timeouts?.[key])));
-    if (!canHibernate && hibernateChanged)
-        receipt.skipped.push('系统 S4 休眠：本机未确认支持');
-    if (typeof value.hibernate === 'boolean' && value.hibernate !== before.hibernate) {
-        if (canHibernate) {
-            const result = await ownedBootAction(actionOwner,()=>setHibernate(value.hibernate, sleepPowerWrite()));
-            if (result.exitCode !== 0)
-                throw Error('系统休眠设置失败');
-            const confirmed = await readOnce(readHibernateState, '系统休眠能力');
-            if (!confirmed.enabledKnown || confirmed.enabled !== value.hibernate)
-                throw Error('系统休眠回读未确认');
-        }
-    }
-    if (canHibernate && value.hibernate === true && typeof value.hibernateSize === 'number' && value.hibernateSize !== before.hibernateSize) {
-        await ownedBootAction(actionOwner,()=>setHibernateSize(value.hibernateSize, sleepPowerWrite()));
-        if (await readOnce(readHibernateSize, '休眠文件大小') !== value.hibernateSize)
-            throw Error('休眠文件大小回读不一致');
-    }
-    for (const side of ['ac', 'dc'])
-        for (const kind of ['Screen', 'Sleep', 'Hibernate']) {
-            const key = side + kind, minutes = value.timeouts?.[key];
-            if (typeof minutes === 'number' && minutes >= 0 && minutes !== before.timeouts?.[key] && (kind !== 'Hibernate' || (canHibernate && value.hibernate === true))) {
-                await ownedBootAction(actionOwner,()=>setSleepTimeout(kind.toLowerCase() as 'screen' | 'sleep' | 'hibernate', side === 'ac', minutes, sleepPowerWrite()));
-                powerChanged = true;
-            }
-        }
-    if (powerChanged)
-        await ownedBootAction(actionOwner,()=>reactivateCurrentScheme(sleepPowerWrite()));
-    if (typeof value.steamAutoRecovery === 'boolean' && value.steamAutoRecovery !== before.steamAutoRecovery) {
-        const result = await ownedBootAction(actionOwner,()=>setAutomaticSleepRecovery(value.steamAutoRecovery, bootPreferenceWrite(actionOwner)));
-        if (!result.ok || result.enabled !== value.steamAutoRecovery)
-            throw Error('Steam 自动恢复设置未确认');
-    }
-}
-async function applyRuntimeModule(id: BootModeModule, value: any, before: any, receipt: BootModeReceipt, actionOwner?: MouseOwnerCheck, preservePerformanceState = false, sleepPowerAdmission: SleepPowerWrite['powerAdmission'] = null): Promise<void> {
+async function applyRuntimeModule(id: BootModeModule, value: any, before: any, receipt: BootModeReceipt, actionOwner?: MouseOwnerCheck, preservePerformanceState = false): Promise<void> {
     await requireBootActionOwner(actionOwner);
     const pendingBefore = receipt.pending.length, skippedBefore = receipt.skipped.length;
     recordModule(receipt, id, 'requested');
@@ -870,8 +800,14 @@ async function applyRuntimeModule(id: BootModeModule, value: any, before: any, r
             if (typeof boot !== 'string' || !boot) throw Error('Windows 启动标识尚未确认，未提交触摸预设');
             const result = await ownedBootAction(actionOwner,()=>screenTouchpadsSaveProfiles(patches, expected,
                 { boot, mode: receipt.mode, revision: mode.revision, ...(actionOwner?.bootContext?.() ?? mouseBootContext(settings)) }));
-            if (!result.settingsSaved) throw Error((result.persona ? result.persona + '：' : '') + (result.reason || '触摸预设未保存'));
-            if (!result.ok) receipt.pending.push('屏幕触摸：整组已保存，当前档位生效待确认（' + result.reason + '）');
+            if (result.settingsSaved !== true) throw Error((result.persona ? result.persona + '：' : '') + (result.reason || '触摸预设未保存'));
+            if (result.ok === true && result.activeApplication === 'applied' && result.applicationConfirmed === true) {
+                recordModule(receipt, id, 'active', '原生已确认当前触摸档位的配置，不代表实体输入已验证');
+                receipt.applied.push(LABELS[id]);
+                return;
+            }
+            if (!result.ok || result.activeApplication === 'pending' || result.activeApplication === 'applied' || result.applicationConfirmed === true)
+                receipt.pending.push('屏幕触摸：整组已保存，当前档位生效待确认（' + result.reason + '）');
         }
     }
     else if (id === 'audioOptimization' || id === 'frameGeneration') {
@@ -905,11 +841,15 @@ async function applyRuntimeModule(id: BootModeModule, value: any, before: any, r
             recordModule(receipt, id, 'unchanged', '本预设未指定 Steam 外观修改');
             return;
         }
-        if (Object.keys(value.states || {}).length) {
-            const state = await readOnce(() => steamAppearance.read(), 'Steam 美化设置'), result = await ownedBootAction(actionOwner,()=>steamAppearance.apply(state, value.states, bootPreferenceWrite(actionOwner)));
-            if (!result.ok)
-                receipt.pending.push('Steam 美化：' + (result.message || '等待连接'));
-        }
+        const result = await ownedBootAction(actionOwner, () => steamAppearance.applyScene(value.states, bootPreferenceWrite(actionOwner), async read => {
+            // A timed-out observation may still be running. Its result belongs
+            // to that scene request and must not admit a different write.
+            const current = await readOnce(read, 'Steam 美化预设', false);
+            await requireBootActionOwner(actionOwner);
+            return current;
+        }));
+        if (!result.ok)
+            receipt.pending.push('Steam 美化：' + (result.message || '等待连接'));
     }
     else if (id === 'steamWallpaper')
         await ownedBootAction(actionOwner,()=>setUiSettings({ steamDynamicWallpaperEnabled: value.enabled, steamWallpaperBackgroundDownload: value.download, steamWallpaperDownloadCpuThreshold: Number(value.cpuThreshold) }, bootPreferenceWrite(actionOwner)));
@@ -998,8 +938,6 @@ async function applyRuntimeModule(id: BootModeModule, value: any, before: any, r
         }
         else { recordModule(receipt, id, 'disabled', '设备当前没有YMCC限充控制，不改写外部设置'); return; }
     }
-    else if (id === 'sleep')
-        await applySleep(value, before, receipt,actionOwner,sleepPowerAdmission);
     else if (id === 'steamDecky') {
         if (typeof value.enabled !== 'boolean') {
             receipt.skipped.push('Decky：连接状态尚未确认');
@@ -1015,7 +953,7 @@ async function applyRuntimeModule(id: BootModeModule, value: any, before: any, r
     const pending = receipt.pending.slice(pendingBefore), skipped = receipt.skipped.slice(skippedBefore);
     if (pending.length || skipped.length) {
         recordModule(receipt, id, pending.length ? 'waiting' : 'skipped', [...pending, ...skipped].join('；'), receipt.modules?.[id]?.requested);
-    } else if (['background', 'steamWallpaper', 'sleep', 'touch'].includes(id)) {
+    } else if (['background', 'steamWallpaper', 'touch'].includes(id)) {
         recordModule(receipt, id, 'saved', '配置已由原保存入口接收；不以保存回执证明运行效果');
     } else if (id === 'steamAppearance') {
         recordModule(receipt, id, 'requested', '外观应用已提交；视觉效果由原 Steam owner 确认');
@@ -1575,10 +1513,9 @@ export function applyBootMode(id: BootModeId, document: BootModeDocument, option
     // A new startup restore cancels any older pending mouse handoff.
     cancelBootModeDeferredMouse();
     const mouseEpoch = deferredMouseEpoch;
-    const { powerAdmission } = captureSleepPowerWrite();
-    return serialized(() => applyBootModeInQueue(id, document, mouseEpoch, undefined, [], powerAdmission));
+    return serialized(() => applyBootModeInQueue(id, document, mouseEpoch));
 }
-async function applyBootModeInQueue(id: BootModeId, document: BootModeDocument, mouseEpoch: number, owner?: StartupContext, startupPending: string[] = [], sleepPowerAdmission: SleepPowerWrite['powerAdmission'] = null): Promise<{document: BootModeDocument; receipt: BootModeReceipt}> {
+async function applyBootModeInQueue(id: BootModeId, document: BootModeDocument, mouseEpoch: number, owner?: StartupContext, startupPending: string[] = []): Promise<{document: BootModeDocument; receipt: BootModeReceipt}> {
     cancelBootModeLaunches();
     document = normalizeBootModeDocument(document, document.global);
     owner?.timing?.mark('apply:settings');
@@ -1784,7 +1721,7 @@ async function applyBootModeInQueue(id: BootModeId, document: BootModeDocument, 
         const pendingCount = receipt.pending.length, skippedCount = receipt.skipped.length;
         try {
             const inheritedPerformance = module === 'performance' && (id === 'global' || !Object.prototype.hasOwnProperty.call(object(document.scenes[id]?.overrides), 'performance'));
-            await applyRuntimeModule(module, next[module], before[module], receipt, currentSoftwareOwner, !!owner && inheritedPerformance, sleepPowerAdmission);
+            await applyRuntimeModule(module, next[module], before[module], receipt, currentSoftwareOwner, !!owner && inheritedPerformance);
             if (receipt.pending.length === pendingCount && receipt.skipped.length === skippedCount && receipt.modules?.[module]?.state !== 'unchanged')
                 saved.activeSnapshot[module] = cloneBootValue(next[module]);
         }
@@ -1867,7 +1804,6 @@ function unconfirmedStartupClaim(boot: string, mode: BootModeId, revision: numbe
 export function restoreSelectedBootMode(): Promise<void> {
     if (startupRestore) return startupRestore;
     const generation = getSettingsGeneration();
-    const { powerAdmission } = captureSleepPowerWrite();
     const timing = bootStartupTiming();
     return startupRestore = serialized(async () => {
         assertSettingsGeneration(generation);
@@ -2036,10 +1972,12 @@ export function restoreSelectedBootMode(): Promise<void> {
                 }
             } catch (error) { startupPending.push('Steam 开机路径：' + text(error)); }
             await requireClaim();
-            const baseline = await captureBootModeSnapshot(undefined, stage => timing.mark('capture:' + stage)), document = normalizeBootModeDocument(claimedRaw, baseline);
+            // The claimed appearance is already saved intent. The apply
+            // capture replaces the intermediate active snapshot before commit.
+            const baseline = await captureBootModeSnapshot(undefined, stage => timing.mark('capture:' + stage), { skipAppearance: true }), document = normalizeBootModeDocument(claimedRaw, baseline);
             owner.revision = document.revision + 1;
             cancelBootModeDeferredMouse();
-            await applyBootModeInQueue(owner.mode, document, deferredMouseEpoch, owner, startupPending, powerAdmission);
+            await applyBootModeInQueue(owner.mode, document, deferredMouseEpoch, owner, startupPending);
             timing.mark('active-boot');
             const markActive = owner.markActive;
             delete owner.markActive;

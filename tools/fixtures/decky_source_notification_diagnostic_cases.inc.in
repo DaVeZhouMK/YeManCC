@@ -8,7 +8,7 @@ inline std::vector<int> forwardedPresence;
 inline std::vector<ymcc::steamsession::Session> forwardedSession;
 inline std::vector<std::string> deliveredOrder;
 inline std::vector<ymcc::steamsession::Session> observedSessions;
-inline std::atomic<bool> g_deckySteamRestartRequired{true};
+inline ymcc::deckysetup::SteamRestartRequirement g_deckySteamRestartRequired;
 struct Observer {
     std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> source;
     auto identitySnapshot() { ++snapshots;return source; }
@@ -50,20 +50,32 @@ inline json run() {
     ymcc::deckybinding::fixture::need(cleanLog.size()==1&&cleanLog[0].value("stage",std::string{})=="binding-identity-incomplete","original-diagnostic-helper-control");
     const char* expectedStages[]{"observer-session","observer-presence","observer-initial"};
     const std::vector<std::string> ordered{"link","mode","decky","css-guard","css-use"};
-    const auto clearFanout=[] { deliveredOrder.clear();observedSessions.clear();g_deckySteamRestartRequired.store(true); };
+    const auto restartSource=[&](int presence,DWORD pid,ULONGLONG created,std::uint64_t revision) {
+        auto source=std::make_shared<ymcc::steamsession::IdentitySnapshot>();
+        source->session=full;source->session.pid=pid;source->session.created=created;
+        source->presence=presence;source->revision=revision;
+        return source;
+    };
+    const auto originalSource=restartSource(1,full.pid,full.created,10);
+    const auto noNewReceipt=[] { return std::shared_ptr<const ymcc::steamsession::IdentitySnapshot>{}; };
+    const auto clearFanout=[&] {
+        deliveredOrder.clear();observedSessions.clear();
+        g_deckySteamRestartRequired.markerCreated(full.root,500,[&]{return originalSource;});
+    };
+    const auto latched=[&] { return g_deckySteamRestartRequired.requiredFor(full.root,noNewReceipt); };
     const auto checkFanout=[&](unsigned caller,int presence,const ymcc::steamsession::Session& session){
         const auto expected=caller==0?ordered:std::vector<std::string>{"decky"};
         ymcc::deckybinding::fixture::need(deliveredOrder==expected,"source-fanout-order");
         ymcc::deckybinding::fixture::need(observedSessions.size()==(caller==0?4u:0u)&&
             std::all_of(observedSessions.begin(),observedSessions.end(),[&](const auto& state){return state==session;}),"source-fanout-single-session");
-        ymcc::deckybinding::fixture::need(g_deckySteamRestartRequired.load()==(caller!=0||presence!=0),"source-fanout-clear-restart-on-absence-only");
+        ymcc::deckybinding::fixture::need(latched()==(caller!=0||presence!=0),"source-fanout-ordinary-session-preserves-restart-until-absence");
     };
     for(unsigned caller=0;caller<3;++caller) {
         for(unsigned variant=0;variant<4;++variant) {
             auto session=full;if(variant==1)session.account=0;
             const int presence=variant==2?-1:variant==3?0:1;
             auto writable=std::make_shared<ymcc::steamsession::IdentitySnapshot>();
-            writable->session=session;writable->presence=presence;
+            writable->session=session;writable->presence=presence;writable->revision=11;
             std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> source=writable,initial=writable;
             g_steamSettingsObserver.source=source;clearFanout();
             cleanLog.clear();offered=forwarded=snapshots=0;forwardedPresence.clear();forwardedSession.clear();failLog=false;
@@ -79,7 +91,7 @@ inline json run() {
             cases.push_back({{"caller",caller},{"variant",variant},{"delivered",delivered},{"snapshots",snapshots},{"forwarded",forwarded},{"enabled",state.enabled},{"pid",state.pid}});
         }
         cleanLog.clear();offered=forwarded=snapshots=0;forwardedPresence.clear();forwardedSession.clear();failLog=true;
-        auto writable=std::make_shared<ymcc::steamsession::IdentitySnapshot>();writable->session=full;writable->presence=1;
+        auto writable=restartSource(1,full.pid,full.created,11);
         std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> source=writable;
         g_steamSettingsObserver.source=source;clearFanout();
         invoke(caller,source,source);
@@ -91,7 +103,7 @@ inline json run() {
     clearFanout();g_steamSettingsObserver.source.reset();snapshots=offered=forwarded=0;
     invoke(0,{},{});
     ymcc::deckybinding::fixture::need(snapshots==1&&offered==0&&forwarded==0&&deliveredOrder.empty()&&
-        g_deckySteamRestartRequired.load(),"missing-source-does-not-invent-notification");
+        latched(),"missing-source-does-not-invent-notification");
     const json old{{"stage","binding-identity-incomplete"},{"accountPresent",false}};
     ymcc::deckybinding::fixture::need(ymcc::deckydiag::record("steam-session-check",old).at("stage")=="binding-identity-incomplete","old-stage-regressed");
     unsigned badRejected=0;
@@ -100,12 +112,73 @@ inline json run() {
         ymcc::deckybinding::fixture::need(!filtered.contains("stage")&&!filtered.contains("account")&&!filtered.contains("token"),"stage-whitelist-or-private-data");
         ++badRejected;
     }
+    const auto replacement=[&](DWORD pid) {
+        const auto next=restartSource(1,pid,600,11);
+        clearFanout();
+        g_steamSettingsObserver.source=next;snapshots=0;
+        invoke(0,next,next);
+        return std::pair{!latched(),deliveredOrder==ordered&&snapshots==1};
+    };
+    const auto [newPidCleared,newPidOrder]=replacement(124);
+    const auto [reusedPidCleared,reusedPidOrder]=replacement(full.pid);
+    cases.push_back({{"variant","restart-marker-fast-process-replacement"},{"newPidCleared",newPidCleared},{"reusedPidCleared",reusedPidCleared}});
+    const auto checkRestart=[&](const char* name,const auto& source,bool expected) {
+        g_steamSettingsObserver.source=source;deliveredOrder.clear();snapshots=0;
+        invoke(0,source,source);
+        ymcc::deckybinding::fixture::need(latched()==expected&&deliveredOrder==ordered&&snapshots==1,name);
+        cases.push_back({{"variant",name},{"retained",latched()}});
+    };
+    clearFanout();
+    checkRestart("older-exit-cannot-clear-new-marker",restartSource(0,0,0,9),true);
+    checkRestart("unknown-source-cannot-clear-marker",restartSource(-1,124,600,11),true);
+    checkRestart("missing-birth-cannot-clear-marker",restartSource(1,124,0,12),true);
+    auto other=restartSource(1,124,600,13);other->session.root=L"C:/other-steam";
+    checkRestart("unrelated-install-cannot-clear-marker",other,true);
+    ymcc::deckybinding::fixture::need(!g_deckySteamRestartRequired.requiredFor(other->session.root,noNewReceipt),"restart-marker-leaked-to-other-install");
+    checkRestart("process-born-before-marker-retains-requirement",restartSource(1,124,490,14),true);
+    auto same=restartSource(1,full.pid,full.created,15);same->session.account=full.account+1;
+    checkRestart("account-change-keeps-same-process-marker",same,true);
+    auto pathAlias=restartSource(1,124,600,16);pathAlias->session.root=L"c:/Fixture-Steam/";
+    checkRestart("path-spelling-does-not-hide-replacement",pathAlias,false);
+    g_deckySteamRestartRequired.markerCreated(full.root,500,noNewReceipt);
+    checkRestart("unknown-at-marker-cannot-infer-replacement",restartSource(1,124,600,17),true);
+    checkRestart("confirmed-exit-clears-unknown-marker",restartSource(0,0,0,18),false);
+
+    // Real CREATE_NEW within the private runner's working directory. The
+    // second environment read publishes the replacement before fan-out.
+    const auto steam=std::filesystem::current_path()/L"marker-hook";
+    ymcc::deckybinding::fixture::need(std::filesystem::create_directory(steam),"private-marker-root");
+    const auto marker=steam/L".cef-enable-remote-debugging";
+    auto running=restartSource(1,full.pid,full.created,30);running->session.root=steam.wstring();
+    g_steamSettingsObserver.source=running;
+    const auto readIdentity=[] {return g_steamSettingsObserver.identitySnapshot();};
+    unsigned reads=0,hooks=0;
+    ULONGLONG mark=0;
+    ymcc::deckyresources::Options options;options.enabled=false;
+    options.isolatedPreparation=[&] {
+        if(++reads==1)return json{{"ready",false},{"reason","steam-debug-missing"}};
+        ymcc::deckybinding::fixture::need(hooks==1&&mark!=0,"marker-hook-ran-after-reinspection");
+        auto next=restartSource(1,124,mark+1,31);next->session.root=steam.wstring();
+        g_steamSettingsObserver.source=next;
+        return json{{"ready",true},{"reason","ready"}};
+    };
+    const auto markerCreated=[&](ULONGLONG createdThrough) {
+        ++hooks;mark=createdThrough;
+        ymcc::deckybinding::fixture::need(std::filesystem::is_regular_file(marker),"marker-hook-ran-before-create");
+        g_deckySteamRestartRequired.markerCreated(steam.wstring(),createdThrough,readIdentity);
+    };
+    const auto result=ymcc::deckysetup::prepare(steam,{}, {},false,{}, {},options,markerCreated);
+    const bool clearedDuringRecheck=!g_deckySteamRestartRequired.requiredFor(steam.wstring(),readIdentity);
+    ymcc::deckybinding::fixture::need(reads==2&&hooks==1&&result.value("createdSteamDebugMarker",false)&&result.value("ready",false)&&clearedDuringRecheck,
+        "real-marker-prepare-stale-result-after-replacement");
+    cases.push_back({{"variant","replacement-during-real-marker-reinspection"},{"cleared",clearedDuringRecheck},{"reads",reads},{"hooks",hooks}});
     const auto after=handles();
     std::cout << "SOURCE_NOTIFICATION_RAW " << cases.dump() << " before=" << baseline << " after=" << after << std::endl;
+    ymcc::deckybinding::fixture::need(newPidCleared&&reusedPidCleared&&newPidOrder&&reusedPidOrder,"restart-marker-latched-on-replaced-process");
     ymcc::deckybinding::fixture::need(baseline==after,"source-notification-resource-return");
     ymcc::deckybinding::fixture::need(allDelivered,"source-notification-caller-stage-missing");
     return {{"sourceNotificationCases",cases},{"allSourceStagesDelivered",allDelivered},{"badStageValuesRejected",badRejected},{"beforeHandles",baseline},{"afterHandles",after},
-        {"scope","Exact synchronous main fan-out and two other observation calls; actual helper/filter/disabled Runtime; no Observer producer or whole-main/field execution"},
+        {"scope","Exact synchronous main fan-out and two other observation calls; actual helper/filter/disabled Runtime and private marker creation with controlled publications; no Observer producer or whole-main/field execution"},
         {"missingSessionSourceRefused",true},
         {"realSteamOrDeviceActions",0}};
 }

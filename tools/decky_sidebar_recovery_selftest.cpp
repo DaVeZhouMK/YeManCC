@@ -316,6 +316,37 @@ static int rebuildChildWindowCase(){
  need(switched.observe(oldReopen+1,successor)==Action::reconnect,"replacement identity must not inherit old page step");
  std::cout<<"REBUILD_CHILD_RECEIPT_OK boundaries=9 modeCommands=0\n";
  std::cout<<"REBUILD_CHILD_WINDOW_OK fieldOffsets=10467,15372,20000 modeCommands=0\n";
+
+ // Identity refusal is not a successful rebuild: the new child can use
+ // only the remainder of the original rung, with no carried-over credit.
+ const auto refuse=[&](Window& w,bool identityDeferred=true){
+  start(w,false);w.failed(Action::rebuild,confirmed,identityDeferred);
+ };
+ const auto refusalDue=oldReopen-1; // start(false) issues rebuild at confirmed-1.
+ Window noChild;refuse(noChild);
+ auto identityPending=missing;identityPending.paused=true;
+ need(noChild.observe(confirmed+1,identityPending)==Action::none&&noChild.observe(child,missing)==Action::reopen,
+      "identity pause alone cannot prevent escalation after a missing child");
+ Window unearned;refuse(unearned);
+ need(unearned.observe(child,owned)==Action::reopen,"health timestamp alone cannot prevent escalation");
+ Window gone;refuse(gone);gone.serviceStarted(child);
+ need(gone.observe(child+1,owned)==Action::none&&gone.observe(child+2,missing)==Action::reopen,"lost child restores escalation");
+ Window replaced;refuse(replaced);replaced.serviceStarted(child);replaced.serviceStarted(child+1000);
+ need(replaced.observe(child+1000,duplicate)==Action::reopen,"replacement child cannot overwrite the first start receipt");
+ Window expires;refuse(expires);expires.serviceStarted(child);expires.failed(Action::rebuild,child+1,true);
+ need(expires.observe(refusalDue-1,owned)==Action::none&&expires.timeout(refusalDue-1)==1&&expires.attempts()==3&&
+      expires.observe(refusalDue,owned)==Action::reopen,"duplicate refusal never refills the original rung");
+ Window expired;refuse(expired);expired.serviceStarted(refusalDue);lateChild.coldLoaderStarted=refusalDue;
+ need(expired.observe(refusalDue+1,lateChild)==Action::reopen,"expired rung grants no new child time");
+ Window ordinaryDenial;refuse(ordinaryDenial,false);ordinaryDenial.serviceStarted(child);
+ need(ordinaryDenial.observe(child+1,owned)==Action::reopen,"ordinary denial still escalates");
+ Window recovered;refuse(recovered);recovered.serviceStarted(child);
+ need(recovered.observe(child+1,healthy)==Action::recovered,"complete health stops the refused rebuild episode");
+ Window disabled;refuse(disabled);disabled.serviceStarted(child);
+ need(disabled.observe(child+1,{false,false,"off"})==Action::stopped,"OFF retires refusal protection");
+ Window changed;refuse(changed);changed.serviceStarted(child);
+ need(changed.observe(child+1,successor)==Action::reconnect,"successor does not inherit a refused rebuild receipt");
+ std::cout<<"REBUILD_REFUSAL_WINDOW_OK boundaries=10 modeCommands=0\n";
  return 0;
 }
 static void busyCommandRecoveryCase(){
@@ -448,7 +479,9 @@ static void pageAttemptCooldownCase(){
  need(request(Origin::FinalCleanup).value("reason",std::string{})=="decky-repair-wait","unstarted successor does not erase the prior spent cooldown");
  std::cout<<"PAGE_ATTEMPT_COOLDOWN_CONTROLS 9 PASS\n";
 }
+static void bigPictureRecoveryCases();
 int main(int argc,char** argv){
+if(argc==2&&std::string_view(argv[1])=="--bigpicture-recovery"){bigPictureRecoveryCases();return 0;}
 if(argc==3&&std::string_view(argv[1])=="--health-observation-timer"&&std::string_view(argv[2])=="--control-extra-startup-read"){
  try{return healthObservationTimerCase(2);}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }
@@ -633,34 +666,49 @@ if(argc==2&&std::string(argv[1])=="--health-observation-timer"){try{return healt
  for(unsigned i=0;i<10000;++i)assert(parked.observe(102+i,{false,false,"launch-policy-blocked"})==Action::none);
  assert(parked.observe(90100,missing)==Action::reconnect); // Environment recovery uses normal authority again.
  std::cout<<"Elevated-shell classification PASS: wrong errors remain recoverable, bounded read-only probes, storms, unknown, restored and explicit reset\n";
+ bigPictureRecoveryCases();
+ healthObservationFaultCase();
+ std::cout<<"Decky outage recovery PASS: capped retry, coalescing, cancel, health reset; no real process IO\n";
+}
+static void bigPictureRecoveryCases(){
  using Json=nlohmann::json;ymcc::steamsession::Session session;session.pid=77;session.created=88;session.root=L"C:\\inert";session.account=99;
+ const auto ready=[](Json& mode){
+   for(const auto* name:{"deckyBackendConnected","deckyHooksInstalled","deckyClientConnected","deckyClientVerified"})mode[name]=true;
+ };
  unsigned cycles=0;
- for(const std::string scenario:{"success","close-no-transition","close-rejected","open-no-transition","open-rejected","off-after-close","account-after-close","identity-missing","throws"}){
+ for(const std::string scenario:{"success","close-no-transition","close-rejected","open-no-transition","open-rejected","off-after-close","account-after-close","identity-missing","throws",
+      "ready-before-close","ready-after-close","missing-verified-reply","invalid-verified-reply"}){
    ++cycles;std::vector<std::string>sent;unsigned long long tick=100;bool current=true;unsigned reads=0;
+   const bool skip=scenario=="ready-before-close";
+   const bool success=scenario=="success"||scenario=="ready-after-close"||scenario=="missing-verified-reply"||scenario=="invalid-verified-reply";
    const auto read=[&]()->Json{
      ++reads;
      if(scenario=="throws"&&!sent.empty())throw std::runtime_error("inert");
      std::string mode=sent.empty()?"bigpicture":sent.back();
      if(scenario=="close-no-transition"&&!sent.empty())mode="bigpicture";
      if(scenario=="open-no-transition"&&sent.size()==2)mode="desktop";
-     return {{"known",true},{"running",true},{"pid",session.pid},{"birth",std::to_string(session.created)},
+     Json result={{"known",true},{"running",true},{"pid",session.pid},{"birth",std::to_string(session.created)},
        {"mode",mode},{"observedAccount",scenario=="account-after-close"&&!sent.empty()?100:99},
        {"deckyAccountWatchAvailable",scenario!="identity-missing"}};
+     if(skip||(scenario=="ready-after-close"&&!sent.empty())||scenario=="missing-verified-reply"||scenario=="invalid-verified-reply")ready(result);
+     if(scenario=="missing-verified-reply")result.erase("deckyClientVerified");
+     if(scenario=="invalid-verified-reply")result["deckyClientVerified"]=1;
+     return result;
    };
    const auto result=ymcc::deckyrepair::bigpicture::run(session,[&]{return current;},read,[&](const std::string& mode){
      sent.push_back(mode);if(scenario=="off-after-close")current=false;
      return !(scenario=="close-rejected"||scenario=="open-rejected"&&mode=="bigpicture");
    },[&]{return tick;},[&]{tick+=500;});
-   assert(result.value("ok",false)==(scenario=="success"));
-   const auto expectedStage=scenario=="success"?"complete":scenario=="identity-missing"?"initial-read":
+   assert(result.value("ok",false)==success);
+   const auto expectedStage=success?"complete":skip||scenario=="identity-missing"?"initial-read":
      scenario=="close-rejected"?"close-submit":scenario=="open-rejected"?"open-submit":
      scenario=="open-no-transition"?"open-readback":"close-readback";
-   const auto expectedMode=scenario=="success"?"bigpicture":
+   const auto expectedMode=success?"bigpicture":
      scenario=="identity-missing"||scenario=="account-after-close"||scenario=="throws"?"unknown":
      scenario=="open-rejected"||scenario=="open-no-transition"?"desktop":"bigpicture";
    assert(result.value("launchStage",std::string{})==expectedStage);
    assert(result.value("launchMode",std::string{})==expectedMode);
-   const unsigned expectedReads=scenario=="success"?3:scenario=="close-no-transition"?25:
+   const unsigned expectedReads=success?3:scenario=="close-no-transition"?25:
      scenario=="open-no-transition"?50:scenario=="open-rejected"||scenario=="account-after-close"||scenario=="throws"?2:1;
    assert(reads==expectedReads); // Diagnostics add no mode or identity reads.
    auto detail=result;detail["elapsedMs"]=tick-100;detail["token"]="must-not-log";
@@ -668,9 +716,11 @@ if(argc==2&&std::string(argv[1])=="--health-observation-timer"){try{return healt
    assert(logged.at("launchStage")==result.at("launchStage"));
    assert(logged.at("launchMode")==result.at("launchMode"));
    assert(logged.at("elapsedMs")==tick-100&&!logged.contains("token"));
+   if(skip)assert(logged.at("reason")=="decky-bigpicture-already-healthy"&&!result.value("uncertain",true));
    std::cout<<"BigPicture diagnostic "<<scenario<<" "<<expectedStage<<" "<<expectedMode<<" reads="<<reads<<"\n";
-   if(scenario=="identity-missing"){assert(sent.empty()&&!result.value("mutated",true));}
-   else {assert(result.value("mutated",false));assert(result.value("uncertain",false)==(scenario!="success"));}
+   if(skip||scenario=="identity-missing"){assert(sent.empty()&&!result.value("mutated",true));}
+   else {assert(result.value("mutated",false));assert(result.value("uncertain",false)==!success);}
+   if(success)assert(sent==std::vector<std::string>({"desktop","bigpicture"}));
    assert(sent.size()<=2);if(!sent.empty())assert(sent[0]=="desktop");
    if(sent.size()==2)assert(sent[1]=="bigpicture");
    if(scenario=="off-after-close"||scenario=="account-after-close"||scenario=="close-no-transition")assert(sent.size()==1);
@@ -689,6 +739,13 @@ if(argc==2&&std::string(argv[1])=="--health-observation-timer"){try{return healt
  deps.preflight=[&]{++preflightCount;return std::string{};};deps.reserveCleanup=[&](const auto&){++reservedCount;return true;};
  deps.reopenBigPicture=[&](const auto& current){++reopenCount;assert(current());return Json{{"ok",true},{"mutated",true}};};
  ymcc::deckyrepair::ManualRepair repair;
+ const auto notReady=mode;
+ ready(mode);
+ const auto healthy=repair.request(args,deps,ymcc::deckyrepair::Origin::ReopenBigPicture);
+ assert(healthy.at("ok")==false&&healthy.at("mutated")==false&&healthy.at("cleanupNotStarted")==true&&healthy.at("reason")=="decky-bigpicture-already-healthy");
+ assert(reservedCount==0&&reopenCount==0&&preflightCount==0);
+ std::cout<<"BigPicture ready-before-reservation PASS: no preflight, reservation or command\n";
+ mode=notReady;
  assert(repair.request(args,deps,ymcc::deckyrepair::Origin::ReopenBigPicture).value("ok",false));
  assert(reservedCount==1&&reopenCount==1&&preflightCount==2); // One admission recheck, no hashing in mode waits.
  assert(!repair.request(args,deps,ymcc::deckyrepair::Origin::ReopenBigPicture).value("ok",false));
@@ -751,7 +808,5 @@ if(argc==2&&std::string(argv[1])=="--health-observation-timer"){try{return healt
  Json document={{"deckyBigPictureRecovery",reserved}};
  assert(!ymcc::deckyrepair::cleanupDocumentAvailable(document,session,{},"deckyBigPictureRecovery"));
  assert(ymcc::deckyrepair::cleanupDocumentAvailable(document,session)); // Independent lower-tier fuse.
- std::cout<<"Decky ladder + observed Big Picture cycle PASS: nine bounded scenarios; no Steam/OS mode commands\n";
- healthObservationFaultCase();
- std::cout<<"Decky outage recovery PASS: capped retry, coalescing, cancel, health reset; no real process IO\n";
+ std::cout<<"Observed Big Picture cycle PASS: "<<cycles<<" bounded scenarios; no Steam/OS mode commands\n";
 }

@@ -13,6 +13,7 @@
 #include "json.hpp"
 #include "mouse_mode_foreground.h"
 #include "mouse_mode_application_rules.h"
+#include "input_shortcut_toggle.h"
 using json=nlohmann::json;
 static std::mutex g_gamepadSettingsMx,g_inputHostPersonaMx,g_mouseModeMx;
 static std::string g_mouseBackend="joyxoff",g_inputHostBuildPersona,g_inputHostBoundPersona="xbox",requestedPersona="xbox";
@@ -40,7 +41,9 @@ template<class Creator>static Result set(const std::wstring&,bool enabled,Creato
  return {true,joyRunning,true,0,enabled?"process-started":"process-stopped"};
 }
 }
-static json inputShortcutRuntimeSnapshot(){return {{"persona",requestedPersona},{"virtualEnabled",requestedEnabled}};}
+static std::mutex g_inputShortcutRuntimeMx;
+static ymcc::InputShortcutRuntime g_inputShortcutRuntime;
+static const std::string& gameInputOwnerSession(){static const std::string session="mouse-mode-fixture";return session;}
 static HRESULT gamebarMouseGet(bool& value){++reads;value=SUCCEEDED(gamebarHr)&&gamebarOn;return gamebarHr;}
 static HRESULT gamebarMouseSet(bool enabled,bool& actual){++writes;if(enabled)++gamebarStarts;else ++gamebarStops;if(gamebarSetFails){actual=gamebarOn;return E_FAIL;}gamebarOn=enabled;actual=enabled;if(enabled&&switchToSdOnStart){requestedPersona="steamdeck";g_inputHostBoundPersona="steamdeck";}return S_OK;}
 static std::string gamebarMouseError(HRESULT){return "fixture-component-failure";}
@@ -49,7 +52,13 @@ static json savedGamepad=json::object();
 static std::wstring summonPath(){return L"private-memory/summon.json";}
 static std::string sgReadFile(const std::wstring&){return {};}
 static bool ymSettingsExists(){return true;}
-static json ymSettingsSection(const char*){return savedGamepad;}
+static json ymSettingsSection(const char* section){
+ if(std::strcmp(section,"input")==0)return {{"outputTarget",{{"persona",requestedPersona},{"buttonMappingEnabled",requestedEnabled}}}};
+ return savedGamepad;
+}
+static std::shared_ptr<const json> ymSettingsSectionView(const char* section) {
+    return std::make_shared<const json>(ymSettingsSection(section));
+}
 static void summonSave(){++saves;savedGamepad["mouseBackend"]=g_mouseBackend;savedGamepad["mouseMode"]=g_mousePolicyMode.load()==2?"on":g_mousePolicyMode.load()==1?"auto":"off";}
 static void gamepadSerialPostEvent(const std::string&,const json& value){lastEvent=value;}
 static void ipc_emit(const std::string&,const json& value){lastFeedback=value;}

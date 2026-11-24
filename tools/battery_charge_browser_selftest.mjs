@@ -26,16 +26,16 @@ import Component from './src/components/BatteryChargeSettings.vue';
 import * as model from './src/bridge/batteryCharge';
 import {getSharedPowerLifecycleDiagnostics} from './src/bridge/powerLifecycleState';
 window.__model=model;window.__powerDiagnostics=getSharedPowerLifecycleDiagnostics;
-window.__fixture={calls:[],state:null,defer:false,fail:false,failSet:false,pending:[],actualController:new URLSearchParams(location.search).get('actual-controller')==='1',power:{phase:'ready',generation:1,known:true,inputReady:true,hardwareWritesAllowed:true,publicationRevision:1}};
-window.__publishPower=(generation,phase)=>{const f=window.__fixture;f.power={phase,generation,known:true,inputReady:phase==='ready',hardwareWritesAllowed:phase==='ready',publicationRevision:f.power.publicationRevision+1};window.dispatchEvent(new CustomEvent('ipc:power.lifecycleChanged',{detail:structuredClone(f.power)}));};
+window.__fixture={calls:[],state:null,defer:false,fail:false,failSet:false,pending:[],actualController:new URLSearchParams(location.search).get('actual-controller')==='1',power:{phase:'ready',generation:1,known:true,inputReady:true,hardwareWritesAllowed:true,publicationRevision:1,suspendSerial:0}};
+window.__publishPower=(generation,phase,notificationPending=false,suspendSerial=window.__fixture.power.suspendSerial)=>{const f=window.__fixture;f.power={phase,generation,known:true,inputReady:phase==='ready',hardwareWritesAllowed:phase==='ready',notificationPending,suspendSerial,publicationRevision:f.power.publicationRevision+1};window.dispatchEvent(new CustomEvent('ipc:power.lifecycleChanged',{detail:structuredClone(f.power)}));};
 const fixtureApp=createApp({setup(){const shown=ref(true),version=ref(0);window.__show=v=>shown.value=v;window.__reset=v=>{window.__fixture.state=v;shown.value=true;version.value++};return()=>h(KeepAlive,{key:version.value},{default:()=>shown.value?h(Component):null})}});window.__destroy=()=>fixtureApp.unmount();fixtureApp.mount('#app');
 `;
-const ipcMock = `export const isNativeRuntime=true;export function on(name,handler){const listener=event=>handler(event.detail);window.addEventListener('ipc:'+name,listener);return()=>window.removeEventListener('ipc:'+name,listener);}export async function invoke(cmd,args,options){const f=window.__fixture;f.calls.push({cmd,args,options});
+const ipcMock = `export const isNativeRuntime=true;export class IpcTimeoutError extends Error {} export function on(name,handler){const listener=event=>handler(event.detail);window.addEventListener('ipc:'+name,listener);return()=>window.removeEventListener('ipc:'+name,listener);}export async function invoke(cmd,args,options){const f=window.__fixture;f.calls.push({cmd,args,options});
 if(cmd==='power.lifecycle')return structuredClone(f.power);
 if(cmd==='diagnostics.frontendError')return {ok:true};
 if(f.actualController){const response=await fetch('/controller',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:cmd,args:args??{}})});if(!response.ok)throw Error('controller bridge rejected request');return await response.json();}
 if(cmd==='battery.charge.refresh'&&f.state.verification==='unconfirmed'&&!f.fail){f.state={...f.state,ok:true,supported:true,verification:'readback',fence:'b'.repeat(64),reason:''}}
-if(cmd==='battery.charge.get'||cmd==='battery.charge.refresh'){if(f.fail)throw Error('fixture read failure');if(f.defer)return new Promise(resolve=>f.pending.push(resolve));return structuredClone(f.state)}
+ if(cmd==='battery.charge.get'||cmd==='battery.charge.refresh'){if(f.fail)throw Error('fixture read failure');if(f.defer)return new Promise((resolve,reject)=>{const signal=options?.signal;const abort=()=>reject(Error('IPC request retired'));if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});f.pending.push(value=>{signal?.removeEventListener('abort',abort);resolve(value)});});return structuredClone(f.state)}
 if(cmd==='battery.charge.set'){
  if(f.failSet)throw Error('fixture lost acknowledgement');
  const software=f.state.kind==='software-bypass-threshold',ack=f.state.family==='ASUS';
@@ -132,6 +132,14 @@ try{
  await refresh(msiUnknown);assert.match(await panel.textContent(),/当前上限未知/);const beforeMsi=await page.evaluate(()=>window.__fixture.calls.filter(c=>c.cmd.endsWith('.set')).length);
  await choose('80%');assert.equal(await page.getByRole('button',{name:'应用',exact:true}).isEnabled(),true);assert.equal(await page.evaluate(()=>window.__fixture.calls.filter(c=>c.cmd.endsWith('.set')).length),beforeMsi);
  await page.getByRole('button',{name:'应用',exact:true}).click();await page.waitForTimeout(60);assert.match(await panel.textContent(),/当前：80%/);cases.push('MSI flag-only unknown limit allows explicit apply without fabricating or auto-writing a value');
+ await refresh({...msiUnknown,managed:true,requestedLimit:95});
+ assert.equal(await panel.getByRole('status').textContent(),'当前：未确认');
+ assert.match(await panel.getByRole('button',{name:'充电上限档位',exact:true}).textContent(),/95%/);
+ const beforeReapply=await page.evaluate(()=>window.__fixture.calls.filter(c=>c.cmd.endsWith('.set')).length);
+ await panel.getByRole('button',{name:'应用',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('[data-testid="battery-charge-settings"] [role="status"]')?.textContent==='当前：95%');
+ assert.equal(await page.evaluate(()=>window.__fixture.calls.filter(c=>c.cmd.endsWith('.set')).length),beforeReapply+1);
+ cases.push('saved MSI 95 is a selection, not a verified limit; the same target can be reapplied');
  const asus={...percent,family:'ASUS',currentLimit:null};await refresh(asus);assert.match(await panel.textContent(),/当前上限未知/);await choose('80%');await page.getByRole('button',{name:'应用',exact:true}).click();await page.waitForTimeout(70);assert.match(await panel.textContent(),/当前设置：80%（已接受）/);assert.doesNotMatch(await panel.textContent(),/当前：80%/);cases.push('ASUS write acknowledgement does not fabricate readback');
  const soft={...percent,kind:'software-bypass-threshold',family:'AYANEO',currentLimit:null,requestedLimit:null,verification:'unknown'};await refresh(soft);await choose('80%');await page.getByRole('button',{name:'应用',exact:true}).click();await page.waitForTimeout(60);assert.match(await panel.textContent(),/当前目标：80%/);
  const releases=await page.evaluate(()=>window.__fixture.calls.filter(c=>c.cmd.endsWith('.release')).length);await page.evaluate(()=>window.__show(false));await page.waitForTimeout(50);await page.evaluate(()=>window.__show(true));await page.waitForTimeout(70);assert.equal(await page.evaluate(()=>window.__fixture.calls.filter(c=>c.cmd.endsWith('.release')).length),releases);cases.push('KeepAlive navigation leaves software policy active');
@@ -214,6 +222,34 @@ try{
  await page.evaluate(()=>{window.__publishPower(9,'suspending');window.dispatchEvent(new CustomEvent('ipc:power.suspending',{detail:{generation:9}}));});const staleResumeReads=await reads();
  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('ipc:power.resumed',{detail:{generation:8}})));await page.clock.runFor(60000);await page.waitForTimeout(30);assert.equal(await reads(),staleResumeReads);
  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('ipc:power.resume-ready',{detail:{generation:9}})));await page.waitForTimeout(40);assert.equal(await reads(),staleResumeReads,'resume-ready hint cannot commit Ready');await page.evaluate(()=>window.__publishPower(9,'ready'));await page.waitForTimeout(40);assert.match(await panel.textContent(),/当前：80%/);cases.push('older power wake cannot resume a newer suspended read session');
+ const pendingApply=page.getByRole('button',{name:'应用',exact:true});assert.equal(await pendingApply.isEnabled(),true);
+ await page.evaluate(()=>{window.__fixture.defer=true;window.dispatchEvent(new Event('focus'))});
+ await page.waitForFunction(()=>window.__fixture.pending.length===1);
+ await page.evaluate(()=>{const f=window.__fixture;window.__publishPower(9,'ready',true);f.defer=false;for(const done of f.pending.splice(0))done({...f.state,currentLimit:100});});
+ const pendingReads=await reads(),pendingWrites=await page.evaluate(()=>window.__fixture.calls.filter(c=>c.cmd==='battery.charge.set'||c.cmd==='battery.charge.release').length);
+ await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await page.clock.runFor(100);
+ assert.equal(await reads(),pendingReads,'same-generation pending notice must pause reads');
+ assert.match(await panel.textContent(),/当前：80%/,'late read from before the pending notice must not publish');
+ assert.equal(await pendingApply.isDisabled(),true,'pending notice must disable Apply');
+ await page.evaluate(()=>window.__publishPower(9,'ready'));
+ await page.waitForFunction(expected=>window.__fixture.calls.filter(c=>c.cmd==='battery.charge.get').length>=expected,pendingReads+1);
+ assert.equal(await reads(),pendingReads+1,'same-generation Ready must restart reads once');
+ assert.equal(await pendingApply.isEnabled(),true,'Ready must re-enable manual Apply');
+ assert.equal(await page.evaluate(()=>window.__fixture.calls.filter(c=>c.cmd==='battery.charge.set'||c.cmd==='battery.charge.release').length),pendingWrites,'Ready must not replay writes');
+ cases.push('same-generation pending notice retires stale reads and resumes one read without replaying writes');
+ await page.evaluate(()=>{window.__fixture.defer=true;window.dispatchEvent(new Event('focus'));});
+ await page.waitForFunction(()=>window.__fixture.pending.length===1);
+ const coalescedReads=await reads(),coalescedWrites=await writes();
+  await page.evaluate(()=>window.__publishPower(9,'ready',false,1));
+  await page.waitForFunction(()=>window.__fixture.pending.length===2,undefined,{timeout:2000});
+  await page.evaluate(()=>{const f=window.__fixture;f.pending.shift()({...f.state,currentLimit:100});});
+ assert.match(await panel.textContent(),/当前：80%/,'coalesced same-generation Ready must discard the old read');
+  assert.equal(await reads(),coalescedReads+1,'coalesced Ready must request one fresh read before the old reply arrives');
+ await page.evaluate(()=>{const f=window.__fixture;window.__publishPower(9,'ready',false,1);window.dispatchEvent(new CustomEvent('ipc:power.lifecycleChanged',{detail:{...f.power,suspendSerial:0,publicationRevision:f.power.publicationRevision+1}}));f.defer=false;f.pending.shift()({...f.state,currentLimit:100});});
+ await page.waitForFunction(()=>document.querySelector('.charge-status')?.textContent.includes('当前：100%'));
+ assert.equal(await reads(),coalescedReads+1,'duplicate or delayed Ready must not start another read');
+ assert.equal(await writes(),coalescedWrites,'coalesced Ready must not replay a write');
+ cases.push('coalesced same-generation Ready retires the old read and accepts one current read without replaying writes');
  await page.evaluate(()=>{window.__fixture.defer=true;window.dispatchEvent(new Event('focus'))});await page.waitForTimeout(30);const destroyedReads=await reads();await page.evaluate(()=>window.__destroy());
  await page.evaluate(v=>{const f=window.__fixture;f.defer=false;for(const done of f.pending.splice(0))done(v);for(const name of ['focus','ipc:window.focus','ipc:window.restored','ipc:power.resumed'])window.dispatchEvent(new CustomEvent(name,{detail:{generation:10}}));},state);
  await page.clock.runFor(120000);await page.waitForTimeout(40);assert.equal(await reads(),destroyedReads);assert.equal(await panel.count(),0);const powerAfterUnmount=await page.evaluate(()=>window.__powerDiagnostics());assert.equal(powerAfterUnmount.subscriberCount,0);assert.equal(powerAfterUnmount.active,false);assert.equal(powerAfterUnmount.read.retryTimerActive,false);cases.push('unmount removes owned event listeners and timer; late read and wake cannot recreate the card or refresh');

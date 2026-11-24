@@ -60,15 +60,14 @@ static bool inputHostRetireUnownedRogWakeHoldForStart() {
     return true;
 }
 
-// A first GPD Start must reach the existing serial dispatcher even when a
-// wake hold predates that Start and the old native writer is still pending.
+// A first GPD Start must reach the existing serial dispatcher with a live
+// native writer or its settled, same-request handoff still owning the hide.
 // This grants QUEUEING only: native BeforeVirtualWork still owns the actual
 // defer/observation and every Start/return/power fence remains authoritative.
 // No hold is cleared, writer polled/replaced, target created or ticket renewed.
 static bool inputHostMayQueueGpdNativeWriterWait() {
     if(!g_wakeHoldPhysicalUnhide.load(std::memory_order_acquire) ||
-        nativeForegroundProfile()!=ymcc::nativeForeground::Profile::Gpd ||
-        !g_msiNativeForegroundCyclePending.load(std::memory_order_acquire))return false;
+        nativeForegroundProfile()!=ymcc::nativeForeground::Profile::Gpd)return false;
     std::unique_lock<InputHostMutex> hostLock(g_inputHostMx,std::try_to_lock);
     if(!hostLock.owns_lock())return false;
     const auto view=g_virtualStartProtection.view(inputHostStartProtectionNow());
@@ -84,11 +83,18 @@ static bool inputHostMayQueueGpdNativeWriterWait() {
     std::unique_lock<std::mutex> leaseLock(g_msiNativeForegroundMx,std::try_to_lock);
     if(!leaseLock.owns_lock())return false;
     const auto& owner=g_msiNativeForegroundLease;
-    return owner.active && owner.profile==ymcc::nativeForeground::Profile::Gpd &&
-        owner.power==currentPowerGeneration() && !owner.postHideCycle && !owner.coldReturnCycle &&
-        !g_msiNativeForegroundPowerHold.load(std::memory_order_acquire) &&
-        g_msiNativeForegroundCyclePending.load(std::memory_order_acquire) &&
-        (owner.cycleProcess || owner.nativeRefreshWriter);
+    if(!owner.active || owner.profile!=ymcc::nativeForeground::Profile::Gpd ||
+        owner.power!=currentPowerGeneration() || owner.postHideCycle || owner.coldReturnCycle ||
+        g_msiNativeForegroundPowerHold.load(std::memory_order_acquire))return false;
+    if(g_msiNativeForegroundCyclePending.load(std::memory_order_acquire))
+        return owner.cycleProcess || owner.nativeRefreshWriter;
+    // A settled writer leaves no completion to enqueue the held request.
+    if(owner.cycleProcess || owner.nativeRefreshWriter || owner.restorePending || owner.configurationReturned ||
+        !owner.virtualHandoffHeld || owner.virtualHandoffRequest!=view.requestId || !owner.cycleAccepted ||
+        owner.helperExitCode!=0 || owner.retiredNativeWriterAttempt.empty())return false;
+    ymcc::sleeppower::SharedPowerV1 power;
+    return captureSharedPowerLifecycle(power) && power.generation==owner.power &&
+        owner.suspendSerial==g_sharedPowerSuspendSerial.load(std::memory_order_acquire) && sharedPowerLifecycleCurrent(power);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -323,7 +329,8 @@ static void inputHostRecordStartupException(const std::string& reason) noexcept 
 // This runs on the same serialized lifecycle owner. Only an ALREADY queued
 // mode2 ticket for this epoch may progress inside the wait; its normal strict
 // consumer rechecks every generation. No new writes, retries or deadlines.
-static bool ymStartAwaitMsiSource(std::uint64_t ticket, bool& admitted, std::unique_lock<InputHostMutex>& hostLock) {
+static bool ymStartAwaitMsiSource(std::uint64_t ticket, bool& admitted, std::unique_lock<InputHostMutex>& hostLock,
+                                 bool recheckSettledSource, std::uint64_t originalIntent) {
     // Retain Start's exact permission through every yielded wait. A later
     // scalar Ready cannot replace or revive this one-way cancelled scope.
     const auto requestPower=t_inputHostRequestPower;
@@ -351,7 +358,12 @@ static bool ymStartAwaitMsiSource(std::uint64_t ticket, bool& admitted, std::uni
         auto remaining=playerExecution?request.remainingMs:std::uint64_t{0};
         if(!remaining)remaining=inputHostWakeMsiSourceWaitRemaining(ticket,persona,now);
         if(!remaining)remaining=inputHostMsiPowerWorkRemaining(ticket,persona,now);
-        if(!remaining)break;
+        // Ordinary same-intent restore may recheck a source already admitted
+        // before HELLO. An expired request cannot authorize a wait or mode work.
+        const bool recheckOnly=recheckSettledSource && !remaining && ticket &&
+            !request.locked && request.phase=="expired" && request.persona==persona &&
+            !g_inputHostSwitchRecoveryStartDeadline && intent==originalIntent;
+        if(!remaining&&!recheckOnly)break;
         if(g_inputHostSwitchRecoveryStartDeadline) {
             if(now>=g_inputHostSwitchRecoveryStartDeadline)break;
             remaining=(std::min)(remaining,g_inputHostSwitchRecoveryStartDeadline-now);
@@ -367,6 +379,22 @@ static bool ymStartAwaitMsiSource(std::uint64_t ticket, bool& admitted, std::uni
                 g_inputHostRunId!=runId || WaitForSingleObject(process,0)!=WAIT_TIMEOUT) {reason="intent-or-host-context-changed";break;}
         if (!msiControllerRepairScope()) {reason="msi-route-retired";break;}
         ++checks;
+        if(recheckOnly){
+            admitted=msiDinputMainSourceEligible();
+            const auto latest=g_virtualStartProtection.view(inputHostStartProtectionNow());
+            if(!requestPower->current()){admitted=false;reason="original-public-power-retired";break;}
+            if(latest.requestId!=ticket || latest.phase!="expired" ||
+                    g_externalPriorityVirtualSuspended.load(std::memory_order_acquire) ||
+                    g_inputHostVirtualIntentWriters.load(std::memory_order_acquire) ||
+                    originalIntent!=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire) ||
+                    inputHostConfiguredPersona()!=persona || !g_realStickTest.virtualTargetEnabled ||
+                    currentPowerGeneration()!=power || !hardwareWriteAllowed() || inputHostExitFenceRaised() ||
+                    g_exitRequested.load(std::memory_order_acquire) || g_inputCaptureStop.load(std::memory_order_acquire)){
+                admitted=false;reason="intent-or-host-context-changed";break;
+            }
+            reason=admitted?"current-msi-source-rechecked":"msi-source-recheck-unavailable";
+            break;
+        }
         admitted=ymStartAdmitSource();
         if(!requestPower->current()){admitted=false;reason="original-public-power-retired";break;}
         if (admitted) {reason="current-msi-source-admitted";break;}
@@ -519,47 +547,75 @@ static bool ymStartAwaitGpdPreHideSource(uint64_t ticket,std::unique_lock<InputH
     const auto intent=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire);
     const auto began=inputHostStartProtectionNow();
     const auto initialRemaining=inputHostGpdStartRemaining(ticket,persona,began);
-    if(!initialRemaining)return false;
     const auto playerDeadline=began+initialRemaining;
     const auto inheritedDeadline=g_inputHostSwitchRecoveryStartDeadline;
     const auto deadline=inheritedDeadline?(std::min)(playerDeadline,inheritedDeadline):playerDeadline;
     unsigned checks=0;
+    bool lastSourceAdmitted=false;
+    uint64_t guardTick=began;
+    const char* rejection="unclassified";
+    const auto failed=[&](const char* boundary,uint64_t observed) noexcept {
+        try {
+            appendNativeLifecycleLog("input-host-gpd-source-before-hide",{
+                {"requestId",ticket},{"epoch",epoch},{"runId",runId},{"persona",persona},
+                {"startPowerGeneration",power},{"stage","rejected"},{"boundary",boundary},{"reason",rejection},
+                {"checks",checks},{"lastAdmissionKnown",checks!=0},{"lastSourceAdmitted",lastSourceAdmitted},
+                {"elapsedMs",observed>=began?observed-began:0},{"originalBudgetMs",initialRemaining},
+                {"originalDeadlineTick",deadline},{"inheritedDeadlineTick",inheritedDeadline},
+                {"observedTick",observed},{"targetPrepareIssuedByWait",false},{"originalDeadlineRetained",true}});
+        } catch (...) { /* evidence never changes the stop result */ }
+        return false;
+    };
+    if(!initialRemaining){rejection="player-period-unavailable";return failed("entry",began);}
+    // Label the first failed predicate without repeating the underlying reads.
+    const auto witness=[&](const char* reason,bool passed) noexcept {
+        if(!passed)rejection=reason;
+        return passed;
+    };
     auto current=[&](uint64_t now) {
-        const bool bound=requestPower && requestPower->current() && ticket &&
-            nativeForegroundProfile()==ymcc::nativeForeground::Profile::Gpd &&
-            currentPowerGeneration()==power && g_inputHostBoundPowerGeneration==power &&
-            g_inputHostEpoch==epoch && g_inputHostRunId==runId && g_inputHostProcess==process &&
-            process && WaitForSingleObject(process,0)==WAIT_TIMEOUT &&
-            !g_inputHostVirtualIntentWriters.load(std::memory_order_acquire) &&
-            intent==g_inputHostVirtualIntentRevision.load(std::memory_order_acquire) &&
-            inputHostConfiguredPersona()==persona && g_realStickTest.virtualTargetEnabled &&
-            g_inputHostHello && !g_inputHostPrepared && !g_inputHostPrepareMayHaveReachedHost &&
-            !g_inputHostActive && hardwareWriteAllowed() && g_inputReady && !g_inputCaptureStop &&
-            !inputHostExitFenceRaised() && !g_exitRequested &&
-            inputHostGpdStartRemaining(ticket,persona,now) &&
-            (!g_inputHostSwitchRecoveryStartDeadline || now<g_inputHostSwitchRecoveryStartDeadline);
+        guardTick=now;
+        const bool bound=witness("request-power-retired",requestPower && requestPower->current()) &&
+            witness("ticket-or-profile-changed",ticket && nativeForegroundProfile()==ymcc::nativeForeground::Profile::Gpd) &&
+            witness("power-generation-changed",currentPowerGeneration()==power && g_inputHostBoundPowerGeneration==power) &&
+            witness("host-tuple-changed",g_inputHostEpoch==epoch && g_inputHostRunId==runId && g_inputHostProcess==process) &&
+            witness("hello-host-not-running",process && WaitForSingleObject(process,0)==WAIT_TIMEOUT) &&
+            witness("settings-writer-active",!g_inputHostVirtualIntentWriters.load(std::memory_order_acquire)) &&
+            witness("intent-changed",intent==g_inputHostVirtualIntentRevision.load(std::memory_order_acquire) &&
+                inputHostConfiguredPersona()==persona && g_realStickTest.virtualTargetEnabled) &&
+            witness("hello-only-state-retired",g_inputHostHello && !g_inputHostPrepared &&
+                !g_inputHostPrepareMayHaveReachedHost && !g_inputHostActive) &&
+            witness("input-or-hardware-not-ready",hardwareWriteAllowed() && g_inputReady && !g_inputCaptureStop) &&
+            witness("exit-requested",!inputHostExitFenceRaised() && !g_exitRequested) &&
+            witness("player-period-unavailable",inputHostGpdStartRemaining(ticket,persona,now)!=0) &&
+            witness("inherited-deadline-expired",!g_inputHostSwitchRecoveryStartDeadline || now<g_inputHostSwitchRecoveryStartDeadline);
         // Potentially blocking proof readers cannot extend the original limit.
         const auto fresh=inputHostStartProtectionNow();
-        return bound && fresh>=now && fresh<deadline && requestPower->current();
+        if(!bound)return false;
+        guardTick=fresh;
+        return witness("clock-regressed",fresh>=now) && witness("original-deadline-expired",fresh<deadline) &&
+            witness("request-power-retired",requestPower->current());
     };
     for(;;){
         const auto now=inputHostStartProtectionNow();
-        if(!current(now))return false;
+        if(!current(now))return failed("before-source-read",guardTick);
         ++checks;
         const bool admitted=ymStartAdmitSource();
+        lastSourceAdmitted=admitted;
         const auto after=inputHostStartProtectionNow();
         // Admission and optional observers can retire this exact request.
-        if(after<now || !current(after))return false;
+        if(after<now){rejection="clock-regressed";return failed("after-source-read",after);}
+        if(!current(after))return failed("after-source-read",guardTick);
         if(admitted){
             appendNativeLifecycleLog("input-host-gpd-source-before-hide",{
                 {"requestId",ticket},{"epoch",epoch},{"stage","admitted"},{"checks",checks},
                 {"elapsedMs",after-began},{"targetPrepared",false},{"originalDeadlineRetained",true}});
-            return current(inputHostStartProtectionNow());
+            const auto commit=inputHostStartProtectionNow();
+            return current(commit) || failed("before-hide",guardTick);
         }
         auto remaining=inputHostGpdStartRemaining(ticket,persona,after);
         if(g_inputHostSwitchRecoveryStartDeadline)
             remaining=(std::min)(remaining,g_inputHostSwitchRecoveryStartDeadline-after);
-        if(!remaining)return false;
+        if(!remaining){rejection="source-not-admitted-period-ended";return failed("before-wait",after);}
         const auto delay=(std::min)(uint64_t(kInputCaptureGamepadPublishIntervalMs),remaining);
         hostLock.unlock();
         try{
@@ -1038,6 +1094,7 @@ static bool inputHostStart() {
     // XInput sample is admitted.  Never apply this relaxed lifecycle to the
     // XInput persona, where a late slot could be the virtual endpoint.
     const bool msiSourceRequiredBeforeTarget = msiClawKnownBoardAuthority();
+    const auto sourceAdmissionIntent=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire);
     bool physicalSourceAdmittedAtStart = ymStartAdmitSource();
     if(!startPower->current())return false;
     bool physicalSourcePending = !physicalSourceAdmittedAtStart;
@@ -1176,12 +1233,15 @@ static bool inputHostStart() {
     // MSI source readiness must precede visibility proof and PREPARE. The
     // HELLO-only epoch preserves the original pump/resend ownership while waiting.
     if (hello && msiSourceRequiredBeforeTarget) {
+        const bool recheckSettledSource=physicalSourceAdmittedAtStart && !activeMsiWake && !activeMsiPowerWork &&
+            !ymcc::inputHost::queuedPlayerStart::executingPlayerStartWork && !g_inputHostSwitchRecoveryStartDeadline &&
+            entryView.requestId==requestTicket && !entryView.locked && entryView.phase=="expired";
         physicalSourceAdmittedAtStart=false;
         const auto sourceWaitEpoch=g_inputHostEpoch;
         const auto sourceWaitRunId=g_inputHostRunId;
         const auto sourceWaitPower=g_inputHostBoundPowerGeneration;
         const auto sourceWaitIntent=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire);
-        if (!ymStartAwaitMsiSource(requestTicket,physicalSourceAdmittedAtStart,lock)) {
+        if (!ymStartAwaitMsiSource(requestTicket,physicalSourceAdmittedAtStart,lock,recheckSettledSource,sourceAdmissionIntent)) {
             // The wait yields the mutex for BUS. Never retire a replacement owner
             // if an independent exit/cleanup changed the tuple in that interval.
             if(g_inputHostEpoch==sourceWaitEpoch && g_inputHostRunId==sourceWaitRunId) {
@@ -1502,6 +1562,13 @@ static bool inputHostStart() {
     inputHostSwitchAuditTargetIds(builtPersonaNow, &builtTargetLabel, &builtVidPid);
     if(!startPower->current())return false;
     msiExplicitRearmStarted(msiStartSettingSequence);
+    if(g_coldFseBootPending.exchange(false,std::memory_order_acq_rel) &&
+       builtPersonaNow==g_coldFseBootPersona && livePersonaNow==builtPersonaNow &&
+       g_coldFseReaderBoundary.load(std::memory_order_relaxed)==g_sleepPowerDispatch.observedSleepBoundarySequence()) {
+        g_coldFseReaderPower.store(currentPowerGeneration(),std::memory_order_relaxed);
+        g_coldFseReaderIntent.store(g_inputHostRecoveryIntent.revision(),std::memory_order_relaxed);
+        g_coldFseReaderHost.store(g_inputHostEpoch,std::memory_order_release);
+    }
     appendNativeLifecycleLog("input-host-started", {
         {"intentOrigin", inputHostIntentOriginForReason(g_inputHostReconcileReason.c_str())},
         {"intentId", std::string("start:") +

@@ -560,9 +560,9 @@ static void sampledTokenIndependentFenceCases(){
 #endif
 
 #ifdef YMCC_SHORTCUT_OEM_DEMAND
-using DemandEvaluator=void(*)(WORD,const XINPUT_GAMEPAD&,ULONGLONG,bool,const uint64_t*,bool,uint64_t,const OemProducerTokens*,const ymcc::input::desktopFunction::Edge*);
+using DemandEvaluator=decltype(&nativeKeyboardShortcutsEvaluate);
 static void demandEval(DemandEvaluator fn,WORD buttons=0,ULONGLONG now=0,bool allowed=true,const uint64_t* receipt=nullptr){
- fn(buttons,XINPUT_GAMEPAD{},now?now:fixtureTick,allowed,receipt,false,0,nullptr,nullptr);
+ fn(buttons,XINPUT_GAMEPAD{},now?now:fixtureTick,allowed,receipt,false,0,nullptr,nullptr,nullptr,nullptr);
 }
 static json demandOwn(const char* source="controller",const char* code="a",const char* trigger="press"){
  auto r=rule("os.openTouchKeyboard","unused",trigger,source,code);r["params"]=json::object();return r;

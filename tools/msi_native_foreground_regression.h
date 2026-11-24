@@ -308,7 +308,8 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression(bool mutationP
         reset();enter();
         msiNativeForegroundPowerEvent(PBT_APMSUSPEND);msiNativeForegroundHandleWork();
         ++g_powerGeneration;++g_sharedPowerSuspendSerial;
-        msiNativeForegroundPowerEvent(PBT_APMRESUMEAUTOMATIC);
+        g_resumeReadyGeneration=currentPowerGeneration();
+        g_lastPowerResumeCommitTick=g_msiNativeForegroundPowerHoldCommitTick.load()+1;
         msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
         const bool maintenanceReadyKnown=captureSharedPowerLifecycle(ready);
         const auto maintenanceEdge=g_msiNativeForegroundEdge.load();
@@ -498,14 +499,26 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression(bool mutationP
     msiNativeForegroundPowerEvent(PBT_APMRESUMEAUTOMATIC);msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
     check("resume cannot enter on stale ready generation",g_msiNativeForegroundPowerHold && cycles.size()==1);
     g_powerGeneration=4;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
-    check("ready new power generation has one bounded re-entry",!g_msiNativeForegroundPowerHold && g_msiNativeForegroundLease.active && cycles.size()==2);
+    check("generation alone cannot reopen the suspended foreground owner",g_msiNativeForegroundPowerHold && cycles.size()==1);
+    ymcc::sleeppower::SharedPowerV1 readyAfterSuspend;
+    const bool readyAfterSuspendKnown=captureSharedPowerLifecycle(readyAfterSuspend);
+    if(readyAfterSuspendKnown)msiNativeForegroundSharedPowerReady(readyAfterSuspend);
+    msiNativeForegroundHandleWork();
+    check("public Ready in the new generation has one bounded re-entry",readyAfterSuspendKnown && !g_msiNativeForegroundPowerHold && g_msiNativeForegroundLease.active && cycles.size()==2);
     const auto cyclesAfterWake=cycles.size();
+    if(readyAfterSuspendKnown)msiNativeForegroundSharedPowerReady(readyAfterSuspend);
     msiNativeForegroundPowerEvent(PBT_APMRESUMESUSPEND);msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
     check("duplicate resume notification has no extra hide, unhide or port refresh",!g_msiNativeForegroundPowerHold && cycles.size()==cyclesAfterWake && g_msiNativeForegroundLease.active);
     reset();g_powerLifecycle=PowerLifecycle::Resuming;g_inputReady=false;g_powerGeneration=4;
     msiNativeForegroundPowerEvent(PBT_APMRESUMEAUTOMATIC);msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
-    check("cold resume after shared generation publication still waits for reader ready",g_msiNativeForegroundPowerHold && cycles.empty());
-    g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
+    check("cold raw resume does not create a private hold or run foreground work",!g_msiNativeForegroundPowerHold && jobs.empty() && cycles.empty());
+    g_powerLifecycle=PowerLifecycle::Ready;
+    ymcc::sleeppower::SharedPowerV1 readyAfterColdResume;
+    const bool readyAfterColdResumeKnown=captureSharedPowerLifecycle(readyAfterColdResume);
+    if(readyAfterColdResumeKnown)msiNativeForegroundSharedPowerReady(readyAfterColdResume);
+    msiNativeForegroundHandleWork();
+    check("cold public Ready still waits for the input reader",readyAfterColdResumeKnown && cycles.empty());
+    g_inputReady=true;msiNativeForegroundMaintenance();msiNativeForegroundHandleWork();
     check("cold resume enters once reader and generation ready",g_msiNativeForegroundLease.active && cycles.size()==1);
     reset();enter();rootPresent=false;leave();check("gone/relocated old source returns config without cycling guessed root",hidden.empty() && !g_msiNativeForegroundLease.active && cycles.size()==1);
     reset();cycleResult=1;enter();g_msiNativeForegroundLease.deferredVirtualWork.push_back("persona-transition");g_inputHostExitFence=true;msiNativeForegroundExitCleanup();
@@ -1101,6 +1114,52 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression(bool mutationP
             leave();
             check("native OFF resumed game lease returns only its selected paths on hide",
                 !g_msiNativeForegroundLease.active&&hidden==std::vector<std::wstring>{L"HID\\FOREIGN-NATIVE-OFF"});
+        }
+        {
+            const auto originalReader=g_msiNativeForegroundTestIo.readerExemption;
+            const auto originalDeviceClass=g_machineIdentity.deviceClass;
+            const std::vector<std::wstring> foreignHidden{L"HID\\FOREIGN-NATIVE-OFF"};
+            for(const std::string scenario:{"repaired","already-registered","write-failed","not-listed",
+                    "inverse-on","snapshot-unavailable","ui-closed","suspend","virtual-priority","inverse-changed",
+                    "location-changed","readback-unavailable","other-gpd"}){
+                configureFamily(false);
+                g_machineIdentity.deviceClass=scenario=="other-gpd"?"OtherGpd":"HandheldCompanion.Devices.GPDWin5";
+                hidden=foreignHidden;cloak=false;exempt=scenario=="already-registered";
+                inverseOff=scenario!="inverse-on";readOk=scenario!="snapshot-unavailable";
+                unsigned registrations=0;
+                g_msiNativeForegroundTestIo.readerExemption=[&](){
+                    ++registrations;
+                    if(scenario=="write-failed")return false;
+                    exempt=scenario!="not-listed";
+                    if(scenario=="ui-closed")ui=false;
+                    if(scenario=="suspend")g_sharedPowerSuspendSerial.fetch_add(1);
+                    if(scenario=="virtual-priority")g_inputHostVirtualIntentWriters.fetch_add(1);
+                    if(scenario=="inverse-changed")inverseOff=false;
+                    if(scenario=="location-changed")rootPresent=false;
+                    if(scenario=="readback-unavailable")readOk=false;
+                    return true;
+                };
+                enter();
+                msiNativeForegroundHandleWork();
+                const bool admitted=scenario=="repaired"||scenario=="already-registered";
+                const bool shouldRegister=scenario!="already-registered" && scenario!="inverse-on" &&
+                    scenario!="snapshot-unavailable" && scenario!="other-gpd";
+                const bool writesMatch=admitted?hidHideContainsPath(hidden,familyHid) &&
+                    hidHideContainsPath(hidden,familyXusb) && gameRefreshes==std::vector<std::string>{familyHid} &&
+                    xusbRefreshes==std::vector<std::string>{familyXusb}:
+                    hidden==foreignHidden && writes.empty() && cloakWrites==0 && gameRefreshes.empty() && xusbRefreshes.empty();
+                const std::string label="Win5 native reader registration: "+scenario;
+                check(label.c_str(),registrations==(shouldRegister?1U:0U) && writesMatch &&
+                    g_msiNativeForegroundLease.active==admitted && !g_inputHostProcess);
+                if(scenario=="virtual-priority" && registrations)g_inputHostVirtualIntentWriters.fetch_sub(1);
+                if(admitted){
+                    leave();
+                    check("Win5 reader registration: closing returns only isolation-owned paths",
+                        !g_msiNativeForegroundLease.active && hidden==foreignHidden && !cloak && exempt);
+                }
+            }
+            g_msiNativeForegroundTestIo.readerExemption=originalReader;
+            g_machineIdentity.deviceClass=originalDeviceClass;
         }
         for(unsigned boundary=0;boundary<7;++boundary){
             configureFamily(false);const auto now=inputHostStartProtectionNow();

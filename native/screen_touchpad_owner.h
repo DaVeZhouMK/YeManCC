@@ -44,11 +44,15 @@ inline bool initializeForOwner(HINSTANCE module,HWND window,const Config& config
     if(initialized&&!inputTeardown)openOwnerExport();
     return initialized;
 }
-inline void ownerOnSuspend() {
+inline void ownerOnSuspend(bool retainResumeBudget=false) {
     if(ymcc::customtouch::editing.load())ymcc::customtouch::finish(false,false);
     if(ownerDisplayRefresh.pending||displayTransitionFence.idleSuspended)ownerDisplayReflowInterrupted=true;
     // Release sees the withdrawn HWNDs. They must not reset normal idle state.
     cancelOwnerDisplayRefresh(true);cancelOwnerResumeRecovery("suspended");ownerResumeRecovery.observed=false;
+    if(retainResumeBudget){
+        ownerResumeRecovery.awaitingPower=true;ownerResumeRecovery.clean=0;
+        ownerResumeRecovery.status="waiting-for-power";
+    }
     if(ownerDisplayReflowInterrupted)publishOwnerDisplayExport(DisplayExportPhase::WaitingForPowerReady);
     // A display refresh may be on the stack inside a source dispatcher.
     ++ownerLifecycleEpoch;++padRefreshEpoch;++buttonRefreshEpoch;++ymcc::customtouch::refreshEpoch;
@@ -91,21 +95,40 @@ inline void ownerSharedPowerChanged(const ymcc::sleeppower::SharedPowerV1& power
     if(newer&&!ownerPowerWithdrawn){ownerPowerWithdrawn=true;ownerOnSuspend();}
     const bool admitted=known&&ymcc::sleeppower::powerAdmitted(power);
     if(!admitted){
-        if(!ownerPowerWithdrawn){ownerPowerWithdrawn=true;ownerOnSuspend();}
+        if(!ownerPowerWithdrawn){
+            const auto& r=ownerResumeRecovery;
+            const bool sameWake=known&&power.generation==r.powerGeneration&&power.suspendSerial==r.powerScope.suspendSerial;
+            ownerPowerWithdrawn=true;ownerOnSuspend(sameWake&&(r.pending||r.awaitingPower)&&ownerResumeBindingCurrent());
+        }
         return;
     }
-    if(!sharedInputAllowed())return;
+    const bool localBlock=ownerResumeLocallyBlocked();
+    // A local lease cannot discard a committed wake. Require the exact power
+    // scope while that lease masks sharedInputAllowed().
+    if(localBlock?(!ownerPowerCurrent||!ownerPowerCurrent(power)):!sharedInputAllowed())return;
     const bool resume=ownerPowerWithdrawn;
     ownerPowerWithdrawn=false;const auto epoch=ownerLifecycleEpoch;
     // The timer can observe closed admission even when NonReady delivery was coalesced.
-    if(ownerDisplayReflowInterrupted){
+    if(ownerDisplayReflowInterrupted&&!localBlock){
         queueOwnerDisplayRefresh(true,true);
         if(epoch!=ownerLifecycleEpoch||ownerPowerWithdrawn||!initialized||inputTeardown)return;
         // Synchronous Ready fallback can lose admission before the next
         // projection. Do not consume the wake or start its verifier yet.
-        if(!sharedInputAllowed()){ownerPowerWithdrawn=resume;return;}
+        if(!sharedInputAllowed()&&(!ownerResumeLocallyBlocked()||!ownerPowerCurrent||!ownerPowerCurrent(power))){ownerPowerWithdrawn=resume;return;}
     }
-    if(resume)queueOwnerResumeRebind();
+    // The committed verifier takes ownership here; a queued rebind would be
+    // stale by the time its private window message reached the owner.
+    auto& r=ownerResumeRecovery;
+    if(resume&&nativeInputCandidateRequested){
+        r.observed=true;
+        if(r.awaitingPower&&r.epoch+1==epoch&&power.generation==r.powerGeneration&&
+           power.suspendSerial==r.powerScope.suspendSerial){
+            // Resources were withdrawn for a query without a new sleep. Keep
+            // its original deadline and attempts, but fence off the old HWND work.
+            r.epoch=r.consumedEpoch=epoch;
+            if(!ownerResumeBindingCurrent())cancelOwnerResumeRecovery("context-changed");
+        }
+    }
     if(ownerResumeRecovery.observed)ownerResumeReady(power.generation);
 }
 inline void quiesceForOwner(){

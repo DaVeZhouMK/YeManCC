@@ -33,15 +33,15 @@ class Watch {
     alignas(DWORD) std::array<std::byte, 8192> buffer_{};
     ULONGLONG retryAt_ = 0;
     bool pending_ = false;
+    DWORD filter_ = FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_ATTRIBUTES |
+        FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SECURITY;
 
     bool arm() noexcept {
         if (!ResetEvent(event_)) return false;
         operation_ = {};
         operation_.hEvent = event_;
         pending_ = ReadDirectoryChangesW(dir_, buffer_.data(), static_cast<DWORD>(buffer_.size()), FALSE,
-            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_ATTRIBUTES |
-            FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SECURITY,
-            nullptr, &operation_, nullptr) != FALSE;
+            filter_, nullptr, &operation_, nullptr) != FALSE;
         return pending_;
     }
     void close() noexcept {
@@ -97,9 +97,12 @@ public:
     }
 
     Notice check(const wchar_t* root, ULONGLONG now,
-        std::initializer_list<std::wstring_view> names) noexcept {
+        std::initializer_list<std::wstring_view> names,
+        DWORD filter = FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_ATTRIBUTES |
+            FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SECURITY) noexcept {
         if (dir_ == INVALID_HANDLE_VALUE) {
             if (now < retryAt_) return Notice::Unavailable;
+            filter_ = filter;
             const DWORD attrs = GetFileAttributesW(root);
             if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY) ||
                 (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return failed(now);

@@ -36,6 +36,7 @@ static FixtureMachineIdentity g_machineIdentity;
 static HWND g_hwnd = reinterpret_cast<HWND>(0x100);
 static HWND g_rawInputSinkHwnd = nullptr;
 static bool g_rawInputRegistered = false;
+static std::atomic<bool> g_gpStateFallbackTimerArmed{false};
 static std::atomic<bool> g_keyboardModifierRawSubscribed{false};
 static constexpr UINT_PTR GP_STATE_FALLBACK_TIMER_ID = 0x5678;
 static const HWND fixtureSink = reinterpret_cast<HWND>(0x200);
@@ -224,6 +225,7 @@ static json runRegistration(const json& row) {
                           cold ? YmccFamily::Unknown : fixtureResolvedFamily };
     g_rawInputSinkHwnd = row.value("stale", false) ? fixtureStaleSink : nullptr;
     g_rawInputRegistered = false;
+    g_gpStateFallbackTimerArmed.store(false);
     const bool rawOk = row.value("rawError", 0) == 0;
     const bool kmOk = row.value("keyboardMouseError", 0) == 0;
     g_keyboardModifierRawSubscribed.store(!kmOk); // prove both success and failure store the result
@@ -241,6 +243,7 @@ static json runRegistration(const json& row) {
                           g_machineIdentity.resolved == (fixtureResolvedFamily != YmccFamily::Unknown),
                           "identity-resolved-before-registration");
         checkRegistration(g_rawInputRegistered == rawOk, "gamepad-registration-state");
+        checkRegistration(g_gpStateFallbackTimerArmed.load(), "fallback-timer-availability-state");
         checkRegistration(g_keyboardModifierRawSubscribed.load() == kmOk, "keyboard-mouse-subscription-state");
         checkRegistration(fixtureRegistrations.size() == (step + 1) * 2, "two-registration-calls");
         if (fixtureRegistrations.size() >= (step + 1) * 2) {

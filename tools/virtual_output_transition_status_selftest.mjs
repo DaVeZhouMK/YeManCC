@@ -19,6 +19,7 @@ function option(flag){const at=args.indexOf(flag);if(at<0)return null;assert(arg
 const prepareOnly=args.includes('--prepare-only');
 const selectedCase=option('--case');
 const selectedCases=selectedCase?.split(',')??[];
+const retiredPlayerCase=selectedCases.includes('retired-player-start-does-not-fail-startup');
 assert(new Set(selectedCases).size===selectedCases.length&&selectedCases.every(Boolean),'Invalid original case selection');
 const savedNativeUi=option('--ui-from-native');
 const selectedProfiles=option('--profiles')?.split(',')??['Release','Checked'];
@@ -57,6 +58,7 @@ if(savedNativeUi){
 const runtime=readVirtualControllerSource(path.join(repo,'native/main.cpp'));
 const files=['native/main.cpp','native/input_host_lifecycle_claim.h','native/controller_persona.h','native/virtual_target_policy.h','native/virtual_output_status.h','native/virtual_output_transition_status.h','src/bridge/virtualOutputStatus.ts','src/bridge/virtualTargetPolicy.ts','tools/virtual_output_status_selftest.ts','tools/virtual_output_transition_status_selftest.mjs','deps/json/json.hpp','tools/fixtures/hc_reviewed_calibration/toolchain.mjs','tools/virtual_controller_runtime_source.mjs','native/virtual_start_protection.h','native/virtual_controller_queued_start_runtime.h','native/virtual_controller_runtime_contract.h','native/ps_endpoint_ownership.h','native/input_host_diagnostic_dispatch.h','tools/controller_snapshot_wire_selftest.cpp',...runtime.inputs.slice(1).map(row=>path.relative(repo,row.file).replaceAll('\\','/'))];
 files.push('native/input_application_receipt.h','native/virtual_recovery_intent.h','native/game_input_override.h','native/sleep_power_state.h','native/sleep_power_observation.h');
+if(retiredPlayerCase)files.push('native/startup_readiness.h');
 const snapshotVersionEnabled=fs.readFileSync(path.join(candidateRoot??repo,'native/main.cpp'),'utf8').includes('static ymcc::virtualOutputPublication::SnapshotVersion g_virtualOutputSnapshotVersion;');
 if(snapshotVersionEnabled)files.push('native/virtual_output_publication_cache.h');
 const frozen=path.join(out,'frozen-source');const manifest=[];
@@ -100,6 +102,9 @@ const machineBlock=extract('inputHostSteamDeckSelfOutputBlocked');
 const machineRejection=extract('inputHostMachineTargetRejectionReason');
 const getPersona=extract('inputHostConfiguredPersona');
 const refreshMatch=extract('inputHostRefreshPersonaMatchLocked');
+const matchedDeckAt=main.indexOf('static std::atomic<bool> g_inputHostMatchedSteamDeck');
+const matchedDeckState=refreshMatch.includes('g_inputHostMatchedSteamDeck')?
+  record('derived Steam Deck persona match',matchedDeckAt,main.indexOf(';',matchedDeckAt)+1):'';
 const protectionSnapshot=extract('inputHostStartProtectionSnapshot');
 const getRequest=extract('inputHostPresentationRequest');
 const setDeferred=extract('inputHostPresentationDeferred');
@@ -109,6 +114,9 @@ const sleepQueueAt=main.indexOf('static bool inputHostSleepRepairWork(');
 assert(sleepQueueAt>=0,'Missing lifecycle queue implementation section');
 const queueWork=extract('inputHostQueueLifecycleWorkInternal',sleepQueueAt);
 const queueEntry=between('owned lifecycle queue entry','struct InputHostLifecycleWork {','static std::deque<InputHostLifecycleWork>');
+const hasForegroundReady=queueEntry.includes('MsiNativeForegroundReadyWork');
+const readyEntry=hasForegroundReady?between('foreground Ready queue receipt','struct MsiNativeForegroundReadyWork {','static bool msiNativeForegroundReadyWorkCurrent('):'';
+const sameForegroundReady=hasForegroundReady?extract('inputHostSameForegroundReady'):'';
 const sleepRepairWork=extract('inputHostSleepRepairWork');
 const fenceRaised=extract('inputHostExitFenceRaised');
 const cleanupWork=extract('inputHostLifecycleWorkIsCleanup');
@@ -117,6 +125,10 @@ const fenceRefusal=extract('inputHostExitFenceLogRefusal');
 const productionPersona=extract('inputHostPersona');
 const claim=between('lifecycle handoff','    if (!g_inputHostLifecycleWorkRequested.load(std::memory_order_acquire)) return;','    // GP-XBOX-2（裁决 §4）：生命周期工作执行段',main.indexOf('static void inputHostRunQueuedLifecycleWork() {'));
 const setter=between('request publication at config assignment','    g_realStickTest.virtualTargetEnabled = targetEnabled;','    // 批129「请求拍」');
+const playerDispatch=retiredPlayerCase?between('original queued-player dispatch','    ymcc::inputHost::queuedPlayerStart::Work playerWork;','    ymcc::inputHost::queuedPlayerStart::Scope playerStartScope(playerWork);',main.indexOf('static void inputHostRunQueuedLifecycleWork() {')):'';
+const startupAttempt=retiredPlayerCase?extract('recordStartupInputAttempt'):'';
+const hasColdFse=setter.includes('g_coldFseBootPending.load(');
+const coldFseState=hasColdFse?between('cold FSE startup intent state','static std::string g_coldFseBootPersona;','static void inputHostRefreshPersonaMatchLocked() noexcept;'):'';
 const decisionStart=main.indexOf('            const auto admissionStatusRequest = inputHostPresentationRequest();');
 const decisionIf=main.indexOf('            if (!inputHostAdmitSelectedPhysicalSource() &&',decisionStart);
 const firstEnd=endBrace(masked.indexOf('{',decisionIf));const elseStart=masked.indexOf('{',firstEnd);assert(/^\s*else\s*$/.test(masked.slice(firstEnd,elseStart)));
@@ -187,6 +199,7 @@ static ULONGLONG mockTick=10000;
 static std::string mockBound="elite";
 static std::string& g_inputHostBoundPersona=mockBound;
 static std::atomic<bool> g_inputHostRequestedPersonaMatchesBound{false};
+${coldFseState}
 static ymcc::VirtualStartProtection g_virtualStartProtection;
 static ymcc::psEndpointOwnership::State g_psEndpointOwnership;
 static std::uint64_t inputHostStartProtectionNow(){return mockTick;}
@@ -204,6 +217,7 @@ static struct {bool resolved=false;YmccFamily family=YmccFamily::Unknown;} g_mac
 ${machineBlock}
 ${machineRejection}
 ${getPersona}
+${matchedDeckState}
 ${refreshMatch}
 ${protectionJson}
 ${protectionSnapshot}
@@ -211,6 +225,7 @@ ${getRequest}
 ${setDeferred}
 static void configureProduction(const std::string& configuredPersona,bool targetEnabled){
  const json input=json::object(); // Existing base-config fixture has no game overlay.
+ ${hasColdFse?'const bool targetRequested=targetEnabled; // This fixture has no rejected raw request.':''}
 ${setter}
 }
 ${applicationView}
@@ -276,6 +291,7 @@ static unsigned long long g_exitSessionId=1;
 static std::mutex g_inputHostLifecycleWorkMx;
 // Player-only fixture: an unexpected shared sleep grant is unsupported.
 namespace ymcc::inputHost::sharedPower {struct Scope {bool current() const {throw std::logic_error("sleep grant outside player queue fixture");}};}
+${readyEntry}
 ${queueEntry}
 static std::deque<InputHostLifecycleWork> g_inputHostLifecycleWorkQueue;
 static std::uint64_t g_inputHostSwitchRecoveryStartDeadline=0,g_inputHostSwitchRecoveryStartRequestId=0,g_inputHostSwitchRecoveryStartPower=0;
@@ -285,6 +301,24 @@ static void inputHostRecordSwitchTimeout(const ymcc::VirtualStartProtection::Vie
 #pragma warning(disable:4505)
 #include "virtual_controller_queued_start_runtime.h"
 #pragma warning(pop)
+${retiredPlayerCase?`
+#include "startup_readiness.h"
+static std::atomic<ymcc::StartupInputState> g_startupInputState{ymcc::StartupInputState::Waiting};
+static std::atomic<bool> g_inputModuleReplayPending{false},g_inputHostSwitchExecutionReturnPending{false},g_inputHostSwitchRecoveryPending{false};
+static bool g_startupInputAttempted=false,g_startupInputStartSucceeded=false;
+static std::uint64_t g_inputHostStartProtectionBoundTicket=0;
+static unsigned startupFinishes=0;
+static void inputHostStartProtectionFinish(std::uint64_t,const char*,const char*) noexcept{++startupFinishes;}
+static void publishStartupInputState(ymcc::StartupInputState state,const char*){g_startupInputState.store(state);}
+#pragma warning(push)
+#pragma warning(disable:4505)
+${startupAttempt}
+#pragma warning(pop)
+static void dispatchPlayerIdentityProduction(const std::string& queuedReason,bool& reachesNextStage){
+    std::string reason=queuedReason;
+${playerDispatch}
+    reachesNextStage=reason=="initial-target-admission";
+}`:''}
 ${fenceRaised}
 ${cleanupWork}
 ${fenceBlocks}
@@ -295,8 +329,10 @@ static void inputHostLateHideCommitQueuedPublication(InputHostLateHidePublicatio
 static bool msiNativeRearIntentCurrent(const std::string&){return false;} // no native rear owner in these cases
 static void inputHostSwitchAuditEnqueue(const std::string&,std::size_t){}
 ${sleepRepairWork}
+${sameForegroundReady}
+${hasForegroundReady?'static bool msiNativeForegroundReadyWorkCurrent(const MsiNativeForegroundReadyWork&) noexcept {std::abort();}':''}
 ${queueWork}
-static bool queueWithoutSleepGrant(const char* reason,bool* coalesced=nullptr){return inputHostQueueLifecycleWorkInternal(reason,coalesced,nullptr,{});}
+static bool queueWithoutSleepGrant(const char* reason,bool* coalesced=nullptr){return inputHostQueueLifecycleWorkInternal(reason,coalesced,nullptr,{}${hasForegroundReady?',{}':''});}
 static bool inputHostQueueLifecycleWork(const char* reason){++queueCalls;queueReasons.push_back(reason);if(beforeQueue)beforeQueue();return queueWithoutSleepGrant(reason);}
 static void xinputSlotsMarkDiscoveryDirty(){++dirtyCalls;}
 static void admissionProduction(){const bool personaTransition=mockPersonaTransition;
@@ -442,6 +478,45 @@ int main(){
       f.at("powerGeneration")==power&&f.at("newHostCreated")==false&&f.at("budgetRenewed")==false;
   }),"expiry emits a same-ticket and same-generation rejection without budget renewal");
  });
+ ${retiredPlayerCase?`
+ test("retired-player-start-does-not-fail-startup",[]{
+  const char* expected[]={"player-request-retired","power-generation-retired","player-persona-retired","original-player-period-finished"};
+  for(unsigned edge=0;edge<4;++edge){
+   reset();dead();g_startupInputState=ymcc::StartupInputState::Waiting;
+   g_startupInputAttempted=g_startupInputStartSucceeded=false;startupFinishes=0;
+   const auto original=g_virtualStartProtection.admit("elite",mockTick);
+   require(original.created&&queueWithoutSleepGrant("initial-target-admission"),"original typed boot work queued");
+   const auto oldWire=g_inputHostLifecycleWorkQueue.front().reason;
+   bool next=false;
+   dispatchPlayerIdentityProduction(oldWire,next);
+   require(next,"matching work reaches the existing dispatcher");
+   if(edge==0){
+    require(g_virtualStartProtection.cancel(mockTick),"old ON retired");
+    configureProduction("disabled",false);
+    mockTick+=ymcc::VirtualStartProtection::settleMs;
+    const auto replacement=g_virtualStartProtection.admit("elite",mockTick);
+    require(replacement.accepted&&replacement.created&&replacement.requestId!=original.requestId,"same-persona ON has a different ticket");
+    configureProduction("elite",true);
+   }else if(edge==1)++mockPower;
+   else if(edge==2)configureProduction("dualsense-edge",true);
+   else mockTick+=ymcc::VirtualStartProtection::maxMs;
+   const auto current=g_virtualStartProtection.view(mockTick);g_inputHostStartProtectionBoundTicket=current.requestId;
+   next=false;dispatchPlayerIdentityProduction(oldWire,next);
+   require(!next&&lifecycleNotes.back().at("fields").at("reason")==expected[edge],"stale work retires before dispatch with exact reason");
+   require(!g_startupInputAttempted&&!g_startupInputStartSucceeded&&!g_inputHostFaultHoldsStart.load()&&startupFinishes==0,
+       "retirement is not a startup execution failure and cannot arm a fault hold or finish a ticket");
+   require(g_virtualStartProtection.view(mockTick)==current,"retirement preserves the current request, deadline and outcome");
+   if(edge==0){
+    require(queueWithoutSleepGrant("initial-target-admission"),"new same-persona work can still queue");
+    dispatchPlayerIdentityProduction(g_inputHostLifecycleWorkQueue.back().reason,next);
+    require(next,"new same-persona work reaches the existing dispatcher");
+   }
+   if(edge==3){
+    require(!timeoutNotes.empty()&&timeoutNotes.back().at("requestId")==original.requestId,"current expiry still records the original timeout");
+    require(ymcc::startupInputDecision(true,false,false,false,false,true)==ymcc::StartupInputState::Failed,"observer still settles a genuinely expired startup");
+   }
+  }
+ });`:''}
  test("new-persona-invalidates-old-wait",[]{dead();admissionProduction();const auto old=inputHostPresentationRequest();const auto c=context();configureProduction("dualsense-edge",true);inputHostPresentationDeferred(old,c,true);require(!waiting(),"late old-persona writer ignored");require(snap()["state"]=="suspected-failed","old wait does not mask new failure");configureProduction("elite",true);require(!waiting(),"persona ABA cannot revive wait");});
  test("same-persona-off-on-aba",[]{dead();admissionProduction();const auto old=inputHostPresentationRequest();const auto c=context();configureProduction("elite",false);configureProduction("elite",true);const auto next=inputHostPresentationRequest();require(next.generation!=old.generation,"real config assignment captures unseen OFF/ON");inputHostPresentationDeferred(old,c,true);require(!waiting(),"old same-persona request rejected");require(snap()["state"]=="suspected-failed","new request failure remains visible");admissionProduction();require(snap()["switchPending"]==true,"new actual defer may become pending");inputHostPresentationDeferred(old,c,false);require(waiting(),"old clear cannot erase new request wait");});
  test("off-cancels-deferred-status",[]{dead();admissionProduction();configureProduction("disabled",false);require(!waiting(),"OFF clears pending state");require(snap()["state"]=="disabled","OFF remains OFF");});

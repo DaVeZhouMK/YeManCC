@@ -1,7 +1,7 @@
 ﻿param(
     [Parameter(Mandatory=$true)][string]$Out,
     [string]$BeforeHeader='',
-    [ValidateSet('all','cold-single','cold-cost','cold-editor','cold-power','cold-request','cold-identity','cold-initial-failure','cold-bad-init','cold-missing-protocol','cold-public-serial','cold-public-notification','cold-public-unknown','cold-public-revision','cold-public-cache')][string]$Case='all'
+    [ValidateSet('all','cold-single','cold-apply-revision','cold-cost','cold-editor','cold-power','cold-request','cold-identity','cold-initial-failure','cold-bad-init','cold-missing-protocol','cold-public-serial','cold-public-notification','cold-public-unknown','cold-public-revision','cold-public-cache','manual-ensure-event')][string]$Case='all'
 )
 $ErrorActionPreference='Stop'
 $repo=Split-Path -Parent $PSScriptRoot

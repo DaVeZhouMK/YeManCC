@@ -178,9 +178,12 @@ internal static class Program
         int reads=0,owners=0,ownerCloses=0,timerCloses=0,eventCloses=0;bool coherent=true;
         NativeSystemPowerReader.Callback reader=(ref SharedSystemPowerV1 value,uint bytes)=>{reads++;Check(bytes==48);value=current;return coherent?1:0;};
         var address=((ulong)System.Runtime.InteropServices.Marshal.GetFunctionPointerForDelegate(reader)).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var pending=new Queue<Action>();Action? tick=null;int rejectQueues=0;
+        var pending=new Queue<Action>();Action? tick=null,onQueueRejection=null;int rejectQueues=0;
         var rig=new Rig("ayaneo-cec-bypass");var provider=new SystemPowerBoundaryProvider(rig.Device);
-        var runtime=new InProcessRuntime(useSharedSystemPower:true,queueSystemPower:work=>{if(rejectQueues>0){rejectQueues--;throw new IOException("fixture queue unavailable");}pending.Enqueue(work);},
+        var runtime=new InProcessRuntime(useSharedSystemPower:true,queueSystemPower:work=>{
+            if(rejectQueues>0){rejectQueues--;var notify=onQueueRejection;onQueueRejection=null;notify?.Invoke();throw new IOException("fixture queue unavailable");}
+            pending.Enqueue(work);
+        },
             acquireOwner:()=>{owners++;return new PowerToken(()=>ownerCloses++);},
             schedule:(work,_)=>{tick=work;return new PowerToken(()=>timerCloses++);},
             subscribe:(_,_)=>new PowerToken(()=>eventCloses++),
@@ -204,6 +207,37 @@ internal static class Program
             Check(rig.Device.Writes==writes+2&&rig.Device.Raw==0x55,"coalesced pause was lost or restart duplicated");
             writes=rig.Device.Writes;runtime.NotifySystemPower();runtime.NotifySystemPower();Drain();
             Check(rig.Device.Writes==writes,"same serial Ready replayed saved policy");
+            // Retire the old device ownership, then revoke the first resume
+            // preflight with a newer receipt in the same Ready power cycle.
+            current.Phase=1;current.Flags=1;current.SuspendSerial++;current.PublicationRevision++;
+            runtime.NotifySystemPower();Drain();Check(rig.Device.Raw==0xaa,"resume retry fixture did not return the old pause");
+            writes=rig.Device.Writes;var savedPolicy=rig.Store.Data[Controller.SettingsFile];bool crossed=false;
+            current.Phase=0;current.Flags=3;current.PublicationRevision++;
+            provider.AfterRead=()=>{
+                crossed=true;current.ObservedNotificationSequence++;current.PublicationRevision++;runtime.NotifySystemPower();
+            };
+            runtime.NotifySystemPower();pending.Dequeue()();
+            Check(crossed&&rig.Device.Raw==0xaa&&rig.Device.Writes==writes&&pending.Count==1,"revoked resume preflight issued a write or lost its public follow-up");
+            Drain();
+            Console.WriteLine("RESUME_PREFLIGHT_SEQUENCE "+JsonSerializer.Serialize(new{crossed,writesBefore=writes,writesAfter=rig.Device.Writes,raw=rig.Device.Raw},Policy.Json));
+            Check(rig.Device.Raw==0x55&&rig.Device.Writes==writes+1&&rig.Store.Data[Controller.SettingsFile]==savedPolicy,"current Ready did not continue the saved policy after a zero-action preflight");
+            runtime.NotifySystemPower();Drain();Check(rig.Device.Writes==writes+1,"duplicate Ready replayed the continued policy");
+            current.Phase=1;current.Flags=1;current.SuspendSerial++;current.PublicationRevision++;
+            runtime.NotifySystemPower();Drain();Check(rig.Device.Raw==0xaa,"budget fixture did not return old ownership");
+            writes=rig.Device.Writes;int revokedPreflights=0;
+            void RevokeResumePreflight()
+            {
+                revokedPreflights++;
+                if(revokedPreflights<3)provider.AfterRead=RevokeResumePreflight;
+                current.ObservedNotificationSequence++;current.PublicationRevision++;runtime.NotifySystemPower();
+            }
+            provider.AfterRead=RevokeResumePreflight;
+            current.Phase=0;current.Flags=3;current.PublicationRevision++;
+            runtime.NotifySystemPower();Drain();runtime.NotifySystemPower();Drain();tick!();
+            Check(revokedPreflights==3&&rig.Device.Raw==0xaa&&rig.Device.Writes==writes&&!rig.Store.Data.ContainsKey(Controller.RecoveryFile),"Ready retries reset budget or retained unsubmitted ownership");
+            var manual=PowerCall(runtime,"get");
+            Check(manual.GetProperty("ok").GetBoolean()&&PowerCall(runtime,"set",fence:manual.GetProperty("fence").GetString(),target:80).GetProperty("ok").GetBoolean()&&rig.Device.Writes==writes+1&&rig.Device.Raw==0x55,"exhausted resume prevented current manual policy");
+            Console.WriteLine("RESUME_PREFLIGHT_BUDGET "+JsonSerializer.Serialize(new{revokedPreflights,writesWhileRevoked=0,manualWrites=rig.Device.Writes-writes},Policy.Json));
             // Same diagnostic Ready, but the original native ingress still owns
             // an undelivered notification. No new writes until it is consumed.
             writes=rig.Device.Writes;current.Flags=5;current.ObservedNotificationSequence++;
@@ -246,6 +280,17 @@ internal static class Program
             Check(rig.Store.Data[Controller.SettingsFile]==savedSettings,"expired pre-read changed saved target");
             Check(rig.Store.Data[Controller.RecoveryFile]==savedJournal,"expired pre-read changed recovery ownership");
             Drain();
+            // Ready supersedes a queue submission that is about to fail. With
+            // no later request or timer, that exact notification must reach a worker.
+            current.Phase=1;current.Flags=1;current.SuspendSerial++;current.PublicationRevision++;
+            runtime.NotifySystemPower();Drain();Check(rig.Device.Raw==0xaa,"policy did not pause before queue rejection");
+            writes=rig.Device.Writes;rejectQueues=1;
+            onQueueRejection=()=>{current.Phase=0;current.Flags=3;current.PublicationRevision++;runtime.NotifySystemPower();};
+            runtime.NotifySystemPower();
+            Check(pending.Count==1&&rig.Device.Writes==writes,"Ready lost behind failed queue submission, or device resumed inline");
+            Drain();
+            Check(rig.Device.Raw==0x55&&rig.Device.Writes==writes+1,"superseding Ready did not resume saved policy exactly once");
+            Check(runtime.SystemPowerWorkOutstanding==0&&runtime.SystemPowerWorkRunning==0,"queue rejection left outstanding work");
             // Queue failure cannot strand the coalescing latch; stop may precede a queued no-op.
             rejectQueues=2;int readsBeforeFailure=reads;
             runtime.NotifySystemPower();Check(!runtime.SystemPowerWorkPending&&pending.Count==0);
@@ -255,7 +300,7 @@ internal static class Program
             reads=0;runtime.NotifySystemPower();runtime.PowerChanged(Microsoft.Win32.PowerModes.Resume);tick!();Drain();
             Check(reads==0&&owners==ownerCloses&&timerCloses==1&&eventCloses==1&&!runtime.SystemPowerWorkPending&&pending.Count==0,"late authority call, queued work or resource debt after shutdown");
             Check(PowerCall(runtime,"shutdown").GetProperty("cleanupCompleted").GetBoolean(),"returned callback did not complete shutdown");
-            Console.WriteLine("COMMON_POWER_BOUNDARIES prepared-original-case: abi48, idle, missing-reader, coalesced-suspend, duplicate-ready, zero-return-unknown, unknown, raw-resume, stale-ready, generation-expiry, unchanged-persistence, repeated-queue-failure, stopped-queue-drained");
+            Console.WriteLine("COMMON_POWER_BOUNDARIES prepared-original-case: abi48, idle, missing-reader, coalesced-suspend, duplicate-ready, zero-return-unknown, unknown, raw-resume, stale-ready, generation-expiry, unchanged-persistence, ready-during-queue-failure, repeated-queue-failure, stopped-queue-drained");
         }
         finally{_=runtime.Shutdown();Drain();GC.KeepAlive(reader);GC.KeepAlive(native.Callback);}
     }
@@ -846,6 +891,36 @@ internal static class Program
             var restarted=New();restarted.StartSaved();restarted.Suspend();restarted.Resume();restarted.Tick();Check(f.Writes==writes);
             var state=restarted.Read();Check(state.CurrentLimit is null&&state.Verification=="unknown");
             Check(restarted.Apply(state.Fence,60).Ok&&f.Writes==writes+1);
+        });
+        Test("G3E saved 95 is sampled once after resume without replaying it",()=>{
+            var f=new MsiApFixture();var r=new Rig("msi-claw-cg3em-ap");bool ready=true;
+            Controller New()=>new(r.Id with {Bios="E1T91IMS.10E"},r.Store,_=>new MsiApProvider(f),()=> (true,true,5),()=>ready);
+            var c=New();Check(c.Apply(c.Read().Fence,95).CurrentLimit==95);int writes=f.Writes;
+            string saved=r.Store.Data[Controller.SettingsFile];
+            c.Resume();int reads=f.Reads;c.Suspend();
+            Check(f.Reads==reads,"suspend sampled the firmware");
+            f.Packet[5]=0x80;c.Resume();c.Resume();c.Tick();
+            Check(f.Reads==reads+1&&f.Writes==writes,"resume must sample exactly once and never write");
+            c.Suspend();ready=false;reads=f.Reads;c.Resume();
+            Check(f.Reads==reads&&f.Writes==writes,"revoked power admission must not probe");
+            ready=true;c.Suspend();f.Packet[5]=0xd0;c.Resume();
+            Check(f.Reads==reads+1&&f.Writes==writes&&f.Packet[5]==0xd0,"resume overwrote a different valid threshold");
+            f.Packet[5]=0x80;var restarted=New();
+            using var request=JsonDocument.Parse("{\"op\":\"restore\"}");
+            var skipped=YeManBatteryHost.Program.DispatchBattery(restarted,request.RootElement);
+            Check(skipped.Ok&&skipped.CurrentLimit is null&&skipped.Verification=="unknown"&&skipped.RequestedLimit==95&&f.Writes==writes);
+            Check(saved==r.Store.Data[Controller.SettingsFile]&&!r.Store.Data.ContainsKey(Controller.RecoveryFile));
+            var reapplied=restarted.Apply(skipped.Fence,95);
+            Check(reapplied.Ok&&reapplied.CurrentLimit==95&&reapplied.Verification=="readback"&&f.Writes==writes+1);
+        });
+        Test("G3E resume does not sample without a saved owner or with an unconfirmed transaction",()=>{
+            var f=new MsiApFixture();var r=new Rig("msi-claw-cg3em-ap");
+            Controller New()=>new(r.Id,r.Store,_=>new MsiApProvider(f),()=> (true,true,5));
+            var c=New();c.Suspend();c.Resume();Check(f.Reads==0&&f.Writes==0);
+            Check(c.Apply(c.Read().Fence,95).Ok);f.IgnoreWrite=true;
+            Check(!c.Apply(c.Read().Fence,80).Ok&&r.Store.Data.ContainsKey(Controller.RecoveryFile));
+            var restarted=New();int reads=f.Reads,writes=f.Writes;restarted.Suspend();restarted.Resume();restarted.Tick();
+            Check(f.Reads==reads&&f.Writes==writes&&r.Store.Data.ContainsKey(Controller.RecoveryFile));
         });
         Test("unknown AP still checks stale fence and journals before the first write",()=>{
             var f=new MsiApFixture();f.Packet[5]=0x80;var r=new Rig("msi-claw-cg3em-ap");

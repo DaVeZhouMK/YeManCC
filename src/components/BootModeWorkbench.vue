@@ -39,8 +39,8 @@ const localModal = computed(() => !!supportDialog.value || !!confirmation.value)
 const own = (module: BootModeModule) => selected.value === 'global' || !!draft.value.scenes[selected.value].overrides[module];
 const readOnly = (module: BootModeModule) => !own(module) || selected.value === 'global' && bootGlobalModuleUnresolved(draft.value, module);
 const presetOptions = computed(() => Object.keys(draft.value.presets[selected.value] || {}).map(value => ({ value, label: value })));
-const names: Record<BootModeModule, string> = { performance: '性能调度', charge: '充电限制', input: '手柄与鼠标', gyro: '陀螺仪', touch: '触摸板与屏幕按键', audioOptimization: '掌机音质优化 · FxSound', frameGeneration: '小黄鸭 · 缩放插帧', softwareLaunch: '自定义软件联动', steamAppearance: 'Steam 大屏美化', steamWallpaper: 'Steam 动态壁纸', steamDecky: 'Decky', monitor: '性能监控', display: '屏幕与显示', background: 'YMCC 界面外观', sleep: '睡眠优化' };
-const supportKeys: Partial<Record<BootModeModule, keyof BootDeviceCapabilities>> = { performance: 'performance', charge: 'charge', gyro: 'gyro', sleep: 'hibernate' };
+const names: Record<BootModeModule, string> = { performance: '性能调度', charge: '充电限制', input: '手柄与鼠标', gyro: '陀螺仪', touch: '触摸板与屏幕按键', audioOptimization: '掌机音质优化 · FxSound', frameGeneration: '小黄鸭 · 缩放插帧', softwareLaunch: '自定义软件联动', steamAppearance: 'Steam 大屏美化', steamWallpaper: 'Steam 动态壁纸', steamDecky: 'Decky', monitor: '性能监控', display: '屏幕与显示', background: 'YMCC 界面外观' };
+const supportKeys: Partial<Record<BootModeModule, keyof BootDeviceCapabilities>> = { performance: 'performance', charge: 'charge', gyro: 'gyro' };
 function warning(module: BootModeModule) {
   const key = supportKeys[module];
   if (!key) return null;

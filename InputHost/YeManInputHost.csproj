@@ -46,6 +46,8 @@
   <ItemGroup>
     <Compile Include="..\capabilities\HcControllerGameFeedbackCapabilityCatalog.generated.cs" Link="HcControllerGameFeedbackCapabilityCatalog.generated.cs" />
     <Compile Include="..\native\ProcessEfficiency.cs" Link="ProcessEfficiency.cs" />
+    <Compile Include="..\native\SharedSleepPower\RemotePowerContracts.cs" Link="SharedSleepPower/RemotePowerContracts.cs" />
+    <Compile Include="..\native\SharedSleepPower\RemoteNativePowerClient.cs" Link="SharedSleepPower/RemoteNativePowerClient.cs" />
     <Compile Include="..\native\UsbipMaintenanceState.cs" Link="UsbipMaintenanceState.cs" />
     <Compile Include="..\native\ModuleMaintenanceGate.cs" Link="ModuleMaintenanceGate.cs" />
   </ItemGroup>

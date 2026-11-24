@@ -19,7 +19,7 @@ const collectFailures=process.argv.includes('--collect-failures');
 report.collectFailures=collectFailures;report.fullSelectionCompleted=false;
 let resumeInitialViewport=process.argv.includes('--resume-initial-viewport'),resumeWrapperTeardown=process.argv.includes('--resume-wrapper-teardown'),resumeTouchConditional=process.argv.includes('--resume-touch-conditional');assert([resumeInitialViewport,resumeWrapperTeardown,resumeTouchConditional].filter(Boolean).length<=1,'Choose one original browser continuation');report.notRun=[];
 const resumeTeardownRequested=resumeWrapperTeardown;
-const COMMON_STARTUP_READS={'common.read.taskExists':4,'common.read.searchState':1,'common.read.bootMirror':1,'common.read.rtss':1,'common.read.settings':1,'common.read.gpuSchedule':1,'common.read.registry':1};
+const COMMON_STARTUP_READS={'common.read.taskExists':3,'common.read.networkTask':1,'common.read.searchState':1,'common.read.bootMirror':1,'common.read.rtss':1,'common.read.settings':1,'common.read.gpuSchedule':1,'common.read.registry':1};
 if(fanCommonOnly){report.scope=fanCommonEditorOnly?'fan-common-editor':'fan-common';report.wholeSuite='NOT_RUN';}
 const test=async(name,height,run)=>{if(resumeInitialViewport||resumeWrapperTeardown||resumeTouchConditional){const expected=resumeInitialViewport?'initial viewport exposes every core action inside the actually visible app-content without scrolling':resumeWrapperTeardown?'actual wrapper keeps startup and system tools visible and releases width owners and receipt listener on teardown':'SteamDeck touch dual and single layouts expose all mapping, special, rear, feedback and mouse controls with natural visual rows';if(height===720&&name===expected){resumeInitialViewport=false;resumeWrapperTeardown=false;resumeTouchConditional=false;}else{report.notRun.push({name,height,reason:'Earlier successful source epoch; not reexecuted'});return;}}try{const evidence=await run();report.assertions.push({name,height,pass:true,...(evidence?{evidence}:{})});}catch(error){report.assertions.push({name,height,pass:false,error:error.stack||String(error)});if(!collectFailures){report.stoppedAfterFirstUnexpectedFailure=true;throw Object.assign(new Error('Original browser case failed; remaining cases not started'),{bootBrowserCaseFailure:true});}}};
 const command=async(page,action)=>{await page.evaluate(action=>window.__bootGamepad.command(action),action);await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));};
@@ -181,23 +181,25 @@ try{
    await page.close();continue;
   }
   if(sleepGuardOnly){
-   await test('sleep guard fields use actual components and engine, retain saved intent and return with B',height,async()=>{
+   await test('shared sleep is absent from all four editors; remaining controls preserve directional focus',height,async()=>{
     await page.waitForFunction(()=>!document.querySelector('.boot-panel-actions button')?.disabled);
     const edit=page.getByRole('button',{name:'编辑配置',exact:true});await focus(page,edit);await command(page,'confirm');await page.waitForSelector('.boot-workbench');
-    const category=page.locator('[data-boot-category="sleep"]');await focus(page,category);await command(page,'confirm');
-    const timeout=page.locator('[data-field="sleep.config.retryOnSleepTimeout"]').getByRole('switch',{name:'睡眠超时',exact:true});
-    const entry=page.locator('[data-field="sleep.config.retryOnEntryFailure"]').getByRole('switch',{name:'入睡失败重试',exact:true});
-    assert.equal(await timeout.count(),1);assert.equal(await entry.count(),1);assert.equal(await timeout.getAttribute('aria-checked'),'false');
-    const oldEntry=await entry.getAttribute('aria-checked');await focus(page,timeout);await command(page,'confirm');
-    assert.equal(await timeout.getAttribute('aria-checked'),'true');assert.equal(await entry.getAttribute('aria-checked'),oldEntry);
-    const layout=await auditRows(page,height,'sleep-timeout');
-    const save=page.getByRole('button',{name:'保存预设',exact:true});await focus(page,save);await command(page,'confirm');
-    await page.waitForFunction(()=>window.__bootMemory.document.global.sleep.config.retryOnSleepTimeout===true);
-    await shot(page,height+'-sleep-timeout-fields');await command(page,'back');await page.waitForSelector('.boot-workbench',{state:'detached'});
-    await focus(page,edit);await command(page,'confirm');await page.waitForSelector('.boot-workbench');await focus(page,category);await command(page,'confirm');
-    assert.equal(await timeout.getAttribute('aria-checked'),'true');assert.equal(await entry.getAttribute('aria-checked'),oldEntry);
+    const rail=page.locator('.boot-workbench [data-boot-category]');
+    const isFocused=locator=>locator.evaluate(el=>el===document.activeElement);
+    for(const id of ['global','xbox','steam','xbox-steam']){
+     await focus(page,page.locator(`[data-preview-mode="${id}"]`));await command(page,'confirm');
+     assert.deepEqual(await rail.evaluateAll(nodes=>nodes.map(node=>node.dataset.bootCategory)),['performance','optimization','input','touch','steam','display']);
+     await focus(page,rail.first());
+     for(let i=1;i<6;i++){await command(page,'nav-down');assert(await isFocused(rail.nth(i)),`${id}: down ${i}`);}
+     await command(page,'nav-down');assert(await isFocused(rail.last()),`${id}: bottom rail boundary`);
+     await command(page,'nav-right');assert(await page.locator('.boot-workbench [data-boot-module] :focus').count(),`${id}: enter display controls`);
+     await command(page,'nav-left');assert(await isFocused(rail.last()),`${id}: return from controls`);
+     for(let i=4;i>=0;i--){await command(page,'nav-up');assert(await isFocused(rail.nth(i)),`${id}: up ${i}`);}
+    }
+    await shot(page,height+'-shared-sleep-outside-editor');
     await command(page,'back');await page.waitForSelector('.boot-workbench',{state:'detached'});
-    return {...layout,partialFieldRetained:true,saveAndReopen:true,formalEngine:true};
+    assert(await isFocused(edit));
+    return {modeCount:4,categories:6,railUpDown:true,railFieldLeftRight:true,backRestoredFocus:true,formalEngine:true};
    });
    await page.close();continue;
   }
@@ -366,7 +368,7 @@ try{
    assert.equal(await page.locator('.boot-workbench [data-boot-close]').isEnabled(),true);
    assert.equal(await page.locator('.boot-workbench [data-preview-mode="xbox-steam"]').isEnabled(),true);
    const pendingCount=await page.evaluate(()=>window.__bootMemory.supportReads.filter(value=>value==='performance').length);
-   await page.locator('[data-boot-category="sleep"]').click();await page.waitForFunction(()=>window.__bootMemory.supportReads.includes('sleep'));
+   await page.locator('[data-boot-category="display"]').click();await page.waitForFunction(()=>window.__bootMemory.supportReads.includes('display'));
    await page.locator('[data-boot-category="performance"]').click();assert.equal(await page.evaluate(()=>window.__bootMemory.supportReads.filter(value=>value==='performance').length),pendingCount);
    await page.locator('[data-boot-close]').click();await page.waitForSelector('.boot-workbench',{state:'hidden'});
    const before=await page.evaluate(()=>JSON.stringify(window.__bootMemory.document));await page.evaluate(()=>window.__bootMemory.releaseSupportRead());await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
@@ -441,7 +443,7 @@ try{
   await test('actual wrapper keeps startup and system tools visible and releases width owners and receipt listener on teardown',height,async()=>{
     if(height===720&&resumeTeardownRequested){const alreadyOpen=await page.locator('.boot-workbench').count();if(alreadyOpen){await command(page,'back');await page.locator('.boot-workbench').waitFor({state:'detached'});}for(let n=0;n<2;n++){await focus(page,page.getByRole('button',{name:'编辑配置',exact:true}));await command(page,'confirm');await page.locator('.boot-workbench').waitFor();await command(page,'back');await page.locator('.boot-workbench').waitFor({state:'detached'});}report.continuationSetup={height,priorRealEditorClosed:!!alreadyOpen,realEditorOpenBackCycles:2,countedAsNewSuccessfulCases:false};}
    const events=await page.evaluate(()=>window.__bootMemory.nativeCalls.filter(c=>c.op==='window.editorWidth').map(c=>c.value));report.widthOwnership.push({height,events});const owners=[...new Set(events.map(e=>e.owner))];assert(owners.length>=2);for(const owner of owners){const own=events.filter(e=>e.owner===owner);assert.equal(own[0].enabled,true);assert.equal(own.at(-1).enabled,false);}
-    const common=page.locator('section.boot-common-startup');assert.equal(await common.count(),1);assert.equal(await common.locator('summary').count(),0);const reads=await page.evaluate(()=>window.__bootMemory.nativeCalls.filter(c=>c.op.startsWith('common.read.')&&!(c.op==='common.read.settings'&&c.value==='ui')));assert.equal(reads.length,10);assert.deepEqual(reads.reduce((counts,c)=>(counts[c.op]=(counts[c.op]||0)+1,counts),{}),COMMON_STARTUP_READS);assert.equal(reads.filter(c=>c.op==='common.read.taskExists').length,4);assert.deepEqual(reads.filter(c=>c.op==='common.read.settings').map(c=>c.value),['startupDesired']);assert.equal(await common.locator('.settings-section-panel').count(),2);const services=common.locator('[data-boot-startup-group="services"]'),tools=common.locator('[data-boot-startup-group="tools"]');assert.match(await services.innerText(),/网络加速/);assert.match(await services.innerText(),/硬件加速/);assert.doesNotMatch(await tools.innerText(),/硬件加速/);await focus(page,tools.getByRole('button',{name:'恢复全部任务',exact:true}));const toolsBox=await tools.boundingBox();assert(toolsBox.y>=0&&toolsBox.y+toolsBox.height<=height,'System tools clipped after controller scroll');await shot(page,height+'-system-tools-visible');await page.evaluate(()=>window.dispatchEvent(new CustomEvent('boot-mirror-changed-fixture')));await page.waitForFunction(()=>window.__bootMemory.nativeCalls.filter(c=>c.op.startsWith('common.read.')&&!(c.op==='common.read.settings'&&c.value==='ui')).length===11);assert.equal(await page.evaluate(()=>window.__bootMemory.nativeCalls.filter(c=>c.op.startsWith('common.write.')).length),0);
+    const common=page.locator('section.boot-common-startup');assert.equal(await common.count(),1);assert.equal(await common.locator('summary').count(),0);const reads=await page.evaluate(()=>window.__bootMemory.nativeCalls.filter(c=>c.op.startsWith('common.read.')&&!(c.op==='common.read.settings'&&c.value==='ui')));assert.equal(reads.length,10);assert.deepEqual(reads.reduce((counts,c)=>(counts[c.op]=(counts[c.op]||0)+1,counts),{}),COMMON_STARTUP_READS);assert.deepEqual(reads.filter(c=>c.op==='common.read.settings').map(c=>c.value),['startupDesired']);assert.equal(await common.locator('.settings-section-panel').count(),2);const services=common.locator('[data-boot-startup-group="services"]'),tools=common.locator('[data-boot-startup-group="tools"]');assert.equal(await services.getByRole('switch',{name:'网络加速',exact:true}).getAttribute('aria-checked'),'true');assert.match(await services.innerText(),/硬件加速/);assert.doesNotMatch(await tools.innerText(),/硬件加速/);await focus(page,tools.getByRole('button',{name:'恢复全部任务',exact:true}));const toolsBox=await tools.boundingBox();assert(toolsBox.y>=0&&toolsBox.y+toolsBox.height<=height,'System tools clipped after controller scroll');await shot(page,height+'-system-tools-visible');await page.evaluate(()=>window.dispatchEvent(new CustomEvent('boot-mirror-changed-fixture')));await page.waitForFunction(()=>window.__bootMemory.nativeCalls.filter(c=>c.op.startsWith('common.read.')&&!(c.op==='common.read.settings'&&c.value==='ui')).length===11);assert.equal(await page.evaluate(()=>window.__bootMemory.nativeCalls.filter(c=>c.op.startsWith('common.write.')).length),0);
    assert.equal(await page.evaluate(()=>window.__bootReceiptProbe.count()),1);await page.evaluate(()=>window.__bootUnmount());assert.equal(await page.locator('.boot-modes-panel').count(),0);assert.deepEqual(await page.evaluate(()=>({active:window.__bootReceiptProbe.count(),events:window.__bootReceiptProbe.events})),{active:0,events:['add','remove']});await page.evaluate(()=>window.dispatchEvent(new CustomEvent('boot-mode:changed',{detail:{mode:'xbox',applied:[],skipped:[],pending:['late after teardown']}})));return {owners:owners.length,commonReads:reads,receiptListenerRemoved:true};
   });
   await test('actual gyro enable and all remembered disabled-output presets activate native output only on saved draft',height,async()=>{

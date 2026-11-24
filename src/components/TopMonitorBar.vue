@@ -52,8 +52,9 @@ const batteryClass = computed(() => {
   return 'p-zero';
 });
 
-async function poll(): Promise<void> {
-  setTopMonitorData(await readTopMonitor().catch(() => null));
+async function poll(powerSignal?: AbortSignal): Promise<void> {
+  const current = await readTopMonitor(powerSignal).catch(() => null);
+  if (!powerSignal?.aborted) setTopMonitorData(current);
 }
 
 onMounted(() => {
@@ -61,6 +62,7 @@ onMounted(() => {
   stopTask = registerScheduledTask('topmon-read', POLL_MS, poll, {
     pauseWhenHidden: true, // 窗口隐藏时暂停轮询（顶部条不可见，省 IPC）
     runImmediately: true,
+    releaseReadOnPowerChange: true,
   });
 });
 onUnmounted(() => {
@@ -235,7 +237,8 @@ onUnmounted(() => {
   box-shadow:
     inset 0 0 0 1px rgba(0, 0, 0, 0.88),
     0 1px 3px rgba(0, 0, 0, 0.48);
-  animation: music-disc-spin 2.4s linear infinite;
+  /* Update the playback indicator every 100 ms to limit compositor work. */
+  animation: music-disc-spin 2.4s steps(24, end) infinite;
   animation-play-state: paused;
 }
 /* 参考图中心：白色轴孔 + 黑色内环 + 白色外环 */
@@ -268,7 +271,12 @@ onUnmounted(() => {
   animation-play-state: running;
 }
 .music-disc.untuned .cd-shape {
-  filter: grayscale(0.7) brightness(0.7);
+  background: #040405 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='5.3' fill='%23b3b3b3'/%3E%3Ccircle cx='12' cy='12' r='3.6' fill='%23040405'/%3E%3Ccircle cx='12' cy='12' r='2.1' fill='%23b3b3b3'/%3E%3Cpath d='M3.7 5.2a10.7 10.7 0 0 1 6.8-3.8l.8 5.2a5.4 5.4 0 0 0-3.7 1.9Z' fill='%23b3b3b3'/%3E%3C/svg%3E") center / cover no-repeat;
+  box-shadow: none;
+}
+.music-disc.untuned .cd-shape::before,
+.music-disc.untuned .cd-shape::after {
+  content: none;
 }
 .music-notice-mask {
   position: fixed;

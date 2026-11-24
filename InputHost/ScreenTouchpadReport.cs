@@ -47,7 +47,11 @@ internal static partial class Program
         // No diagnostic owns the clock/buffer or changes the packet counter/SDK arguments.
         var signalAttempt = signalSession is null ? default : signalSession.BeginVirtualSignalEvidenceSafely(
             controller, signalCause, envelope, signalReason, _screenPadPacketCounter, report, null);
-        try { controller.SubmitRawReport(report); }
+        try
+        {
+            if(!isNeutralCommand)signalSession?.RequireFramePowerBeforeEffect();
+            controller.SubmitRawReport(report);
+        }
         catch (Exception ex)
         {
             signalSession?.CompleteVirtualSignalEvidenceSafely(signalAttempt, ex);

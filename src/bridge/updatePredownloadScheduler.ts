@@ -20,7 +20,7 @@ export interface PredownloadDependencies {
   setEnabled(enabled: boolean): Promise<PredownloadPolicy>;
   saveSchedule(failureCount: number, nextCheckAt: number): Promise<unknown>;
   initialize(): Promise<void>;
-  refresh(): Promise<void>;
+  refresh(): Promise<void | 'retired'>;
   current(): { info: UpdateInfo | null; progress: UpdateProgressState };
   check(): Promise<boolean | void | 'retired'>;
   prepare(cacheOnly: boolean): Promise<boolean>;
@@ -141,8 +141,8 @@ export function createUpdatePredownloadScheduler(deps: PredownloadDependencies):
       if (deps.now() < quietUntil) { publish({phase:'waiting',version:'',percent:0,message:'更新缓存已清理，稍后再自动检查；也可手动检查更新'}); return; }
       if (deps.canRun?.() === false) { publish({phase:'paused',message:'游戏运行或状态待确认，已暂停自动更新并保留下载进度'}); return; }
       const refreshTicket = revision;
-      await deps.refresh();
-      if (ended || refreshTicket !== revision) return;
+      const refreshed = await deps.refresh();
+      if (ended || refreshTicket !== revision || refreshed === 'retired') return;
       let current = deps.current();
       if (busyPhases.includes(current.progress.phase || '')) { progress(); return; }
       if (current.progress.installerActive === true ||

@@ -55,6 +55,7 @@ def extract(text):
                            line=text.count('\n', 0, start)+1, **extra)
     for name, pattern in (
         ('callback', r'^static\s+void\s+CALLBACK\s+inputCaptureTimerEventProc\s*\('),
+        ('wake', r'^static\s+bool\s+inputCaptureOwnerNeedsWake\(\) noexcept \{'),
         ('scope', r'^class\s+InputTimerCallbackEvidenceScope\s*\{'),
         ('personaGetter', r'^static\s+const\s+char\s*\*\s*inputHostPersona\s*\([^;{]*\)\s*\{'),
         ('periodRefresh', r'^static\s+void\s+inputCaptureRefreshEffectiveTickPeriod\s*\([^;{]*\)\s*\{'),
@@ -149,6 +150,7 @@ PRELUDE = r'''
 #include <thread>
 #include <vector>
 #include "input_timer_evidence.h"
+#include "startup_readiness.h"
 using json = nlohmann::json;
 using UINT = unsigned;
 using UINT32 = std::uint32_t;
@@ -160,7 +162,7 @@ struct Calls {
     unsigned role=0, refresh=0, bus=0, event=0, scopeEnter=0, scopeExit=0;
     unsigned accumulate=0, elapsed=0, gates=0, clock=0, tid=0, power=0, costClock=0;
     int endGate=-1;
-    bool costEnabled=false;
+    bool costEnabled=false, enqueueSampleOnBus=false;
     DWORD_PTR lastEvent=0;
     unsigned long long now=100000, generation=77;
     DWORD threadId=0x6251;
@@ -205,7 +207,24 @@ public:
     ~Scope() noexcept { ++calls.scopeExit; }
 };
 }
-static void inputCaptureBusTick() noexcept { ++calls.bus; ++g_inputCaptureBusTickGlobal; }
+enum class YmccFamily { Unknown, ValveSteamMachine, OneXPlayer };
+static struct { YmccFamily family=YmccFamily::OneXPlayer; } g_machineIdentity;
+enum class PowerLifecycle { Ready, Resuming };
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static std::atomic<ymcc::StartupInputState> g_startupInputState{ymcc::StartupInputState::Skipped};
+static std::atomic<bool> g_superJoyLightingOwnerUsed{false}, g_inputCaptureReady{true},
+    g_oemInputCaptureOnly{false}, g_oemInputCaptureInitRequested{false}, g_inputReady{true},
+    g_inputHostSwitchRecoveryPending{false}, g_inputHostSwitchExecutionReturnPending{false},
+    g_inputHostRecoveryPending{false}, g_inputHostRecoveryIntentReset{false},
+    g_externalPriorityVirtualSuspended{false}, g_inputCaptureSampleQueuePending{false};
+static std::atomic<unsigned> g_inputHostVirtualIntentWriters{0}, g_inputHostHealthySinceTick{0};
+static struct { bool pending=false; bool active() const noexcept { return pending; } } g_gamepadDriverSetup;
+static bool lifecycleBusy=false;
+static bool inputHostLifecycleBusy() { return lifecycleBusy; }
+static void inputCaptureBusTick() noexcept {
+    ++calls.bus; ++g_inputCaptureBusTickGlobal;
+    if (calls.enqueueSampleOnBus) g_inputCaptureSampleQueuePending.store(true);
+}
 '''
 
 TESTS = r'''
@@ -469,6 +488,50 @@ static json conservation(bool actualCallback) {
         {"total",total},{"busCollected",busCollected},{"costCollected",costCollected},
         {"mainThreadExchanges",exchanges},{"collectionOverlappedProducers",overlap}};
 }
+static json wakeCases() {
+    unsigned rows=0;
+    g_machineIdentity.family=YmccFamily::Unknown;
+    g_inputCaptureStop.store(false);
+    g_domainLogEnabled[1].store(false);
+    auto invoke=[&](bool event, bool enqueue=false) {
+        calls=Calls{};
+        calls.enqueueSampleOnBus=enqueue;
+        inputCaptureTimerEventProc(1,0,123,0,0);
+        check(calls.bus==1, "lifecycle wake predicate changed physical BUS cadence");
+        check(calls.event==static_cast<unsigned>(event), "incorrect owner notification");
+        ++rows;
+    };
+    auto obligation=[&](auto& flag, auto pending, auto settled) {
+        flag=pending; invoke(true);
+        flag=settled; invoke(false);
+    };
+    invoke(false);
+    obligation(g_machineIdentity.family, YmccFamily::OneXPlayer, YmccFamily::Unknown);
+    obligation(g_superJoyLightingOwnerUsed,true,false);
+    obligation(g_inputCaptureReady,false,true);
+    obligation(g_oemInputCaptureOnly,true,false);
+    obligation(g_oemInputCaptureInitRequested,true,false);
+    obligation(g_inputReady,false,true);
+    obligation(g_powerLifecycle, PowerLifecycle::Resuming, PowerLifecycle::Ready);
+    obligation(g_startupInputState, ymcc::StartupInputState::Waiting, ymcc::StartupInputState::Skipped);
+    obligation(g_inputHostVirtualIntentWriters,1u,0u);
+    obligation(g_realStickTest.virtualTargetEnabled,true,false);
+    obligation(g_inputHostSwitchRecoveryPending,true,false);
+    obligation(g_inputHostSwitchExecutionReturnPending,true,false);
+    obligation(g_inputHostRecoveryPending,true,false);
+    obligation(g_inputHostRecoveryIntentReset,true,false);
+    obligation(g_inputHostHealthySinceTick,1u,0u);
+    obligation(g_externalPriorityVirtualSuspended,true,false);
+    obligation(g_gamepadDriverSetup.pending,true,false);
+    obligation(lifecycleBusy,true,false);
+    obligation(g_domainLogEnabled[1],true,false);
+    invoke(true,true); // A producer committed inside the very same BUS tick.
+    g_inputCaptureSampleQueuePending.store(false);
+    invoke(false);
+    g_machineIdentity.family=YmccFamily::ValveSteamMachine;
+    invoke(false);
+    return {{"cases",rows},{"sameTickEnqueueNotified",true}};
+}
 int main() {
     try {
         json result;
@@ -477,6 +540,7 @@ int main() {
         result["anomalies"]=anomalyCases();
         result["conservation"]={conservation(true),conservation(false)};
         result["diagnosticPeriod"]=diagnosticPeriodCases();
+        result["ownerWake"]=wakeCases();
         result["unknown"]={"late token across owners","actual WinMM kill/drain","waitable/sleep callback coverage","physical input/Steam consumption"};
         result["pass"]=true; result["checks"]=checks;
         std::cout<<result.dump()<<'\n'; return 0;
@@ -502,7 +566,7 @@ def render(parts):
                 f'static unsigned long long collect{suffix}() {{\n{collect}return {local};\n}}\n')
         helpers += code
         probes += body('global.'+name)+code
-    persona_context = 'struct PersonaSettingsSeam { std::string virtualTargetPersona; };\nstatic PersonaSettingsSeam g_realStickTest;\n'
+    persona_context = 'struct PersonaSettingsSeam { std::string virtualTargetPersona; bool virtualTargetEnabled=false; };\nstatic PersonaSettingsSeam g_realStickTest;\n'
     period_window = ('static long long actualDiagnosticPeriodWindow(long long busWindowMs) {\n'
                      + body('period.windowOpen') + body('period.consume')
                      + 'return period;\n}\nreturn -1;\n}\n')
@@ -511,7 +575,7 @@ def render(parts):
     need(callback.count('std::chrono::steady_clock::now()') == 1, 'One actual callback cost clock required')
     callback = callback.replace('std::chrono::steady_clock::now()', 'fakeCostClockNow()')
     fixture = (PRELUDE+declarations+persona_context+body('personaGetter')+body('periodRefresh')
-               +FAKES+body('scope')+body('anomalyBank')+callback+period_window+helpers+TESTS)
+               +FAKES+body('scope')+body('anomalyBank')+body('wake')+callback+period_window+helpers+TESTS)
     probes = re.sub(r'^#line[^\n]*\n', '', probes, flags=re.M)
     return fixture, probes
 
@@ -570,7 +634,7 @@ def main():
         save(output/'RESULT.json',receipt)
     try:
         sources = {name:(ROOT/name).read_bytes() for name in
-                   ('native/main.cpp','native/input_timer_evidence.h','native/controller_persona.h','deps/json/json.hpp','tools/input_timer_evidence_adapter_selftest.py')}
+                   ('native/main.cpp','native/input_timer_evidence.h','native/controller_persona.h','native/startup_readiness.h','deps/json/json.hpp','tools/input_timer_evidence_adapter_selftest.py')}
         text = sources['native/main.cpp'].decode('utf-8-sig')
         parts = extract(text)
         bom = 3 if sources['native/main.cpp'].startswith(b'\xef\xbb\xbf') else 0

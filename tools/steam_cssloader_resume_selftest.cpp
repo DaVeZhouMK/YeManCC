@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include "steam_cssloader_guard.h"
+#include "steam_ui_mode_observer.h"
 #include <json.hpp>
 #include "decky_sidebar_diagnostics.h"
 #include <atomic>
@@ -14,7 +15,10 @@ enum class PowerLifecycle{Ready,Resuming,Suspended};static std::atomic<PowerLife
 static unsigned long long currentPowerGeneration(){return powerGeneration.load();}
 static std::atomic<std::uint64_t> powerSequence{1},powerRevision{1};
 static std::atomic<bool> powerPending{false};
+// Count only the Ready delivery thread, excluding worker-side authority checks.
+static thread_local unsigned readyPowerReads=0, unknownAtRead=0;
 static int __cdecl readReadyFixture(sleeppower::SharedPowerV1* value,std::uint32_t size){
+ if(++readyPowerReads==unknownAtRead)return 0;
  if(!value||size!=sizeof(*value))return 0;
  *value={};value->generation=currentPowerGeneration();value->suspendSerial=1;
  value->observedNotificationSequence=powerSequence;value->publicationRevision=powerRevision;
@@ -30,8 +34,15 @@ static struct{steamcss::Runtime* actual=nullptr;unsigned publicAccepted=0;bool r
  bool requestResumeRecovery(const Session&s,ULONGLONG generation){return actual&&actual->requestResumeRecovery(s,generation);}
 #endif
  void observeMode(const Session&s,const steamcss::ModeSample& mode,bool waitingOnly){if(actual)actual->observeMode(s,mode,waitingOnly);}}g_steamCssGuard;
-static struct{std::atomic<unsigned> invalidations=0;bool valid=true;bool invalidateForResume(const Session&){++invalidations;return valid;}}g_steamCssUse;
-static struct{std::function<bool(const Session&)> port;std::function<json(const Session&)> facts;bool requestRefresh(const Session&s){return port&&port(s);}json snapshot(const Session&s){return facts?facts(s):json();}}g_steamModeObserver;
+static struct{std::atomic<unsigned> invalidations=0;bool valid=true;bool invalidateForResume(const Session&,bool=true,const sleeppower::SharedPowerV1* = nullptr){++invalidations;return valid;} }g_steamCssUse;
+static struct{
+ std::function<bool(const Session&)> port;std::function<json(const Session&)> facts;
+ steamui::ModeObserver* shared=nullptr;
+ bool requestRefresh(const Session&s){return shared?shared->requestRefresh(s):port&&port(s);}
+ json snapshot(const Session&s){return facts?facts(s):json();}
+ json snapshot(const Session&s,const sleeppower::SharedPowerV1& power,steamui::ModeCacheTiming* timing){return shared?shared->snapshot(s,power,timing):json();}
+ bool requestPublicResumeRefresh(const Session&s,const sleeppower::SharedPowerV1& power,std::string* epoch){return shared&&shared->requestPublicResumeRefresh(s,power,epoch);}
+}g_steamModeObserver;
 static void steamWallpaperForegroundWake(){}
 static void deckySidebarResumeManagedMode(const Session&){}
 static struct{bool requestLaunchAdmissionRefresh(){return false;}bool requestConnectionCheck(){return false;}}g_deckySidebarRuntime;
@@ -130,14 +141,28 @@ static void verifyReadyFirst(const std::filesystem::path& root) {
  check(until([&]{return uses==1;}),"ready-first establishes one original appearance use");confirmed=true;SetEvent(helper.value);
  check(until([&]{return guard.snapshot().phase=="ready";}),"ready-first establishes original DOM confirmation");
  g_steamCssUse.invalidations=0;powerGeneration=80;
- const auto begin=GetTickCount64();check(steamAppearanceResumeCommitted(80),"ready-first committed Ready is admitted once");
+ auto readsBefore=readyPowerReads;
+ unknownAtRead=readsBefore+2;
+ const bool acceptedUnknown=steamAppearanceResumeCommitted(80);
+ unknownAtRead=0;
+ check(!acceptedUnknown,"UNKNOWN at Ready admission refuses the request");
+ readsBefore=readyPowerReads;
+ const auto begin=GetTickCount64();check(steamAppearanceResumeCommitted(80),"ready-first committed Ready is admitted once after UNKNOWN");
+ const auto freshReads=readyPowerReads-readsBefore;
  check(until([&]{return refreshes==1;},500),"ready-first requests public mode within500ms instead of fixed10s");
  const auto refreshMs=GetTickCount64()-begin;
  check(g_steamCssUse.invalidations==1,"only the worker invalidates before its one public mode request");
  const auto accepted=g_steamCssGuard.publicAccepted;
+ readsBefore=readyPowerReads;
  steamAppearancePublicReady(80);
+ const auto duplicatePublicReads=readyPowerReads-readsBefore;
  check(g_steamCssGuard.publicAccepted==accepted,"committed Ready followed by public projection must not admit a second CSS wave");
+ readsBefore=readyPowerReads;
  bool duplicatesRejected=true;for(unsigned i=0;i<1000;++i)if(steamAppearanceResumeCommitted(80))duplicatesRejected=false;check(duplicatesRejected,"ready-first duplicate Ready is rejected");
+ const auto duplicateReads=readyPowerReads-readsBefore;
+ const json readBudget={{"fresh",freshReads},{"duplicatePublicReady",duplicatePublicReads},{"duplicateCommit1000",duplicateReads}};
+ std::ofstream(root/L"ready-power-reads.json")<<readBudget.dump(2);
+ check(freshReads==2&&duplicatePublicReads==1&&duplicateReads==1000,"fresh Ready revalidates once; consumed Ready needs only the original capture");
  Sleep(40);check(uses==1&&refreshes==1,"accepted refresh with unknown mode cannot apply CSS or replenish recovery");
  // The shared observer emits stableBigPicture after a fresh unchanged read.
  // Exercise the exact main callback after all short cache reads have parked.
@@ -225,7 +250,93 @@ static void verifyStableDuringEnsure(const std::filesystem::path& root,bool canc
  }
 }
 
+static void verifyDesktopResume(const std::filesystem::path& root, const std::wstring& scenario) {
+ const auto dir=root/scenario;std::filesystem::create_directories(dir);
+ const auto link=dir/L"backend.path";{std::ofstream out(link);out<<"C:\\fixture-css\\CssLoader-Standalone-Headless.exe";}
+ const Session session{L"C:\\fixture-steam",42,123,100};
+ g_steamSettingsObserver.value=session;
+ powerGeneration=100;powerSequence=1;g_steamCssUse.invalidations=0;
+ const bool unknown=scenario==L"unknown"||scenario==L"stale-power"||scenario==L"stale-session";
+ const bool changed=scenario==L"changed";
+ const bool late=scenario==L"stable-late";
+ std::atomic<steamcss::UiMode> mode=changed?steamcss::UiMode::BigPicture:steamcss::UiMode::Desktop;
+ std::atomic<bool> delayed=false;
+ std::atomic<unsigned> reads=0,changes=0,desktopChanges=0,refreshes=0,uses=0;
+ deckylaunch::Handle backend,helper;
+ backend.value=CreateEventW(nullptr,TRUE,FALSE,nullptr);helper.value=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+ check(backend.value&&helper.value,"fixture owns inert backend and helper handles");
+ steamcss::Runtime guard;steamui::ModeObserver observer;
+ g_steamCssGuard.actual=&guard;g_steamModeObserver.shared=&observer;
+ steamui::ModeObserverConfig source;source.debounceMs=1;source.minimumGapMs=7;source.failureGapMs=15;
+ source.admissionPowerReader=&readReadyFixture;
+ source.readOwned=[&](const Session& current,const steamui::ModeReadCurrent& isCurrent){
+  if(delayed.load())until([&]{return !delayed.load()||!isCurrent();},1000);
+  const auto value=mode.load();++reads;
+  return json{{"known",value!=steamcss::UiMode::Unknown},{"running",true},{"pid",current.pid},{"birth",std::to_string(current.created)},
+   {"mode",value==steamcss::UiMode::BigPicture?"bigpicture":value==steamcss::UiMode::Desktop?"desktop":"unknown"},
+   {"modeEpoch",value==steamcss::UiMode::BigPicture?(powerGeneration==100?"doc:1":"doc:2"):""}};
+ };
+ source.changed=[&](const Session& current,const json& state){
+  // Same untimed desktop delivery as the production changed callback.
+  if(state.value("mode",std::string{})=="desktop") { guard.observeMode(current,steamcss::UiMode::Desktop);++desktopChanges; }
+  ++changes;
+ };
+ source.cssBigPicturePublished=productionCssBigPicturePublished;
+ check(observer.initialize(source),"real shared mode observer initializes");
+ observer.setDemand(steamui::ModeConsumer::Css,true);observer.observeSteam(session);
+ check(until([&]{return changes==1&&productionCssReadMode(session).mode==mode.load();}),"original mode is published by the shared worker");
+ const unsigned originalDesktopChanges=desktopChanges.load();
+ sleeppower::SharedPowerV1 oldPower;check(captureSharedPowerLifecycle(oldPower),"old scope can be captured for negative evidence");
+ steamcss::Config c;c.linkFile=link.wstring();c.delays={2000,10,10};c.modeDelays={5,10,15};c.resumeDelays={0,180,180};
+ c.powerGeneration=currentPowerGeneration;c.powerReader=&readReadyFixture;
+ c.readMode=productionCssReadMode;c.refreshMode=productionCssResumeRefresh;
+ c.refreshPublicResumeMode=[&](const auto& s,const auto& p,auto& epoch){++refreshes;return productionCssPublicResumeRefresh(s,p,epoch);};
+ c.ensure=[&](const auto&,const auto& s,const auto& allowed){
+  return allowed()&&productionCssReadMode(s).mode==steamcss::UiMode::BigPicture
+   ?steamcss::Result{nullptr,0,"missing","fixture"}:steamcss::Result{nullptr,0,"waiting-steam-ui","fixture-needs-bigpicture"};
+ };
+ c.confirmObserved=[&](const auto&,bool,bool,const auto*){++uses;return steamcss::ObservedUse{copy(helper.value),{}};};
+ c.probeExisting=[&]{return steamcss::Result{copy(backend.value),0,"resident","fixture"};};
+ c.isResidentConfirmed=[](const auto&){return true;};
+ check(guard.initialize(c),"real theme guard initializes");guard.observeSteam(session);
+ check(until([&]{return guard.snapshot().phase=="grace";}),"theme guard observes the Steam session without starting it");
+ if(unknown)mode=steamcss::UiMode::Unknown;else mode=steamcss::UiMode::Desktop;
+ delayed=late;powerGeneration=101;
+ check(steamAppearanceResumeCommitted(101),"production Ready binding admits one theme wave");
+ check(until([&]{return refreshes==1;}),"theme wave requests its initial public refresh");
+ if(late){Sleep(100);delayed=false;}
+ if(scenario==L"stale-power"||scenario==L"stale-session") {
+  steamcss::ModeSample stale{steamcss::UiMode::Desktop,{}};
+  stale.timing={oldPower,GetTickCount64(),GetTickCount64()};
+  auto observed=session;
+  if(scenario==L"stale-session"){++observed.account;captureSharedPowerLifecycle(stale.timing.power);}
+  guard.observeMode(observed,stale);
+ }
+ if(!unknown)check(until([&]{return productionCssReadMode(session).mode==steamcss::UiMode::Desktop;}),"current desktop proof comes from the real public cache");
+ Sleep(430);
+ const auto wakeRefreshes=refreshes.load(),wakeInvalidations=g_steamCssUse.invalidations.load(),wakeReads=reads.load();
+ std::ofstream(dir/L"wake-counts.json")<<json{{"refreshes",wakeRefreshes},{"invalidations",wakeInvalidations},{"publicReadsIncludingStartup",wakeReads},{"helpers",uses.load()}}.dump(2);
+ check(uses==0,"Desktop or unknown never starts a CSS helper");
+ if(unknown)check(wakeRefreshes==3&&wakeInvalidations==3,"unknown or stale Desktop preserves all three bounded follow-ups");
+ else {
+  check(wakeRefreshes==1&&wakeInvalidations==1&&wakeReads==2,"confirmed Desktop parks both remaining wake refreshes");
+  check(desktopChanges==originalDesktopChanges+(changed?1:0),"unchanged Desktop has no changed callback; changed Desktop arrives once");
+ }
+ mode=steamcss::UiMode::BigPicture;
+ check(observer.requestRefresh(session,false),"later user entry still reaches the public observer");
+ check(until([&]{return uses==1;}),"later Big Picture applies exactly one theme helper");
+ SetEvent(helper.value);
+ check(until([&]{return guard.snapshot().phase=="ready";}),"later Big Picture retains the DOM confirmation path");
+ Sleep(210);check(uses==1&&refreshes==wakeRefreshes,"confirmed use does not rearm wake refreshes");
+ observer.shutdown();guard.shutdown();g_steamModeObserver.shared=nullptr;g_steamCssGuard.actual=nullptr;
+}
+
 int wmain(int argc,wchar_t**argv){try{
+ if(argc==3&&std::wstring(argv[1])==L"--desktop-resume") {
+  const std::filesystem::path selected=argv[2];
+  for(const auto* scenario:{L"changed",L"stable",L"stable-late",L"unknown",L"stale-power",L"stale-session"})verifyDesktopResume(selected,scenario);
+  std::cout<<json{{"ok",true},{"checks",checks.load()},{"realSteamOperations",0},{"realCssOperations",0}}.dump()<<std::endl;return 0;
+ }
  if(argc==3&&std::wstring(argv[1])==L"--stable-inflight") {const std::filesystem::path selected=argv[2];std::filesystem::create_directories(selected);verifyStableDuringEnsure(selected,false);verifyStableDuringEnsure(selected,true);const json record={{"ok",true},{"selection","stable-inflight"},{"checks",checks.load()},{"realSteamOperations",0},{"realCssOperations",0}};std::ofstream(selected/L"result.json")<<record.dump(2);std::cout<<record.dump()<<std::endl;return 0;}
 
  if(argc==3&&std::wstring(argv[1])==L"--ready-first") {const std::filesystem::path selected=argv[2];std::filesystem::create_directories(selected);verifyReadyFirst(selected);const json record={{"ok",true},{"selection","ready-first"},{"checks",checks.load()},{"realSteamOperations",0},{"realCssOperations",0}};std::ofstream(selected/L"result.json")<<record.dump(2);std::cout<<record.dump()<<std::endl;return 0;}

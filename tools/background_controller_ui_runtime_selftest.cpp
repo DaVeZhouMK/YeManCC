@@ -199,7 +199,8 @@ static BOOL ReadFile(HANDLE device,LPVOID buffer,DWORD bytes,LPDWORD immediate,L
     io.pending=pending;io.buffer=static_cast<BYTE*>(buffer);io.cancelled=false;io.terminal=false;pending->Internal=0x103;
     if(io.synchronous){complete(false);return TRUE;}io.error=ERROR_IO_PENDING;return FALSE;
 }
-static bool sameXusbSource(const std::wstring& path,const std::wstring& slot){
+static bool sameXusbSource(const std::wstring& path,const std::wstring& slot,bool requireXusb=false){
+    (void)requireXusb;
     io.calls.push_back("same-xusb");check(!path.empty()&&!slot.empty(),"exact interface and slot paths reach same-XUSB proof");
 #if defined(YMCC_ISOLATION_HID_PORT_R3)
     if(io.topology.enabled){const auto* candidate=nodeByPath(path);const auto* selected=nodeByPath(slot);return io.sourceMatches&&candidate&&selected&&candidate->present&&selected->present&&candidate->xusb&&candidate->xusb==selected->xusb&&slot==io.topology.slotPath;}
@@ -306,6 +307,7 @@ template<class Value> using vector=::std::vector<Value,PortAllocator<Value>>;
 #include YMCC_ISOLATION_HID_OEM_INCLUDE
 enum class InspectionStage {Unobserved};
 #include YMCC_ISOLATION_HID_DEVICE_INCLUDE
+static DWORD (WINAPI* g_ymccXInputGetCapabilities14)(DWORD,DWORD,XINPUT_CAPABILITIES*)=nullptr;
 #include YMCC_ISOLATION_HID_PORT_INCLUDE
 #undef std
 #if defined(YMCC_ISOLATION_HID_PORT_R3)
@@ -822,6 +824,14 @@ static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& out){
     out.flags=ymcc::sleeppower::kKnown|ymcc::sleeppower::kHardwareAllowed;
     return true;
 }
+static std::uint64_t coldHost=0,coldDemand=0,coldPower=0,coldBoundary=0;
+// Stub only the startup ownership publication; reader selection is production code.
+static bool coldFseReaderCurrent(std::uint64_t generation,std::uint64_t& intent,std::uint64_t& host){
+    host=coldHost;intent=coldDemand;
+    return host && host==fixtureHost && intent && intent==g_inputHostRecoveryIntent.revision() &&
+        generation==coldPower && generation==power && hardwareWriteAllowed() && !g_inputHostVirtualIntentWriters &&
+        coldBoundary==g_sleepPowerDispatch.observedSleepBoundarySequence();
+}
 namespace ymccCommonHid {static ymcc::commonhid::Lane lane;}
 static bool uiEvaluation=true;
 static Reader<IsolationFakePort> reader;
@@ -834,7 +844,11 @@ static void retireSample(){if(lane.hasSample())++retiredSamples;lane.clear();}
 #define GetTickCount64 fixtureTick
 #include YMCC_ISOLATION_HID_OBSERVE_INCLUDE
 #if defined(YMCC_ISOLATION_HID_RAW_FENCE_INCLUDE)
+enum class YmccFamily {Other,Gpd};
+static struct {YmccFamily family=YmccFamily::Gpd;std::string_view deviceClass="HandheldCompanion.Devices.GPDWin5";} g_machineIdentity;
+static std::atomic<bool> g_inputHostMatchedSteamDeck{false};
 namespace ymccCommonHid {
+using Sample=ymcc::commonhid::Sample;
 static std::uint64_t dispatchGeneration=0;
 namespace isolationDirect {static std::atomic<bool> backgroundRetirementPending{false};}
 }
@@ -845,6 +859,156 @@ static void observe(bool ui){
     Epoch current;context(current);
     if(eligible())observe(ui,current);
     else {withdraw();reader.port().serviceClosing();} // Production Port::close also services closing.
+}
+static void checkCachedRawSticks(){
+    ymcc::commonhid::CachedRawStickHandoff handoff;
+    const Epoch epoch{power,topology,4,5,0};
+    const std::uint64_t host=12;
+    ymcc::commonhid::Sample raw{isolationFrame(XINPUT_GAMEPAD_A).pad,100,1,true,true,0};
+    raw.pad.sThumbLX=18000;raw.pad.sThumbRX=-31000;raw.pad.bLeftTrigger=76;raw.pad.bRightTrigger=45;
+    XINPUT_GAMEPAD native{};
+    const auto read=[&](std::uint64_t current,const Epoch& source){auto copy=raw;
+        const auto mask=handoff.apply(current,source,native,&copy);return std::pair{mask,copy.pad};};
+    check(read(host,epoch).first==0 && read(host,epoch).second.sThumbRX==-31000,"stable native neutral preserves an event-driven Raw hold");
+    native.sThumbRX=600;check(read(host,epoch).first==0,"small native jitter does not replace Raw axes");
+    native.sThumbRX=2400;native.sThumbRY=-4000;
+    const auto [mask,pad]=read(host,epoch);
+    check(mask==2 && pad.sThumbRX==2400 && pad.sThumbRY==-4000,"native right stick motion is not masked by the same Raw receipt");
+    check(pad.sThumbLX==18000 && pad.wButtons==XINPUT_GAMEPAD_A && pad.bLeftTrigger==76 && pad.bRightTrigger==45,
+        "native right stick handoff preserves the left stick, buttons and independent triggers");
+    native={};const auto up=read(host,epoch);
+    check(up.first==2 && up.second.sThumbRX==0 && up.second.sThumbRY==0,"native release does not replay the cached Raw right stick");
+    ++raw.sequence;raw.pad.sThumbRX=-15000;
+    check(read(host,epoch).first==0 && read(host,epoch).second.sThumbRX==-15000,"new Raw receipt keeps original stick authority");
+    native.sThumbLX=2300;check(read(host,epoch).first==1,"left stick moves independently of the right stick");
+    check(read(host+1,epoch).first==0,"handoff is not inherited by a new Host");
+    native.sThumbLX=4700;check(read(host+1,epoch).first==1,"new Host can observe its own native motion");
+    auto next=epoch;++next.topology;
+    check(read(host+1,next).first==0,"handoff is not inherited by a new physical source epoch");
+    native.sThumbLX=8000;check(read(host+1,next).first==1,"new source can observe its own native motion");
+    check(read(0,next).first==0 && read(host+1,next).first==0,"leaving the scoped route retires the handoff");
+    raw.isolationSharedRead=true;native.sThumbRX=32767;
+    check(read(host+1,next).first==0 && read(host+1,next).second.sThumbRX==-15000,"shared direct HID is not changed");
+    raw.isolationSharedRead=false;raw.completeBasic=false;
+    check(read(host+1,next).first==0,"incomplete HID reports do not take the stick handoff path");
+#if defined(YMCC_ISOLATION_HID_RAW_FENCE_INCLUDE)
+    // Exercise the exact production gate and selected Raw copy through Lane.
+    ymcc::commonhid::Lane cached;
+    raw.completeBasic=true;raw.sequence=1;
+    cached.observe(epoch,raw);
+    const auto actualRead=[&](SHORT x,bool allowed=true){
+        XINPUT_GAMEPAD xinput{};xinput.sThumbLX=x;
+        ymcc::commonhid::Sample selected;
+        check(cached.read(epoch,true,xinput,selected),"original Raw lane remains selected");
+        const auto source=ymccCommonHid::applyWin5CachedRawSticks(epoch,xinput,&selected,allowed);
+        return std::pair{source,selected.pad.sThumbLX};
+    };
+    const bool oldEnabled=g_realStickTest.virtualTargetEnabled;
+    const auto oldWakeHost=g_win5WakeReaderHost.load();
+    g_realStickTest.virtualTargetEnabled=true;g_inputHostMatchedSteamDeck=true;g_win5WakeReaderHost=0;
+    check(actualRead(0).first==0 && actualRead(2400)==std::pair{1u,SHORT{2400}},"admitted Win5 SD Raw cannot mask changed XInput sticks");
+    const auto unchanged=std::pair{0u,raw.pad.sThumbLX};
+    check(actualRead(0,false)==unchanged && actualRead(7000,false)==unchanged,"non-FSE or unadmitted routes do not hand off sticks");
+    g_realStickTest.virtualTargetEnabled=false;
+    check(actualRead(0)==unchanged && actualRead(7000)==unchanged,"virtual OFF keeps original source routing");
+    g_realStickTest.virtualTargetEnabled=true;g_inputHostMatchedSteamDeck=false;
+    check(actualRead(0)==unchanged && actualRead(7000)==unchanged,"non-SD or mismatched Host keeps original routing");
+    g_inputHostMatchedSteamDeck=true;g_win5WakeReaderHost=fixtureHost;
+    check(actualRead(0)==unchanged && actualRead(7000)==unchanged,"retained wake Host keeps original routing");
+    g_win5WakeReaderHost=0;g_machineIdentity.family=YmccFamily::Other;
+    check(actualRead(0)==unchanged && actualRead(7000)==unchanged,"other handheld families keep original routing");
+    g_machineIdentity.family=YmccFamily::Gpd;g_machineIdentity.deviceClass="other-gpd";
+    check(actualRead(0)==unchanged && actualRead(7000)==unchanged,"other GPD models keep original routing");
+    g_machineIdentity.deviceClass="HandheldCompanion.Devices.GPDWin5";g_inputHostVirtualIntentWriters=1;
+    check(actualRead(0)==unchanged && actualRead(7000)==unchanged,"an in-flight virtual intent cannot borrow axes");
+    g_inputHostVirtualIntentWriters=0;g_inputHostMatchedSteamDeck=false;
+    g_win5WakeReaderHost=oldWakeHost;g_realStickTest.virtualTargetEnabled=oldEnabled;
+#endif
+}
+static void checkColdFseReader(){
+    auto& port=reader.port();
+    g_win5WakeReaderHost=0;
+    g_controllerIsolationHidPermit.store(nullptr);
+    const auto configure=[](bool enabled,const char* target){
+        g_realStickTest.virtualTargetEnabled=enabled;
+        g_inputHostRecoveryIntent.configure(json::object(),"",true,enabled,target);
+    };
+    const Epoch slot{power,topology,4,5,0};
+    ymcc::commonhid::Sample out;
+    const auto read=[&]{return lane.readWakeFallback(slot,sampleReadAllowed(true),{},clockTick,out);};
+    const auto tick=[&](bool primary=false){++clockTick;observe(true,slot,primary);};
+    const auto close=[&]{if(port.pending())port.complete(isolationFrame(XINPUT_GAMEPAD_B));tick(true);};
+    const auto arm=[&]{coldHost=fixtureHost;coldDemand=g_inputHostRecoveryIntent.revision();
+        coldPower=power;coldBoundary=g_sleepPowerDispatch.observedSleepBoundarySequence();};
+    fixtureFse=false;g_xinputPhysicalSourceLocked=true;
+    configure(true,"steamdeck");
+    tick();check(!port.bound(),"ordinary mode does not open a cold reader");
+    fixtureFse=true;tick();check(!port.bound(),"manual SD without a boot grant does not open a cold reader");
+    // Win5 014828: the first qualified Raw arrived about 19 s into an unchanged SD Host.
+    for(const bool withBootGrant:{false,true}){
+        if(withBootGrant)arm();
+        const auto bootHost=fixtureHost,bootIntent=g_inputHostRecoveryIntent.revision();
+        const auto beforeBind=port.bindCalls,beforeDiscard=port.discardedFrames;
+        ymcc::commonhid::Lane raw;
+        std::uint64_t rawSequence=0;
+        const auto replayRaw=[&](WORD buttons){
+            raw.observe(slot,{isolationFrame(buttons).pad,++rawSequence,clockTick,false,true,0});
+            const bool selected=withBootGrant
+                ? raw.readColdPrimary(slot,{},clockTick,lane.selected(),out)
+                : raw.read(slot,true,{},out);
+            tick(selected);
+            return selected;
+        };
+        tick();
+        clockTick+=18902;tick();
+        check(!read() && !raw.hasSample() && port.pending()==withBootGrant,
+              "a quiet cold startup must not synthesize activity or retire its waiting source");
+        check(!replayRaw(0) && !read(),"first neutral Raw is not an active source");
+        clockTick+=15;
+        check(replayRaw(XINPUT_GAMEPAD_DPAD_RIGHT) && out.pad.wButtons==XINPUT_GAMEPAD_DPAD_RIGHT && !out.isolationSharedRead,
+              "late original Raw RIGHT reaches the existing startup Host instead of waiting for the direct reader");
+        check(!port.bound() && !read(),"the original Raw selection retires the redundant direct lane");
+        if(withBootGrant)close();
+        clockTick+=140;
+        check(replayRaw(0) && !out.pad.wButtons,"Raw RIGHT release is preserved after direct retirement");
+        check(replayRaw(XINPUT_GAMEPAD_DPAD_LEFT) && out.pad.wButtons==XINPUT_GAMEPAD_DPAD_LEFT,
+              "subsequent original Raw LEFT stays selected");
+        check(replayRaw(0) && !out.pad.wButtons,"subsequent original Raw release remains neutral");
+        check(port.returned() && port.bindCalls==beforeBind+(withBootGrant?1u:0u) &&
+              port.discardedFrames==beforeDiscard+(withBootGrant?1u:0u) &&
+              fixtureHost==bootHost && g_inputHostRecoveryIntent.revision()==bootIntent,
+              "late Raw neither rebinds the direct reader nor changes the startup Host or intent");
+        coldHost=0;
+    }
+    g_hidHidePhysicalIdentity.vendorId=0x0b05;g_hidHidePhysicalIdentity.productId=0x1234;
+    for(const char* target:{"steamdeck","elite","dualsense-edge"}){
+        configure(true,target);arm();
+        g_hidHidePhysicalIdentity.resolved=false;
+        tick();check(!port.bound(),"an unproven physical source cannot open the port");
+        g_hidHidePhysicalIdentity.resolved=true;
+        tick(true);check(!port.bound(),"a healthy original source avoids the direct reader");
+        tick();check(key.coldIntent && port.bound() && port.pending() && !read(),"current scoped reader awaits a real sample regardless of target or VID/PID");
+        port.complete(isolationFrame(XINPUT_GAMEPAD_A));tick();
+        check(read()&&out.pad.wButtons==XINPUT_GAMEPAD_A&&out.isolationSharedRead,"first fresh cold DOWN is selected");
+        port.complete(isolationFrame(0));tick();
+        check(read()&&!out.pad.wButtons,"fresh cold UP releases the selected DOWN");
+        configure(false,"disabled");tick();
+        check(!read()&&!port.bound()&&port.pending(),"OFF immediately fences selection and retires the read");
+        close();check(port.returned()&&!read(),"late old DOWN is discarded during return");
+    }
+    configure(true,"steamdeck");arm();tick();
+    check(port.pending(),"cold current read is in flight at FSE departure");
+    fixtureFse=false;tick();close();
+    check(port.returned()&&!read(),"departure releases the only reader");
+    fixtureFse=true;tick();check(!port.bound(),"same boot grant is not reused on later FSE reentry");
+    ymcc::commonhid::Lane original;
+    const auto old=clockTick;
+    original.observe(slot,{isolationFrame(XINPUT_GAMEPAD_A).pad,1,old,false,true,0});
+    clockTick+=251;
+    check(!original.readColdPrimary(slot,{},clockTick,true,out),"stale cached Raw DOWN cannot replace direct input");
+    original.observe(slot,{isolationFrame(0).pad,2,clockTick,false,true,0});
+    check(original.readColdPrimary(slot,{},clockTick,true,out)&&!out.pad.wButtons,"fresh Raw UP wins a cold handoff without replay");
+    coldHost=0;g_hidHidePhysicalIdentity.vendorId=0x045e;g_hidHidePhysicalIdentity.productId=0x028e;
 }
 static void checkWin5WakeReader(){
     auto& port=reader.port();
@@ -1366,7 +1530,11 @@ int main(int argc,char** argv)try {
             if(std::string_view(argv[1])=="--isolation-hid-pending-reader")pendingIsolationReader::checkPendingReader();
             else if(std::string_view(argv[1])=="--isolation-hid-coalesced-reader")pendingIsolationReader::checkCoalescedReader();
             else if(std::string_view(argv[1])=="--isolation-hid-first-report")pendingIsolationReader::checkFirstReportReader();
-            else pendingIsolationReader::checkWin5WakeReader();
+            else {
+                pendingIsolationReader::checkWin5WakeReader();
+                pendingIsolationReader::checkColdFseReader();
+                pendingIsolationReader::checkCachedRawSticks();
+            }
             json result{{"checks",checks},{"scope","actual isolation reader observation and shared dispatch with fake HID I/O"},{"physicalInput",false}};
             if(std::string_view(argv[1])=="--isolation-hid-win5-kept-wake")result["selectedCase"]=argv[1];
             std::cout<<result.dump()<<'\n';return 0;

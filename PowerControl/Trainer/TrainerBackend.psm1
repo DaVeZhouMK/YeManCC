@@ -46,12 +46,30 @@ function Get-TrainerJsonBytes([string]$Path,[long]$Limit=8388608) {
     }
     finally { if($stream){$stream.Dispose()} }
 }
-function Assert-TrainerJsonNumbers($Value,[int]$Depth=0) {
+function Assert-TrainerJsonNumbers($Value,[int]$Depth=0,[bool]$DecodedJson=$false) {
     if($Depth -gt 32){throw (New-TrainerJsonFault 'corrupt' '修改器JSON层级过深')}
     if(($Value -is [double] -or $Value -is [single]) -and ([double]::IsNaN([double]$Value) -or [double]::IsInfinity([double]$Value))){throw (New-TrainerJsonFault 'corrupt' '修改器JSON包含非有限数字')}
-    if($Value -is [Collections.IDictionary]){foreach($child in $Value.Values){Assert-TrainerJsonNumbers $child ($Depth+1)}}
-    elseif($Value -is [array]){foreach($child in $Value){Assert-TrainerJsonNumbers $child ($Depth+1)}}
-    elseif($Value -is [pscustomobject]){foreach($property in $Value.PSObject.Properties){Assert-TrainerJsonNumbers $property.Value ($Depth+1)}}
+    if($Value -isnot [Collections.IDictionary] -and $Value -isnot [array] -and $Value -isnot [pscustomobject]){return}
+    # Large catalog arrays contain thousands of objects. Walk them without a
+    # PowerShell function invocation per row, including when writing JSON.
+    $pending=[Collections.Generic.Stack[object]]::new()
+    do {
+        $properties=$false
+        if($Value -is [Collections.IDictionary]){$children=$Value.Values}
+        elseif($Value -is [array]){$children=$Value}
+        else{$properties=$true;$children=$Value.PSObject.Properties}
+        $childDepth=$Depth+1
+        foreach($entry in $children){
+            if($childDepth -gt 32){throw (New-TrainerJsonFault 'corrupt' '修改器JSON层级过深')}
+            $child=$entry
+            if($properties){$child=$entry.Value}
+            if($DecodedJson -and ($child -is [string] -or $null -eq $child -or $child -is [bool] -or $child -is [int] -or $child -is [long])){continue}
+            if(($child -is [double] -or $child -is [single]) -and ([double]::IsNaN([double]$child) -or [double]::IsInfinity([double]$child))){throw (New-TrainerJsonFault 'corrupt' '修改器JSON包含非有限数字')}
+            if($child -is [Collections.IDictionary] -or $child -is [array] -or $child -is [pscustomobject]){$pending.Push(@($child,$childDepth))}
+        }
+        if($pending.Count -eq 0){break}
+        $next=$pending.Pop();$Value=$next[0];$Depth=$next[1]
+    } while($true)
 }
 function Assert-TrainerJsonVersion($Value,[bool]$Owned,[bool]$Index=$false,[bool]$Foreign=$false) {
     foreach($field in @('schema','schemaVersion','version','storageVersion')){
@@ -72,15 +90,18 @@ function ConvertFrom-TrainerJsonBytes($Snapshot,[string]$Path) {
     $index=$leaf -eq 'trainers.json';$owned=$index -or $leaf -in @('ymcc-library.json','ymcc-data-state.json','ymcc-fling-public.json','last-game-status.json','last-launch-status.json') -or $parent -in @('requests','ymcc-validated')
     if(($trim[0] -ne '{' -and $trim[0] -ne '[') -or ($owned -and $trim[0] -ne '{')){throw (New-TrainerJsonFault 'corrupt' '修改器JSON根类型无效')}
     # ConvertFrom-Json permits comments, single quotes and named nonfinite tokens.
-    # Mask JSON strings before rejecting those extensions and trailing commas.
-    $outside=[regex]::Replace($trim,'"(?:\\["\\/bfnrt]|\\u[0-9a-fA-F]{4}|[^"\\\x00-\x1f])*"','""')
-    if($outside -match "'|/|\b(?:NaN|Infinity)\b|,\s*[}\]]"){throw (New-TrainerJsonFault 'corrupt' '修改器JSON语法无效')}
-    # PowerShell 5.1 also accepts unquoted names, +1 and leading-zero numbers.
-    # After masking valid strings, every remaining token must have JSON spelling.
-    $token='""|(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)(?=[ \t\r\n]*[,}\]]|$)|[{}\[\],: \t\r\n]'
-    if([regex]::Replace($outside,$token,'').Length){throw (New-TrainerJsonFault 'corrupt' '修改器JSON包含非标准字段或数字')}
+    # Consume strings and the remaining JSON tokens in one pass. Leave a
+    # trailing comma unmatched and bound regex backtracking storage on large files.
+    $stringToken='"(?:\\["\\/bfnrt]|\\u[0-9a-fA-F]{4}|[^"\\\x00-\x1f])*"'
+    $scalarToken='(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)(?=[ \t\r\n]*[,}\]]|$)'
+    $token='\A(?>(?:'+$stringToken+'|'+$scalarToken+'|,(?!\s*[}\]])|[{}\[\]: \t\r\n])*)\z'
+    if($trim.Length -gt 524288 -or -not [regex]::IsMatch($trim,$token)){
+        $outside=[regex]::Replace($trim,$stringToken,'""')
+        if($outside -match "'|/|\b(?:NaN|Infinity)\b|,\s*[}\]]"){throw (New-TrainerJsonFault 'corrupt' '修改器JSON语法无效')}
+        if([regex]::Replace($outside,'""|'+$scalarToken+'|[{}\[\],: \t\r\n]','').Length){throw (New-TrainerJsonFault 'corrupt' '修改器JSON包含非标准字段或数字')}
+    }
     try{$value=ConvertFrom-Json -InputObject $trim -ErrorAction Stop}catch{throw (New-TrainerJsonFault 'corrupt' '修改器JSON损坏或截断')}
-    Assert-TrainerJsonNumbers $value
+    Assert-TrainerJsonNumbers $value 0 $true
     if($trim[0] -eq '{'){
         # GCM's version describes a game/catalog, not this application's schema.
         $foreign=-not $owned -and $leaf -in @('gcm_info.json','settings.json','translations.json','fling_main.json','fling_archive.json','gcm_trainers.json','cheat_table.json','xiaoxing.json')

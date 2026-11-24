@@ -13,11 +13,13 @@
 #include "sleep_power_state.h"
 #include "decky_sidebar_launch.h"
 #include <array>
+#include <cstddef>
 #include <filesystem>
 #include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
 #pragma comment(lib, "iphlpapi.lib")
 
@@ -53,10 +55,19 @@ inline Link readLink(const std::wstring& path) {
     text = text.substr(first, last - first + 1);
     if (text.find_first_of(L"\r\n\"\0", 0, 4) != std::wstring::npos || text.size() < 4 ||
         text[1] != L':' || (text[2] != L'\\' && text[2] != L'/')) return {false, {}, "link-invalid"};
-    std::wstring full(32768, L'\0');
-    const DWORD count = GetFullPathNameW(text.c_str(), static_cast<DWORD>(full.size()), full.data(), nullptr);
-    if (!count || count >= full.size()) return {false, {}, "link-invalid"};
-    full.resize(count);
+    constexpr DWORD shortCapacity = 512, maxCapacity = 32768;
+    wchar_t shortPath[shortCapacity];
+    DWORD count = GetFullPathNameW(text.c_str(), shortCapacity, shortPath, nullptr);
+    if (!count || count > maxCapacity) return {false, {}, "link-invalid"};
+    std::wstring full;
+    if (count < shortCapacity) full.assign(shortPath, count);
+    else {
+        // Insufficient capacity returns the required size including the NUL.
+        full.resize(count);
+        count = GetFullPathNameW(text.c_str(), static_cast<DWORD>(full.size()), full.data(), nullptr);
+        if (!count || count >= full.size()) return {false, {}, "link-invalid"};
+        full.resize(count);
+    }
     if (_wcsicmp(std::filesystem::path(full).filename().c_str(), L"CssLoader-Standalone-Headless.exe")) return {false, {}, "link-wrong-executable"};
     return {true, std::move(full), {}};
 }
@@ -97,25 +108,46 @@ inline Result probeBackend(DWORD exclude = 0, bool listenersOnly = false, unsign
     // launch. Check IPv4 AND IPv6 before adopting an existing process.
     ymcc::deckylaunch::Handle found;
     DWORD foundPid = 0;
+    constexpr DWORD maxTableBytes = 16 * 1024 * 1024;
+    alignas(DWORD) unsigned char local[8192];
+    std::vector<unsigned char> grown;
     for (const ULONG family : {2UL, 23UL}) {
-        DWORD size = 0;
-        const DWORD initial = GetExtendedTcpTable(nullptr, &size, FALSE, family, TCP_TABLE_OWNER_PID_LISTENER, 0);
-        if (initial != ERROR_INSUFFICIENT_BUFFER || !size || size > 16 * 1024 * 1024) return {nullptr, 0, "blocked", "loader-port-unverified"};
-        std::vector<unsigned char> bytes(size);
-        if (GetExtendedTcpTable(bytes.data(), &size, FALSE, family, TCP_TABLE_OWNER_PID_LISTENER, 0) != NO_ERROR) return {nullptr, 0, "blocked", "loader-port-unverified"};
+        // Share capacity, never rows, between the two independent reads.
+        auto* bytes = grown.empty() ? local : grown.data();
+        DWORD capacity = grown.empty() ? static_cast<DWORD>(sizeof(local)) : static_cast<DWORD>(grown.size());
+        DWORD size = capacity;
+        auto status = GetExtendedTcpTable(bytes, &size, FALSE, family, TCP_TABLE_OWNER_PID_LISTENER, 0);
+        if (status == ERROR_INSUFFICIENT_BUFFER && size > capacity && size <= maxTableBytes) {
+            grown.resize(size); bytes = grown.data(); capacity = size;
+            status = GetExtendedTcpTable(bytes, &size, FALSE, family, TCP_TABLE_OWNER_PID_LISTENER, 0);
+        }
+        if (status != NO_ERROR || size < sizeof(DWORD) || size > capacity)
+            return {nullptr, 0, "blocked", "loader-port-unverified"};
         bool blocked = false;
         const auto accept = [&](DWORD pid, DWORD port) {
             const auto decoded = static_cast<unsigned short>(((port & 0xff) << 8) | ((port >> 8) & 0xff));
             if (decoded != targetPort || pid == exclude) return;
+            // Multiple addresses can name the same listener process. Only
+            // reuse the held, verified instance while it is still alive.
+            if (found.value && pid == foundPid) {
+                if (WaitForSingleObject(found.value, 0) != WAIT_TIMEOUT) blocked = true;
+                return;
+            }
             auto candidate = loaderLease(pid);
             if (!candidate.process) { blocked = true; return; }
             if (found.value) CloseHandle(candidate.process);
             else { found.value = candidate.process; foundPid = candidate.pid; }
         };
-        if (family == 2) { const auto* table = reinterpret_cast<const MIB_TCPTABLE_OWNER_PID*>(bytes.data());
-            for (DWORD i = 0; i < table->dwNumEntries; ++i) accept(table->table[i].dwOwningPid, table->table[i].dwLocalPort); }
-        else { const auto* table = reinterpret_cast<const MIB_TCP6TABLE_OWNER_PID*>(bytes.data());
-            for (DWORD i = 0; i < table->dwNumEntries; ++i) accept(table->table[i].dwOwningPid, table->table[i].dwLocalPort); }
+        const auto readRows = [&](const auto* table) {
+            using Table = std::remove_cv_t<std::remove_pointer_t<decltype(table)>>;
+            constexpr auto offset = offsetof(Table, table);
+            if (size < offset || table->dwNumEntries > (size - offset) / sizeof(table->table[0])) return false;
+            for (DWORD i = 0; i < table->dwNumEntries; ++i) accept(table->table[i].dwOwningPid, table->table[i].dwLocalPort);
+            return true;
+        };
+        const bool read = family == 2 ? readRows(reinterpret_cast<const MIB_TCPTABLE_OWNER_PID*>(bytes)) :
+            readRows(reinterpret_cast<const MIB_TCP6TABLE_OWNER_PID*>(bytes));
+        if (!read) return {nullptr, 0, "blocked", "loader-port-unverified"};
         if (blocked) return {nullptr, 0, "blocked", "loader-port-occupied"};
     }
     if (found.value) { HANDLE lease = found.value; found.value = nullptr; return {lease, foundPid, "running", {}, false}; }
@@ -158,6 +190,7 @@ struct State {
         std::uint64_t generation = 0, suspendSerial = 0, notificationSequence = 0;
         std::uint64_t readerReturnedTick = 0, publishedTick = 0, enqueuedTick = 0, acceptedTick = 0;
     } modeHandoff;
+    bool notifyCard = true;
 };
 struct ObservedUse {
     HANDLE completion = nullptr;
@@ -221,10 +254,10 @@ class Runtime {
     }
     void publish(const Link& link, const ymcc::steamsession::Session& session, const std::string& phase,
                  const std::string& reason, unsigned attempts, DWORD pid = 0, bool started = false,
-                 const State::ModeHandoff& handoff = {}) {
+                 const State::ModeHandoff& handoff = {}, bool notifyCard = true) {
         State copy;
         { std::lock_guard lock(stateMutex_);
-          state_ = {link.enabled, session.pid != 0, started, pid, attempts, phase, reason, recoveryCount_, session.pid, session.created, handoff}; copy = state_; }
+          state_ = {link.enabled, session.pid != 0, started, pid, attempts, phase, reason, recoveryCount_, session.pid, session.created, handoff, notifyCard}; copy = state_; }
         try { if (config_.changed) config_.changed(copy); } catch (...) {} // No observer/UI blockage.
     }
     void run() {
@@ -280,10 +313,23 @@ class Runtime {
             ymcc::steamsession::Session resumedSession, reboundSession; bool rebindRequested = false;
             ULONGLONG requestedGeneration = 0;
             ymcc::sleeppower::SharedPowerV1 requestedPower;
-            { std::lock_guard lock(stateMutex_); if (stopping_) break; next = desired_; manualRecheck = manualRecheck_; manualRecheck_ = false; uiRecheck = uiRecheck_;
-              hasConfirmedMode = modePending_; confirmedMode = pendingMode_; confirmedSession = pendingModeSession_; modePending_ = false;
-              resumeRequested = resumeRecheck_; resumedSession = resumeSession_; requestedGeneration = lastResumeGeneration_; requestedPower = resumePower_; resumeRecheck_ = false;
-              rebindRequested = rebindPending_; reboundSession = rebindSession_; rebindPending_ = false; }
+            {
+                std::lock_guard lock(stateMutex_);
+                if (stopping_) break;
+                next = desired_; manualRecheck = manualRecheck_; manualRecheck_ = false; uiRecheck = uiRecheck_;
+                hasConfirmedMode = modePending_;
+                if (hasConfirmedMode) {
+                    confirmedMode = std::move(pendingMode_); confirmedSession = std::move(pendingModeSession_); modePending_ = false;
+                }
+                resumeRequested = resumeRecheck_;
+                if (resumeRequested) {
+                    resumedSession = std::move(resumeSession_); requestedGeneration = lastResumeGeneration_; requestedPower = resumePower_; resumeRecheck_ = false;
+                }
+                rebindRequested = rebindPending_;
+                if (rebindRequested) {
+                    reboundSession = std::move(rebindSession_); rebindPending_ = false;
+                }
+            }
             // Synchronize same-process account metadata without resetting mode,
             // startup/crash budgets, helper ownership or the Steam observation.
             if (initialized && sameSession(next, session)) session.account = next.account;
@@ -309,6 +355,33 @@ class Runtime {
                 resumeBudget.begin(GetTickCount64());
                 budget.pause(); modeWindow.park(); hasConfirmedMode = false;
                 publish(nextLink, next, "waiting-steam-ui", "resume-css-settle-delay", 0);
+            }
+            const auto awaitingResumeDesktop = [&] {
+                return resumeGeneration && resumePower.generation && !resumeNeedsFreshMode && resumeBudget.used() &&
+                    resumeBudget.timeout(GetTickCount64()) != INFINITE && config_.readMode && next.pid && nextLink.enabled &&
+                    sameSession(next, resumeTarget) && nextLink == link && !manualRecheck && !rebindRequested &&
+                    !idleHelper && !readOnlyHandoff && !unconfirmedUse && !exitParked && !recoveringExit && !recovery.pending();
+            };
+            const auto parkDesktopResume = [&](const ModeSample& mode) {
+                if (mode.mode != UiMode::Desktop || !mode.timing.matches(resumePower)) return false;
+                std::lock_guard lock(stateMutex_);
+                if (stopping_ || !(desired_ == next) || resumeRecheck_ || manualRecheck_ || rebindPending_ ||
+                    !ymcc::sleeppower::powerCurrent(config_.powerReader, mode.timing.power)) return false;
+                // Stop only the remaining CSS timers, not the public observer,
+                // the mode edge tracker or an independently requested use.
+                resumeBudget.pause();
+                return true;
+            };
+            // An unchanged Desktop may publish after the last cache probe and
+            // send no mode-change callback. Try the cache before invalidating it.
+            if (awaitingResumeDesktop() && resumeBudget.timeout(GetTickCount64()) == 0 &&
+                !(hasConfirmedMode && confirmedSession == next && confirmedMode.mode == UiMode::BigPicture)) {
+                try {
+                    auto cached = config_.readMode(next);
+                    if (parkDesktopResume(cached)) {
+                        hasConfirmedMode = true; confirmedSession = next; confirmedMode = std::move(cached);
+                    }
+                } catch (...) {}
             }
             // A completed manual edit gets its existing read-only handoff first.
             // Refused handoff leaves the original resume slot untouched.
@@ -477,6 +550,13 @@ class Runtime {
                     // or let a notification authorize a different Steam process.
                     if (!allowed()) { modeWindow.reset(); continue; }
                     const bool entered = delivered ? modeWindow.confirmed(GetTickCount64(), mode) : modeWindow.finish(GetTickCount64(), mode);
+                    if (mode.mode == UiMode::Desktop && awaitingResumeDesktop()) {
+                        if (delivered && !mode.timing.publishedTick) {
+                            // The ordinary Desktop notification has no Ready
+                            // provenance; only the exact-session cache can settle it.
+                            try { (void)parkDesktopResume(config_.readMode(session)); } catch (...) {}
+                        } else (void)parkDesktopResume(mode);
+                    }
                     // A manual request can arrive before Steam reaches BPM.
                     // Its old-mode/unknown probe parked the budget; the first
                     // confirmed BPM must resume it even when ModeWindow already
@@ -502,7 +582,8 @@ class Runtime {
                                     sameScope ? mode.timing.readerReturnedTick : 0, sameScope ? mode.timing.publishedTick : 0,
                                     delivered && sameScope ? mode.enqueuedTick : 0, GetTickCount64()};
                             }
-                            publish(link, session, "applying", "bigpicture-entered", 0, 0, false, handoff);
+                            // This edge immediately enters the bounded guard probe below.
+                            publish(link, session, "applying", "bigpicture-entered", 0, 0, false, handoff, false);
                         }
                     }
                 }
@@ -541,11 +622,13 @@ class Runtime {
                 const bool startupCandidate = backend || result.phase == "missing";
                 if (!backend && result.phase != "idle" && result.phase != "waiting-manual-steam" && result.phase != "waiting-steam-ui" && budget.timeout(GetTickCount64()) == INFINITE) result.phase = "exhausted";
                 if (recoveringExit && result.phase == "exhausted") { exitParked = true; recoveringExit = false; budget.pause(); }
-                publish(link, session, result.phase, result.reason, budget.used(), result.pid, result.started);
+                const bool helperCandidate = startupCandidate && !idleRequested && (config_.confirmObserved || config_.confirmIdle);
+                const bool probeOnly = helperCandidate && (result.phase == "running" || result.phase == "missing");
+                publish(link, session, result.phase, result.reason, budget.used(), result.pid, result.started, {}, !probeOnly);
                 // Exactly one startup use for either external or YMCC Steam.
                 // Missing CSS is started only for an enabled verified session;
                 // an idle receipt never replenishes it; abnormal exit recovery has its own fixed cap.
-                if (startupCandidate && !idleRequested && (config_.confirmObserved || config_.confirmIdle) && attemptAllowed() && readLink(config_.linkFile) == link) {
+                if (helperCandidate && attemptAllowed() && readLink(config_.linkFile) == link) {
                     idleRequested = true; budget.pause();
                     helperIdentity.reset();
                     try {
@@ -566,6 +649,9 @@ class Runtime {
                         idleRequested = false; budget.resume(GetTickCount64());
                         publish(link, session, "waiting-appearance", "appearance-helper-unavailable", budget.used(), result.pid);
                     }
+                } else if (probeOnly) {
+                    // No helper owns a later result: retain the original card observation.
+                    publish(link, session, result.phase, result.reason, budget.used(), result.pid, result.started);
                 }
             }
             HANDLE handles[5]{stop_, wake_}; DWORD count = 2;
@@ -702,8 +788,7 @@ public:
     }
     bool requestPublicResumeRecovery(const ymcc::steamsession::Session& session, const ymcc::sleeppower::SharedPowerV1& power) {
         std::lock_guard lock(stateMutex_);
-        if (stopping_ || !ymcc::sleeppower::powerCurrent(config_.powerReader, power) ||
-            power.generation < lastResumeGeneration_) return false;
+        if (stopping_ || power.generation < lastResumeGeneration_) return false;
         if (lastResumePower_.generation) {
             if (power.suspendSerial < lastResumePower_.suspendSerial ||
                 power.observedNotificationSequence < lastResumePower_.observedNotificationSequence ||
@@ -711,6 +796,7 @@ public:
                  power.suspendSerial == lastResumePower_.suspendSerial &&
                  power.observedNotificationSequence == lastResumePower_.observedNotificationSequence)) return false;
         }
+        if (!ymcc::sleeppower::powerCurrent(config_.powerReader, power)) return false;
         // Consume verified OFF/absent scopes too. Revision-only publication is
         // metadata; only the public notification/suspend boundary grants a wave.
         lastResumeGeneration_ = power.generation; lastResumePower_ = power;

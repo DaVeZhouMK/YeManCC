@@ -22,7 +22,7 @@ const frameStart = source.indexOf('function waitForRenderFrame()');
 const frameEnd = source.indexOf('// A route-ready signal', frameStart);
 const code = transformSync(source.slice(frameStart, frameEnd) + source.slice(start, end), { loader: 'ts', target: 'es2020' }).code;
 function fixture(options: { timeout?: number; content?: boolean; child?: boolean; ipcFail?: boolean; native?: boolean } = {}) {
-  const route = deferred<boolean>(), app = deferred<boolean>(), chunks = deferred<void>();
+  const route = deferred<boolean>(), app = deferred<boolean>();
   const page = deferred<void>();
   const barrier = new StartupWorkBarrier();
   void barrier.track(() => page.promise).catch(() => {});
@@ -36,10 +36,10 @@ function fixture(options: { timeout?: number; content?: boolean; child?: boolean
     isNativeRuntime: options.native !== false,
     lastSettingsStartupError: '',
     initialRouteReady: route.promise, appStartupReady: app.promise, initialPageWork: barrier,
-    router: { isReady: () => route.promise, currentRoute: { value: {
+    router: { currentRoute: { value: {
       name: options.child ? 'button-mapping-shortcuts' : 'schedule', fullPath: '/schedule',
     } } },
-    preloadStartupRoutes: () => { state.preloadCalls++; return chunks.promise; },
+    preloadStartupRoutes: () => { state.preloadCalls++; throw new Error('Unopened pages must not load during startup'); },
     nextTick: () => Promise.resolve(),
     settleStartup: (work: Promise<boolean>) => settleStartup(work, options.timeout ?? 1000),
     showRouteFallback: () => { state.fallback = true; },
@@ -50,29 +50,29 @@ function fixture(options: { timeout?: number; content?: boolean; child?: boolean
       if (options.ipcFail) throw new Error('simulated lost acknowledgement');
       return { ok: true };
     },
+    bindGyroTelemetryDocument: () => {},
     window: win, document: doc, routeEpoch: 1,
     requestAnimationFrame: (callback: () => void) => setTimeout(callback, 0),
     cancelAnimationFrame: clearTimeout, clearTimeout,
     console: { warn: () => {} },
   };
   const run = new Function(...Object.keys(deps), `${code}; return signalInitialRenderReady;`)(...Object.values(deps));
-  const finish = () => { route.resolve(true); app.resolve(true); chunks.resolve(); page.resolve(); };
-  return { route, app, chunks, page, state, win, run, finish };
+  const finish = () => { route.resolve(true); app.resolve(true); page.resolve(); };
+  return { route, app, page, state, win, run, finish };
 }
 
 async function main() {
   const a = fixture(); const run = a.run();
   a.route.resolve(true); a.app.resolve(true); await delay();
-  check(a.state.receipts.length === 0, 'route+app do not bypass lazy chunks and first-page work');
-  a.chunks.resolve(); await delay();
-  check(a.state.receipts.length === 0, 'preloaded route is not async page-initialization completion');
+  check(a.state.receipts.length === 0, 'route+app do not bypass first-page work');
   a.page.resolve(); await run;
   check(a.state.receipts[0]?.routeReady === true, 'all frontend prerequisites release');
+  check(a.state.preloadCalls === 0, 'unopened pages do not participate in native readiness');
   check(a.state.receipts[0]?.navigationId === '9007199254740999', '64-bit navigation identity stays string');
   check(a.win.__YMCC_STARTUP_READY__ === a.state.receipts[0], 'lost-message probe sees same durable receipt');
 
   const b = fixture(); const br = b.run();
-  b.route.resolve(true); b.chunks.resolve(); b.page.resolve(); await delay();
+  b.route.resolve(true); b.page.resolve(); await delay();
   check(b.state.receipts.length === 0, 'page ready cannot bypass App startup');
   b.app.resolve(true); await br;
   check(b.state.receipts[0]?.routeReady === true, 'reverse signal ordering completes');
@@ -83,9 +83,8 @@ async function main() {
   c.finish(); await delay();
   check(c.state.receipts.length === 1 && c.state.fallback, 'late completion cannot remove failure or acknowledge twice');
 
-  const d = fixture(); const dr = d.run(); d.route.resolve(true); d.app.resolve(true); d.page.resolve();
-  d.chunks.reject(new Error('chunk missing')); await dr;
-  check(d.state.fallback && d.state.receipts[0]?.fallbackVisible, 'failed route chunk is actionable failure, not blank content');
+  const d = fixture(); const dr = d.run(); d.route.resolve(false); d.app.resolve(true); d.page.resolve(); await dr;
+  check(d.state.fallback && d.state.receipts[0]?.fallbackVisible, 'failed initial route leaves an actionable fallback');
 
   const e = fixture({ content: false }); const er = e.run(); e.finish(); await er;
   check(e.state.fallback && !e.state.receipts[0]?.routeReady, 'empty content cannot report ready');
@@ -110,6 +109,7 @@ async function main() {
   const elements = new Map<string, any>(); let reloads = 0;
   function element() {
     const e: any = { id: '', style: {}, dataset: {}, children: [], textContent: '',
+      get isConnected() { return elements.get(this.id) === this; },
       setAttribute() {}, append(...children: any[]) { this.children.push(...children); },
       appendChild(child: any) { this.children.push(child); elements.set(child.id, child); },
       replaceChildren() { this.children = []; }, remove() { elements.delete(this.id); } };
@@ -130,7 +130,7 @@ async function main() {
   check(stopped, 'LT/RB is consumed by failure surface, not hidden page');
   fallback.children[0].children[1].onclick();
   check(reloads === 1, 'fallback retry reloads document');
-  elements.clear(); showRouteFallback('route', '/settings'); clearRouteFallback();
+  fallback.remove(); showRouteFallback('route', '/settings'); clearRouteFallback();
   check(!elements.has('yemancc-route-fallback'), 'ordinary route recovery still clears transient errors');
   check(!appRoot.inert && listeners.size === 0, 'ordinary recovery returns input ownership and inert state');
 

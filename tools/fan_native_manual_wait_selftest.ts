@@ -47,6 +47,27 @@ function settledAction(f:Awaited<ReturnType<typeof settledFixture>>,action:Settl
 function noSettledWrites(f:Awaited<ReturnType<typeof settledFixture>>){assert.deepEqual(f.host.calls.filter(call=>['open','events','acquire','enable','preset','resume','close'].includes(call)),[],'native cleanup is not hardware write permission');assert.equal(f.starts(),1);assert.equal(f.stops(),0);assert.deepEqual(f.host.closedOwners,[]);}
 function sameSettledOwner(f:Awaited<ReturnType<typeof settledFixture>>){assert.equal(f.starts(),1);assert.equal(f.stops(),0);assert.deepEqual(f.host.closedOwners,[]);assert(!f.host.calls.includes('resume'),'settled current receipt must not mint another Host resume');}
 async function main(){
+ await check('public-grant first Win5 adjustment waits on the original Host',async()=>{
+  const f=make(1500),observed=defer(),originalRead=f.host.getState.bind(f.host);
+  let waiting=true,pending:Promise<unknown>|undefined;
+  try {
+   f.host.factoryType='HandheldCompanion.Devices.GPDWin5';await f.life.start({manualRecovery:true});
+   await f.life.apply(curve);f.life.setPowerGeneration(7);f.life.observePowerBoundary('suspending',7);
+   f.life.observePowerBoundary('resume-ready',7);f.set(state('ready',7));
+   f.host.settled('ready');f.host.generation=7;f.host.calls.length=0;f.host.writtenCurves.length=0;
+   f.host.getState=async()=>{const view=await originalRead();if(!waiting)return view;observed.resolve();return {...view,
+    state:'AwaitingControl',resumePhase:'AwaitingControl',powerOperationStatus:'superseded',
+    powerOperationOutcome:'public-power-superseded',controlAccepting:false,resumeAwaitingPublicGrant:true};};
+   pending=f.life.apply(curve).then(()=>null,error=>error);
+   await bounded(observed.promise);await delay(25);
+   assert.deepEqual(f.host.calls.filter(call=>['open','events','acquire','enable','resume','close'].includes(call)),[]);
+   assert.equal(f.wakeCalls(),0,'waiting started a new Native wake');
+   waiting=false;
+   const result=await bounded(pending);assert.equal(result,null,String(result));
+   assert.deepEqual(f.host.writtenCurves,[curve]);assert.equal(f.host.calls.filter(x=>x==='acquire').length,1);
+   assert.equal(f.starts(),1);assert.equal(f.stops(),0);assert.deepEqual(f.host.closedOwners,[]);
+  } finally {waiting=false;await pending;f.host.getState=originalRead;await cleanup(f);}
+ });
  for(const [mode,action,family] of [['ready','start','XboxROGAllyX'],['ready','apply','MSI.ClawCG3EM'],['ready','preset','Lenovo.LegionGo'],['idle','start','GPD.GPDWin5'],['idle','apply','OneXPlayerX1Mini'],['idle','preset','AYANEO2021']] as const)await check('settled current '+mode+' first '+action+' waits through residual native cleanup '+family,async()=>{
   const f=await settledFixture(mode,800,family);let pending:Promise<unknown>|undefined,finished=false,failure='';
   try{

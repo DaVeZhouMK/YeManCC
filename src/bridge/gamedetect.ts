@@ -1,8 +1,8 @@
 // Shared game detection for all pages.
 // Process enumeration is performed by the native shell so polling never
 // starts a short-lived PowerShell process.
-import { invoke } from './ipc';
-import { getSharedPowerLifecycle, onSharedPowerLifecycle, isSharedPowerLifecycleAdmitted } from './powerLifecycleState';
+import { invoke, IpcRemoteError } from './ipc';
+import { getSharedPowerLifecycle, onSharedPowerLifecycle, isSharedPowerLifecycleAdmitted, requestSharedPowerLifecycleReconcile } from './powerLifecycleState';
 import gameTitlePolicy from '../../PowerControl/GameTitlePolicy.json';
 import { registerScheduledTask } from '@/scheduler';
 
@@ -101,14 +101,19 @@ let lastNativeReadAt = -Infinity;
 let nextEventReadAt = 0;
 let recoveryNotBefore = 0;
 let recoveryAttempts = 0;
+let recoveryPower: ReturnType<typeof getSharedPowerLifecycle> = null;
+let rejectedPower: ReturnType<typeof getSharedPowerLifecycle> = null;
 let backgroundTimer: ReturnType<typeof setTimeout> | null = null;
 let backgroundTimerAt = 0;
 
 
+function samePowerScope(a: ReturnType<typeof getSharedPowerLifecycle>, b: ReturnType<typeof getSharedPowerLifecycle>): boolean {
+  return !!a && !!b && a.generation === b.generation && a.observedNotificationSequence === b.observedNotificationSequence &&
+    a.suspendSerial === b.suspendSerial;
+}
 function powerMatches(captured: ReturnType<typeof getSharedPowerLifecycle>): boolean {
   const now = getSharedPowerLifecycle();
-  return isSharedPowerLifecycleAdmitted(captured) && isSharedPowerLifecycleAdmitted(now) &&
-    captured?.generation === now?.generation && captured?.observedNotificationSequence === now?.observedNotificationSequence;
+  return isSharedPowerLifecycleAdmitted(captured) && isSharedPowerLifecycleAdmitted(now) && samePowerScope(captured, now);
 }
 function readCurrent(owner: ReadOwner): boolean { return !owner.revoked && (!owner.power || powerMatches(owner.power)); }
 // Readiness observers can recover an established target, but do not start cold discovery or polling.
@@ -125,7 +130,7 @@ function retireReads(): void {
 }
 function releasePowerIfIdle(): void {
   if (listeners.size || readinessListeners.size || activeReads.size || !stopPower) return;
-  const release = stopPower; stopPower = null; release();
+  const release = stopPower; stopPower = null; rejectedPower = null; release();
 }
 function ensurePower(): void {
   if (stopPower || startingPower) return;
@@ -133,20 +138,47 @@ function ensurePower(): void {
   let observed = false;
   try { stopPower = onSharedPowerLifecycle(power => {
     const initial = !observed; observed = true;
+    const admitted = isSharedPowerLifecycleAdmitted(power);
     retireReads();
-    if (!isSharedPowerLifecycleAdmitted(power)) { cacheDirty = true; cancelBackgroundRead(); }
-    for (const resolve of [...initialPowerWaiters.values()]) resolve();
-    initialPowerWaiters.clear();
+    if (!admitted) { cacheDirty = true; cancelBackgroundRead(); }
+    else {
+      // An exhausted retry budget belongs to the previous sleep scope.
+      // Notification sequence changes alone do not grant another budget.
+      if (recoveryPower && (recoveryPower.generation !== power.generation ||
+          recoveryPower.suspendSerial !== power.suspendSerial)) {
+        recoveryAttempts = 0;
+        recoveryNotBefore = 0;
+        cancelBackgroundRead();
+      }
+      recoveryPower = power;
+    }
+    for (const finish of [...initialPowerWaiters.values()]) finish();
     notifyReadiness();
-    if (isSharedPowerLifecycleAdmitted(power)) {
+    if (admitted) {
       if (listeners.size && (!initial || stopPollSchedule)) void refreshBackground(initial ? 'poll' : 'event');
       else if (!listeners.size && hasBackgroundDemand() && !isGameStatusCurrent()) void refreshBackground('event');
     }
-  }, { observeNotificationSequence: true }); } finally { startingPower = false; }
+  }, {
+    observeNotificationSequence: true,
+    observeSuspendSerial: true,
+    onReadyRecheck: () => {
+      if (hasBackgroundDemand() && !isGameStatusCurrent()) void refreshBackground('event');
+    },
+  }); } finally { startingPower = false; }
 }
 async function admitRead(owner: ReadOwner): Promise<void> {
   ensurePower();
-  if (!getSharedPowerLifecycle()) await new Promise<void>(resolve => initialPowerWaiters.set(owner, resolve));
+  // Shared observation may keep retrying while there is demand. An explicit
+  // game selection must release its own wait if the first snapshot never arrives.
+  if (!getSharedPowerLifecycle()) await new Promise<void>(resolve => {
+    const finish = () => {
+      if (!initialPowerWaiters.delete(owner)) return;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, DETECTION_TIMEOUT_MS);
+    initialPowerWaiters.set(owner, finish);
+  });
   if (owner.revoked || !isSharedPowerLifecycleAdmitted(getSharedPowerLifecycle())) throw new Error('Game target power admission unavailable');
   owner.power ??= getSharedPowerLifecycle();
   if (!readCurrent(owner)) throw new Error('Game target power admission expired');
@@ -259,6 +291,7 @@ function publish(observation: Observation, owner: ReadOwner): void {
   cacheDirty = false;
   recoveryAttempts = 0;
   recoveryNotBefore = 0;
+  rejectedPower = null;
   cancelBackgroundRead();
   committedSelectionEpoch = selectionEpoch;
   notifyReadiness();
@@ -319,6 +352,8 @@ async function observeNative(preferredPid: number, epoch: number, owner: ReadOwn
     // Superseded selections that never reached native must not mutate its valve.
     if (epoch !== selectionEpoch) return followNewSelection(epoch);
     await admitRead(owner);
+    if (epoch !== selectionEpoch) return followNewSelection(epoch);
+    if (!readCurrent(owner)) throw new Error('Game target power admission expired');
     cancelBackgroundRead();
     lastNativeReadAt = performance.now();
     const invalidationAtStart = invalidationEpoch;
@@ -326,7 +361,8 @@ async function observeNative(preferredPid: number, epoch: number, owner: ReadOwn
     const raw = await invoke<NativeGameSnapshot | null>('game.detect', {
       ...(preferredPid > 0 ? { pid: preferredPid } : {}), automatic,
       expectedPowerGeneration: owner.power!.generation,
-      expectedPowerNotificationSequence: owner.power!.observedNotificationSequence, 
+      expectedPowerNotificationSequence: owner.power!.observedNotificationSequence,
+      ...(owner.power!.suspendSerial === undefined ? {} : { expectedPowerSuspendSerial: owner.power!.suspendSerial }),
     }, { timeoutMs: DETECTION_TIMEOUT_MS, signal: owner.cancellation.signal });
     if (!readCurrent(owner)) throw new Error('Game target power admission expired');
     // A manual reader may retain an automatic request after it was sent.
@@ -343,7 +379,8 @@ async function observeNative(preferredPid: number, epoch: number, owner: ReadOwn
     const observation = decodeSnapshot(raw, preferredPid);
     const floor = Math.max(currentGeneration, notifiedGeneration);
     if (observation.generation < floor) {
-      if (currentGeneration >= notifiedGeneration && initialized && !cacheDirty) return getCurrentGame();
+      // A stale reply cannot confirm the display cache after public power changed.
+      if (isGameStatusCurrent()) return getCurrentGame();
       if (attempt < 2) continue;
       throw new Error('Game target changed while reading');
     }
@@ -395,6 +432,12 @@ function readAuthority(preferredPid = 0, background = false): Promise<DetectedGa
     if (epoch === selectionEpoch && readCurrent(owner)) {
       cacheDirty = true;
       if (isSharedPowerLifecycleAdmitted(getSharedPowerLifecycle())) recoverAfterFailure();
+      // Native may have revoked this scope even though its publication did not reach the renderer.
+      if (owner.power && !samePowerScope(owner.power, rejectedPower) && error instanceof IpcRemoteError &&
+          (error.message === 'GAME_TARGET_POWER_ADMISSION_UNAVAILABLE' || error.message === 'GAME_TARGET_POWER_ADMISSION_EXPIRED')) {
+        rejectedPower = owner.power;
+        requestSharedPowerLifecycleReconcile('game-detect-power-denied');
+      }
       notifyReadiness();
     }
     throw error;
@@ -451,7 +494,7 @@ export function subscribeGameStatus(cb: GameStatusListener): () => void {
   if (listeners.size > 0 && !stopPollSchedule) {
     stopPollSchedule = registerScheduledTask(
       'game-status', POLL_MS, () => refreshBackground('poll'),
-      { pauseWhenHidden: false, runImmediately: true },
+      { pauseWhenHidden: false, runImmediately: true, releaseReadOnPowerChange: true },
     );
   }
   return () => {
@@ -478,10 +521,11 @@ if (typeof window !== 'undefined') {
       // shells use generation ordering; old shells retain the strict result.
       if (!selectionRead) clearGameCache();
     }
-    reconcile();
+    // A late target hint can invalidate a read that already finished on Ready.
+    void refreshBackground('event');
   });
   for (const event of ['ipc:window.shown', 'ipc:window.restored', 'ipc:window.summoned',
-    'ipc:window.focus', 'ipc:power.resumed']) window.addEventListener(event, reconcile);
+    'ipc:window.focus']) window.addEventListener(event, reconcile);
   if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') reconcile();
   });

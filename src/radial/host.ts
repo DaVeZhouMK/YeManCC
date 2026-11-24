@@ -2,7 +2,7 @@ import type { Router } from 'vue-router';
 import { isRadialTestingEnabled } from './testingState';
 import { invoke, isNativeRuntime, on } from '@/bridge/ipc';
 import { powerLifecycle, shell, windowApi } from '@/bridge/api';
-import { onSharedPowerLifecycle, isSharedPowerLifecycleAdmitted } from '@/bridge/powerLifecycleState';
+import { onSharedPowerLifecycle, isSharedPowerLifecycleAdmitted, type SharedPowerLifecycleSnapshot } from '@/bridge/powerLifecycleState';
 import { getSettingsGeneration } from '@/bridge/settingsRepository';
 import { getContinuousPerformanceSnapshot, updateContinuousPerformanceControls } from '@/bridge/performanceSchedule';
 import { getTdpExecutionCapability } from '@/bridge/yeman';
@@ -18,12 +18,16 @@ import { createLocalRadialFanActions } from './fanHost';
 import { onFanMirrorDisplay, onFanMirrorUiGate } from '@/bridge/deckyFanDisplay';
 import { emptyRadialPerformance, radialPerformanceFrame, applyRadialPerformance, type RadialPerformanceFrame, type RadialPerformanceIntent } from './performance';
 interface Identity {wheelId:number;nonce:string}
-interface Session extends Identity {settings:RadialSettings;generation:number;powerGeneration:number;tdp:TdpDraft;performance:RadialPerformanceFrame;fan:RadialFanFrame;input:RadialInputFrame;utilities:RadialUtilities;snapshot?:ContinuousPerformanceSnapshot;pending:boolean;seen:Set<string>}
+interface PowerPeriod {powerGeneration:number;powerSuspendSerial:number}
+interface SummonRequest extends Partial<PowerPeriod> {source?:string;x?:number;y?:number;issuedAt?:number;expiresAt?:number}
+interface Session extends Identity, PowerPeriod {settings:RadialSettings;generation:number;tdp:TdpDraft;performance:RadialPerformanceFrame;fan:RadialFanFrame;input:RadialInputFrame;utilities:RadialUtilities;snapshot?:ContinuousPerformanceSnapshot;pending:boolean;seen:Set<string>}
+const periodAdmitted=(period:PowerPeriod,power:SharedPowerLifecycleSnapshot)=>isSharedPowerLifecycleAdmitted(power)&&!!power.inputReady&&
+  power.generation===period.powerGeneration&&power.suspendSerial===period.powerSuspendSerial;
 /** Main-document action owner. The overlay imports neither this file nor the
  * scheduler/settings tree, so there is only one performance scheduling owner. */
 export function startRadialHost(router:Router){
   if (!isRadialTestingEnabled()) return { stop() {} };
-  let ended=false,epoch=0,opening=false,session:Session|null=null;
+  let ended=false,epoch=0,opening:PowerPeriod|null=null,session:Session|null=null;
   // The host can remain admitted while the wheel is closed. Only an actual
   // session owns the existing two-second keep-alive and its pending read.
   let heartbeat:ReturnType<typeof setInterval>|null=null;
@@ -54,40 +58,49 @@ export function startRadialHost(router:Router){
   const utilityActions=createLocalRadialUtilityActions(()=>!ended);
   const utilityCheckpoint=(s:Session,expiresAt?:number)=>{if(ended||session!==s||s.generation!==getSettingsGeneration()||expiresAt!==undefined&&expiresAt<=Date.now())throw Error('菜单操作会话已结束或过期');};
   async function refreshUtility(s:Session,group:RadialUtilityGroup,force=false){if(s.pending)return;try{const next=await utilityActions.read(group,()=>utilityCheckpoint(s),force);if(session!==s||s.pending||next.sourceRevision===s.utilities[group].sourceRevision)return;s.utilities[group]=next;}catch(e){if(session!==s)return;s.utilities[group]={...emptyRadialUtilities()[group],notice:(e as Error).message};}
-    if(session===s&&!s.pending)await invoke('radial.frame',{...identity(s),frame:frame(s)},{timeoutMs:2500}).catch(()=>close());
+    if(session===s&&!s.pending)await invoke('radial.frame',{...identity(s),frame:frame(s)},{timeoutMs:2500}).catch(()=>{if(session===s)void close();});
   }
   const inputCheckpoint=(s:Session,expiresAt?:number)=>{if(ended||session!==s||s.generation!==getSettingsGeneration()||expiresAt!==undefined&&expiresAt<=Date.now())throw Error('输入操作会话已结束或过期');};
   async function refreshInput(s:Session){if(s.pending)return;try{const next=await inputActions.read(()=>inputCheckpoint(s));if(session!==s||s.pending||next.sourceRevision===s.input.sourceRevision)return;s.input=next;}catch(e){if(session!==s)return;s.input={...emptyRadialInput(),notice:(e as Error).message};}
-    if(session===s&&!s.pending)await invoke('radial.frame',{...identity(s),frame:frame(s)},{timeoutMs:2500}).catch(()=>close());
+    if(session===s&&!s.pending)await invoke('radial.frame',{...identity(s),frame:frame(s)},{timeoutMs:2500}).catch(()=>{if(session===s)void close();});
   }
   const fanCheckpoint=(s:Session,expiresAt?:number)=>{if(ended||session!==s||s.generation!==getSettingsGeneration()||expiresAt!==undefined&&expiresAt<=Date.now())throw Error('风扇操作会话已结束或过期');};
   async function refreshFan(s:Session){if(s.pending)return;try{const next=await fanActions.read(()=>fanCheckpoint(s));if(session!==s||s.pending||next.sourceRevision===s.fan.sourceRevision)return;s.fan=next;}catch(e){if(session!==s)return;s.fan={...emptyRadialFan(),notice:(e as Error).message};}
-    if(session===s&&!s.pending)await invoke('radial.frame',{...identity(s),frame:frame(s)},{timeoutMs:2500}).catch(()=>close());
+    if(session===s&&!s.pending)await invoke('radial.frame',{...identity(s),frame:frame(s)},{timeoutMs:2500}).catch(()=>{if(session===s)void close();});
   }
   const frame=(s:Session)=>({settings:s.settings,tdp:s.tdp,performance:s.performance,fan:s.fan,input:s.input,utilities:s.utilities,feedback:s.settings.feedback});
   const matches=(data:Identity)=>!!session&&session.wheelId===data.wheelId&&session.nonce===data.nonce;
   const identity=(s:Identity)=>({wheelId:s.wheelId,nonce:s.nonce});
-  async function close(){++epoch;const s=session;session=null;stopHeartbeat();if(s)await invoke('radial.close',identity(s),{timeoutMs:2500}).catch(()=>undefined);}
+  async function closeSession(){const s=session;session=null;stopHeartbeat();if(s)await invoke('radial.close',identity(s),{timeoutMs:2500}).catch(()=>undefined);}
+  async function close(){++epoch;opening=null;await closeSession();}
   async function configure(){if(!isNativeRuntime||ended)return;const value=await loadRadialSettings();if(ended)return;await invoke('radial.configure',{enabled:value.enabled,monitorHold:value.monitorHold,holdMs:value.holdMs,fullScreenHold:value.fullScreenHold},{timeoutMs:2500});if(session)await close();}
   async function loadTdp(s:Session){
     try{const capability=await getTdpExecutionCapability(true),snapshot=await getContinuousPerformanceSnapshot('effective');if(ended||session!==s)return;
       s.snapshot=snapshot;s.performance=radialPerformanceFrame(snapshot,capability,crypto.randomUUID());const min=Math.max(snapshot.hardwareMinimum,capability.minPL1),max=Math.min(snapshot.hardwareMaximum,capability.maxPL1,snapshot.bank?.tdpCeiling??0);
       s.tdp={available:capability.ready&&!!snapshot.side&&!!snapshot.bank&&min<=max,min,max,value:snapshot.bank?.tdp??min,label:(snapshot.identity.scope==='dedicated'?(snapshot.gameName||'游戏专属'):'全局')+' · '+(snapshot.side==='ac'?'接电':'电池'),reason:capability.ready?'当前电源或游戏策略不可调节':capability.error||'TDP 写入通道未就绪'};
     }catch(e){if(session!==s)return;s.tdp={...emptyTdp(),label:'TDP 不可用',reason:(e as Error).message};s.performance={...emptyRadialPerformance(),feedback:(e as Error).message};}
-    if(session===s)await invoke('radial.frame',{...identity(s),frame:frame(s)},{timeoutMs:2500}).catch(()=>close());
+    if(session===s)await invoke('radial.frame',{...identity(s),frame:frame(s)},{timeoutMs:2500}).catch(()=>{if(session===s)void close();});
   }
-  async function summon(data:{source?:string;x?:number;y?:number;issuedAt?:number;expiresAt?:number;powerGeneration?:number}){
-    if(ended||!isNativeRuntime||!Number.isSafeInteger(data.issuedAt)||!Number.isSafeInteger(data.expiresAt)||data.issuedAt!>Date.now()+500||data.expiresAt!<=Date.now()||data.expiresAt!-data.issuedAt!>5000)return;if(session){if(data.source==='shortcut'||data.source==='settings'||!data.source)await close();return;}if(opening)return;opening=true;const ticket=++epoch;
-    try{const [settings,power]=await Promise.all([loadRadialSettings(),powerLifecycle.get()]);if(ended||ticket!==epoch||!settings.enabled||!isSharedPowerLifecycleAdmitted(power)||!power.inputReady||power.generation!==data.powerGeneration||data.expiresAt!<=Date.now())return;
-      const nonce=crypto.randomUUID(),s:Session={wheelId:0,nonce,settings,generation:getSettingsGeneration(),powerGeneration:power.generation,tdp:emptyTdp(),performance:emptyRadialPerformance(),fan:emptyRadialFan(),input:emptyRadialInput(),utilities:emptyRadialUtilities(),pending:false,seen:new Set()};
+  async function summon(data:SummonRequest){
+    if(ended||!isNativeRuntime||!Number.isSafeInteger(data.issuedAt)||!Number.isSafeInteger(data.expiresAt)||data.issuedAt!>Date.now()+500||data.expiresAt!<=Date.now()||data.expiresAt!-data.issuedAt!>5000||
+      !Number.isSafeInteger(data.powerGeneration)||data.powerGeneration!<=0||!Number.isSafeInteger(data.powerSuspendSerial)||data.powerSuspendSerial!<0)return;
+    const period={powerGeneration:data.powerGeneration!,powerSuspendSerial:data.powerSuspendSerial!};
+    if(session?.powerGeneration===period.powerGeneration&&session.powerSuspendSerial===period.powerSuspendSerial){
+      if(data.source==='shortcut'||data.source==='settings'||!data.source)await close();return;
+    }
+    if(opening)return;opening=period;const ticket=++epoch;
+    try{const [settings,power]=await Promise.all([loadRadialSettings(),powerLifecycle.get()]);if(ended||ticket!==epoch||!settings.enabled||!periodAdmitted(period,power)||data.expiresAt!<=Date.now())return;
+      if(session)await closeSession();
+      if(ended||ticket!==epoch||data.expiresAt!<=Date.now())return;
+      const nonce=crypto.randomUUID(),s:Session={wheelId:0,nonce,settings,generation:getSettingsGeneration(),...period,tdp:emptyTdp(),performance:emptyRadialPerformance(),fan:emptyRadialFan(),input:emptyRadialInput(),utilities:emptyRadialUtilities(),pending:false,seen:new Set()};
       const source=data.source==='monitor'?'monitor':data.source==='fullscreen'?'fullscreen':data.source==='fullscreen-raw'?'fullscreen-raw':'shortcut';
-      const receipt=await invoke<{id:number;nonce:string}>('radial.create',{nonce,source,x:Number.isFinite(data.x)?Math.round(data.x!):0,y:Number.isFinite(data.y)?Math.round(data.y!):0,frame:frame(s)},{timeoutMs:7000});
+      const receipt=await invoke<{id:number;nonce:string}>('radial.create',{nonce,source,...period,x:Number.isFinite(data.x)?Math.round(data.x!):0,y:Number.isFinite(data.y)?Math.round(data.y!):0,frame:frame(s)},{timeoutMs:7000});
       if(!Number.isSafeInteger(receipt.id)||receipt.id<1||receipt.nonce!==nonce)throw new Error('轮盘窗口回执无效');s.wheelId=receipt.id;
       if(ended||ticket!==epoch){await invoke('radial.close',identity(s));return;}session=s;startHeartbeat(s);void loadTdp(s);void refreshFan(s);void refreshInput(s);utilityActions.resetSession();void refreshUtility(s,'monitor.templates');void refreshUtility(s,'steam.controls',true);
-    }catch(e){console.warn('[radial] summon',e);}finally{opening=false;}
+    }catch(e){console.warn('[radial] summon',e);}finally{if(opening===period)opening=null;}
   }
   async function checkpoint(s:Session){if(ended||session!==s||s.generation!==getSettingsGeneration())throw new Error('会话或设置已变化，请重新呼出。');
-    const power=await powerLifecycle.get();if(!isSharedPowerLifecycleAdmitted(power)||power.generation!==s.powerGeneration||!power.inputReady)throw new Error('电源或输入状态已变化。');
+    const power=await powerLifecycle.get();if(!periodAdmitted(s,power))throw new Error('电源或输入状态已变化。');
     if(session!==s)throw new Error('菜单已经关闭。');const current=await loadRadialSettings();if(ended||session!==s||s.generation!==getSettingsGeneration()||current.revision!==s.settings.revision||!current.enabled)throw new Error('菜单设置已变化，请重新呼出。');
   }
   async function execute(data:Identity&{intent:unknown}){
@@ -152,16 +165,14 @@ export function startRadialHost(router:Router){
   const offUtility=utilityActions.observe(group=>{const s=session;if(s&&!s.pending)void refreshUtility(s,group);});
   const offInput=inputActions.observe(()=>{const s=session;if(s&&!s.pending)void refreshInput(s);});
   const offFanDisplay=onFanMirrorDisplay(refreshFanDisplay),offFanGate=onFanMirrorUiGate(refreshFanDisplay);
-  const offSummon=on<{source?:string;x?:number;y?:number;issuedAt?:number;expiresAt?:number;powerGeneration?:number}>('radial.summon-request',data=>{void summon(data);});
+  const offSummon=on<SummonRequest>('radial.summon-request',data=>{void summon(data);});
   const offIntent=on<Identity&{intent:unknown}>('radial.intent',data=>{void execute(data);});
-  const offClosed=on<Identity>('radial.closed',data=>{if(matches(data)){session=null;++epoch;stopHeartbeat();}});
-  let observedPowerGeneration:number|null=null;
+  const offClosed=on<Identity>('radial.closed',data=>{if(matches(data)){session=null;stopHeartbeat();}});
   const offPower=[onSharedPowerLifecycle(snapshot=>{
     if(ended)return;
-    const changedGeneration=observedPowerGeneration!==null&&snapshot.generation!==observedPowerGeneration;
-    observedPowerGeneration=snapshot.generation;
-    if(!isSharedPowerLifecycleAdmitted(snapshot)||snapshot.inputReady===false||changedGeneration||session&&snapshot.generation!==session.powerGeneration)void close();
-  }),on('power.sourceChanged',()=>{void close();})];
+    if(opening&&!periodAdmitted(opening,snapshot)){++epoch;opening=null;}
+    if(session&&!periodAdmitted(session,snapshot))void closeSession();
+  },{observeSuspendSerial:true}),on('power.sourceChanged',()=>{void close();})];
   const offPad=on<{connected?:boolean}>('gamepad.state',data=>{if(data.connected===false&&session)void close();});
   const settingsChanged=()=>{void configure().catch(e=>console.warn('[radial]',e));};window.addEventListener('ymcc:radial-settings-changed',settingsChanged);
   if(isNativeRuntime)void configure().catch(e=>console.warn('[radial]',e));

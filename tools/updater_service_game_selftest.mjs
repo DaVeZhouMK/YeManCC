@@ -9,7 +9,7 @@ const output=path.resolve(process.argv[2]||path.join(root,'../../Build/Validatio
 fs.mkdirSync(path.dirname(output),{recursive:true});
 await build({entryPoints:[path.join(root,'tools/updater_service_game_selftest.ts')],bundle:true,platform:'node',format:'esm',outfile:output,alias:{'@':path.join(root,'src')},plugins:[{name:'shared-game-memory-evidence',setup(b){
  b.onResolve({filter:/gamePolicyTarget$/},()=>({path:'gamePolicyTarget',namespace:'fixture'}));
- b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:`const f=globalThis.__updaterGameFixture;export const getPolicyGame=()=>f.game;export const isPolicyGameInitialized=()=>f.known;export const subscribePolicyGameStatus=fn=>{f.listeners.add(fn);if(f.known)fn(f.game);return()=>f.listeners.delete(fn);};export const isPolicyTargetCurrent=()=>false;export const detectPolicyGame=async()=>f.game;export const gamePolicyKey=()=>'';export const samePolicyGame=(a,b)=>a===b;`,loader:'js'}));
+ b.onLoad({filter:/.*/,namespace:'fixture'},()=>({contents:`const f=globalThis.__updaterGameFixture;export const getPolicyGame=()=>f.game;export const isPolicyGameInitialized=()=>f.known;export const isPolicyGameCurrent=isPolicyGameInitialized;export const subscribePolicyGameReadiness=fn=>{fn(f.known);return()=>{};};export const subscribePolicyGameStatus=fn=>{f.listeners.add(fn);if(f.known)fn(f.game);return()=>f.listeners.delete(fn);};export const isPolicyTargetCurrent=()=>false;export const detectPolicyGame=async()=>f.game;export const gamePolicyKey=()=>'';export const samePolicyGame=(a,b)=>a===b;`,loader:'js'}));
 }}]});
 const result=spawnSync(process.execPath,[output],{cwd:root,stdio:'inherit'});
 if(result.error)throw result.error;

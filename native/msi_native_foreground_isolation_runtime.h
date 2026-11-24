@@ -222,11 +222,12 @@ static void msiNativeForegroundScheduleRetryLocked() {
     retry.due=now+(1000ULL<<retry.attempts);
 }
 static ymcc::msi::NativeForegroundFacts msiNativeForegroundFacts();
-static bool msiNativeForegroundRepairReaderLocked(uint64_t power,uint64_t edge) {
+static bool msiNativeForegroundRepairReaderLocked(uint64_t power,uint64_t edge,uint64_t suspendSerial) {
     const auto current=[&] {
         const auto facts=msiNativeForegroundFacts();
         return ymcc::msi::nativeForegroundMayEnter(facts) &&
-            facts.currentPower==power && facts.currentEdge==edge;
+            facts.currentPower==power && facts.currentEdge==edge &&
+            g_sharedPowerSuspendSerial.load(std::memory_order_acquire)==suspendSerial;
     };
     if(!current())return false;
 #ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
@@ -503,11 +504,41 @@ static void msiNativeForegroundReceipt(const char* phase,const char* reason) {
     msiNativeForegroundAppendCycleDetails(detail,s);
     appendNativeLifecycleLog(s.profile==ymcc::nativeForeground::Profile::Msi?"msi-native-foreground-isolation":"native-foreground-isolation",detail);
 }
-static void msiNativeForegroundQueue() {
+static bool msiNativeForegroundReadyWorkCurrent(const MsiNativeForegroundReadyWork& work) noexcept {
+    return !g_exitRequested.load(std::memory_order_acquire)&&!inputHostExitFenceRaised()&&
+        !g_msiNativeForegroundPowerHold.load(std::memory_order_acquire)&&
+        g_msiNativeForegroundEdge.load(std::memory_order_acquire)==work.edge&&
+        sharedPowerLifecycleCurrent(work.power);
+}
+static void msiNativeForegroundDeferRevokedReady(const MsiNativeForegroundReadyWork& work,
+        bool queueAllocationFailed=false) noexcept {
+    if(!g_exitRequested.load(std::memory_order_acquire)&&!inputHostExitFenceRaised()&&
+       g_msiNativeForegroundEdge.load(std::memory_order_acquire)==work.edge&&
+       (queueAllocationFailed||g_msiNativeForegroundPowerHold.load(std::memory_order_acquire)||
+        !sharedPowerLifecycleCurrent(work.power)))
+        g_msiNativeForegroundWorkPowerDeferred.store(true,std::memory_order_release);
+}
+static void msiNativeForegroundQueue(const MsiNativeForegroundReadyWork* ready=nullptr) {
 #ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
     if(g_msiNativeForegroundTestIo.queue){g_msiNativeForegroundTestIo.queue();return;}
 #endif
-    (void)inputHostQueueLifecycleWork("msi-native-foreground");
+    if(!ready){(void)inputHostQueueLifecycleWork("msi-native-foreground");return;}
+    try {
+        if(inputHostQueueMsiNativeForegroundReady(*ready))return;
+    } catch(const std::bad_alloc&) {
+        // This reason has no post-enqueue audit or publication. Allocation
+        // failure precedes acceptance, so the original work can retry once.
+        if(msiNativeForegroundReadyWorkCurrent(*ready)){
+            try {if(inputHostQueueMsiNativeForegroundReady(*ready))return;}
+            catch(const std::bad_alloc&) {
+                // Both attempts failed before admission. Existing maintenance
+                // can reoffer this edge when input and public power are ready.
+                msiNativeForegroundDeferRevokedReady(*ready,true);
+                return;
+            }
+        }
+    }
+    msiNativeForegroundDeferRevokedReady(*ready);
 }
 static void msiNativeForegroundIdentityReady() {
     if(!ymcc::msi::kNativeForegroundHidHideBorrowEnabled)return;
@@ -521,15 +552,29 @@ static void msiNativeForegroundIdentityReady() {
     if(g_msiNativeForegroundObserverRequested.exchange(true))return;
     if(!PostMessageW(g_hwnd,kMsiNativeForegroundObserverMessage,0,0))g_msiNativeForegroundObserverRequested=false;
 }
-static void msiNativeForegroundUiEvent(bool force=false,bool sourceReturn=false) {
+static void msiNativeForegroundUiEvent(bool force=false,bool sourceReturn=false,
+        const ymcc::sleeppower::SharedPowerV1* ready=nullptr) {
     if(!nativeForegroundFamilyAllowed())return;
+    const auto priorEdge=ready?g_msiNativeForegroundEdge.load(std::memory_order_acquire):0;
     msiNativeForegroundIdentityReady();
     const bool owned=msiNativeForegroundUiEligible();
+    std::unique_lock powerLock(g_msiNativeForegroundPowerMx,std::defer_lock);
+    if(ready){
+        powerLock.lock();
+        // A newer Ready can arrive while sampling the UI. Check before
+        // rotating its edge, then release the power lock before queuing.
+        const MsiNativeForegroundReadyWork previousWork{*ready,priorEdge};
+        if(!msiNativeForegroundReadyWorkCurrent(previousWork)){
+            msiNativeForegroundDeferRevokedReady(previousWork);
+            return;
+        }
+    }
     const bool previous=g_msiNativeForegroundDesiredUi.exchange(owned,std::memory_order_acq_rel);
     if(!force && previous==owned)return; // resize/show duplicates do not cycle an active pad
     if(previous!=owned || (force && !sourceReturn))g_msiNativeForegroundSourceRetryGeneration=0; // UI/config/power boundary, not source-forced retry
-    g_msiNativeForegroundEdge.fetch_add(1,std::memory_order_acq_rel);
-    msiNativeForegroundQueue();
+    const auto edge=g_msiNativeForegroundEdge.fetch_add(1,std::memory_order_acq_rel)+1;
+    if(ready){powerLock.unlock();const MsiNativeForegroundReadyWork work{*ready,edge};msiNativeForegroundQueue(&work);}
+    else msiNativeForegroundQueue();
 }
 // Existing RawInput identity resolution supplies metadata, not a hide command.
 // Warm source return can retry a failed discovery ONCE per cache generation,
@@ -623,40 +668,51 @@ static void msiNativeForegroundStopObserver() {
 #endif
     if(g_msiNativeForegroundObserver){UnhookWinEvent(g_msiNativeForegroundObserver);g_msiNativeForegroundObserver=nullptr;}
 }
+static void msiNativeForegroundHoldPowerLocked(uint64_t generation,bool transitioned) {
+    g_msiNativeForegroundPowerHold=true;
+    g_msiNativeForegroundSuspendedGeneration=generation;
+    g_msiNativeForegroundResumePending=false;
+    g_msiNativeForegroundPowerHoldCommitTick=g_lastPowerResumeCommitTick.load(std::memory_order_acquire);
+    g_msiNativeForegroundPowerTransitionObserved=transitioned;
+}
 static void msiNativeForegroundPowerEvent(WPARAM event) {
-    if(!nativeForegroundFamilyAllowed())return;
-    if(event!=PBT_APMSUSPEND && event!=PBT_APMRESUMEAUTOMATIC &&
-       event!=PBT_APMRESUMESUSPEND && event!=PBT_APMRESUMECRITICAL)return;
+    // Raw resume notifications have no foreground authority. The shared Ready
+    // consumer owns reopening and binds the queued work to its power receipt.
+    if(event!=PBT_APMSUSPEND || !nativeForegroundFamilyAllowed())return;
     std::unique_lock powerLock(g_msiNativeForegroundPowerMx);
-    if(event==PBT_APMSUSPEND){
-        // This hook precedes the shared power handler: close our private gate
-        // immediately, not after its Ready/Suspending publication races us.
-        g_msiNativeForegroundPowerHold=true;
-        g_msiNativeForegroundSuspendedGeneration=g_powerGeneration.load(std::memory_order_acquire);
-        g_msiNativeForegroundResumePending=false;
-        g_msiNativeForegroundPowerHoldCommitTick=g_lastPowerResumeCommitTick.load(std::memory_order_acquire);
-        g_msiNativeForegroundPowerTransitionObserved=
-            g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready;
-    }else if(event==PBT_APMRESUMEAUTOMATIC || event==PBT_APMRESUMESUSPEND || event==PBT_APMRESUMECRITICAL){
-        // Resume notification runs AFTER the unchanged shared power handler.
-        // Several PBT notifications in one generation are one event, not a
-        // request to unhide/re-hide/cycle the same physical source again.
-        const auto generation=g_powerGeneration.load(std::memory_order_acquire);
-        if(!g_msiNativeForegroundPowerHold && !g_msiNativeForegroundResumePending)return;
-        if(g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready)
-            g_msiNativeForegroundPowerTransitionObserved=true;
-        if(g_msiNativeForegroundResumePending.load(std::memory_order_acquire))return;
-        g_msiNativeForegroundPowerHold=true;
-        if(g_msiNativeForegroundSuspendedGeneration.load(std::memory_order_acquire)==0)
-            g_msiNativeForegroundSuspendedGeneration=generation?generation-1:0;
-        g_msiNativeForegroundResumePending=true;
-    }
+    // An admitted suspend must fence foreground operations before the public
+    // phase moves. Its restoration still belongs to the original lease owner.
+    msiNativeForegroundHoldPowerLocked(g_powerGeneration.load(std::memory_order_acquire),
+        g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready);
     powerLock.unlock();
     msiNativeForegroundUiEvent(true);
+}
+static bool msiNativeForegroundSharedPowerBoundary(const ymcc::sleeppower::SharedPowerV1& power) {
+    using namespace ymcc::sleeppower;
+    if(!powerObservationKnown(power)||power.phase==static_cast<uint32_t>(PowerLifecycle::Ready)||
+        !nativeForegroundFamilyAllowed())return true;
+    std::unique_lock powerLock(g_msiNativeForegroundPowerMx);
+    if(g_exitRequested.load(std::memory_order_acquire))return true;
+    if(!powerObservationCurrent(&readSharedSystemPower,power))return false;
+    // The admitted pre-suspend path may already have fenced this owner.
+    if(g_msiNativeForegroundPowerHold.load(std::memory_order_acquire))return true;
+    msiNativeForegroundHoldPowerLocked(power.generation,true);
+    powerLock.unlock();
+    msiNativeForegroundUiEvent(true);
+    return true;
 }
 // Positive CURRENT common-owner completion; a missed or reordered raw resume
 // cannot retain a private gate after this authoritative Ready. Only power
 // scalars are cleared here: helper/target/configuration return debts remain.
+static void msiNativeForegroundContinueDeferredReady(const ymcc::sleeppower::SharedPowerV1& power) {
+    if(!g_msiNativeForegroundWorkPowerDeferred.load(std::memory_order_acquire)||
+       !g_inputReady.load(std::memory_order_acquire))return;
+    const MsiNativeForegroundReadyWork work{power,g_msiNativeForegroundEdge.load(std::memory_order_acquire)};
+    // The raw suspend hook can close the private gate before public Ready changes.
+    if(!msiNativeForegroundReadyWorkCurrent(work))return;
+    if(g_msiNativeForegroundWorkPowerDeferred.exchange(false,std::memory_order_acq_rel))
+        msiNativeForegroundQueue(&work);
+}
 static bool msiNativeForegroundSharedPowerReady(const ymcc::sleeppower::SharedPowerV1& power) {
     if(!nativeForegroundFamilyAllowed())return true;
     std::unique_lock powerLock(g_msiNativeForegroundPowerMx);
@@ -671,16 +727,13 @@ static bool msiNativeForegroundSharedPowerReady(const ymcc::sleeppower::SharedPo
     g_msiNativeForegroundPowerTransitionObserved=false;
     g_msiNativeForegroundLastResumeGeneration=power.generation;
     powerLock.unlock();
-    if(changed)msiNativeForegroundUiEvent(true);
-    else if(g_inputReady.load(std::memory_order_acquire) &&
-        g_msiNativeForegroundWorkPowerDeferred.exchange(false,std::memory_order_acq_rel))msiNativeForegroundQueue();
+    if(changed)msiNativeForegroundUiEvent(true,false,&power);
+    else msiNativeForegroundContinueDeferredReady(power);
     return true;
 }
 
-// Existing lifecycle maintenance only; no device reads, new timer or mode write.
-// The shared Ready/reader facts own readiness. A real same-generation resume
-// after an observed transition is as valid as a different-generation resume.
-// A raw resume while the pre-suspend shared Ready is unchanged still waits.
+// Existing maintenance may catch up to a new shared commit before the window
+// projection. Cancellation-only Ready is delivered by the common projection.
 static bool msiNativeForegroundTryReleasePowerHold() {
     if(!g_msiNativeForegroundPowerHold.load(std::memory_order_acquire) &&
        !g_msiNativeForegroundResumePending.load(std::memory_order_acquire))return false;
@@ -699,10 +752,7 @@ static bool msiNativeForegroundTryReleasePowerHold() {
     const bool sharedCommit=committed &&
         committed!=g_msiNativeForegroundPowerHoldCommitTick.load(std::memory_order_acquire) &&
         g_resumeReadyGeneration.load(std::memory_order_acquire)==generation;
-    const bool broadcastResume=g_msiNativeForegroundResumePending.load(std::memory_order_acquire) &&
-        (generation!=g_msiNativeForegroundSuspendedGeneration.load(std::memory_order_acquire) ||
-         g_msiNativeForegroundPowerTransitionObserved.load(std::memory_order_acquire));
-    if(!broadcastResume && !sharedCommit)return false;
+    if(!sharedCommit)return false;
     // Local Ready and input readiness can lead the public write gate or lag
     // a newer suspend receipt. Keep this hold until the common owner admits it.
     ymcc::sleeppower::SharedPowerV1 power;
@@ -712,7 +762,7 @@ static bool msiNativeForegroundTryReleasePowerHold() {
     g_msiNativeForegroundPowerTransitionObserved=false;
     g_msiNativeForegroundLastResumeGeneration=power.generation;
     powerLock.unlock();
-    msiNativeForegroundUiEvent(true);
+    msiNativeForegroundUiEvent(true,false,&power);
     return true;
 }
 // Cached historical ownership is read under the same Host mutex. Defined by
@@ -2076,12 +2126,19 @@ static void msiNativeForegroundRefreshGameSourceLocked() {
     msiNativeForegroundReceipt(refresh==0?"game-source-refresh-accepted":"game-source-refresh-wait","current-same-root-game-interface");
     if(refresh==0 && !lease.pendingGameSources.empty())msiNativeForegroundQueue();
 }
-static void msiNativeForegroundHandleWork() {
+static bool msiNativeForegroundReadyWorkAdmitted(const MsiNativeForegroundReadyWork* ready) noexcept {
+    if(!ready||msiNativeForegroundReadyWorkCurrent(*ready))return true;
+    msiNativeForegroundDeferRevokedReady(*ready);
+    return false;
+}
+static void msiNativeForegroundHandleWork(const MsiNativeForegroundReadyWork* ready=nullptr) {
+    if(!msiNativeForegroundReadyWorkAdmitted(ready))return;
     if(msiColdReturnMaintainOwner("cold-native-work"))return;
     if(msiPostHideMaintainOwner("post-hide-maintenance"))return;
     if(!nativeForegroundFamilyAllowed())return;
     std::lock_guard hostLock(g_inputHostMx);
     std::lock_guard<std::mutex> leaseLock(g_msiNativeForegroundMx);
+    if(!msiNativeForegroundReadyWorkAdmitted(ready))return;
     auto& s=g_msiNativeForegroundLease;
     if(s.coldReturnCycle)return; // only its original OFF consumer may progress it
     const auto suspendSerial=g_sharedPowerSuspendSerial.load(std::memory_order_acquire);
@@ -2162,7 +2219,7 @@ static void msiNativeForegroundHandleWork() {
         if(!ymcc::msi::nativeForegroundMayEnter(controlFacts) ||
             controlFacts.currentPower!=facts.power || controlFacts.currentEdge!=facts.edge)return;
         if(repair)
-            (void)msiNativeForegroundRepairReaderLocked(facts.power,facts.edge);
+            (void)msiNativeForegroundRepairReaderLocked(facts.power,facts.edge,s.suspendSerial);
         if(!ymcc::msi::nativeForegroundMayEnter(msiNativeForegroundFacts()))return;
     }
     s.xusbTargets.clear();
@@ -2235,6 +2292,27 @@ static void msiNativeForegroundHandleWork() {
     facts.gameInput=mainCurrent && targets.size()<=16;
     facts.virtualSource=hidHideIsVirtualIdentity(source.deviceInstanceId,s.root);
     if(!msiNativeForegroundSnapshot(s.before)){msiNativeForegroundReceipt("deferred","visibility-query-failed");return;}
+    const auto readerPath=W2U(hidHideCurrentModulePath());
+    if(s.profile==ymcc::nativeForeground::Profile::Gpd &&
+        g_machineIdentity.deviceClass=="HandheldCompanion.Devices.GPDWin5" &&
+        s.before.valid && facts.gameInput && !facts.virtualSource && !readerPath.empty() &&
+        hidHideInverseApplicationListState(s.before.inverseRaw)=="off" &&
+        !hidHideContainsPath(s.before.applications,readerPath) && msiNativeForegroundLeaseCurrent()){
+        if(!msiNativeForegroundRepairReaderLocked(s.power,s.edge,s.suspendSerial)){
+            msiNativeForegroundReceipt("deferred","native-reader-registration-not-acknowledged");return;
+        }
+        HidHideVisibilitySnapshot repaired;
+        if(!msiNativeForegroundLeaseCurrent() || !msiNativeForegroundSnapshot(repaired) || !repaired.valid ||
+            hidHideInverseApplicationListState(repaired.inverseRaw)!="off" ||
+            !hidHideContainsPath(repaired.applications,readerPath)){
+            msiNativeForegroundReceipt("deferred","native-reader-registration-not-verified");return;
+        }
+        if(!msiNativeForegroundLeaseCurrent() || !ymcc::msi::samePhysicalLocation(s.locations,msiForegroundIsolationLocations(s.root))){
+            msiNativeForegroundReceipt("deferred","native-reader-registration-owner-or-location-changed");return;
+        }
+        s.before=std::move(repaired);
+        msiNativeForegroundReceipt("reader-registration-verified","current-native-reader-restored");
+    }
     try {
         s.diagnosticSelectedPaths.clear();
         for(const auto& target:targets)s.diagnosticSelectedPaths.push_back(U2W(target));
@@ -2245,7 +2323,7 @@ static void msiNativeForegroundHandleWork() {
         s.diagnosticSelectedPaths.clear();s.diagnosticSelectedPathsComplete=false;
         s.diagnosticBeforeConfiguration=nullptr;
     }
-    facts.readerExempt=hidHideContainsPath(s.before.applications,W2U(hidHideCurrentModulePath()));
+    facts.readerExempt=hidHideContainsPath(s.before.applications,readerPath);
     facts.inverseOff=hidHideInverseApplicationListState(s.before.inverseRaw)=="off";
     const auto now=msiNativeForegroundFacts();facts.currentEdge=now.currentEdge;facts.currentPower=now.currentPower;
     facts.uiOwned=now.uiOwned;facts.powerReady=now.powerReady;facts.nativeChoice=now.nativeChoice;
@@ -2457,9 +2535,10 @@ static void msiNativeForegroundMaintenance() {
         }
     }
     (void)msiNativeForegroundTryReleasePowerHold();
-    if(g_msiNativeForegroundWorkPowerDeferred.load(std::memory_order_acquire) &&
-        hardwareWriteAllowed() && g_inputReady.load(std::memory_order_acquire) &&
-        g_msiNativeForegroundWorkPowerDeferred.exchange(false,std::memory_order_acq_rel))msiNativeForegroundQueue();
+    if(g_msiNativeForegroundWorkPowerDeferred.load(std::memory_order_acquire) && g_inputReady.load(std::memory_order_acquire)){
+        ymcc::sleeppower::SharedPowerV1 power;
+        if(captureSharedPowerLifecycle(power))msiNativeForegroundContinueDeferredReady(power);
+    }
     {
         std::unique_lock<std::mutex> lock(g_msiNativeForegroundMx,std::try_to_lock);
         if(lock.owns_lock() && nativeForegroundProfile()==ymcc::nativeForeground::Profile::Msi){

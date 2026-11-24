@@ -84,9 +84,15 @@ try{
  $Action='Automatic';$VerifyOnly=$true;$StartBackend=$false;$GateTimeoutMs=0;$script:AutomaticResultMap=$null;$script:ResultJson=$null
  . ([scriptblock]::Create($dispatch[0].Extent.Text))
  Assert ($ownedReady.WaitOne(0) -and $script:ResultJson.ok -and $script:ResultJson.resident) 'The exact Automatic VerifyOnly dispatcher completes through its named events without initialization/reapply'
+ Assert (($script:ResultJson.PSObject.Properties.Name -join ',') -ceq 'ok,resident,message' -and $script:ResultJson.message -ceq $result.message -and $result.snapshot.themes.Count -eq 7) 'Automatic success emits only the terminal summary after validating all seven themes'
+ Assert ($script:SessionReads -eq 4 -and $script:DomReads -eq 1) 'VerifyOnly dispatch uses four fresh scoped identities and one independent DOM read'
  $values=@(0..7|ForEach-Object{$view.ReadInt32($_*4)})
  Assert ($values[0] -eq 0x594D4353 -and $values[1] -eq 2 -and $values[2] -eq 8 -and $values[3] -eq 0 -and $values[4] -eq 31 -and $values[5] -eq 1) 'The actual helper publishes the complete 32-byte resident result after read-only verification'
  Assert ((Get-ThemeRevision @(Get-ThemeRows)) -ceq $baseline) 'Every user-style active flag and parameter survives the complete read-only path byte-for-byte'
 }finally{$view.Dispose();$ownedMap.Dispose();$ownedIdle.Dispose();$ownedReady.Dispose()}
+$script:AutomaticResultMap=$null;$script:ResultJson=$null
+$Action='Status';$VerifyOnly=$false
+. ([scriptblock]::Create($dispatch[0].Extent.Text))
+Assert ($script:ResultJson.ok -and $script:ResultJson.snapshot.themes.Count -eq 7) 'Ordinary Status dispatch still emits its full snapshot'
 [pscustomobject]@{ok=$true;passed=$cases.Count;cases=$cases.ToArray();rpcReads=$script:RpcReads.ToArray();hintReads=$script:HintReads;realSteamOperations=0;realCssOperations=0;productionThemeWrites=0;productionHelpersLaunched=0;sourceFunctions=$script:AppearanceFixtureInitialization.sourceFunctions;scope='Exact production functions and Automatic dispatch; private named events/map and owned copied configs; process/DOM/HTTP endpoints are explicit memory ports'}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $Out 'result.json') -Encoding UTF8
 Write-Output "PASS: $($cases.Count) read-only manual observation checks"

@@ -140,8 +140,9 @@ $repairResult=$null;$repairMessage=''
 if(__REPAIR__){
  $tokens=$null;$errors=$null;$ast=[Management.Automation.Language.Parser]::ParseFile('__CONTROL__',[ref]$tokens,[ref]$errors)
  if($errors.Count){throw $errors[0]}
- foreach($name in @('Sync-AppearanceBackend','Invoke-AppearanceControl')){
+ foreach($name in @('Find-UniqueAppearanceBackendTheme','Sync-AppearanceBackend','Invoke-AppearanceControl')){
   $fn=$ast.Find({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
+  if(!$fn -and $name -ceq 'Find-UniqueAppearanceBackendTheme'){continue} # older fixture sources inline the lookup
   Invoke-Expression $fn.Extent.Text
  }
  $status|Add-Member -NotePropertyName revision -NotePropertyValue ('b'*64)

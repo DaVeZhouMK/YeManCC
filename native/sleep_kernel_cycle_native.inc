@@ -3,19 +3,22 @@
 // Shared Windows evidence owner. These observations never admit power actions.
 static ymcc::sleeppower::KernelCycleObservations g_sgKernelCycles;
 static std::atomic<ULONGLONG> g_sgKernelSystemWake{0};
-static ULONGLONG sgKernelCompletedSessionUs(const json& evidence) noexcept {
+static ymcc::sleeppower::KernelCycleSample sgKernelSleepExit(const json& evidence,ULONGLONG at,
+                                                            ULONGLONG generation,int reason) noexcept {
     try {
         const auto& values=evidence.at("values");
         const auto& entered=values.at("SleepEntered");
         const auto& sleep=values.at("SleepDurationInUs");
         const auto& total=values.at("DurationInUs");
-        if(!entered.is_boolean()||!entered.get<bool>()||!sleep.is_number_unsigned()||!total.is_number_unsigned())return 0;
+        if(!entered.is_boolean()||!entered.get<bool>()||!sleep.is_number_unsigned()||!total.is_number_unsigned())return {};
         const auto inProgress=values.find("IsCsSessionInProgressOnExit");
-        if((inProgress!=values.end()&&*inProgress!=false)||
-           (inProgress==values.end()&&evidence.at("raw").contains("IsCsSessionInProgressOnExit")))return 0;
+        if((inProgress!=values.end()&&!inProgress->is_boolean())||
+           (inProgress==values.end()&&evidence.at("raw").contains("IsCsSessionInProgressOnExit")))return {};
         const auto slept=sleep.get<ULONGLONG>(),span=total.get<ULONGLONG>();
-        return slept&&span>=slept?span:0;
-    }catch(...){return 0;}
+        if(!slept||span<slept)return {};
+        // A continuing phase can prove entry without authorizing interactive recovery.
+        return {at,generation,reason,span,inProgress!=values.end()&&inProgress->get<bool>()};
+    }catch(...){return {};}
 }
 struct SgOriginalKernelCycleReadback {
     ymcc::sleeppower::OriginalKernelCycle fact;
@@ -56,7 +59,9 @@ static SgOriginalKernelCycleReadback sgReadOriginalKernelCycle(const ymcc::sleep
             if(!at||at>sgNowFileTime()){out.error=ERROR_INVALID_DATA;break;}
             if(id==107){out.fact.result=KernelCycleResult::SystemWake;break;}
             if(id==507){
-                evidence.exit({at,power.generation,reason,sgKernelCompletedSessionUs(ymcc::sleep_residency::makeEvidence(xml))});
+                auto exit=sgKernelSleepExit(ymcc::sleep_residency::makeEvidence(xml),at,power.generation,reason);
+                // Keep the original time and reason even when sleep counters are unavailable.
+                evidence.exit(exit.sessionUs ? exit : KernelCycleSample{at,power.generation,reason});
                 continue;
             }
             if(id!=506){out.error=ERROR_INVALID_DATA;break;}

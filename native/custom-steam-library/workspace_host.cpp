@@ -61,6 +61,7 @@
 #include "custom_steam_library_identity_cache.h"
 #include "custom_steam_library_plan_receipt.h"
 #include "custom_steam_library_video_catalog.h"
+#include "custom_steam_library_console_video.h"
 #include "../shared_game_media_video_request.h"
 #include "custom_steam_library_opti_catalog.h"
 #include "../opti_catalog_startup.h"
@@ -5292,6 +5293,77 @@ static json executeWorkspaceCommand(
         requireSuccess(runWorker({L"--set-library-bucket", L"--game-dir", directory, L"--bucket", bucket}));
         return jsonBoolOr(arguments,"deferSnapshot",false)?json{{"saved",true}}:workspaceSnapshot(false);
     }
+    if (command=="mediaSearchConsoleVideos" || command=="mediaDownloadConsoleVideo") {
+        namespace console=custom_steam_library::console_video;
+        using namespace ymcc::media;
+        const auto exe=jsonStringOr(arguments,"executable");
+        const auto path=fs::path(toWide(exe));
+        const auto libraryTarget=workspaceLibraryMediaArguments({{"executable",exe}});
+        const auto key="exe-"+digestKey(normalized(exe));
+        Store store(g_dataRoot);
+        const auto requireLocal=[&](const json& current,const console::Game& game){
+            std::error_code ec;
+            if(!path.is_absolute()||_wcsicmp(path.extension().c_str(),L".exe")!=0||
+               !console::gameLauncher(game,toUtf8(path.stem().wstring()))||
+               !fs::is_regular_file(custom_steam_library::ioPath(path),ec)||ec||
+               current.value("key",std::string{})!=key||current.value("appId",int64_t{})!=0||
+               current.value("deleted",false)||stringField(current,"status")=="ambiguous"||
+               (!stringField(current,"executable").empty()&&normalized(stringField(current,"executable"))!=normalized(exe)))
+                throw std::runtime_error("该素材需要游戏独立启动程序，不能绑定到通用模拟器或其他游戏");
+        };
+        auto* cancelFlag=backgroundJob?&backgroundJob->cancelRequested:&g_cancelRequested;
+        const auto catalogPath=g_dataRoot/L"cache"/L"jobs"/L"console-video-search"/wide(key+".json");
+        if(command=="mediaSearchConsoleVideos"){
+            const auto query=jsonStringOr(arguments,"query");
+            if(query.size()>256)throw std::runtime_error("游戏名称过长");
+            auto result=console::candidates(query);
+            const auto* game=console::match(query);
+            Lock lock(g_dataRoot);
+            if(cancelFlag->load())throw std::runtime_error("media-download-cancelled");
+            // No-result searches retire the old catalog, not the saved wallpaper.
+            std::error_code removeError;
+            fs::remove(custom_steam_library::ioPath(catalogPath),removeError);
+            if(removeError)throw std::runtime_error("无法更新动态壁纸候选，请重试");
+            if(!game)return result;
+            auto current=store.resolve(libraryTarget);
+            requireLocal(current,*game);
+            if(!current.value("bindingRevision",uint64_t{})){
+                auto seed=libraryTarget;seed["name"]=game->title;
+                current=store.registerEntry(seed);
+                requireLocal(current,*game);
+            }
+            result["source"]="console";result["searchToken"]=randomId();result["entryKey"]=key;
+            result["bindingRevision"]=current["bindingRevision"];result["createdAt"]=now();
+            atomicWrite(catalogPath,result);
+            result["entry"]=describeWorkspaceMediaEntry(store,current);
+            return result;
+        }
+        // Explicit on-demand downloads share the existing artwork worker lane.
+        // Do not queue native/console work on the Steam AppID inventory.
+        static std::mutex consoleTransfer;
+        std::unique_lock transfer(consoleTransfer,std::try_to_lock);
+        if(!transfer)throw std::runtime_error("另一项主机壁纸正在下载，请稍后重试");
+        const auto authorize=[&](){
+            if(cancelFlag->load())throw std::runtime_error("media-download-cancelled");
+            auto current=store.resolve(libraryTarget);
+            const auto& offer=console::select(current,ymcc::media::read(catalogPath),arguments,now());
+            requireLocal(current,offer.game);
+            return std::pair{std::move(current),&offer};
+        };
+        const auto admitted=authorize();
+        struct TemporaryVideo {
+            fs::path path;
+            ~TemporaryVideo(){std::error_code ec;fs::remove(custom_steam_library::ioPath(path),ec);}
+        } staged{catalogPath.parent_path()/wide(randomId()+".mp4")};
+        auto* activeProcess=backgroundJob?&backgroundJob->activeProcess:&g_activeProcess;
+        requireSuccess(runWorkerBounded({L"--download-console-wallpaper",wide(std::string(admitted.second->id)),staged.path.wstring()},
+                                        kArtworkWorkerTimeoutMs,cancelFlag,activeProcess));
+        Lock lock(g_dataRoot);
+        auto latest=authorize();
+        latest.first["demandConsumer"]="library";
+        latest.first["slot"]="dynamic";
+        return describeWorkspaceMediaEntry(store,store.publish(latest.first,staged.path,true));
+    }
     if(command=="mediaSearchVideos"){
         auto store=ymcc::media::Store(g_dataRoot);const auto entry=store.resolve(arguments);const auto app=entry.value("appId",int64_t{0});
         ymcc::media::requireVideoIdentity(store,entry,arguments);
@@ -6164,7 +6236,8 @@ static json runOptiCatalogSupplement(const std::function<bool()>& cancelled,
     const std::function<fs::path()>& clientRootFor = optiCatalogClientRoot,
     std::function<bool()> running = optiClientRunningForCatalog,
     const std::function<bool()>& installed = optiCatalogClientInstalled,
-    const OptiSteamFactsReader& readFacts = [](std::uint32_t mask){return ymcc::steaminfo::read(mask);}) {
+    const OptiSteamFactsReader& readFacts = [](std::uint32_t mask){return ymcc::steaminfo::read(mask);},
+    const fs::path& selected = {}) {
     const OptiCatalogCostSample cost;
     const bool backgroundMode = SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) != FALSE;
     if (!backgroundMode) SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
@@ -6203,7 +6276,16 @@ static json runOptiCatalogSupplement(const std::function<bool()>& cancelled,
                 using namespace custom_steam_library::opti_catalog;
                 WorkBudget budget(cancelled);
                 bool inventoryAvailable=false;
-                auto candidates=optiCatalogCandidates(cancelled, false, &inventoryAvailable);
+                std::vector<Candidate> candidates;
+                if(selected.empty()) {
+                    candidates=optiCatalogCandidates(cancelled, false, &inventoryAvailable);
+                } else {
+                    Candidate candidate{toUtf8(selected.parent_path().wstring()),toUtf8(selected.wstring()),
+                        toUtf8(selected.stem().wstring()),{},0,true};
+                    if(!valid(candidate)||!fs::is_regular_file(selected,error)||error)
+                        return {{"status","error"},{"reason","invalid-selected-executable"}};
+                    candidates.push_back(std::move(candidate));
+                }
                 bool coldSteam=false;
                 if(trigger=="ymcc-client-open"&&!inventoryAvailable&&candidates.empty()) {
                     const auto scan=g_dataRoot/L"state"/L"library-scan.json";
@@ -6214,13 +6296,15 @@ static json runOptiCatalogSupplement(const std::function<bool()>& cancelled,
                         coldSteam=!candidates.empty();
                     }
                 }
-                const auto previous=readJson(g_dataRoot/L"state"/L"last-opti-client-supplement.json",json::object());
+                const auto previous=selected.empty()?readJson(g_dataRoot/L"state"/L"last-opti-client-supplement.json",json::object()):json::object();
                 // A cursor belongs to this exact client. Removed candidates simply
                 // fall back to normal order; missing covers cannot starve the tail.
                 const bool resumed=jsonStringOr(previous,"clientRoot")==toUtf8(normalizedPathKey(clientRoot)) &&
                     jsonBoolOr(previous,"workLimited",false) && resumeCandidates(candidates,jsonStringOr(previous,"nextCandidate"));
                 receipt = supplementOptiCatalog(clientRoot, candidates,
                     std::move(running), cancelled, permitted, &budget);
+                if(!selected.empty() && receipt.value("skipped",0)>0)
+                    return {{"status","error"},{"reason","selected-catalog-identity-not-admitted"}};
                 if(trigger=="ymcc-client-open"&&!inventoryAvailable&&candidates.empty()&&receipt["status"]=="idle") {
                     receipt["status"]="deferred";
                     receipt["reason"]="library-scan-unavailable";
@@ -6239,6 +6323,7 @@ static json runOptiCatalogSupplement(const std::function<bool()>& cancelled,
     }
     // A skipped attempt must not erase the previous bounded pass's cursor.
     // This preserves queue fairness when OPT was open at the next YMCC start.
+    if (!selected.empty()) return receipt; // Do not replace the automatic pass's resume cursor.
     if(receipt.value("status",std::string{})=="deferred"&&!receipt.contains("nextCandidate")&&!clientRoot.empty()) {
         const auto previous=readJson(g_dataRoot/L"state"/L"last-opti-client-supplement.json",json::object());
         if(jsonStringOr(previous,"clientRoot")==toUtf8(normalizedPathKey(clientRoot))&&jsonBoolOr(previous,"workLimited",false))
@@ -6275,16 +6360,17 @@ static std::optional<int> runLibraryOptiStartupEntrypoint(const fs::path& appRoo
     std::function<bool()> running = optiClientRunningForCatalog,
     const std::function<bool()>& installed = optiCatalogClientInstalled,
     const OptiSteamFactsReader& readFacts = [](std::uint32_t mask){return ymcc::steaminfo::read(mask);}) {
-    bool explicitOpen=false;int preparationCode=0;
+    bool explicitOpen=false;int preparationCode=0;fs::path selected;
     const auto admitted=ymcc::optiStartup::entrypoint(appRoot, [&](const std::function<bool()>& cancelled) {
         g_dataRoot = custom_steam_library::defaultDataRoot(appRoot);
         const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         struct EndCom { bool active; ~EndCom() { if (active) CoUninitialize(); } } endCom{SUCCEEDED(com)};
         const auto result = runOptiCatalogSupplement(cancelled, [&] { return !cancelled(); },
-            explicitOpen?"ymcc-client-open":"ymcc-startup-once", clientRootFor, std::move(running), installed, readFacts);
+            !selected.empty()?"ymcc-selected-game":explicitOpen?"ymcc-client-open":"ymcc-startup-once",
+            clientRootFor, std::move(running), installed, readFacts, selected);
         if (result.value("status", std::string{}) == "error") throw std::runtime_error("OPT startup supplement failed");
         if (explicitOpen) preparationCode = optiCatalogPreparationExitCode(result);
-    }, &explicitOpen);
+    }, &explicitOpen, &selected);
     return admitted&&*admitted==0?std::optional<int>{preparationCode}:admitted;
 }
 
@@ -6883,6 +6969,16 @@ static bool startScrapeQueue(bool forceManual, bool continueAfterBusy) {
         launchHostBackgroundTask([forceManual, job] {
             fs::path failureHistoryPath;
             try {
+            // Early cancellation or failure can post a terminal event before
+            // the target list is ready. Bind it to this batch, not the last one.
+            const auto batchId = std::string("scrape-") + std::to_string(GetCurrentProcessId()) + "-" +
+                std::to_string(g_scrapeBatchSequence.fetch_add(1) + 1);
+            const char* mode = forceManual ? "manual-refresh" : "automatic-first-pass";
+            {
+                std::lock_guard<std::mutex> lock(g_scrapeStateMutex);
+                g_scrapeState = {{"batchId", batchId}, {"mode", mode}, {"active", false},
+                    {"current", 0}, {"total", 0}, {"items", json::object()}};
+            }
             // The queue is weak-network work.  It must not hold the task
             // boundary while each EXE spends up to its full network timeout in
             // the worker. Individual JSON mutations use only short locks.
@@ -6891,7 +6987,6 @@ static bool startScrapeQueue(bool forceManual, bool continueAfterBusy) {
             const int artworkConcurrency = scrapeArtworkConcurrency();
             std::atomic<int> completed{0};
             size_t total = 0;
-            std::string batchId;
             std::atomic<bool> cancelled{false};
             std::atomic<bool> failed{false};
             const int64_t batchStartedAt = unixTimeMsHost();
@@ -6906,7 +7001,7 @@ static bool startScrapeQueue(bool forceManual, bool continueAfterBusy) {
                 {"status", "running"},
                 {"startedAt", batchStartedAt},
                 {"hostProcessId", GetCurrentProcessId()},
-                {"mode", forceManual ? "manual-refresh" : "automatic-first-pass"},
+                {"mode", mode},
                 {"applicationRoot", toUtf8(g_labRoot.wstring())},
                 {"dataRoot", toUtf8(g_dataRoot.wstring())},
                 {"worker", toUtf8(g_worker.wstring())},
@@ -6973,11 +7068,6 @@ static bool startScrapeQueue(bool forceManual, bool continueAfterBusy) {
                 // A previous process can leave a status=running document only
                 // when it exits early. Seal it before creating this batch.
                 markInterruptedScrapeHistory();
-                // The sequence is process-local. Include the process ID so a
-                // restart never reuses scrape-1 directories still containing
-                // output from the previous host.
-                batchId = std::string("scrape-") + std::to_string(GetCurrentProcessId()) + "-" +
-                    std::to_string(g_scrapeBatchSequence.fetch_add(1) + 1);
                 historyPath = scrapeHistoryRoot() /
                     (L"round-" + std::to_wstring(batchStartedAt) + L"-" + toWide(batchId) + L".json");
                 failureHistoryPath = historyPath;
@@ -7135,8 +7225,6 @@ static bool startScrapeQueue(bool forceManual, bool continueAfterBusy) {
                         identityConcurrency, artworkConcurrency);
                     {
                         std::lock_guard<std::mutex> lock(g_scrapeStateMutex);
-                        g_scrapeState["batchId"] = batchId;
-                        g_scrapeState["mode"] = forceManual ? "manual-refresh" : "automatic-first-pass";
                         g_scrapeState["round"] = 1;
                         g_scrapeState["roundLabel"] = "第一轮";
                         g_scrapeState["roundCurrent"] = 0;
@@ -8972,7 +9060,8 @@ static void beginCommand(uint64_t id, std::string command, json arguments = json
         postWebMessageNoThrow({{"kind", "response"}, {"id", id}, {"ok", true}, {"result", {{"cancelled", requested}}}});
         return;
     }
-    if (command == "searchArtwork" || command == "downloadArtworkCandidate" || command == "mediaSearchVideos") {
+    if (command == "searchArtwork" || command == "downloadArtworkCandidate" || command == "mediaSearchVideos" ||
+        command == "mediaSearchConsoleVideos" || command == "mediaDownloadConsoleVideo") {
         startArtworkTask(id, std::move(command), std::move(arguments));
         return;
     }

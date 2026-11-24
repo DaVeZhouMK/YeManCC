@@ -2,7 +2,7 @@
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue';
 import Dropdown from './Dropdown.vue';
 import { getUiVisibilityState, onUiVisibilityChange } from '@/bridge/uiLifecycle';
-import { getSharedPowerLifecycle, onSharedPowerLifecycle } from '@/bridge/powerLifecycleState';
+import { getSharedPowerLifecycle, onSharedPowerLifecycle, type SharedPowerLifecycleSnapshot } from '@/bridge/powerLifecycleState';
 import InlineIcon from './InlineIcon.vue';
 import { batteryCharge, batteryChargeOptions, batteryChargeStatus, type BatteryChargeState } from '@/bridge/batteryCharge';
 const state = ref<BatteryChargeState | null>(null);
@@ -11,8 +11,13 @@ const busy = ref(false), loading = ref(false), dirty = ref(false), error = ref('
 const preferenceWarning = ref('');
 const mayRunSoftware = ref(false);
 let active = false, inPage = true, generation = 0;
-const initialPower = getSharedPowerLifecycle();
-let readFailures = 0, refreshQueued = false, powerPaused = initialPower?.phase !== 'ready' || initialPower.known === false, powerGeneration = 0;
+// BatteryHost admits its own device work; the fan/input write gate is independent.
+const batteryPowerPaused = (power: SharedPowerLifecycleSnapshot | null) =>
+  power?.phase !== 'ready' || power.known === false || power.notificationPending === true;
+const powerPaused = ref(batteryPowerPaused(getSharedPowerLifecycle()));
+let readFailures = 0, refreshQueued = false, powerGeneration = 0;
+let powerSuspendSerial: number | undefined;
+let pendingRead: AbortController | undefined;
 let stopVisibility: (() => void) | undefined;
 let stopPower: (() => void) | undefined;
 const retryDelays = [1500, 5000, 15000];
@@ -28,7 +33,7 @@ const options = computed(() => {
 const software = computed(() => state.value?.kind === 'software-bypass-threshold');
 const canRecover = computed(() => state.value?.verification === 'unconfirmed' && !software.value && Boolean(state.value.choices.length));
 const canSelect = computed(() => Boolean(state.value?.supported || canRecover.value || mayRunSoftware.value));
-const canApply = computed(() => !busy.value && !loading.value && typeof selected.value === 'number' && selected.value >= 50 &&
+const canApply = computed(() => !powerPaused.value && !busy.value && !loading.value && typeof selected.value === 'number' && selected.value >= 50 &&
   Boolean((mayRunSoftware.value && selected.value === 100) ||
     ((state.value?.supported || canRecover.value) && state.value?.choices.includes(selected.value))));
 function accept(next: BatteryChargeState) {
@@ -57,9 +62,11 @@ function requestRead() {
 async function refresh() {
   if (!active || loading.value || busy.value) return;
   const epoch = generation;
+  const owner = new AbortController();
+  pendingRead = owner;
   refreshQueued = false; loading.value = true; stopTimer();
   try {
-    const next = await batteryCharge.get();
+    const next = await batteryCharge.get(owner.signal);
     if (active && generation === epoch) {
       accept(next); error.value = preferenceWarning.value;
       // Known unsupported hardware stays idle. An unknown transport/host or a
@@ -73,9 +80,12 @@ async function refresh() {
       if (state.value) state.value = { ...state.value, supported: false, currentLimit: null };
     }
   } finally {
-    loading.value = false;
-    if (active && generation !== epoch) requestRead();
-    else scheduleRead();
+    if (pendingRead === owner) {
+      pendingRead = undefined;
+      loading.value = false;
+      if (active && generation !== epoch) requestRead();
+      else scheduleRead();
+    }
   }
 }
 async function apply() {
@@ -122,23 +132,32 @@ function activate() {
   const visibility = getUiVisibilityState();
   // BatteryHost owns availability. A separate fan/input recovery gate must not
   // leave a visible, independently readable charging card permanently stale.
-  if (!inPage || !visibility.documentVisible || !visibility.nativeWindowVisible || powerPaused || active) return;
+  if (!inPage || !visibility.documentVisible || !visibility.nativeWindowVisible || powerPaused.value || active) return;
   active = true; generation++; requestRead();
 }
 function suspend() { active = false; generation++; refreshQueued = false; stopTimer(); }
+function retireRead() {
+  if (!pendingRead) return;
+  const retired = pendingRead;
+  pendingRead = undefined;
+  loading.value = false;
+  retired.abort();
+}
 function appeared() { if (!active) activate(); else if (!loading.value && !busy.value) requestRead(); }
 onMounted(() => {
   let observedPower='';
   stopPower = onSharedPowerLifecycle(snapshot => {
-    const next=JSON.stringify([snapshot.generation,snapshot.phase,snapshot.known!==false]);
+    const next=JSON.stringify([snapshot.generation,snapshot.suspendSerial,snapshot.phase,snapshot.known!==false,snapshot.notificationPending===true]);
     if(next===observedPower)return;
     observedPower=next;
     // A missed pause must still retire reads belonging to the old power cycle.
-    if(powerGeneration!==0&&snapshot.generation!==powerGeneration)suspend();
+    const scopeChanged=powerGeneration!==0&&(snapshot.generation!==powerGeneration||snapshot.suspendSerial!==powerSuspendSerial);
     powerGeneration=snapshot.generation;
-    powerPaused=snapshot.phase!=='ready'||snapshot.known===false;
-    if(powerPaused)suspend();else appeared();
-  });
+    powerSuspendSerial=snapshot.suspendSerial;
+    powerPaused.value=batteryPowerPaused(snapshot);
+    if(powerPaused.value||scopeChanged){suspend();retireRead();}
+    if(!powerPaused.value)appeared();
+  }, { observeSuspendSerial: true });
   stopVisibility = onUiVisibilityChange(({ documentVisible, nativeWindowVisible }) => {
     if (documentVisible && nativeWindowVisible) activate(); else suspend();
   });
@@ -149,7 +168,7 @@ onMounted(() => {
 onActivated(() => { inPage = true; activate(); });
 onDeactivated(() => { inPage = false; suspend(); });
 onBeforeUnmount(() => {
-  inPage = false; suspend(); stopVisibility?.(); stopVisibility = undefined; stopPower?.(); stopPower = undefined;
+  inPage = false; suspend(); retireRead(); stopVisibility?.(); stopVisibility = undefined; stopPower?.(); stopPower = undefined;
   for (const event of readEvents) window.removeEventListener(event, requestRead);
   for (const event of showEvents) window.removeEventListener(event, appeared);
   for (const event of hideEvents) window.removeEventListener(event, suspend);

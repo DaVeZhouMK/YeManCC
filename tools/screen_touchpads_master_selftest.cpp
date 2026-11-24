@@ -24,11 +24,10 @@ int wmain(int argc,wchar_t** argv) {
             storedMode["global"]["touch"]["profiles"]=bank.json()["profiles"];
             storedMode["scenes"]["steam"]["overrides"]["sleep"]["config"]={{"pauseGameOnSleep",false}};
             const Json scenes = document["extensions"]["bootModes"]["scenes"];
-            auto sleep = document["sleep"];sleep["pauseGameOnSleep"]=true;sleep["mode"]="off";
-            check("ordinary-native-sleep-remembers-only-explicit-changed-fields",boot::rememberSection(document,"sleep",sleep,{{"pauseGameOnSleep",true}}) &&
-                document["extensions"]["bootModes"]["global"]["sleep"]["config"]["pauseGameOnSleep"]==true &&
-                document["extensions"]["bootModes"]["global"]["sleep"]["config"]["mode"]=="custom" &&
-                document["extensions"]["bootModes"]["revision"]==5);
+            const Json originalMode=storedMode;
+            Json prepared;
+            check("ordinary-native-sleep-updates-only-shared-section",boot::prepareSection(prepared,document,"sleep",{{"pauseGameOnSleep",true}},boot::WriteOrigin::Ordinary) &&
+                prepared["pauseGameOnSleep"]==true && prepared["mode"]=="custom" && document["extensions"]["bootModes"]==originalMode);
             check("ordinary-native-save-preserves-independent-scenes",document["extensions"]["bootModes"]["scenes"]==scenes);
             auto touch=bank.json();touch["profiles"]["elite"]["transparency"]=61;
             touch["profiles"]["disabled"]["scale"]=170;
@@ -36,12 +35,15 @@ int wmain(int argc,wchar_t** argv) {
             check("ordinary-native-touch-updates-global-in-one-document",boot::rememberSection(document,"screenTouchpads",touch,intent) &&
                 document["extensions"]["bootModes"]["global"]["touch"]["profiles"]["elite"]["transparency"]==61 &&
                 document["extensions"]["bootModes"]["global"]["touch"]["profiles"]["disabled"]["scale"]==bank.json()["profiles"]["disabled"]["scale"] &&
-                document["extensions"]["bootModes"]["revision"]==6);
+                document["extensions"]["bootModes"]["revision"]==5);
             const auto original=document;
             check("native-noop-save-does-not-advance-mode-revision",boot::rememberSection(document,"screenTouchpads",touch,intent) && document==original);
             document["extensions"]["bootModes"]["revision"]=9007199254740991LL;
-            const auto overflow=document;sleep["retryOnSleepTimeout"]=false;
-            check("native-invalid-mode-revision-refuses-preference-change",!boot::rememberSection(document,"sleep",sleep,{{"retryOnSleepTimeout",false}}) && document==overflow);
+            const auto overflow=document;
+            check("native-invalid-mode-revision-does-not-reject-shared-sleep",boot::prepareSection(prepared,document,"sleep",{{"retryOnSleepTimeout",false}},boot::WriteOrigin::Ordinary) && prepared["retryOnSleepTimeout"]==false && document==overflow);
+            auto malformed=overflow;malformed["extensions"]["bootModes"]["global"]=nullptr;
+            const auto malformedBefore=malformed;
+            check("native-malformed-mode-global-does-not-reject-shared-sleep",boot::prepareSection(prepared,malformed,"sleep",{{"autoWakeRecovery",true}},boot::WriteOrigin::Ordinary) && prepared["autoWakeRecovery"]==true && malformed==malformedBefore);
         }
     }
     {

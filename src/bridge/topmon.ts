@@ -151,6 +151,6 @@ export async function stopTopMonitor(): Promise<void> {
 }
 
 // 读取最新状态：统一入口取数；ts 新鲜（<6s）→ 返回数据；否则 null（未就绪/已停）。
-export async function readTopMonitor(): Promise<TopMonData | null> {
-  return projectTopMonitorView(await readMonitorSnapshot(), Date.now());
+export async function readTopMonitor(powerSignal?: AbortSignal): Promise<TopMonData | null> {
+  return projectTopMonitorView(await readMonitorSnapshot(powerSignal), Date.now());
 }

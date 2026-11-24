@@ -2,7 +2,7 @@
 
 ## 入口与范围
 
-顶部游戏快捷菜单、快捷应用页均保留 **FSR4.1/Xess-OPT自动导入**。
+顶部游戏快捷菜单、快捷应用页均使用 **FSR4.1.2/XeSS-OPT自动导入**。
 弹窗的三个主要选项为 **FSR4 → XeSS → OPT 客户端**；维护区上方新增并排的“反作弊离线说明”和“还原”，仍保留“卸载并还原游戏文件”。
 
 - FSR4 / XeSS：调用随 YMCC 打包的 `PowerControl/pawnio/YeManTdpCtl.exe`，将本地运行库和模板套用到所选游戏 EXE 的目录；不依赖客户端运行。
@@ -14,22 +14,22 @@
 
 | 组件 | 优先使用 | 可回退的旧版本 |
 | --- | --- | --- |
-| OptiScaler | `0.9.5-pre4` | `0.9.4` |
-| FSR4 INT8 Extras | `FSR_4.1.1b` | `FSR_4.1.1`、`FSR_4.0.2d`、`FSR_4.0.2c`、`FSR_4.0.2b`、`FSR_4.0.0` |
+| OptiScaler | `0.9.5` 正式版（内置 FSR 4.1.2） | `0.9.5-pre4`、`0.9.4` |
 | OptiPatcher | `0.41` | 无；缺失时提示并保持默认伪装 |
 
 先在所有已知缓存根目录寻找固定新版本，缺失/校验不通过才尝试上述旧版本。
 忽略未来版本、Nightly、Rolling、FP8 和无版本目录，不自动追随 GitHub 最新版本。
 DLL/ASI 必须通过 x64 PE/DLL 特征、Optional Header 和 section 文件边界检查；OptiScaler 基础包还必须有可解析的 INI 和核心运行库。
-受支持的 Extras 必须有真正的超分槽文件，只有 Loader/FG/Denoiser 等效果 DLL 不算 FSR4 超分升级；
 任一已知可选 DLL 损坏、同名 DLL 内容冲突或缓存无法完整读取时，拒绝该候选版本并尝试固定旧版。
 这不是官方签名验证，也不能识别所有内容损坏。
 
-如果没有受支持的 INT8 Extras，FSR 选项回退到基础包 FSR3.1 并显示警告；
+所有版本均只从选中的基础包部署运行库，不读取旧版 Extras 或第三方掌机性能包，也不按机型分流。
+使用旧基础包时，FSR 选项回退到基础包 FSR3.1 并显示警告；
 如果基础 OptiScaler 包缺失/不完整，则停止安装，不改游戏文件。
 
 本次不把新的缓存 DLL 放进 YMCC 更新包，也不增加运行时联网下载。
 使用者保留旧缓存时，升级 YMCC 后仍可使用旧版模板与旧库。
+已用旧版导入的游戏须先在 YMCC 中「还原」，再重新选择 FSR4；不会自动覆盖现有安装或改写原件备份。
 
 ## 本地缓存布局
 
@@ -38,12 +38,9 @@ DLL/ASI 必须通过 x64 PE/DLL 特征、Optional Header 和 section 文件边�
 ```text
 Cache\
   OptiScaler\
+    0.9.5\OptiScaler.dll, OptiScaler.ini, 其余完整解压文件...
     0.9.5-pre4\OptiScaler.dll, OptiScaler.ini, 其余完整解压文件...
     0.9.4\OptiScaler.dll, OptiScaler.ini, 其余完整解压文件...
-  Extras\
-    FSR_4.1.1b\amd_fidelityfx_upscaler_dx12.dll 或 amdxcffx64.dll
-    FSR_4.1.1b\可选的 Loader / FrameGeneration / Denoiser / RadianceCache DLL
-    FSR_4.1.1\amd_fidelityfx_upscaler_dx12.dll 或 amdxcffx64.dll
   OptiPatcher\
     0.41\OptiPatcher.asi
 ```
@@ -51,18 +48,11 @@ Cache\
 也接受 `C:\SOFT\OptiscalerClient\Cache`，以及 `PowerControl` 下的
 `OptiScalerCache`、`OptiscalerClient\Cache`、`OptiScaler\Cache`。
 基础包保持完整解压结构；不要把 `OptiScaler.dll` 单独放到版本目录。
-复制时先部署基础包，再用 Extras 覆盖对应 FSR DLL，避免旧 SDK 覆盖新 INT8 库。
+正式版仅使用基础包自带的 FSR 4.1.2 DLL。回退到旧基础包时也不会用 Extras 覆盖同名 DLL。
+YMCC 按官方 OptiScaler v0.9.5 final 发行包内 AMD 4.1.2.4555 的 SHA-256 校验 `amd_fidelityfx_upscaler_dx12.dll`。
+遇到同名改版，跳过该缓存根并寻找另一份经过校验的正式版。若只找到旧基础包，沿原兼容路线并显示实际回退版本。
+写入事务在修改游戏文件前复核源哈希。汉化界面可继续与官方 AMD 超分 DLL 配合。
 两个模式都部署完整 FSR / XeSS SR+FG 依赖，插帧输出不受超分模式的文件裁剪影响。
-对照客户端 `Fsr4Int8DllHelper.KnownFileNames`，精确识别并逐文件覆盖下面六个名称：
-
-```text
-amd_fidelityfx_upscaler_dx12.dll
-amdxcffx64.dll
-amd_fidelityfx_radiancecache_dx12.dll
-amd_fidelityfx_loader_dx12.dll
-amd_fidelityfx_framegeneration_dx12.dll
-amd_fidelityfx_denoiser_dx12.dll
-```
 
 不把 `amdxcffx64.dll` 改名成 legacy DLL，也不把任意脚本、未知插件、`amdxc64.dll` 复制进游戏。
 `amdxc64.dll` 是自定义 RDNA2 辅助驱动；排除它不等于禁用系统 AMD 驱动自身的同名库。
@@ -73,11 +63,11 @@ amd_fidelityfx_denoiser_dx12.dll
 这些地址用于人工维护缓存，不是运行时自动下载接口：
 
 ```text
+OptiScaler 0.9.5 正式版：
+https://github.com/optiscaler/OptiScaler/releases/download/v0.9.5/Optiscaler_0.9.5-final.20261116.7z
+
 OptiScaler 0.9.5-pre4:
 https://github.com/Optiscaler-Client/Optiscaler-Betas/releases/download/0.9.5-pre4/Optiscaler_0.9.5-pre4.20260905.7z
-
-FSR4 INT8 4.1.1b:
-https://github.com/Optiscaler-Client/Optiscaler-Extras/releases/download/FSR_4.1.1b/FSR4_INT8_4.1.1b.7z
 
 OPT 客户端发布页:
 https://github.com/Optiscaler-Client/Optiscaler-Client/releases
@@ -86,9 +76,10 @@ https://github.com/Optiscaler-Client/Optiscaler-Client/releases
 ## 两个模式与 Auto x2
 
 - FSR 模式：DX12 用 `fsr31`；DX11/Vulkan 用 `fsr31_12` 转译路径。
-  有 INT8 Extras 时开启 FSR4 升级并指定 INT8；不引入 FP8、RDNA2 自定义驱动 DLL 或未知配置键。
+  正式版设置 `Fsr4Update=true`，`Fsr4ForceEnableInt8=auto` 交给 OptiScaler 自己按设备选择模型。
+  新导入默认 `Fsr4EnableWatermark=false`，不修改已导入游戏的配置。需要诊断时可手动开启水印：`FSR4L-i8` 表示 INT8 Lite，`FSR3` 表示回退。
 - XeSS 模式：DX12/Vulkan 用 `xess`；DX11 用 `xess_12`，避免把 Arc 专用原生 DX11 路径强套给普通核显。
-  已部署 INT8 Extras 时保留 `Fsr4Update=true` / `Fsr4ForceEnableInt8=true`；超分输出仍由 `[Upscalers]` 的 XeSS 选择决定，不误把“选 XeSS”当成“禁止已装 FSR4 INT8 替换”。
+  保留基础包的 FSR 运行库供兼容路线使用，但不启用 FSR4 超分更新。
 - 两模式均保持游戏控制质量/比例，伪装项为 `auto`，不强改厂商/设备 ID。
 - XeFG `InterpolationCount=1`，即一张插帧、x2；初始化检查不绕过。
   FSR FG 使用 `FGIndex=1` 的 FSR3.1 路径，不强启 FSR4 原生 FP8 插帧。
@@ -161,7 +152,7 @@ node tools/quick_app_ui_browser_selftest.mjs
 规格保持 `console=True` 以输出 JSON；YMCC 原生启动使用隐藏窗口标志。
 `pawnio/_internal` 应与发布锁定清单一起校验，不能随意替换成其它 Python 运行时。
 
-配置依据：OptiScaler v0.9.4 的 `Config.cpp`、本地 0.9.5-pre4 随包 INI、
+配置依据：OptiScaler 正式版 v0.9.5 的发布说明及随包 INI、v0.9.4 的 `Config.cpp`、本地 0.9.5-pre4 随包 INI、
 OptiscalerClient-1.0.7.2 源码与上游 OptiFG 说明。不能把客户端/上游 main 的新键无条件写入这些固定旧版本。
 
 ## 本次源码审计与验证记录（2026-10-02）
@@ -198,7 +189,7 @@ https://github.com/optiscaler/OptiScaler/wiki/OptiFG
 因此 YMCC 不照抄未知键，而使用固定包支持的 `UpscalerIndex`、`Fsr4Update`、`Fsr4ForceEnableInt8`。
 HUD 修复写在旧包真实读取的 `[OptiFG] HUDFix`；XeFG x2 为 `InterpolationCount=1`。
 
-验证结果：
+历史验证（旧 Extras 路线，已退役）：
 
 - `tools/optiscaler_selftest.py`：49 项离线回归通过。
 - `tools/tdp_protocol_selftest.py`、Python 编译检查：通过。
@@ -211,3 +202,11 @@ HUD 修复写在旧包真实读取的 `[OptiFG] HUDFix`；XeFG x2 为 `Interpola
 
 所有游戏写入测试仅限隔离夹具；真实缓存前后哈希未变。未启动真实游戏/OPT 客户端，
 未进行 AMD/Intel 掌机实机画质、性能或驱动兼容验证，也不保证反作弊文件识别覆盖所有在线游戏。
+
+## OPT 1.0.8 共享游戏卡片与备份
+
+- 确认导入后，复用自定义游戏库的单 EXE 补卡入口，不启动客户端、不刷新全库。匹配同一 EXE 的现有卡片；只有文件提交成功后才同步已安装状态。没有客户端时仍使用原 YMCC 备份。
+- 与客户端固定源码 `1a4135de7fce2ea87b37404b533ba2949e40a173` 对齐：由 `InstallPath` 计算备份槽，`InstalledGameDirectory` 保存实际部署目录。准备和中断日志位于独立暂存目录，提交后只有一份有效 v2 账本。
+- 「卸载并还原」按清单核对原件、安装哈希及路径，全部恢复成功才退役已确认的备份。旧 YMCC 账本仍可还原，不迁移；冲突或来源未知时保留。客户端的广泛残留清理不是 YMCC 的回退方案。
+- 客户端卸载会递归清理 `plugins`、`Licenses` 等固定目录；共享安装不接受已存在的这些目录。安装后才新增其他模组时，使用 YMCC 的清单还原以避免客户端的额外清理。
+- 已验证的 `OptiScaler.log` 运行残留不再阻挡共享重装。只在实际部署目录读取有限长度的启动头；必须匹配 OptiScaler 版本、启动横幅和官方发布地址。重装不改动旧日志；提交过的安装卸载时，先按清单恢复，再清理这种日志。原清单已声明存在、同名未知文件、链接及独立模组目录不会被这条规则删除。源文件或备份校验失败仍保留账本，不退回客户端的宽范围清理。

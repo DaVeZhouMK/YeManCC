@@ -5,6 +5,8 @@ import { performancePanelTarget } from './performanceNavigation';
 import { EDIT_REPEAT_BASE_MS, editRepeatInterval } from './sliderRepeat';
 import { emitNativeEvent } from '@/bridge/ipc';
 import { watchMouseModeState } from '@/bridge/mouseModeState';
+import { getSharedPowerLifecycle, isSharedPowerLifecycleAdmitted, onSharedPowerLifecycle,
+  requestSharedPowerLifecycleReconcile, type SharedPowerLifecycleSnapshot } from '@/bridge/powerLifecycleState';
 // gamepad/engine.ts — 手柄全量导航引擎（对齐 PLAN §五）
 //
 // Native Raw Input/XInput supplies page actions; this module maps those
@@ -315,24 +317,6 @@ if (typeof window !== 'undefined') {
   window.addEventListener('performance-schedule:visibility', (e: Event) => {
     const enabled = Boolean((e as CustomEvent<{ detail?: { enabled?: boolean }; enabled?: boolean }>).detail?.enabled);
     setVisibleRoutes(enabled);
-  });
-  // 睡眠守护唤醒后，native 通知重启手柄引擎：重置边沿/时间戳状态，并尝试重启循环
-  window.addEventListener('ipc:gamepad.restart', () => {
-    // 取证：restart 会 stop（epoch+1）再 start（epoch+1），是执行门对拍失败源之一。
-    traceGamepadAdmission('owner-restart', '', { ownerTransitionSchema: 1, phase: 'before-call', transition: 'restart', trigger: 'gamepad-restart' });
-    inputOwnerRuntime.stop('suspend');
-    traceGamepadOwnerResult('stop', 'gamepad-restart', 'suspend');
-    publishOwnerTrace();
-    restartGamepadState();
-    if (summonActive) inputOwnerRuntime.summon();
-    else inputOwnerRuntime.start();
-    traceGamepadOwnerResult(summonActive ? 'summon' : 'start', 'gamepad-restart');
-    publishOwnerTrace();
-    if (engineOpts && hasConnectedPad() && browserLoopAllowed()) ensureLoop(engineOpts);
-    window.setTimeout(() => {
-      if (!engineOpts || !browserLoopAllowed()) return;
-      recoverUnsettledGamepadFocus();
-    }, 120);
   });
   window.addEventListener('ipc:gamepad.ui-input', ((e: CustomEvent<{
     action?: string; uiSeq?: number; repeat?: boolean; heldMs?: number; provenance?: Record<string, unknown>;
@@ -1793,12 +1777,86 @@ function tick(opts: GamepadEngineOptions) {
   rafId = requestAnimationFrame(() => tick(opts));
 }
 
+function gamepadWakeScope(state: SharedPowerLifecycleSnapshot | null): string | null {
+  return state?.known === true && state.gamepadUiRestart === true && state.suspendSerial !== undefined &&
+    isSharedPowerLifecycleAdmitted(state) ? `${state.generation}:${state.suspendSerial}` : null;
+}
+
+let gamepadWakeCleanup: (() => void) | null = null;
+function watchGamepadWake(opts: GamepadEngineOptions): () => void {
+  let focusTimer: { id: number } | null = null;
+  let pendingFocus: string | null = null;
+  let applied = gamepadWakeScope(getSharedPowerLifecycle());
+  let restarting: string | null = null;
+  const cancelTimer = () => {
+    const timer = focusTimer;
+    focusTimer = null;
+    if (timer) window.clearTimeout(timer.id);
+  };
+  const armFocus = (scope: string, current: () => boolean) => {
+    if (pendingFocus !== scope || focusTimer || !current()) return;
+    const timer = { id: window.setTimeout(() => {
+      if (focusTimer !== timer) return;
+      focusTimer = null;
+      if (!current()) return;
+      pendingFocus = null;
+      if (browserLoopAllowed()) recoverUnsettledGamepadFocus();
+    }, 120) };
+    focusTimer = timer;
+  };
+  const stop = onSharedPowerLifecycle(state => {
+    const scope = gamepadWakeScope(state);
+    if (!scope || engineOpts !== opts) { cancelTimer(); return; }
+    const current = () => engineOpts === opts && gamepadWakeScope(getSharedPowerLifecycle()) === scope;
+    if (scope === applied) { armFocus(scope, current); return; }
+    if (scope === restarting) return;
+    if (!current()) return;
+    const previous = restarting;
+    restarting = scope;
+    cancelTimer();
+    pendingFocus = null;
+    try {
+      traceGamepadAdmission('owner-restart', '', { ownerTransitionSchema: 1, phase: 'before-call', transition: 'restart', trigger: 'gamepad-restart' });
+      inputOwnerRuntime.stop('suspend');
+      traceGamepadOwnerResult('stop', 'gamepad-restart', 'suspend');
+      publishOwnerTrace();
+      // Publishing the stopped owner can synchronously retire this Ready.
+      if (!current()) return;
+      restartGamepadState();
+      if (summonActive) inputOwnerRuntime.summon();
+      else inputOwnerRuntime.start();
+      applied = scope;
+      // A pending notification can interrupt focus recovery after the owner is restored.
+      pendingFocus = scope;
+      traceGamepadOwnerResult(summonActive ? 'summon' : 'start', 'gamepad-restart');
+      publishOwnerTrace();
+      if (!current()) return;
+      if (hasConnectedPad() && browserLoopAllowed()) ensureLoop(opts);
+      armFocus(scope, current);
+    } finally {
+      restarting = previous;
+    }
+  }, { observeSuspendSerial: true });
+  // This compatibility event can ask for a read; it cannot reset input itself.
+  const hint = (event: Event) => {
+    const generation = (event as CustomEvent<{ generation?: number }>).detail?.generation;
+    const current = getSharedPowerLifecycle();
+    if (generation !== undefined && current && generation < current.generation) return;
+    if (generation !== current?.generation || !gamepadWakeScope(current))
+      requestSharedPowerLifecycleReconcile('gamepad.restart');
+  };
+  window.addEventListener('ipc:gamepad.restart', hint);
+  return () => { window.removeEventListener('ipc:gamepad.restart', hint); stop(); cancelTimer(); pendingFocus = null; };
+}
+
 export function startGamepad(opts: GamepadEngineOptions): () => void {
   engineOpts = opts;
   inputOwnerRuntime.start();
   traceGamepadAdmission('engine-start', '', { ownerTransitionSchema: 1, phase: 'after-call', transition: 'start', trigger: 'app-mount' });
   publishOwnerTrace();
   void refreshVisibleRoutes();
+  gamepadWakeCleanup?.();
+  gamepadWakeCleanup = watchGamepadWake(opts);
   if (rafId) return () => stopGamepad();
   prevButtons = [];
   prevAxes = [];
@@ -1824,6 +1882,8 @@ function stopGamepadLoop() {
 export function stopGamepad() {
   traceGamepadAdmission('engine-stop', '', { ownerTransitionSchema: 1, phase: 'before-call', transition: 'stop', trigger: 'engine-stop' });
   if (mouseModeCleanup) { mouseModeCleanup(); mouseModeCleanup = null; }
+  gamepadWakeCleanup?.();
+  gamepadWakeCleanup = null;
   cancelSummonFocus();
   stopGamepadLoop();
   inputOwnerRuntime.stop('close');

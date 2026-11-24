@@ -119,7 +119,7 @@ export function createGameSteamContextReader(deps: GameSteamContextReaderDeps): 
 
 function subscribeDefaultInvalidation(callback: () => void): () => void {
   // Suppress only complete positive duplicate transport publications. Unknown,
-  // legacy, completion and power notifications remain revocation edges.
+  // legacy and completion notifications remain revocation edges.
   let sourceSignature = '';
   const invalidate = () => { sourceSignature = ''; callback(); };
   const sourceChanged = (raw: unknown) => {
@@ -141,12 +141,18 @@ function subscribeDefaultInvalidation(callback: () => void): () => void {
   const stops: (() => void)[] = [];
   const stop = () => { for (const dispose of stops.splice(0).reverse()) { try { dispose(); } catch { /* Release the remaining subscriptions. */ } } };
   try {
+    // Game readiness already fences the accepted power generation and sequence.
     stops.push(subscribeGameTargetReadiness(invalidate));
     if (typeof window !== 'undefined') for (const event of [
-      'game.target.changed', 'game.rules.changed', 'steam.uiStateChanged', 'gameSteam.context.changed',
-      'power.lifecycleChanged', 'power.suspending', 'power.resuming', 'power.resumed', 'webview.recovering',
+      'game.target.changed', 'game.rules.changed', 'steam.uiStateChanged',
+      'webview.recovering',
     ]) stops.push(on(event, invalidate));
-    if (typeof window !== 'undefined') stops.push(on('gameSteam.context.sourceChanged', sourceChanged));
+    if (typeof window !== 'undefined') {
+      // A new association retires the pending query, not the verified Steam
+      // identity used to deduplicate a later repeat of the same source event.
+      stops.push(on('gameSteam.context.changed', callback));
+      stops.push(on('gameSteam.context.sourceChanged', sourceChanged));
+    }
     return stop;
   } catch (error) { stop(); throw error; }
 }

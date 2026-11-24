@@ -16,6 +16,7 @@ struct OwnerResumeRecovery {
     unsigned long long powerGeneration=0;
     ymcc::sleeppower::SharedPowerV1 powerScope;
     ULONGLONG deadline=0;
+    ULONGLONG retryOnMessageAt=0;
     unsigned checks=0,repairs=0,clean=0,runtimeRebuilds=0,channelResets=0;
     OwnerResumeControlStamp cleanControls;
     DWORD lastError=0;const char* status="idle";
@@ -38,6 +39,7 @@ inline void (*ownerResumeRecoveryObserver)(const Json&)=nullptr;
 inline Json ownerResumeRecoveryState() {
     const auto& r=ownerResumeRecovery;
     Json state={{"version",1},{"status",r.status},{"pending",r.pending},{"timerArmed",r.timer!=0},
+        {"timerDeliveryDeferred",r.retryOnMessageAt!=0},
         {"powerGeneration",r.powerGeneration},{"checks",r.checks},{"repairs",r.repairs},{"clean",r.clean},{"runtimeRebuilds",r.runtimeRebuilds},{"inputChannelResets",r.channelResets},{"lastError",r.lastError}};
     state["faultBudget"]={{"generation",ownerFaultBudget.generation},{"suspendSerial",ownerFaultBudget.suspendSerial},
         {"repairs",ownerFaultBudget.repairs},{"episodes",ownerFaultBudget.episodes},{"runtimeRebuilds",ownerFaultBudget.runtimeRebuilds},{"inputChannelResets",ownerFaultBudget.channelResets},{"maximumRepairs",kOwnerResumeMaxRepairs},{"maximumEpisodes",kOwnerResumeMaxRepairs}};
@@ -52,7 +54,7 @@ inline Json ownerResumeRecoveryState() {
     return state;
 }
 inline void stopOwnerResumeTimer() {
-    auto& r=ownerResumeRecovery;const auto timer=r.timer;const auto window=r.window;r.timer=0;
+    auto& r=ownerResumeRecovery;const auto timer=r.timer;const auto window=r.window;r.timer=0;r.retryOnMessageAt=0;
     if(window&&timer)KillTimer(window,timer);
 }
 inline void cancelOwnerResumeRecovery(const char* status) {
@@ -67,6 +69,9 @@ inline bool ownerResumeBindingCurrent() {
 inline bool ownerResumeCurrent() {
     const auto& r=ownerResumeRecovery;
     return r.pending&&ownerResumeBindingCurrent()&&ownerPowerCurrent&&ownerPowerCurrent(r.powerScope);
+}
+inline bool ownerResumeLocallyBlocked() noexcept {
+    return presentationSuspended.load(std::memory_order_acquire)||ymcc::customtouch::editing.load(std::memory_order_acquire);
 }
 inline void loseOwnerResumeContext() {
     auto& r=ownerResumeRecovery;
@@ -193,16 +198,14 @@ inline void armOwnerResumeCheck(unsigned delay) {
     if(now>=r.deadline){finishOwnerResumeRecovery("expired");return;}
     const UINT_PTR id=++r.serial;
     const UINT timeout=static_cast<UINT>(std::min<ULONGLONG>(delay,r.deadline-now));
-    if(!SetTimer(r.window,id,std::max<UINT>(USER_TIMER_MINIMUM,timeout),ownerResumeTimerProc)) {
-        r.lastError=GetLastError();finishOwnerResumeRecovery("timer-failed");return;
+    const auto interval=std::max<UINT>(USER_TIMER_MINIMUM,timeout);
+    if(!SetTimer(r.window,id,interval,ownerResumeTimerProc)) {
+        r.lastError=GetLastError();r.retryOnMessageAt=now+interval;return;
     }
     r.timer=id;
 }
-inline void CALLBACK ownerResumeTimerProc(HWND window,UINT,UINT_PTR id,DWORD) {
+inline void runOwnerResumeCheck(UINT_PTR id) {
     auto& r=ownerResumeRecovery;
-    // KillTimer cannot remove an already queued callback. Each arm has a fresh
-    // identity; an old sleep/configuration/exit callback has no authority.
-    if(!r.timer||window!=r.window||id!=r.timer)return;
     stopOwnerResumeTimer();
     if(!ownerResumeCurrent()){loseOwnerResumeContext();return;}
     const auto epoch=r.epoch;const auto generation=r.powerGeneration;
@@ -215,15 +218,18 @@ inline void CALLBACK ownerResumeTimerProc(HWND window,UINT,UINT_PTR id,DWORD) {
     const auto expired=[&] {return GetTickCount64()>=r.deadline;};
     if(!getConfig().masterEnabled){finishOwnerResumeRecovery("disabled");return;}
     if(expired()){finishOwnerResumeRecovery("expired");return;}
-    // A summon presentation lease intentionally hides these controls. It is
-    // neither a source failure nor permission to renew the original deadline.
-    const auto presentationBusy=[] {return presentationSuspended.load(std::memory_order_acquire);};
+    // Hidden or edited controls cannot be probed or repaired by the wake verifier.
     const auto displayBusy=[] {return ownerDisplayRefresh.pending||displayTransitionFence.idleSuspended;};
-    if(presentationBusy()||displayBusy()){r.clean=0;armOwnerResumeCheck(displayBusy()?100:250);return;}
+    if(!sharedInputAllowed()){r.clean=0;armOwnerResumeCheck(250);return;}
+    if(ownerDisplayReflowInterrupted&&displayTransitionFence.idleSuspended){
+        queueOwnerDisplayRefresh(true,true);
+        if(!current())return;
+    }
+    if(displayBusy()){r.clean=0;armOwnerResumeCheck(100);return;}
     // Auto-hide changes the artwork the probe must verify without rebinding input.
     const auto controlStamp=[] {return OwnerResumeControlStamp{padRefreshEpoch,buttonRefreshEpoch,ymcc::customtouch::refreshEpoch,autoHide.revealSerial};};
     const auto stamp=controlStamp();
-    const auto controlsCurrent=[&] {return stamp==controlStamp()&&!presentationBusy()&&!displayBusy();};
+    const auto controlsCurrent=[&] {return stamp==controlStamp()&&!ownerResumeLocallyBlocked()&&!displayBusy();};
     const auto probeCurrent=[&] {return sameAttempt()&&ownerResumeCurrent()&&controlsCurrent()&&!expired();};
     if(r.clean&&r.cleanControls!=stamp)r.clean=0;
     try {
@@ -246,7 +252,7 @@ inline void CALLBACK ownerResumeTimerProc(HWND window,UINT,UINT_PTR id,DWORD) {
         if(r.repairs==kOwnerResumeMaxRepairs||ownerFaultBudget.repairs==kOwnerResumeMaxRepairs){finishOwnerResumeRecovery("failed");return;}
         ++r.repairs;++ownerFaultBudget.repairs;
         const auto sameSources=[&]{return stamp.pad==padRefreshEpoch&&stamp.button==buttonRefreshEpoch&&
-            stamp.custom==ymcc::customtouch::refreshEpoch&&!presentationBusy()&&!displayBusy();};
+            stamp.custom==ymcc::customtouch::refreshEpoch&&!ownerResumeLocallyBlocked()&&!displayBusy();};
         const auto sourceCurrent=[&]{return current()&&sameSources();};
         const auto retainAfterReplacement=[&]{
             if(!current())return true;
@@ -297,6 +303,18 @@ inline void CALLBACK ownerResumeTimerProc(HWND window,UINT,UINT_PTR id,DWORD) {
         // Back off from the actual attempt; never catch up missed timers.
         armOwnerResumeCheck(r.repairs==1?500:1000);
     }catch(...){if(current()){r.lastError=ERROR_GEN_FAILURE;finishOwnerResumeRecovery("exception");}}
+}
+inline void CALLBACK ownerResumeTimerProc(HWND window,UINT,UINT_PTR id,DWORD) {
+    const auto& r=ownerResumeRecovery;
+    // KillTimer does not remove a queued callback. Only the current arm runs.
+    if(r.timer&&window==r.window&&id==r.timer)runOwnerResumeCheck(id);
+}
+inline void ownerResumeContinueOnWindowMessage(HWND window,UINT message) {
+    const auto& r=ownerResumeRecovery;
+    if(!r.retryOnMessageAt||window!=r.window)return;
+    // Let the original lifecycle handlers commit their boundaries first.
+    if(message!=WM_NULL&&message!=WM_PAINT&&message!=WM_INPUT&&message!=WM_MOUSEMOVE&&message!=WM_SETCURSOR)return;
+    if(GetTickCount64()>=r.retryOnMessageAt)runOwnerResumeCheck(r.serial);
 }
 inline bool ownerResumeReady(unsigned long long powerGeneration) {
     auto& r=ownerResumeRecovery;const auto window=owner.load();

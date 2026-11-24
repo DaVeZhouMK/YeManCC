@@ -1,5 +1,5 @@
 import fs from 'node:fs';import crypto from 'node:crypto';import path from 'node:path';import vm from 'node:vm';import assert from 'node:assert/strict';import {fileURLToPath} from 'node:url';
-import {uniqueAnchor,cppBlock} from './ymcc_sim/global/decky-update-recovery/native-source-admission.mjs';
+import {uniqueAnchor,cppBlock,extractDeckyReady} from './ymcc_sim/global/decky-update-recovery/native-source-admission.mjs';
 // Follow the current shared native owner; these are source wiring checks, not native execution.
 function admitManualSources(root,io){
  const read=relative=>io.readFileSync(path.join(root,relative),'utf8'),main=read('native/main.cpp'),runtime=read('native/decky_sidebar_runtime.h');
@@ -13,9 +13,15 @@ function admitManualSources(root,io){
  need(deps,['allowManualRepair(session)','deckySidebarEnvironment(false,{},true)','deckySidebarPortPreflight()','PowerLifecycle::Ready','ymcc::steamui::read(g_steamSettingsObserver,true)'],'manual current context');
  assert(!handler.includes('setEnabled(true)')&&!handler.includes('startOwned')&&!handler.includes('steam.uiMode'));
  const ready=block(main,'static bool deckySidebarResumeAfterIntent(','shared committed Ready');
+ const delivery=extractDeckyReady(main);
+ if(delivery.publicReady){
+  need(ready,['g_exitRequested.load()','g_aiFanMockSession.isolated','g_deckySidebarRuntime.exitFenced()','!g_deckySidebarRuntime.snapshot().enabled'],'shared Ready refusal');
+  ordered(ready,['snapshot().enabled','if(!sharedPowerLifecycleCurrent(power))return false;','delivered.compare_exchange_weak'],'public power proof before generation admission');
+ }else{
  const firstReturn=ready.indexOf('return false;');assert(firstReturn>=0,'shared Ready refusal missing');
  const leading=ready.slice(0,firstReturn).replace(/\s+/g,'');assert(leading.startsWith('if(')&&leading.endsWith(')'),'shared Ready leading refusal');
  const guards=leading.slice(3,-1).split('||');for(const guard of ['!generation','generation!=currentPowerGeneration()','g_exitRequested.load()','g_aiFanMockSession.isolated','g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready','!g_deckySidebarRuntime.snapshot().enabled'])assert(guards.includes(guard),'shared Ready refusal: '+guard);
+ }
  need(ready,['generation<=prior'],'Ready generation duplicate refusal');
  const delivered=uniqueAnchor(ready,'delivered.compare_exchange_weak','Ready once per generation');
  for(const call of ['requestPreparationRefresh(generation)','requestBindingRefresh(generation)','requestLaunchAdmissionRefresh()','requestConnectionCheck()','g_steamModeObserver.requestRefresh(session)','"wake-connection-check"'])assert(uniqueAnchor(ready,call,'Ready recovery')>delivered,'Ready demand preceded generation admission');
@@ -24,7 +30,10 @@ function admitManualSources(root,io){
  const readyFanout=cppBlock(wake,wake.indexOf('{',readyGate),'committed Ready branch').body;
  const dispatch=block(readyFanout,'const auto dispatch=[&](unsigned stage,const char* name,auto&& consume)','Ready dispatch');
  ordered(dispatch,['generation!=currentPowerGeneration()','PowerLifecycle::Ready','g_sleepPowerDispatch.pendingSuspend()','fanout.next=stage+1','consume();'],'Ready current before Decky fanout');
- need(readyFanout,['dispatch(3,"decky",[&]{deckySidebarResumeAfterIntent(generation,"committed-ready");})'],'wake shared consumer');
+ if(delivery.publicReady){
+  assert(!wake.includes('deckySidebarResumeAfterIntent('),'legacy window commit must not claim the first Decky wave');
+  ordered(delivery.delivery,['sharedPowerLifecycleCurrent(power)','power.suspendSerial','deckySidebarResumeAfterIntent(power,"public-ready")'],'public wake before Decky fanout');
+ }else need(readyFanout,['dispatch(3,"decky",[&]{deckySidebarResumeAfterIntent(generation,"committed-ready");})'],'wake shared consumer');
  for(const signature of ['bool requestLaunchAdmissionRefresh(','bool requestConnectionCheck(','bool requestPreparationRefresh(','bool requestBindingRefresh('])need(block(runtime,signature,signature),['pendingSafetyStop_.active(intent_)','stopping_','!state_.enabled'],'Runtime current owner');
  for(const [signature,counter] of [['bool requestPreparationRefresh(','lastPreparationGeneration_'],['bool requestBindingRefresh(','lastBindingGeneration_']])need(block(runtime,signature,signature),['!generation','generation<='+counter], 'Runtime generation fence');
  assert(ready.indexOf('requestBindingRefresh(generation)')<ready.indexOf('requestConnectionCheck()'),'binding invalidation must precede new connection observation');

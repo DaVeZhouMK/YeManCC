@@ -7,13 +7,13 @@ namespace ymcc::fan_wake {
 class Observation {
     mutable std::mutex mutex_;
     std::uint64_t shared_=1, generation_=1, sharedBound_=1;
-    std::uint64_t sleep_=0, wake_=0, lastFact_=0, cutoff_=0, published_=0, unpairedWake_=0, hibernateWake_=0;
+    std::uint64_t sleep_=0, wake_=0, lastFact_=0, cutoff_=0, published_=0, unpairedWake_=0, hibernateWake_=0, confirmedAt_=0;
     std::uint64_t closeOwner_=0, closePending_=0, closed_=0, closeUnstarted_=0;
     bool boundary_=false, firstRaw_=false, sharedAwake_=true;
     void syncLocked(std::uint64_t shared) {
         if(shared>shared_){shared_=shared;generation_=(generation_>=shared?generation_+1:shared);
             sharedBound_=generation_;boundary_=false;firstRaw_=false;sharedAwake_=true;
-            sleep_=wake_=cutoff_=published_=unpairedWake_=hibernateWake_=0;}
+            sleep_=wake_=cutoff_=published_=unpairedWake_=hibernateWake_=confirmedAt_=0;}
     }
     bool physicalLocked() const {return boundary_ && sleep_ && wake_>sleep_ && wake_>cutoff_;}
     bool readyLocked(std::uint64_t g) const {
@@ -23,7 +23,7 @@ class Observation {
 public:
     enum class CloseAdmission { Ignored, Queued, StartWorker };
     std::uint64_t generation(std::uint64_t shared) {std::lock_guard<std::mutex> l(mutex_);syncLocked(shared);return generation_;}
-    std::uint64_t confirmedSuspend(std::uint64_t shared) {
+    std::uint64_t confirmedSuspend(std::uint64_t shared,std::uint64_t at=0) {
         std::lock_guard<std::mutex> l(mutex_);
         if(!shared || shared<shared_)return 0;
         if(shared>shared_)syncLocked(shared);
@@ -31,15 +31,21 @@ public:
         if(boundary_)return sharedBound_==generation_?generation_:0;
         if(generation_==1 && shared==1)++generation_;
         sharedBound_=generation_;boundary_=true;firstRaw_=true;sharedAwake_=false;
-        sleep_=wake_=cutoff_=published_=0;return generation_;
+        confirmedAt_=at;sleep_=wake_=cutoff_=published_=0;return generation_;
     }
     std::uint64_t recordSleep(std::uint64_t shared,std::uint64_t at) {
         std::lock_guard<std::mutex> l(mutex_);
-        if(!shared || shared<shared_ || !at || at<=lastFact_ || (shared==shared_ && at<=unpairedWake_))return 0;
+        if(!shared || shared<shared_ || !at || at<=lastFact_)return 0;
         syncLocked(shared);
+        // A 507 alone is only a watermark. Pair a delayed 506 with it only
+        // inside the still-parked public suspend that expected its first 506.
+        const bool reverse=at<=unpairedWake_;
+        if(reverse && (!firstRaw_ || sharedBound_!=generation_ || sharedAwake_ ||
+            !confirmedAt_ || at<confirmedAt_ || at<=cutoff_ || at==unpairedWake_))return 0;
         if(!firstRaw_ || sharedBound_!=generation_)++generation_;
         firstRaw_=false;boundary_=true;sharedAwake_=false;
-        sleep_=lastFact_=at;wake_=published_=hibernateWake_=0;return generation_;
+        sleep_=at;wake_=reverse?unpairedWake_:0;lastFact_=reverse?wake_:at;
+        published_=hibernateWake_=0;return generation_;
     }
     bool recordWake(std::uint64_t shared,std::uint64_t at,bool retry) {
         std::lock_guard<std::mutex> l(mutex_);
@@ -48,7 +54,8 @@ public:
         if(retry)return false;
         // OS wake facts outlive a control intent; only publication/Host work
         // is activity-gated. Otherwise idle sleep survives a real wake forever.
-        // An unpaired wake is only an ordering watermark in this shared cycle.
+        // An unpaired wake is an ordering watermark until a matching 506 of
+        // a confirmed public suspend arrives.
         // A delayed older 506 must not revoke an already current Ready state;
         // the watermark never manufactures a sleep, Close or physical wake.
         if(!shared || shared<shared_ || !at || at<=lastFact_ || at<=cutoff_)return false;

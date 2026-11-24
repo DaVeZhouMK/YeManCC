@@ -1,5 +1,6 @@
 import {selectedNativeTools,selectedOwnedTools,simulationCorePath,HOST_ENVIRONMENT_SOURCE_INPUTS} from './ymcc_sim/global/release-host-environment.mjs';
 import {resourceFixtureEnvironment} from './ymcc_sim/global/decky-persistent-lifecycle/baseline-environment.mjs';
+import {verifyResourceFixtureTools} from './ymcc_sim/global/decky-update-recovery/resource-fixture-tools.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -83,9 +84,7 @@ function resourceSession(root, out, config) {
   const tools=manifest.native, declared=new Map(),reviewed=new Map();
   const reviewedManifest=selectedOwnedTools();
   const resourceManifestFile=path.join(frozen,'tools/ymcc_sim/global/decky-update-recovery/resource-fixture-tools.json');
-  assert.equal(hash(fs.readFileSync(resourceManifestFile)),'a4b691bbf95cdbdfcfa5ca593d5bff955c95b8b75bf0b2ca4596f9a7ebb7acda','Resource fixed declaration changed before compile');
-  const resourceManifest=JSON.parse(fs.readFileSync(resourceManifestFile,'utf8'));
-  assert.equal(resourceManifest.schemaVersion,1);assert.equal(resourceManifest.files.length,1);
+  const resourceManifest=verifyResourceFixtureTools(resourceManifestFile);
   for(const row of [...reviewedManifest.files,...resourceManifest.files]){canonical(row.path);assert.equal(hash(fs.readFileSync(row.path)),row.sha256,'Reviewed native tool changed before compile: '+row.path);reviewed.set(key(row.path),row);}
   for(const row of manifest.files){canonical(row.path); assert.equal(hash(fs.readFileSync(row.path)),row.sha256,'Declared native tool changed: '+row.path);declared.set(key(row.path),row);}
   for(const tool of [tools.compiler,tools.linker,tools.dumpbin,tools.commandProcessor])assert(declared.has(key(tool)),'Selected tool outside original declaration');

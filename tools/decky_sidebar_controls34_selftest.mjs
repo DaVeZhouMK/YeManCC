@@ -329,8 +329,9 @@ function renderFxToggle({enabled=false,known=true,connected=true,busy=false}={})
  const start=source.indexOf('const fieldLabels:'),end=source.indexOf('// Steam can reload its shared page before Loader calls onDismount.');
  assert(start>0&&end>start);
  const state={connected,busy,snapshot:{runId:'f'.repeat(32),generation:1,revision:1,ready:true,game:null,fan:{enabled:false,preset:'off',choices:[]},audioOptimization:{known,installed:true,running:enabled,enabled,selected:true,preset:'移动端通用音频优化',output:'fixture',reason:''},actions:{audioOptimization:true,fan:false,game:false}}};
- const sends=[],module={exports:{}},intents={performance:{snapshot:()=>null,cancel(){}},fan:{snapshot:()=>null,hasWork:()=>false,cancel(){}}};
- const React={createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)}),useRef:value=>({current:value}),useState:value=>[value,()=>{}],useEffect(){}};
+ const sends=[],module={exports:{}},intents={performance:{snapshot:()=>null,hasWork:()=>false,cancel(){}},fan:{snapshot:()=>null,hasWork:()=>false,cancel(){}}};
+ const React={createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)}),useRef:value=>({current:value}),useState:value=>[typeof value==='function'?value():value,()=>{}],useEffect(){}};
+ React.useLayoutEffect=React.useEffect;
  const globals={module,exports:module.exports,React,SP_REACT:React,client:{snapshot:()=>state,mutate:async(command,args)=>{sends.push({command,args});return {};}},createContentIntents:()=>intents,useQuickAccessVisible:()=>true,PanelSection:'section',PanelSectionRow:'row',ToggleField:'toggle',ButtonItem:'button',SliderField:'slider',DropdownItem:'dropdown',AnchoredDropdown:'anchored',PerformanceControls:'performance',GameProfileControls:'profile',panelStyle:'grouped',FRAME_RATE_CEILINGS:[],FAN_CHOICES:[{data:'off',label:'关闭'}],DECKY_GYRO_CHOICES:[],...load(fs.readFileSync(path.join(root,'src/bridge/losslessProgramState.ts'),'utf8')),activeContentIntents:new Set()};
  vm.runInNewContext(transformSync(source.slice(start,end)+'\nmodule.exports={Content};',{loader:'tsx',format:'cjs',jsxFactory:'React.createElement'}).code,globals);
  const tree=module.exports.Content(),nodes=[];function visit(node){if(!node||typeof node!=='object')return;nodes.push(node);for(const child of node.children??[])visit(child);}visit(tree);

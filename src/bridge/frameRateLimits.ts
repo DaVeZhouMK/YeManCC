@@ -1,4 +1,5 @@
 import { powerLifecycle } from './api';
+import { isSharedPowerLifecycleAdmitted, onSharedPowerLifecycle, type SharedPowerLifecycleSnapshot } from './powerLifecycleState';
 import { isGameStatusCurrent, isCurrentGameTarget, type DetectedGame } from './gamedetect';
 import { powerSourceMode } from './powerSource';
 import { readSettingsSection,saveSettingsSection,updateSettings,rememberOrdinaryPerformancePreferences,getSettingsGeneration,assertSettingsGeneration, type UnifiedSettings } from './settingsRepository';
@@ -16,22 +17,23 @@ const frameTargetCurrent=(target:DetectedGame|null)=>isGameStatusCurrent() && (t
 export function onFrameRatesChanged(listener:(pair:FrameRatePair)=>void):()=>void {listeners.add(listener);return ()=>listeners.delete(listener);}
 // A display transaction may supply its own current RTSS read. Ordinary callers
 // keep the original fresh reader; no resolved section is retained here.
-export async function loadGlobalFrameRates(readRtss:()=>Promise<UnifiedSettings['rtss']>=()=>readSettingsSection('rtss')):Promise<FrameRatePair> {
+export async function loadGlobalFrameRates(readRtss:()=>Promise<UnifiedSettings['rtss']>=()=>readSettingsSection('rtss'),isCurrent:()=>boolean=()=>true):Promise<FrameRatePair> {
   const current=await readRtss();
   if(current.frameRates && current.frameRates.ac && current.frameRates.dc){
     if(current.templateDefaults===true && typeof detectPerformanceTemplate==='function')return frameRatePair(null,(await detectPerformanceTemplate())==='desktop'?200:120,60);
     return frameRatePair(current.frameRates);
   }
-  if(fallbackGeneration!==getSettingsGeneration()){fallbackCache=null;fallbackGeneration=getSettingsGeneration();}
-  if(fallbackCache)return frameRatePair(current.frameRates,fallbackCache.ac,fallbackCache.dc);
+  const generation=getSettingsGeneration();
+  if(fallbackGeneration===generation && fallbackCache)return frameRatePair(current.frameRates,fallbackCache.ac,fallbackCache.dc);
   const [tdp,schedule]=await Promise.all([readSettingsSection<any>('tdp'),readSettingsSection<any>('performanceSchedule')]);
   const legacy=(side:FrameRateSide)=>{
     const profile=schedule.profiles?.[side]?.[schedule.active?.[side]];
     if((schedule.enabled===true || (schedule.configured===true && schedule.enabled===undefined)) && typeof profile?.fpsTarget==='number')return profile.fpsTarget;
     return typeof tdp.fpsLimit==='number'?tdp.fpsLimit:FRAME_RATE_DEFAULTS[side];
   };
-  fallbackCache=frameRatePair(current.frameRates,legacy('ac'),legacy('dc'));
-  return frameRatePair(fallbackCache); // migration is read-only until a real save/apply boundary
+  const fallback=frameRatePair(current.frameRates,legacy('ac'),legacy('dc'));
+  if(isCurrent() && getSettingsGeneration()===generation){fallbackCache=fallback;fallbackGeneration=generation;}
+  return frameRatePair(fallback); // migration is read-only until a real save/apply boundary
 }
 export async function ensureGlobalFrameRates():Promise<FrameRatePair> {
   const generation=getSettingsGeneration(), target=getPolicyGame();
@@ -64,8 +66,9 @@ export async function saveGlobalFrameRate(side:FrameRateSide,value:unknown):Prom
     for(const listener of [...listeners]){try{listener(frameRatePair(pair));}catch{/* observer failure cannot turn durable save into failure */}}return pair;
   });writeQueue=run.then(()=>{},()=>{});return run;
 }
-export async function effectiveFrameRates():Promise<{pair:FrameRatePair;identity:string;dedicated:boolean;target:DetectedGame|null}> {
-  const pair=await loadGlobalFrameRates();
+export async function effectiveFrameRates(isCurrent:()=>boolean=()=>true):Promise<{pair:FrameRatePair;identity:string;dedicated:boolean;target:DetectedGame|null}> {
+  const pair=await loadGlobalFrameRates(undefined,isCurrent);
+  if(!isCurrent())return {pair,identity:'',dedicated:false,target:null};
   const game=getPolicyGame();
   if(!game)return {pair,identity:'',dedicated:false,target:null};
   const custom=await loadGameCustomConfig();const key=gamePolicyKey(game),entry=custom.entries[key];
@@ -78,35 +81,52 @@ let applyQueue:Promise<void>=Promise.resolve();
 let rtssReloadPending=false;
 export function applyIndependentFrameRates(isCurrent:()=>boolean=()=>true):Promise<boolean> {
   const targetAtStart=getPolicyGame();
-  const admitted=()=>frameTargetCurrent(targetAtStart);
+  let powerAtStart:SharedPowerLifecycleSnapshot|null=null, revoked=false;
+  let retireRead!:()=>void;
+  const retiredRead=new Promise<undefined>(resolve=>{retireRead=()=>resolve(undefined);});
+  const readCurrent=<T>(work:Promise<T>)=>Promise.race([work,retiredRead]);
+  const samePower=(a:SharedPowerLifecycleSnapshot,b:SharedPowerLifecycleSnapshot)=>
+    a.generation===b.generation && a.observedNotificationSequence===b.observedNotificationSequence && a.suspendSerial===b.suspendSerial;
+  // Capture before joining the write queue. A later Ready cannot renew an old request.
+  const stopPower=onSharedPowerLifecycle(snapshot=>{
+    if(!isSharedPowerLifecycleAdmitted(snapshot) || powerAtStart && !samePower(powerAtStart,snapshot)){
+      revoked=true;
+      retireRead();
+    }else powerAtStart??=snapshot;
+  },{observeNotificationSequence:true,observeSuspendSerial:true});
+  const admitted=()=>!revoked && isCurrent() && frameTargetCurrent(targetAtStart);
   const run=applyQueue.then(async()=>{
-    if(!isCurrent() || !isPolicyGameInitialized() || !admitted())return false;
-    const lifecycle=await powerLifecycle.get().catch(()=>null);
-    if(lifecycle?.phase!=='ready' || lifecycle.hardwareWritesAllowed!==true)return false;
-    const side=await detectPowerModeReliable();
-    if(!side)return false; // Unknown power is not permission to apply the AC cap.
-    const state=await effectiveFrameRates();
+    if(!isPolicyGameInitialized() || !admitted())return false;
+    const lifecycle=await readCurrent(powerLifecycle.get().catch(()=>null));
+    if(!lifecycle || !isSharedPowerLifecycleAdmitted(lifecycle) || !admitted() || powerAtStart && !samePower(powerAtStart,lifecycle))return false;
+    powerAtStart=lifecycle;
+    const side=await readCurrent(detectPowerModeReliable());
+    if(!side || !admitted())return false;
+    const state=await readCurrent(effectiveFrameRates(admitted));
+    if(!state)return false;
     const targetCurrent=()=>admitted() && (state.target ? isCurrentGameTarget(state.target) : getPolicyGame()===null);
-    if(!isCurrent() || !targetCurrent() || (await detectPowerModeReliable())!==side)return false;
+    if(!targetCurrent() || (await readCurrent(detectPowerModeReliable()))!==side || !targetCurrent())return false;
     setFloatRtssLinked(false);
     const value=state.pair[side];
-    const current=()=>isCurrent() && targetCurrent() && (powerSourceMode.value===null || powerSourceMode.value===side);
+    const current=()=>targetCurrent() && (powerSourceMode.value===null || powerSourceMode.value===side);
     if(!current())return false;
-    const actual=await readRtssLimit();
-    if(!current())return false;
+    // A stale read may still return later. Its result must not block the next
+    // owner; writes below still settle in the original serial queue.
+    const actual=await readCurrent(readRtssLimit(current));
+    if(actual===undefined || !current())return false;
     if(actual!==value.fps || rtssReloadPending){
       rtssReloadPending=true;
       await setRtssLimit(value.fps,current);
       if(!current())return false;
       rtssReloadPending=false;
     }
-    if(!current() || (await detectPowerModeReliable())!==side)return false;
+    if(!current() || (await readCurrent(detectPowerModeReliable()))!==side)return false;
     if(!current())return false;
     const optimizer=getFloatInfo();
     const optimizerTarget = isContinuousFloat() ? value.fps : value.fps || value.lastFps;
     if(optimizer.enabled && optimizer.target!==optimizerTarget)await setFloatTarget(optimizerTarget);
-    return true;
-  });applyQueue=run.then(()=>{},()=>{});return run;
+    return current();
+  }).finally(stopPower);applyQueue=run.then(()=>{},()=>{});return run;
 }
 
 export function publishFrameRatesChanged(pair: FrameRatePair): void {

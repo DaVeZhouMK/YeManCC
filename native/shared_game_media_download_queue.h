@@ -1,5 +1,6 @@
 #pragma once
 #include "shared_game_media_shortcut.h"
+#include <array>
 #include <optional>
 
 namespace ymcc::media::downloads {
@@ -240,18 +241,55 @@ inline void write(const fs::path& path,const Json& j) {
     if(!MoveFileExW(temporary.c_str(),disk.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))throw std::runtime_error("media-cache-checkpoint-replace-failed");
   } catch(...) {if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);std::error_code ec;fs::remove(temporary,ec);throw;}
 }
+enum class FieldCheck { boolean, rowBoolean, text, number, intMax, pidMax, appMax, object, array };
+struct FieldRule { std::string_view name; FieldCheck check; size_t order; };
+template<size_t... N>
+consteval auto makeFieldRules(const std::pair<FieldCheck,std::array<std::string_view,N>>&... groups) {
+  std::array<FieldRule,(N+...)> rules{};
+  size_t index=0;
+  const auto add=[&](const auto& group){for(auto name:group.second){rules[index]={name,group.first,index};++index;}};
+  (add(groups),...);
+  std::sort(rules.begin(),rules.end(),[](const auto& a,const auto& b){return a.name==b.name?a.order<b.order:a.name<b.name;});
+  return rules;
+}
+inline constexpr auto fieldRules=makeFieldRules(
+  std::pair{FieldCheck::boolean,std::to_array<std::string_view>({"enabled","wallpaperPauseOnBattery","sessionClaimed","resourceChecked","catalogPending","identityPending","verified","retiredPopular","refreshRequested","recoveryRequired","recoveryUnconfirmed"})},
+  std::pair{FieldCheck::rowBoolean,std::to_array<std::string_view>({"autoStopped"})},
+  std::pair{FieldCheck::text,std::to_array<std::string_view>({"sharedSleepCancelledSession","wallpaperPowerCancelledSession","session","phase","reason","pauseReason","resourcePauseReason","workerBirth","ownerProtocolSession","launchTarget","inventoryReadyId","inventoryRequestId","manualRequestId","manualSession","manualSessionRequest","manualState","manualPriorityKey","catalogStatus","catalogError","queuePolicy","pendingReason","key","name","state","lastError","stopReason","identityPrerequisiteStamp","identityRecoveryReason","catalogSource","localCatalogSource","executable","steamAccount","shortcutAppId","recoveryReason"})},
+  std::pair{FieldCheck::number,std::to_array<std::string_view>({"sessionIssuedAt","sessionDeadlineAt","statusRevision","queueRevision","updatedAt","workerPid","ownerProtocol","maxParallel","parallelSlots","cpuThreshold","startupProtectionUntil","heartbeatAt","taskStartedAt","manualUntil","inventoryAwaitUntil","inventoryRequestedAt","cooldownUntil","catalogRetryAt","progressNotifiedAt","bytes","totalBytes","resumedBytes","sessionResumedBytes","activeCount","appId","addedAt","lastPlayed","attempts","automaticElapsedMs","retryAt","requestBindingRevision","provenanceRevision","admissionRevision","qualityUpgradeRevision","videoQualityPolicy","sourceTier","localSourceTier","chartRank","attemptBudgetMs","total","completed","remaining","failed","unavailable","manualTotal","manualCompleted","nextDueAt"})},
+  std::pair{FieldCheck::intMax,std::to_array<std::string_view>({"attempts","maxParallel","parallelSlots","cpuThreshold","ownerProtocol","videoQualityPolicy","sourceTier","localSourceTier","chartRank"})},
+  std::pair{FieldCheck::pidMax,std::to_array<std::string_view>({"workerPid"})},
+  std::pair{FieldCheck::appMax,std::to_array<std::string_view>({"appId"})},
+  std::pair{FieldCheck::object,std::to_array<std::string_view>({"sharedSleepSession","sharedSleepWindow","jobs","active","current","localShortcut","selectedVideo","manualTargetRevisions","sourceCounts"})},
+  std::pair{FieldCheck::array,std::to_array<std::string_view>({"history","admissionHistory","manualTargets","recoveryBlockedKeys"})});
+inline bool fieldValid(const FieldRule& rule,const Json& v,bool row) {
+  switch(rule.check){
+    case FieldCheck::boolean:return v.is_boolean();
+    case FieldCheck::rowBoolean:return !row||v.is_boolean();
+    case FieldCheck::text:return v.is_string();
+    case FieldCheck::number:return v.is_number_integer()&&(!v.is_number_unsigned()||v.get<uint64_t>()<=INT64_MAX)&&
+      (v.get<int64_t>()>=0||(rule.name=="nextDueAt"&&v.get<int64_t>()==-1));
+    case FieldCheck::intMax:return v.get<int64_t>()<=INT_MAX;
+    case FieldCheck::pidMax:return v.get<uint64_t>()<=MAXDWORD;
+    case FieldCheck::appMax:return v.get<uint64_t>()<=2147483647;
+    case FieldCheck::object:return v.is_object();
+    case FieldCheck::array:return v.is_array();
+  }
+  return false;
+}
 inline void fields(const Json& j,bool row=false) {
   if(!j.is_object())throw std::runtime_error("media-queue-fields-invalid");
-  const auto require=[&](const char* name,const std::function<bool(const Json&)>& valid){auto it=j.find(name);if(it!=j.end()&&!valid(*it))throw std::runtime_error(std::string("media-queue-field-invalid:")+name);};
-  for(const auto* name:{"enabled","wallpaperPauseOnBattery","sessionClaimed","resourceChecked","catalogPending","identityPending","verified","retiredPopular","refreshRequested","recoveryRequired","recoveryUnconfirmed"})require(name,[](const Json& v){return v.is_boolean();});
-  if(row)require("autoStopped",[](const Json& v){return v.is_boolean();});
-  for(const auto* name:{"sharedSleepCancelledSession","wallpaperPowerCancelledSession","session","phase","reason","pauseReason","resourcePauseReason","workerBirth","ownerProtocolSession","launchTarget","inventoryReadyId","inventoryRequestId","manualRequestId","manualSession","manualSessionRequest","manualState","manualPriorityKey","catalogStatus","catalogError","queuePolicy","pendingReason","key","name","state","lastError","stopReason","identityPrerequisiteStamp","identityRecoveryReason","catalogSource","localCatalogSource","executable","steamAccount","shortcutAppId","recoveryReason"})require(name,[](const Json& v){return v.is_string();});
-  for(const auto* name:{"sessionIssuedAt","sessionDeadlineAt","statusRevision","queueRevision","updatedAt","workerPid","ownerProtocol","maxParallel","parallelSlots","cpuThreshold","startupProtectionUntil","heartbeatAt","taskStartedAt","manualUntil","inventoryAwaitUntil","inventoryRequestedAt","cooldownUntil","catalogRetryAt","progressNotifiedAt","bytes","totalBytes","resumedBytes","sessionResumedBytes","activeCount","appId","addedAt","lastPlayed","attempts","automaticElapsedMs","retryAt","requestBindingRevision","provenanceRevision","admissionRevision","qualityUpgradeRevision","videoQualityPolicy","sourceTier","localSourceTier","chartRank","attemptBudgetMs","total","completed","remaining","failed","unavailable","manualTotal","manualCompleted","nextDueAt"})require(name,[&](const Json& v){return v.is_number_integer()&&(!v.is_number_unsigned()||v.get<uint64_t>()<=INT64_MAX)&&(v.get<int64_t>()>=0||(std::string_view(name)=="nextDueAt"&&v.get<int64_t>()==-1));});
-  for(const auto* name:{"attempts","maxParallel","parallelSlots","cpuThreshold","ownerProtocol","videoQualityPolicy","sourceTier","localSourceTier","chartRank"})require(name,[](const Json& v){return v.get<int64_t>()<=INT_MAX;});
-  require("workerPid",[](const Json& v){return v.get<uint64_t>()<=MAXDWORD;});
-  require("appId",[](const Json& v){return v.get<uint64_t>()<=2147483647;});
-  for(const auto* name:{"sharedSleepSession","sharedSleepWindow","jobs","active","current","localShortcut","selectedVideo","manualTargetRevisions","sourceCounts"})require(name,[](const Json& v){return v.is_object();});
-  for(const auto* name:{"history","admissionHistory","manualTargets","recoveryBlockedKeys"})require(name,[](const Json& v){return v.is_array();});
+  // Sparse jobs contain only a fraction of the schema. Scan present fields,
+  // but keep the original first error when several fields are malformed.
+  const FieldRule* failed=nullptr;
+  for(auto it=j.begin();it!=j.end();++it){
+    const std::string_view name=it.key();
+    for(auto rule=std::lower_bound(fieldRules.begin(),fieldRules.end(),name,[](const auto& r,auto key){return r.name<key;});
+        rule!=fieldRules.end()&&rule->name==name&&(!failed||rule->order<failed->order);++rule){
+      if(!fieldValid(*rule,it.value(),row)){failed=&*rule;break;}
+    }
+  }
+  if(failed)throw std::runtime_error("media-queue-field-invalid:"+std::string(failed->name));
   for(const auto* name:{"manualTargets","recoveryBlockedKeys"})if(j.contains(name))for(const auto& key:j[name])if(!key.is_string())throw std::runtime_error("media-queue-scope-invalid");
   if(j.value("workerPid",DWORD{0})) {
     const auto birth=stringField(j,"workerBirth");if(birth.empty()||birth.size()>20||birth.find_first_not_of("0123456789")!=std::string::npos||birth.find_first_not_of('0')==std::string::npos||stringField(j,"session").empty())throw std::runtime_error("media-queue-owner-unconfirmed");

@@ -34,7 +34,9 @@ assert(!virtualRearOnly || cases === 'native-oem-click-actions',
 const keyboardWorkerCases=['native-oem-keyboard-worker-owner','native-oem-keyboard-worker-revision','native-oem-keyboard-worker'].includes(cases);
 const desktopCase=['native-recorded-mouse-only-hooks','native-recorded-mouse-only-retry','native-recorded-mouse-only-cold','native-recorded-mouse-independent-owner','native-recorded-mouse-publication','native-recorded-mouse-prior-owner','native-recorded-mouse-partial-hook','native-recorded-mouse-pulses','native-recorded-mouse-guards','native-recorded-mouse-replay','native-recorded-mouse-oem-compat','native-recorded-keyboard-diagnostics','native-recorded-keyboard-definitions','native-recorded-keyboard-preheld','native-recorded-keyboard-fallback-control','native-recorded-keyboard-guards-tail','native-recorded-keyboard-guards','native-recorded-keyboard-consume','native-recorded-keyboard-chord','native-rog-held-return','native-rog-source-owner','native-rog-held-boundaries','native-rog-held-source','native-rog-ll-fallback-transition','native-rog-ll-fallback','native-desktop-chord-shape','native-desktop-chord-admission','native-desktop-chord-guards','native-desktop-function-teardown-gate','native-desktop-function-teardown','native-desktop-function','native-desktop-function-boundaries','native-desktop-function-final','native-desktop-function-final-tail','native-desktop-function-proof','native-desktop-function-proof-tail','native-desktop-function-proof-final'].includes(cases);
 const gateCases=desktopCase||['native-oem-gate-transitions','native-oem-gate-transitions-tail'].includes(cases);
-const nativeGateDependencies=gateCases||cases==='native-oem-queued-owner'||cases==='native-oem-click-actions';
+const wmiMaintenance=cases==='wmi-maintenance';
+const nativeGateTestMode=gateCases||cases==='native-oem-queued-owner'||cases==='native-oem-click-actions';
+const nativeGateDependencies=nativeGateTestMode||wmiMaintenance;
 assert(['native-recorded-mouse-only-hooks','native-recorded-mouse-only-retry','native-recorded-mouse-only-cold','native-recorded-mouse-independent-owner','native-recorded-mouse-publication','native-recorded-mouse-prior-owner','native-recorded-mouse-partial-hook','native-recorded-mouse-pulses','native-recorded-mouse-guards','native-recorded-mouse-replay','native-recorded-mouse-oem-compat','native-recorded-keyboard-diagnostics','native-recorded-keyboard-definitions','native-recorded-keyboard-preheld','native-recorded-keyboard-fallback-control','native-recorded-keyboard-guards-tail','native-recorded-keyboard-guards','native-recorded-keyboard-consume','native-recorded-keyboard-chord','native-rog-held-return','native-rog-source-owner','native-rog-held-boundaries','native-rog-held-source','native-rog-ll-fallback-transition','native-rog-ll-fallback','native-desktop-chord-shape','native-desktop-chord-admission','native-desktop-chord-guards','native-desktop-function-teardown-gate','native-desktop-function-teardown','all','frontend-buttons','retired-start-f7','baseline-without-retirement','summon-action-shield','summon-action-shield-custom','summon-action-shield-ordinary-key','onex-consumption','wmi-maintenance','native-oem-click-actions','native-oem-owner-boundary','native-oem-queued-owner','native-oem-ui-mailbox','native-oem-keyboard-worker-owner','native-oem-keyboard-worker-revision','native-oem-keyboard-worker','native-oem-keyboard-suppression','native-desktop-function','native-desktop-function-boundaries','native-desktop-function-final','native-desktop-function-final-tail','native-desktop-function-proof','native-desktop-function-proof-tail','native-desktop-function-proof-final','native-oem-aya-consumption','native-oem-aya-extensions','native-oem-gate-transitions','native-oem-gate-transitions-tail','joyxoff-session-cleanup'].includes(cases), 'Unknown shortcut case selection');
 function shortcutEvidenceDirectory(explicitOut) {
   if (!explicitOut) {
@@ -234,7 +236,7 @@ for(const match of extract('oemChordProfileIdFor').matchAll(/"(HandheldCompanion
 const prelude = `${capabilityPreamble}${hasReadSlots ? "#define YMCC_HID_READ_SLOT_SOURCE\n" : ""}${hasRogClick ? "#define YMCC_ROG_CLICK_SOURCE\n" : ""}${hasProducer ? "#define YMCC_PRODUCER_EDGE_SOURCE\n" : ""}${hasWmi ? "#define YMCC_WMI_CLICK_SOURCE\n" : ""}${source.includes("static void nativeKeyboardShortcutHandleOemEdge(") ? "#define YMCC_SHORTCUT_EDGE_SOURCE\n" : ""}${source.includes("bool controllerAllowed = true") ? "#define YMCC_SHORTCUT_SOURCE_SCOPES\n" : ""}${source.includes("g_msiQsKeyboardMirrorPolicy")?"#define YMCC_MSI_QS_MIRROR_SOURCE":""}
 #define YMCC_SHORTCUT_FIXTURE
 ${source.includes('static bool nativeDesktopChordCapture(')?'#define YMCC_RECORDED_CHORD_SOURCE':''}
-${nativeGateDependencies ? '#define YMCC_SHORTCUT_GATE_CASE_MODE' : ''}
+${nativeGateTestMode ? '#define YMCC_SHORTCUT_GATE_CASE_MODE' : ''}
 ${cases === 'frontend-buttons' ? '#define YMCC_SHORTCUT_FRONTEND_CASE_MODE' : ''}
 ${['native-oem-keyboard-suppression','native-desktop-function','native-desktop-function-boundaries','native-desktop-function-final','native-desktop-function-final-tail','native-desktop-function-proof','native-desktop-function-proof-tail','native-desktop-function-proof-final','native-oem-aya-consumption','native-oem-aya-extensions','native-oem-gate-transitions','native-oem-gate-transitions-tail'].includes(cases) ? '#define YMCC_SHORTCUT_NATIVE_OEM_CASE_MODE' : ''}
 ${source.includes('static json nativeSteamMenuButton(') ? '#define YMCC_STEAM_MENU_DIRECT_SOURCE' : ''}
@@ -528,6 +530,10 @@ static json ymSettingsFields(const char* section, std::initializer_list<const ch
         if (value != input.end()) selected[key] = *value;
     }
     return selected;
+}
+static std::shared_ptr<const json> ymSettingsSectionView(const char* section, bool* primaryRead=nullptr) {
+    if (primaryRead) *primaryRead = fixtureSettingsPrimaryRead;
+    return std::make_shared<const json>(ymSettingsSection(section));
 }
 static bool inputCaptureAssetsPresent() { return fixtureAssets; }
 static void inputCaptureRefreshRealStickSettings(bool) { ++fixtureRefreshes; }
@@ -825,7 +831,7 @@ static json steamLiveRequest(DWORD,const json& request,const std::function<bool(
 static json nativeSteamMenuGameRequest(DWORD account,json request,const std::function<bool()>& allowed,ULONGLONG=0,unsigned long long=0) {
     return steamLiveRequest(account,request,allowed);
 }
-${(desktopCase||cases.startsWith('native-oem-')||cases==='onex-consumption')?'static ULONGLONG nativeSteamMenuColdDeadline(ULONGLONG){throw std::runtime_error("STEAM_ROUTE_NOT_SELECTED_BY_NATIVE_OEM_CLICK_TEST");}':''}
+${(desktopCase||cases.startsWith('native-oem-')||cases==='onex-consumption'||wmiMaintenance)?'static ULONGLONG nativeSteamMenuColdDeadline(ULONGLONG){throw std::runtime_error("STEAM_ROUTE_NOT_SELECTED_BY_NATIVE_OEM_CLICK_TEST");}':''}
 // Cursor-policy wake is outside this input consumer's inert OS boundary.
 static void steamControllerCursorSignal() noexcept {}
 #include "steam_qam_followup.h"
@@ -1015,7 +1021,7 @@ if (cases === 'retired-start-f7') {
     return 0;
   } catch(const std::exception& error) { std::cerr << error.what(); return 1; } }
 `;
-} else if (cases === 'wmi-maintenance') {
+} else if (wmiMaintenance) {
   assert(hasWmi, 'WMI maintenance requires the real WMI consumer');
   const mainStart = regressionSource.indexOf('int main() {');
   assert(mainStart >= 0, 'Missing original shortcut main');
@@ -1073,8 +1079,8 @@ const generatedFunctions=functions.map(extract).sort((a,b)=>source.indexOf(a)-so
     text='#define YMCC_SHORTCUT_TOKEN_INTERLEAVE 1\nstatic std::function<void()> fixtureTokenCaptureInterleave;\n'+text.replace(opening,
       opening+'\n    if(fixtureTokenCaptureInterleave){auto action=std::move(fixtureTokenCaptureInterleave);fixtureTokenCaptureInterleave={};action();}');
   }
-  if(cases==='native-oem-queued-owner'&&text.startsWith('static uint64_t nativeOemKeyMask(')) {
-    const opening='static uint64_t nativeOemKeyMask(bool forActions) {';
+  if(cases==='native-oem-queued-owner'&&text.startsWith('static uint64_t nativeOemVirtualActionObservation(')) {
+    const opening='static uint64_t nativeOemVirtualActionObservation(OemProducerTokens& tokens){';
     assert(text.startsWith(opening),'OEM demand read boundary changed');
     text='#define YMCC_SHORTCUT_OEM_DEMAND 1\nstatic unsigned fixtureDemandOemReads=0;\n'+text.replace(opening,opening+'\n    ++fixtureDemandOemReads;');
   }

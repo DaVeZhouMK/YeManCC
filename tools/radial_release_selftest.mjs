@@ -44,7 +44,8 @@ try{
  check('performance route remains allowed',state.guards.every(guard=>guard({path:'/schedule'})===true));
  routing.radialTestingEnabled.value=true;check('explicit testing admits direct editor route',state.guards.every(guard=>guard({path:'/radial'})===true));
  routing.radialTestingEnabled.value=false;check('disabling testing rejects route again',state.guards.some(guard=>guard({path:'/radial'})==='/schedule'));
- await routing.preloadStartupRoutes();
+ await routing.ROUTES.find(route=>route.path==='/schedule').component();
+ check('default route resolves its page',state.loads.some(file=>file.endsWith('/PerformanceScheduleView.vue')));
  check('startup never loads radial editor/page chunks',state.loads.every(file=>!file.includes('Radial')));
  const bad=`()=>{globalThis.__radialRelease.calls++;throw Error('Hidden host performed IO')}`;
  const host=await load(`export {startRadialHost} from './src/radial/host';`,{

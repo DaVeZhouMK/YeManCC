@@ -17,7 +17,7 @@ export interface DesktopHudOwnerDeps {
   availabilityRecovered?():void;
   visibilityTerminal?():void;
   visibilityAllowed?():boolean; // Existing host intent/shared-power admission; no detector.
-  invoke<T>(command:string,args:unknown):Promise<T>;
+  invoke<T>(command:string,args:unknown,signal?:AbortSignal):Promise<T>;
   observe(listener:(name:string,event:DesktopHudEvent)=>void):()=>void;
   setTimer(fn:()=>void,ms:number):unknown;clearTimer(id:unknown):void;
   placementChanged?(value:HudDragPlacement):void;
@@ -33,7 +33,13 @@ export function createDesktopHudOwner(deps:DesktopHudOwnerDeps){
   let timer:unknown=null,uncertain=true,creating=0,lastSend=-Infinity;
   const visibilityInterval=10000,maxVisibilityRepairs=3;
   let retirementRevision=0;
-  let visibilityExpected=false,nextVisibilityCheck=Infinity,visibilityChecking=false,visibilityFailures=0,visibilityRepairs=0,visibilityRecoveryRevision=0;
+  let visibilityExpected=false,nextVisibilityCheck=Infinity,visibilityFailures=0,visibilityRepairs=0,visibilityRecoveryRevision=0;
+  let visibilityCheck:{read:AbortController|null}|null=null;
+  function retireVisibilityRead(){
+    visibilityFailures=0;
+    const read=visibilityCheck?.read;
+    if(read){visibilityCheck=null;read.abort();}
+  }
   const changed=()=>{try{deps.changed?.();}catch{}};
   const expired='MONITOR_OUTPUT_REQUEST_EXPIRED';
   const currentNow=async(current?:MonitorOutputCurrent)=>{try{return !current||await current();}catch{return false;}};
@@ -43,19 +49,25 @@ export function createDesktopHudOwner(deps:DesktopHudOwnerDeps){
   // Owner-bounded native calls. The main IPC must retain late creation receipts:
   // browser-only IPC timeouts would discard the id needed for precise cleanup.
   const calls=new Set<{deadline:number;expire:(reason:string)=>void}>();
-  function call<T>(command:string,args:unknown,late?:(value:T)=>void,rawSettled?:()=>void):Promise<T>{
+  function call<T>(command:string,args:unknown,late?:(value:T)=>void,rawSettled?:()=>void,scope?:AbortSignal):Promise<T>{
+    if(scope?.aborted)return Promise.reject(Error(expired));
+    // Status never owns a native descriptor. Mutations retain their late receipts.
+    const read=command==='desktopHud.status'?new AbortController():null;
     let releaseClock=()=>{},clockError:string|undefined;
     try{releaseClock=deps.acquireClock?.()??(()=>{});}catch{clockError='原生 HUD 时钟不可用。';}
     return new Promise<T>((resolve,reject)=>{
       let done=false,fallback:unknown=null;
-      const request={deadline:deps.now()+5000,expire:(reason:string)=>{if(finish())reject(Error(reason));}};
-      function finish(){if(done)return false;done=true;calls.delete(request);if(fallback!==null)deps.clearTimer(fallback);releaseClock();return true;}
+      const request={deadline:deps.now()+5000,expire:(reason:string)=>{if(finish()){read?.abort();reject(Error(reason));}}};
+      const abort=()=>request.expire(expired);
+      function finish(){if(done)return false;done=true;calls.delete(request);scope?.removeEventListener('abort',abort);if(fallback!==null)deps.clearTimer(fallback);releaseClock();return true;}
       calls.add(request);
       fallback=deps.setTimer(()=>request.expire('原生 HUD 请求超时：'+command),5000);
+      scope?.addEventListener('abort',abort,{once:true});
+      if(scope?.aborted)abort();
       if(clockError)request.expire(clockError);
       // Even on clock failure a close may be sent best-effort, but only its
       // actual id/nonce-bound reply (not dispatch) can establish hidden state.
-      void deps.invoke<T>(command,args).then(value=>{
+      void deps.invoke<T>(command,args,read?.signal).then(value=>{
         rawSettled?.();if(finish())resolve(value);else late?.(value);
       }).catch(error=>{rawSettled?.();if(finish())reject(error);});
     });
@@ -135,14 +147,15 @@ export function createDesktopHudOwner(deps:DesktopHudOwnerDeps){
   // required; a failed/unknown reply is not permission to destroy a window.
   async function verifyVisibility(){
     const own=owned,at=epoch;
-    if(ended||(!own&&!visibilityExpected)||(own&&!own.prepared)||opening||creating||visibilityChecking||deps.now()<nextVisibilityCheck||recoveryBlocked)return;
+    if(ended||(!own&&!visibilityExpected)||(own&&!own.prepared)||opening||creating||visibilityCheck||deps.now()<nextVisibilityCheck||recoveryBlocked)return;
     nextVisibilityCheck=deps.now()+visibilityInterval;
     if(deps.visibilityAllowed?.()===false){visibilityFailures=0;return;}
-    visibilityChecking=true;
+    const read=new AbortController(),check:{read:AbortController|null}={read};
+    visibilityCheck=check;
     try{
       const state=await call<{available:boolean;id:number;nonce?:string;ready?:boolean;armed?:boolean;visible?:boolean;
-        presentationAllowed?:boolean;layoutReady?:boolean;controllerVisible?:boolean|null;recoveryBlocked?:boolean}>('desktopHud.status',{});
-      if(ended||owned!==own||epoch!==at||opening||deps.visibilityAllowed?.()===false)return;
+        presentationAllowed?:boolean;layoutReady?:boolean;controllerVisible?:boolean|null;recoveryBlocked?:boolean}>('desktopHud.status',{},undefined,undefined,read.signal);
+      if(visibilityCheck!==check||ended||owned!==own||epoch!==at||opening||deps.visibilityAllowed?.()===false)return;
       const wasBlocked=recoveryBlocked;recoveryBlocked ||= state.recoveryBlocked===true;
       if(recoveryBlocked||state.available!==true){nativeAvailable=false;visibilityFailures=0;if(recoveryBlocked&&!wasBlocked){try{deps.visibilityTerminal?.();}catch{}}return;}
       const becameAvailable=!nativeAvailable;nativeAvailable=true;
@@ -167,9 +180,13 @@ export function createDesktopHudOwner(deps:DesktopHudOwnerDeps){
       // No global hide/show, SetForegroundWindow or unowned close. A missing
       // descriptor needs no native close; a hidden owned one uses normal ACKs.
       if(missing){++epoch;if(own)acknowledgeClose(own,true);else{++retirementRevision;uncertain=false;changed();}}
-      else await closeOwn('监控可见性连续两次核验异常。');
-    }catch{if(owned===own&&epoch===at)visibilityFailures=0;}
-    finally{visibilityChecking=false;}
+      else{
+        // A dispatched repair keeps the slot until its close acknowledgement.
+        check.read=null;
+        await closeOwn('监控可见性连续两次核验异常。');
+      }
+    }catch{if(visibilityCheck===check&&owned===own&&epoch===at)visibilityFailures=0;}
+    finally{if(visibilityCheck===check)visibilityCheck=null;}
   }
   function receive(name:string,event:DesktopHudEvent){
     if(ended)return;
@@ -237,6 +254,11 @@ export function createDesktopHudOwner(deps:DesktopHudOwnerDeps){
     setVisibilityExpected(value:boolean){
       if(visibilityExpected===value)return;visibilityExpected=value;
       nextVisibilityCheck=value?deps.now()+visibilityInterval:Infinity;visibilityFailures=0;
+      if(!value)retireVisibilityRead();
+    },
+    reconcileVisibilityAfterPowerChange(woke:boolean){
+      retireVisibilityRead();
+      if(woke&&visibilityExpected)nextVisibilityCheck=deps.now();
     },
     advance(){
       checkPending();
@@ -253,9 +275,10 @@ export function createDesktopHudOwner(deps:DesktopHudOwnerDeps){
       // A failing availability probe must not invalidate itself forever.
       if(hadOutput)changed();
     },
-    async available(){
-      if(ended)return false;
-      const state=await call<{available:boolean;id:number;recoveryBlocked?:boolean}>('desktopHud.status',{}).catch(()=>null);
+    async available(scope?:AbortSignal){
+      if(ended||scope?.aborted)return false;
+      const state=await call<{available:boolean;id:number;recoveryBlocked?:boolean}>('desktopHud.status',{},undefined,undefined,scope).catch(()=>null);
+      if(ended||scope?.aborted)return false;
       if(!owned&&!creating)uncertain=state?.id!==0;
       recoveryBlocked ||= state?.recoveryBlocked===true;
       nativeAvailable=state?.available===true;return nativeAvailable&&(deps.scope==='global'||!!deps.target());
@@ -297,7 +320,7 @@ export function createDesktopHudOwner(deps:DesktopHudOwnerDeps){
       if((prefs.ymcc.dragRevision??0)>(next.dragRevision??0)){const p=admitHudDragPlacement(prefs.ymcc);if(p)next={...next,...p};}
       prefs={...normalized,output:prefs.output,enabled:prefs.enabled,ymcc:next};
     }},
-    async dispose(){if(ended)return;const ack=await closeOwn('YMCC 输出所有者释放。');ended=true;off();return ack;},
-    inspect:()=>({nativeAvailable,recoveryBlocked,retirementRevision,visibilityRecoveryRevision,visibilityHealth:{expected:visibilityExpected,intervalMs:visibilityInterval,checking:visibilityChecking,failures:visibilityFailures,repairs:visibilityRepairs,maxRepairs:maxVisibilityRepairs},opening:!!opening,creating:!!creating,owned:owned?{id:owned.id,scope:deps.scope??'game',target:owned.target?{...owned.target}:null,ready:owned.ready,painted:owned.painted,prepared:owned.prepared,actualVisible:owned.actualVisible}:null,uncertain,timer:timer!==null,pendingCalls:calls.size}),
+    async dispose(){if(ended)return;retireVisibilityRead();const ack=await closeOwn('YMCC 输出所有者释放。');ended=true;off();return ack;},
+    inspect:()=>({nativeAvailable,recoveryBlocked,retirementRevision,visibilityRecoveryRevision,visibilityHealth:{expected:visibilityExpected,intervalMs:visibilityInterval,checking:!!visibilityCheck,failures:visibilityFailures,repairs:visibilityRepairs,maxRepairs:maxVisibilityRepairs},opening:!!opening,creating:!!creating,owned:owned?{id:owned.id,scope:deps.scope??'game',target:owned.target?{...owned.target}:null,ready:owned.ready,painted:owned.painted,prepared:owned.prepared,actualVisible:owned.actualVisible}:null,uncertain,timer:timer!==null,pendingCalls:calls.size}),
   };
 }

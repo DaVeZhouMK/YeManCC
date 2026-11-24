@@ -7,6 +7,7 @@
 #include "sleep_power_state.h"
 #include <array>
 #include <stdexcept>
+#include <utility>
 #include <sddl.h>
 #include <wincrypt.h>
 
@@ -14,37 +15,50 @@
 // Jobs own helpers only; the one verified backend explicitly breaks away.
 // Releasing a use, changing Steam or closing YMCC never terminates CSS.
 namespace ymcc::steamcssuse {
-inline void verifyFile(const std::wstring& path, const wchar_t* leaf) {
-    if (path.empty() || _wcsicmp(std::filesystem::path(path).filename().c_str(), leaf))
+inline void verifyFileLeaf(const std::filesystem::path& path, const wchar_t* leaf) {
+    if (path.empty() || _wcsicmp(path.filename().c_str(), leaf))
         throw std::runtime_error("CSS use path invalid");
     const auto fileAttributes = GetFileAttributesW(path.c_str());
     if (fileAttributes == INVALID_FILE_ATTRIBUTES || (fileAttributes & FILE_ATTRIBUTE_DIRECTORY))
         throw std::runtime_error("CSS use file missing");
-    for (auto cursor = std::filesystem::path(path); !cursor.empty();) {
+    if (fileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+        throw std::runtime_error("CSS use path unverified");
+}
+inline void verifyFileAncestors(std::filesystem::path cursor) {
+    for (; !cursor.empty();) {
         const auto attributes = GetFileAttributesW(cursor.c_str());
         if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_REPARSE_POINT))
             throw std::runtime_error("CSS use path unverified");
         const auto parent = cursor.parent_path(); if (parent == cursor) break; cursor = parent;
     }
 }
+inline void verifyFile(const std::wstring& path, const wchar_t* leaf) {
+    const std::filesystem::path file(path);
+    verifyFileLeaf(file, leaf);
+    verifyFileAncestors(file.parent_path());
+}
 inline void verifyResidentControl(const std::wstring& script, bool initializeAutomatic = false) {
-    verifyFile(script, L"steam-appearance.ps1");
+    const std::filesystem::path entryPath(script);
+    verifyFileLeaf(entryPath, L"steam-appearance.ps1");
     // Refuse a mixed old PowerControl deployment before any helper can start
     // a backend inside a kill-on-close Job. Packaging also verifies all files.
-    const auto module = (std::filesystem::path(script).parent_path() / L"steam-appearance" / L"resident.ps1").wstring();
-    verifyFile(module, L"resident.ps1");
-    const auto renderer = (std::filesystem::path(script).parent_path() / L"steam-appearance" / L"idle.ps1").wstring();
-    verifyFile(renderer, L"idle.ps1");
-    for (const auto& file : {script, module, renderer}) {
-        deckylaunch::Handle handle; handle.value = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    const auto moduleDir = entryPath.parent_path() / L"steam-appearance";
+    const auto module = moduleDir / L"resident.ps1";
+    const auto renderer = moduleDir / L"idle.ps1";
+    verifyFileLeaf(module, L"resident.ps1");
+    verifyFileLeaf(renderer, L"idle.ps1");
+    // This walk covers both embedded modules and the entry script's parents.
+    verifyFileAncestors(moduleDir);
+    for (const auto* file : {&entryPath, &module, &renderer}) {
+        deckylaunch::Handle handle; handle.value = CreateFileW(file->c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         LARGE_INTEGER size{};
         if (handle.value == INVALID_HANDLE_VALUE) { handle.value = nullptr; throw std::runtime_error("CSS resident component unreadable"); }
         if (!GetFileSizeEx(handle.value, &size) || size.QuadPart <= 0 || size.QuadPart > 262144) throw std::runtime_error("CSS resident component size invalid");
         std::string text(static_cast<size_t>(size.QuadPart), '\0'); DWORD read = 0;
         if (!ReadFile(handle.value, text.data(), static_cast<DWORD>(text.size()), &read, nullptr) || read != text.size()) throw std::runtime_error("CSS resident component read incomplete");
-        const bool entry = file == script;
+        const bool entry = file == &entryPath;
         if (entry ? text.find("SharedProcessQueryProtocol=1") == std::string::npos || text.find("SharedSteamReadProtocol=1") == std::string::npos || text.find("ResidentBackendPolicy=3") == std::string::npos || text.find("AutomaticResultProtocol=2") == std::string::npos || text.find("ManualObservationProtocol=1") == std::string::npos
-                  : file == module ? text.find("function Start-ResidentAppearanceBackend") == std::string::npos || text.find("AppearanceProcessQueryProtocol=3") == std::string::npos
+                  : file == &module ? text.find("function Start-ResidentAppearanceBackend") == std::string::npos || text.find("AppearanceProcessQueryProtocol=3") == std::string::npos
                   : text.find("AppearanceRenderProtocol=4") == std::string::npos || text.find("AppearanceSharedSteamProtocol=1") == std::string::npos || text.find("function Get-AppearanceVariableDefaults") == std::string::npos)
             throw std::runtime_error("CSS resident component version mismatch; update PowerControl together with YMCC");
         if (entry && initializeAutomatic && text.find("AutomaticInitializeGateProtocol=1") == std::string::npos)
@@ -63,6 +77,14 @@ inline constexpr size_t automaticResultCorrectionReasonWords = automaticResultCo
 inline constexpr DWORD automaticCorrectionReasonOffer = 0x594D524F, automaticCorrectionReasonCommit = 0x594D5A00;
 inline constexpr size_t automaticResultStatusPartsWords = automaticResultCorrectionReasonWords + 6;
 inline constexpr DWORD automaticStatusPartsOffer = 0x594D534F, automaticStatusPartsCommit = 0x594D5331;
+inline constexpr size_t automaticResultInitializationWords = automaticResultStatusPartsWords + 8;
+inline constexpr DWORD automaticInitializationOffer = 0x594D494F, automaticInitializationCommit = 0x594D4931;
+inline constexpr size_t automaticResultThemeStateWords = automaticResultInitializationWords + 8;
+inline constexpr DWORD automaticThemeStateOffer = 0x594D504F, automaticThemeStateCommit = 0x594D5031;
+struct InitializationTiming {
+    bool known = false, launched = false;
+    DWORD scriptSetupMs = 0, ensureChecksMs = 0, backendPreflightMs = 0, listenerWaitMs = 0, afterListenerMs = 0, totalMs = 0;
+};
 struct AutomaticCorrectionTiming {
     bool known = false;
     DWORD startMs = 0, endMs = 0, firstSetStartMs = MAXDWORD, lastSetAckMs = MAXDWORD,
@@ -76,6 +98,8 @@ struct AutomaticTiming {
         firstCssRpcCount = 0, firstDomMs = 0, entryToReadyMs = 0;
     bool statusPartsKnown = false;
     DWORD statusIdentityMs = 0, cssCandidatesMs = 0, cssRpcOwnerMs = 0, themeStateMs = 0;
+    bool themeStatePartsKnown = false;
+    DWORD rowsMs = 0, bundleMs = 0, installedMs = 0, foreignMs = 0, backupMs = 0, statusPasses = 0;
 };
 struct AutomaticRenderTrace {
     struct Attempt { DWORD waitMs = 0, outcome = 0; };
@@ -92,6 +116,7 @@ struct Cleanup {
     AutomaticRenderTrace renderTrace;
     AutomaticTiming timing;
     AutomaticCorrectionTiming correctionTiming;
+    InitializationTiming initializationTiming;
     bool editorProtected = false, editorStateUnknown = false;
     uint64_t useGeneration = 0;
     DWORD error = 0; bool deferred = false, holding = false, stale = false;
@@ -135,7 +160,23 @@ inline AutomaticTiming readAutomaticTiming(const DWORD* values, size_t words) {
             t.statusIdentityMs=parts[2]; t.cssCandidatesMs=parts[3]; t.cssRpcOwnerMs=parts[4]; t.themeStateMs=parts[5];
         }
     }
+    if(t.statusPartsKnown && words >= automaticResultThemeStateWords) {
+        const auto* p = values + automaticResultInitializationWords;
+        if(p[0]==automaticThemeStateOffer && p[1]==automaticThemeStateCommit && p[7]>0 && p[7]<=128 &&
+           uint64_t(p[2])+p[3]+p[4]+p[5]+p[6]<=t.themeStateMs) {
+            t.themeStatePartsKnown=true;
+            t.rowsMs=p[2]; t.bundleMs=p[3]; t.installedMs=p[4]; t.foreignMs=p[5]; t.backupMs=p[6]; t.statusPasses=p[7];
+        }
+    }
     return t;
+}
+inline InitializationTiming readInitializationTiming(const DWORD* values, size_t words) {
+    if (!values || words < automaticResultInitializationWords) return {};
+    const auto* p = values + automaticResultStatusPartsWords;
+    if (p[0] != automaticInitializationOffer || p[1] != automaticInitializationCommit ||
+        (p[7] != 1 && p[7] != 2) || p[6] > 180000) return {};
+    for (size_t i = 2; i < 6; ++i) if (p[i] > p[i+1]) return {};
+    return {true, p[7] == 2, p[2], p[3]-p[2], p[4]-p[3], p[5]-p[4], p[6]-p[5], p[6]};
 }
 inline AutomaticCorrectionTiming readAutomaticCorrectionTiming(const DWORD* values, size_t words) {
     if (!values || words < automaticResultCorrectionWords) return {};
@@ -322,6 +363,8 @@ class Runtime {
     ULONGLONG usePowerGeneration_ = 0, confirmedPowerGeneration_ = 0;
     sleeppower::SharedPowerV1 usePower_, confirmedPower_;
     Group group_; steamsession::Session session_, observed_, confirmedSession_; bool observationKnown_ = false, residentConfirmed_ = false;
+    DWORD automaticAppliedPid_ = 0;
+    ULONGLONG automaticAppliedBirth_ = 0, automaticAppliedRevision_ = 0;
     std::wstring script_, link_, backend_;
     HANDLE completed_ = nullptr;
     HANDLE autoReady_ = nullptr, idleGate_ = nullptr, resultMap_ = nullptr;
@@ -337,7 +380,7 @@ class Runtime {
     void readHelperResultLocked(Cleanup& status) {
         if (readAutomaticResult(resultView_, status)) {
             status.renderTrace = readAutomaticRenderTrace(resultView_, automaticResultTraceWords);
-            status.timing = readAutomaticTiming(resultView_, automaticResultStatusPartsWords);
+            status.timing = readAutomaticTiming(resultView_, automaticResultThemeStateWords);
             if (status.renderTrace.correctionAttempt)
                 status.correctionTiming = readAutomaticCorrectionTiming(resultView_, automaticResultCorrectionReasonWords);
         }
@@ -399,7 +442,7 @@ class Runtime {
         }
         if (autoReady_ && idleGate_ && error != ERROR_ALREADY_EXISTS) {
             SetLastError(ERROR_SUCCESS);
-            constexpr DWORD resultBytes = static_cast<DWORD>(automaticResultStatusPartsWords * sizeof(DWORD));
+            constexpr DWORD resultBytes = static_cast<DWORD>(automaticResultThemeStateWords * sizeof(DWORD));
             resultMap_ = CreateFileMappingW(INVALID_HANDLE_VALUE, &attributes, PAGE_READWRITE, 0, resultBytes, (name + L".result").c_str());
             error = GetLastError();
             if (resultMap_ && error != ERROR_ALREADY_EXISTS) {
@@ -410,6 +453,8 @@ class Runtime {
                     view[automaticResultTimingWords] = automaticCorrectionOffer;
                     view[automaticResultCorrectionWords] = automaticCorrectionReasonOffer;
                     view[automaticResultCorrectionReasonWords] = automaticStatusPartsOffer;
+                    view[automaticResultInitializationWords] = automaticThemeStateOffer;
+                    if (initializationGatePending_) view[automaticResultStatusPartsWords] = automaticInitializationOffer;
                     resultView_ = view;
                 }
                 else error = GetLastError();
@@ -423,6 +468,7 @@ class Runtime {
     }
     HANDLE steam_ = nullptr, helper_ = nullptr, ensure_ = nullptr, wake_ = nullptr, stop_ = nullptr;
     std::thread worker_; uint64_t generation_ = 0, token_ = 0;
+    uint64_t ensureNoticeToken_ = 0;
     ULONGLONG due_ = 0, holdUntil_ = 0, readOnlyUntil_ = 0; DWORD lifetime_ = 180000, cleanupDelay_ = 4000, minimumHold_ = 0;
     bool idlePending_ = false, releasePending_ = false, manualCompletion_ = false;
     bool initializationGatePending_ = false;
@@ -431,6 +477,11 @@ class Runtime {
     std::function<void(const std::string&, const steamsession::Session&, const std::wstring&, const Cleanup&)> changed_;
     void emit(const std::string& stage, const Cleanup& result) {
         try { if (changed_) changed_(stage, session_, backend_, result); } catch (...) {}
+    }
+    void cancelEnsureNoticeLocked() {
+        if (!ensureNoticeToken_) return;
+        Cleanup canceled; canceled.useGeneration = std::exchange(ensureNoticeToken_, 0);
+        emit("ensure-helper-canceled", canceled);
     }
     void emitHelperFailure(const char* stage) {
         try { throw; }
@@ -493,6 +544,7 @@ class Runtime {
         if (helperError && !result.error) result.error = helperError;
         if (ensure_) { CloseHandle(ensure_); ensure_ = nullptr; }
         if (helper_) { CloseHandle(helper_); helper_ = nullptr; }
+        cancelEnsureNoticeLocked();
         closeAutoEventsLocked(); cleanupPending_ = false; initializationGatePending_ = false;
         if (hadUse || result.verified || result.error) emit("resident-backend-retained", result);
         if (manualEnded && !result.error && !editorTookOver) {
@@ -546,7 +598,7 @@ class Runtime {
                 try { cancelAutomaticLocked(); } catch (...) { emitHelperFailure("automatic-cancel-failed"); clearLocked(true); throw; }
             }
             requireRequest(current);
-            if (manual) { setRequestLocked(current); token_ = ++generation_; manualCompletion_ = false; } // Stale completion cannot end the next click.
+            if (manual) { cancelEnsureNoticeLocked(); setRequestLocked(current); token_ = ++generation_; manualCompletion_ = false; } // Stale completion cannot end the next click.
             if (manual) {
                 idlePending_ = releasePending_ = false;
                 if (completed_) { SetEvent(completed_); CloseHandle(completed_); completed_ = nullptr; }
@@ -707,7 +759,10 @@ class Runtime {
                 // window, including when the frontend already reported failure.
                 holdUntil_ = GetTickCount64() + minimumHold_;
                 due_ = std::max(due_, holdUntil_);
-                Cleanup status; status.error = exitKnown ? exitCode : exitError; status.helperExitCode = exitCode; status.helperExitKnown = exitKnown; emit("ensure-helper-complete", status);
+                Cleanup status; status.error = exitKnown ? exitCode : exitError; status.helperExitCode = exitCode; status.helperExitKnown = exitKnown;
+                if (ensureNoticeToken_ && (ensureNoticeToken_ != token_ || !captureAllowed())) cancelEnsureNoticeLocked();
+                status.useGeneration = std::exchange(ensureNoticeToken_, 0);
+                emit("ensure-helper-complete", status);
             }
             if (helper_ && WaitForSingleObject(helper_, 0) == WAIT_OBJECT_0) {
                 Cleanup status; status.helperExitKnown = GetExitCodeProcess(helper_, &status.helperExitCode) != FALSE;
@@ -721,7 +776,14 @@ class Runtime {
                 if (!idleReleased_) status.launchStage = "automatic-helper-exited-before-idle";
                 emit(idleReleased_ ? "idle-helper-complete" : "automatic-helper-failed", status);
                 if (status.helperFailureCode == 15) { clearLocked(false, false, true); continue; }
-                if (!status.error) { confirmedSession_ = session_; confirmedIdentity_=useIdentity_; confirmedPowerGeneration_ = usePowerGeneration_; confirmedPower_ = usePower_; residentConfirmed_ = true; clearLocked(true); continue; }
+                if (!status.error) {
+                    if (!readOnlyUntil_ && captureAllowed()) {
+                        automaticAppliedPid_ = session_.pid;
+                        automaticAppliedBirth_ = session_.created;
+                        ++automaticAppliedRevision_;
+                    }
+                    confirmedSession_ = session_; confirmedIdentity_=useIdentity_; confirmedPowerGeneration_ = usePowerGeneration_; confirmedPower_ = usePower_; residentConfirmed_ = true; clearLocked(true); continue;
+                }
                 residentConfirmed_ = false; confirmedSession_ = {};
                 // An unconfirmed DOM/status is NOT permission to end injection
                 // immediately. Keep this one use for at most one more hold,
@@ -740,6 +802,7 @@ class Runtime {
                     const bool initialized = readAutomaticResult(resultView_, status) &&
                         status.helperPhase == 1 && !status.helperFailureCode &&
                         !status.helperFlags && !status.helperBackendCount && !status.helperHResult;
+                    if (initialized) status.initializationTiming = readInitializationTiming(resultView_, automaticResultInitializationWords);
                     emit("automatic-initialization-ready", status);
                     const auto editor = group_.editorState();
                     if (!initialized || !captureAllowed() || editor != steamcsseditor::State::Absent) {
@@ -883,17 +946,34 @@ public:
         catch (...) { return false; }
     }
     std::wstring processQuery() { std::lock_guard lock(mutex_); return inventory_.name(); }
-    bool ready() { std::lock_guard lock(mutex_); return stop_ && WaitForSingleObject(stop_, 0) == WAIT_TIMEOUT; }
+    struct ReadPolicy { bool ready = false, automaticRepairActive = false; std::wstring processQuery; ULONGLONG automaticAppliedRevision = 0; };
+    ReadPolicy readPolicy(const steamsession::Session& session) {
+        std::lock_guard lock(mutex_);
+        const bool ready = stop_ && WaitForSingleObject(stop_, 0) == WAIT_TIMEOUT;
+        // VerifyOnly and manual holds cannot take over repair from the card.
+        const bool repairing = ready && token_ && completed_ && helper_ && !readOnlyUntil_ &&
+            session == session_ && GetTickCount64() < due_ &&
+            WaitForSingleObject(helper_, 0) == WAIT_TIMEOUT && captureAllowed();
+        // A freshness stamp, not a claim that the current configuration is still applied.
+        const auto applied = session.pid == automaticAppliedPid_ && session.created == automaticAppliedBirth_ ? automaticAppliedRevision_ : 0;
+        return {ready, repairing, inventory_.name(), applied};
+    }
     bool ensure(uint64_t token, const std::function<bool()>& current = {}) {
         requireRequest(current);std::lock_guard lock(mutex_);requireRequest(current);
         if (!token || token != token_) throw std::runtime_error("CSS use expired");
         if(!currentUseRequest()){clearLocked(false,false);throw std::runtime_error("BOOT_CSS_REQUEST_EXPIRED");}
         if(current)setRequestLocked(current);
-        if (ensure_ && WaitForSingleObject(ensure_, 0) == WAIT_TIMEOUT) return true;
-        if (ensure_) { CloseHandle(ensure_); ensure_ = nullptr; }
+        // A signaled helper still belongs to the worker until it consumes the
+        // exit receipt. Do not replace it while a completion can be delivered.
+        if (ensure_ && (WaitForSingleObject(ensure_, 0) == WAIT_TIMEOUT || (!current && ensureNoticeToken_ == token))) {
+            if (!current) ensureNoticeToken_ = token;
+            SetEvent(wake_); return true;
+        }
+        if (ensure_) { cancelEnsureNoticeLocked(); CloseHandle(ensure_); ensure_ = nullptr; }
         try { ensure_ = launchLocked(token, false); }
         catch (...) { emitHelperFailure("ensure-helper-failed");if(!currentUseRequest())clearLocked(false,false);throw; }
         if(!currentUseRequest()){clearLocked(false,false);throw std::runtime_error("BOOT_CSS_REQUEST_EXPIRED");}
+        if (!current) ensureNoticeToken_ = token;
         SetEvent(wake_); return true;
     }
     HANDLE confirmAndIdle(const steamsession::Session& session, bool startBackend = false, bool renewForMode = false,

@@ -31,6 +31,28 @@ int main() {
                 {"presets", {{"fps", {{"gyroMultiplier", 99}}}}}}}
         };
         std::vector<json> overlays = {overlay, nullptr, false, 42, "legacy", json::array({overlay}), json::object()};
+        {
+            ymcc::InputShortcutRuntime runtime;
+            auto saved = base;
+            saved["gameOverride"] = overlay;
+            check(!runtime.steamDeckTargetEnabled(saved, "owner-session"), "mouse guard ignores retired game overlay");
+            saved["outputTarget"] = {{"persona", "steamdeck"}, {"gyroEnabled", true}};
+            check(runtime.steamDeckTargetEnabled(saved, "owner-session"), "gyro-only saved Deck target owns mouse");
+            saved["outputTarget"]["gyroEnabled"] = "true";
+            check(!runtime.steamDeckTargetEnabled(saved, "owner-session"), "malformed flags cannot claim mouse");
+            check(!runtime.steamDeckTargetEnabled(json::array(), "owner-session"), "non-object settings cannot claim mouse");
+            check(runtime.toggle(base, "owner-session", "input.virtualGamepadToggle", "steamdeck").ok &&
+                runtime.steamDeckTargetEnabled(base, "owner-session"), "temporary Deck target owns mouse");
+            auto revisionOnly = base; revisionOnly["revision"] = 8;
+            check(runtime.steamDeckTargetEnabled(revisionOnly, "owner-session") && runtime.active(),
+                "revision-only changes keep temporary ownership");
+            revisionOnly["gyroMotion"]["virtualPadLink"] = false;
+            check(!runtime.steamDeckTargetEnabled(revisionOnly, "owner-session") && !runtime.active(),
+                "changed motion context retires temporary ownership");
+            check(runtime.toggle(base, "owner-session", "input.virtualGamepadToggle", "steamdeck").ok &&
+                !runtime.steamDeckTargetEnabled(base, "new-owner") && !runtime.active(),
+                "changed session retires temporary ownership");
+        }
         auto malformed = overlay; malformed["identity"] = ""; overlays.push_back(malformed);
         malformed = overlay; malformed["gyroMotion"] = false; overlays.push_back(malformed);
         malformed = overlay; malformed["sessionId"] = ""; overlays.push_back(malformed);

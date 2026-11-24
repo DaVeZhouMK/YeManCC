@@ -76,11 +76,35 @@ inline bool validBuildId(const Json& value) {
 }
 // Renderer telemetry remains bounded facts only. Never arbitrary log content.
 // Finite notification category only; never source payloads or authority.
+inline constexpr const char* snapshotInvalidationLabels[]={"audio","monitor","input","touchpads","frames","schedule","profile","game","power","fan","controller","steam","trainer","speed","lossless","action","unspecified","steam-observation","snapshot-request","peer-revision"};
+inline constexpr size_t snapshotInvalidationLabelCount=sizeof(snapshotInvalidationLabels)/sizeof(snapshotInvalidationLabels[0]);
+inline int snapshotInvalidationIndex(const Json& value) {
+    if(value.is_string()){
+        const auto& text=value.get_ref<const std::string&>();
+        for(size_t i=0;i<snapshotInvalidationLabelCount;++i)if(text==snapshotInvalidationLabels[i])return static_cast<int>(i);
+    }
+    return -1;
+}
 inline const char* snapshotInvalidationSource(const Json& input) {
-    if(!input.contains("invalidatedBy")||!input["invalidatedBy"].is_string())return nullptr;
-    const auto& value=input["invalidatedBy"].get_ref<const std::string&>();
-    for(const auto* source:{"audio","monitor","input","touchpads","frames","schedule","profile","game","power","fan","controller","steam","trainer","speed","lossless","action","unspecified","multiple"})if(value==source)return source;
-    return nullptr;
+    const auto value=input.find("invalidatedBy");if(value==input.end())return nullptr;
+    if(*value=="multiple")return "multiple"; // Retain the legacy summary and envelope.
+    const int index=snapshotInvalidationIndex(*value);
+    return index>=0?snapshotInvalidationLabels[index]:nullptr;
+}
+inline const Json* snapshotInvalidationSources(const Json& input) {
+    const auto values=input.find("invalidatedBySources");
+    if(values==input.end()||!values->is_array()||values->size()<2||values->size()>snapshotInvalidationLabelCount||
+       !input.contains("invalidatedBy")||input["invalidatedBy"]!="multiple"||
+       !input.contains("discarded")||input["discarded"]!=true||
+       !input.contains("discardReason")||input["discardReason"]!="source-changed")return nullptr;
+    static_assert(snapshotInvalidationLabelCount<=32);
+    unsigned seen=0;
+    for(const auto& value:*values){
+        const int index=snapshotInvalidationIndex(value);if(index<0)return nullptr;
+        const unsigned bit=1u<<index;if(seen&bit)return nullptr;
+        seen|=bit;
+    }
+    return &*values;
 }
 // JS-reported first-client timing, never admission or a connection receipt.
 // scheduledRetryMs sums requested delays, including cancelled waits; it is not
@@ -102,8 +126,19 @@ inline void attachClientStartup(Json& detail,const Json& request,bool& recorded)
         detail["clientStartup"]=std::move(facts);recorded=true;
     }catch(...){/* Optional logging never changes request acceptance. */}
 }
+// Client-reported provenance is advisory. Never copy a probe nonce or free text.
+inline void attachSnapshotRequestSource(Json& detail,const Json& input) noexcept {
+    try{
+        const auto field=input.find("requestSource");
+        if(field==input.end()||!field->is_string())return;
+        const auto& value=field->get_ref<const std::string&>();
+        for(const auto* source:{"socket-open","socket-open-probe","demand-start","demand-stop","connection-probe","hud-peer-ready","hidden-snapshot","operation-timeout"})
+            if(value==source){detail["requestSource"]=source;break;}
+    }catch(...){/* Optional logging never changes request acceptance. */}
+}
 inline void snapshotReadFailureFacts(Json& result,const Json& input) {
     if(const auto* source=snapshotInvalidationSource(input))result["invalidatedBy"]=source;
+    if(const auto* sources=snapshotInvalidationSources(input))result["invalidatedBySources"]=*sources;
     const auto copy=[&](const char* key,std::initializer_list<const char*> allowed){
         if(!input.contains(key)||!input[key].is_string())return;
         const auto& value=input[key].get_ref<const std::string&>();
@@ -199,12 +234,22 @@ inline const Json* snapshotProfileReadTimings(const Json& input) {
     }
     return &*value;
 }
+inline Json tdpOwnerSettlementRecord(const Json& args) {
+    if(args.size()!=4||!args.contains("event")||args["event"]!="tdp-owner-settled"||
+       !args.contains("generation")||!args["generation"].is_number_unsigned()||args["generation"]>9007199254740991ull||
+       !args.contains("requestedW")||!args["requestedW"].is_number()||
+       !args.contains("outcome")||(args["outcome"]!="write-ack"&&args["outcome"]!="saved-unconfirmed"))return Json{};
+    const auto watts=args["requestedW"].get<double>();
+    // Mirrors APPLICATION_TDP_MAX for log validation, not action admission.
+    return watts>=1&&watts<=150?args:Json{};
+}
 inline Json frontendRecord(const Json& args) {
     if(!args.is_object()||!args.contains("event")||!args["event"].is_string())return Json{};
     const auto event=args["event"].get<std::string>();
     if(event=="startup-phase")return startupPhaseRecord(args);
+    if(event=="tdp-owner-settled")return tdpOwnerSettlementRecord(args);
     const auto* profile=event=="snapshot-read-finished"?snapshotProfileReadTimings(args):nullptr;
-    if(args.size()>(event=="snapshot-read-finished"?32u+(snapshotInvalidationSource(args)?1u:0u)+(profile?1u:0u):22u))return Json{};
+    if(args.size()>(event=="snapshot-read-finished"?32u+(snapshotInvalidationSource(args)?1u:0u)+(snapshotInvalidationSources(args)?1u:0u)+(profile?1u:0u):22u))return Json{};
     if(event!="lossless-read-start"&&event!="lossless-read-timeout"&&event!="lossless-read-finished"&&
        event!="lossless-action-start"&&event!="lossless-action-timeout"&&event!="lossless-action-finished"&&
        event!="snapshot-demand"&&event!="snapshot-read-start"&&event!="snapshot-read-finished")return Json{};
@@ -287,6 +332,7 @@ inline Json record(const std::string& event,const Json& detail) {
             if(detail.contains(key)&&detail[key].is_boolean())result[key]=detail[key];
     }
     if(event=="startup-phase"){const auto startup=startupPhaseRecord(detail);return startup.is_object()?startup:result;}
+    if(event=="tdp-owner-settled"){const auto settled=tdpOwnerSettlementRecord(detail);return settled.is_object()?settled:result;}
     if(event=="steam-mode-settled"){
         const auto wake=detail.find("admissionWake");
         if(wake!=detail.end()&&(*wake=="refresh-notified"||*wake=="retained-refresh-requested"||*wake=="final-read-recheck-queued"))
@@ -370,7 +416,14 @@ inline Json record(const std::string& event,const Json& detail) {
     }
     if(event=="connection-check"&&detail.value("scope",Json{})=="qam-open"){
         const auto source=detail.find("source");
-        if(source!=detail.end()&&source->is_string()&&(*source=="open-or-legacy"||*source=="probe-result"))result["source"]=*source;
+        if(source!=detail.end()&&source->is_string()&&(*source=="open-or-legacy"||*source=="probe-result")){
+            result["source"]=*source;
+            const auto wait=detail.find("readSlotWaitMs"),coalesced=detail.find("readCoalesced"),inFlight=detail.find("readInFlight");
+            if(detail.contains("attempted")&&detail["attempted"]==true&&wait!=detail.end()&&wait->is_number_unsigned()&&
+               *wait<=60000u&&coalesced!=detail.end()&&coalesced->is_boolean()&&inFlight!=detail.end()&&inFlight->is_boolean()){
+                result["readSlotWaitMs"]=*wait;result["readCoalesced"]=*coalesced;result["readInFlight"]=*inFlight;
+            }
+        }
     }
     for(const auto* key:{"stageBudgetMs","stageRemainingMs","recoveryTrigger","generation","bindingRequested","preparationRequested","admissionRequested","connectionRequested","recoveryEpisode","nextRetryMs","scope","recoveryPhase","attempted","uncertain","elapsedMs","stage","ready","enabled","phase","reason","error","pid","revision","bindingRetry","bindingAttempts",
       "launchStage","launchMode","admissionRetry","admissionAttempts","admissionDetail","admissionElapsedMs","admissionNextRetryMs","admissionRecovery","deadlineMs","bootstrapStage","contextPid","contextCreated","contextGeneration","watching","ok","mutated","active","connected","steamKnown","steamRunning","steamDirectory","resourceDirectory","loaderPath","pluginPath","missingPath",
@@ -466,6 +519,8 @@ inline Json record(const std::string& event,const Json& detail) {
             if(detail.contains(key)&&detail[key].is_number_unsigned()&&detail[key]<=4294967295ull)result[key]=detail[key];
         if(detail.contains("resourceWorkerElapsedMs")&&detail["resourceWorkerElapsedMs"].is_number_unsigned())
             result["resourceWorkerElapsedMs"]=(std::min)(detail["resourceWorkerElapsedMs"].get<unsigned long long>(),3600000ull);
+        if(detail.contains("resourceWorkerCleanupMs")&&detail["resourceWorkerCleanupMs"].is_number_unsigned()&&detail["resourceWorkerCleanupMs"]<=3600000ull)
+            result["resourceWorkerCleanupMs"]=detail["resourceWorkerCleanupMs"];
         if(result.value("resourceWorkerChildCpuKnown",false)&&detail.contains("resourceWorkerChildCpuMs")&&detail["resourceWorkerChildCpuMs"].is_number_unsigned())
             result["resourceWorkerChildCpuMs"]=(std::min)(detail["resourceWorkerChildCpuMs"].get<unsigned long long>(),3600000ull);
         if(detail.contains("resourceWorkerProgressCount")&&detail["resourceWorkerProgressCount"].is_number_unsigned()&&detail["resourceWorkerProgressCount"]<=4u)
@@ -475,6 +530,22 @@ inline Json record(const std::string& event,const Json& detail) {
         if(detail.contains("resourceWorkerChildStage")&&detail["resourceWorkerChildStage"].is_string()){
             const auto& stage=detail["resourceWorkerChildStage"].get_ref<const std::string&>();
             if(stage=="none"||stage=="receipt"||stage=="inspect"||stage=="cache"||stage=="reinspect")result["resourceWorkerChildStage"]=stage;
+        }
+        if(detail.contains("resourceWorkerInitialInspectStep")&&detail["resourceWorkerInitialInspectStep"].is_string()){
+            const auto& step=detail["resourceWorkerInitialInspectStep"].get_ref<const std::string&>();
+            if(step=="loader-digest"||step=="loader-open"||step=="loader-read"||step=="plugin-package"||step=="steam-debug-marker"){
+                result["resourceWorkerInitialInspectStep"]=step;
+                const auto* key="resourceWorkerInitialInspectElapsedMs";
+                if(detail.contains(key)&&detail[key].is_number_unsigned()&&detail[key]<=3600000ull)result[key]=detail[key];
+            }
+        }
+        if(detail.contains("resourceWorkerCacheStep")&&detail["resourceWorkerCacheStep"].is_string()){
+            const auto& step=detail["resourceWorkerCacheStep"].get_ref<const std::string&>();
+            if(step=="verify"||step=="repair"||step=="seed"){
+                result["resourceWorkerCacheStep"]=step;
+                const auto* key="resourceWorkerCacheStepElapsedMs";
+                if(detail.contains(key)&&detail[key].is_number_unsigned()&&detail[key]<=3600000ull)result[key]=detail[key];
+            }
         }
         if(detail.contains("resourceWorkerReadKind")&&detail["resourceWorkerReadKind"].is_string()){
             const auto& kind=detail["resourceWorkerReadKind"].get_ref<const std::string&>();
@@ -491,8 +562,11 @@ inline Json record(const std::string& event,const Json& detail) {
         for(const auto* key:{"subscribe","readId","demandEpoch","discarded","powerMs","powerSourceMs","scheduleMs","performanceMs","topologyMs","gyroMs","framesMs","touchpadsMs","globalMs","monitorMs","inputMs"})
             if(detail.contains(key)&&detail[key].is_primitive())result[key]=detail[key];
     }
-    if(event=="mirror-snapshot-request"&&detail.contains("clientStartup")){
-        const auto facts=clientStartupRecord(detail["clientStartup"]);if(!facts.is_null())result["clientStartup"]=facts;
+    if(event=="mirror-snapshot-request"){
+        attachSnapshotRequestSource(result,detail);
+        if(detail.contains("clientStartup")){
+            const auto facts=clientStartupRecord(detail["clientStartup"]);if(!facts.is_null())result["clientStartup"]=facts;
+        }
     }
     if(event=="snapshot-read-finished"){
         snapshotReadFailureFacts(result,detail);performanceReadTimings(result,detail);
@@ -509,6 +583,18 @@ inline Json record(const std::string& event,const Json& detail) {
         detail.value("ok",Json{})==true&&detail.value("mutated",Json{})==true&&detail.value("uncertain",Json{})==false)
         result["reason"]="decky-recovery-action-acknowledged";
     if(event=="connection-recovery"&&detail.value("scope",std::string{})=="global-connection"){
+        if(detail.value("recoveryPhase",Json{})=="connected"){
+            for(const auto* key:{"authenticatedPeerAgeMs","sharedModeObservationAgeMs"})
+                if(detail.contains(key)&&detail[key].is_number_unsigned())result[key]=detail[key];
+        }
+        if(detail.value("reason",Json{})=="official-backend-unavailable"&&
+           (detail.value("stage",Json{})=="rebuild-ui-document"||detail.value("stage",Json{})=="reopen-bigpicture")&&
+           detail.contains("sidebarVerifiedDuringBackendOutage")&&detail["sidebarVerifiedDuringBackendOutage"].is_boolean())
+            result["sidebarVerifiedDuringBackendOutage"]=detail["sidebarVerifiedDuringBackendOutage"];
+        if(detail.value("stage",Json{})=="launch-policy-blocked"){
+            const auto source=detail.find("launchPolicySource");
+            if(source!=detail.end()&&(*source=="cold-preflight-observed"||*source=="loader-create-refused"))result["launchPolicySource"]=*source;
+        }
         if(detail.contains("bindingReused")&&detail["bindingReused"].is_boolean())result["bindingReused"]=detail["bindingReused"];
         if(detail.contains("runtimeReason")&&detail["runtimeReason"].is_string()&&detail["runtimeReason"].get_ref<const std::string&>().size()<=128)result["runtimeReason"]=detail["runtimeReason"];
         if(detail.contains("steamPid")&&detail["steamPid"].is_number_unsigned()&&detail["steamPid"]<=0xffffffffull)result["steamPid"]=detail["steamPid"];
@@ -682,6 +768,15 @@ inline Json record(const std::string& event,const Json& detail) {
             result["cleanupWorkerReadKind"]=detail["cleanupWorkerReadKind"];
         for(const auto* key:{"cleanupWorkerReplyReceived","readbackPending"})
             if(detail.contains(key)&&detail[key].is_boolean())result[key]=detail[key];
+        if(detail.contains("cleanupWorkerTiming")&&detail["cleanupWorkerTiming"].is_object()){
+            const auto& timing=detail["cleanupWorkerTiming"];
+            const auto valid=[&](const char* key){return timing.contains(key)&&timing[key].is_number_unsigned()&&timing[key]<=3600000ull;};
+            if(valid("workMs")&&valid("cleanupMs")){
+                Json measured={{"workMs",timing["workMs"]},{"cleanupMs",timing["cleanupMs"]}};
+                if(valid("childCpuMs"))measured["childCpuMs"]=timing["childCpuMs"];
+                result["cleanupWorkerTiming"]=std::move(measured);
+            }
+        }
     }
     if(event=="steam-mode-signal"){
         // The mode callback already reports both versions. Keep only bounded
@@ -718,6 +813,21 @@ inline Json record(const std::string& event,const Json& detail) {
         if(detail.contains("loaderPolicyVersion")&&detail["loaderPolicyVersion"].is_number_integer()&&detail["loaderPolicyVersion"]>=0&&detail["loaderPolicyVersion"]<=1000)
             result["loaderPolicyVersion"]=detail["loaderPolicyVersion"];
     }
+    if(event=="steam-css-use" && detail.value("stage",Json())=="automatic-initialization-ready") {
+        const auto timing=detail.find("initializationTiming");
+        if(timing!=detail.end() && timing->is_object()) {
+            Json bounded=Json::object(); unsigned sum=0;
+            for(const char* key:{"scriptSetupMs","ensureChecksMs","backendPreflightMs","listenerWaitMs","afterListenerMs","totalMs"}) {
+                const auto field=timing->find(key);
+                if(field==timing->end() || !field->is_number_unsigned() || *field>180000u) break;
+                bounded[key]=*field; sum+=field->get<unsigned>();
+            }
+            const auto launched=timing->find("launched");
+            if(bounded.size()==6 && sum==2*bounded["totalMs"].get<unsigned>() && launched!=timing->end() && launched->is_boolean()) {
+                bounded["launched"]=*launched; result["initializationTiming"]=std::move(bounded);
+            }
+        }
+    }
     // CSS callbacks already provide these bounded facts, but the generic
     // allowlist previously dropped them, making cleanup look verified by error=0.
     if(event=="steam-css-use" && (detail.value("stage",Json())=="idle-helper-complete" || detail.value("stage",Json())=="automatic-helper-failed")) {
@@ -739,6 +849,22 @@ inline Json record(const std::string& event,const Json& detail) {
                         sum+=part->get<unsigned>(); parts[key]=*part;
                     }
                     if(parts.size()==4 && sum<=bounded["firstControlMs"].get<unsigned>()) bounded["firstControlParts"]=std::move(parts);
+                }
+                if(bounded.contains("firstControlParts")) {
+                    const auto source=timing->find("themeStateParts");
+                    if(source!=timing->end() && source->is_object()) {
+                        Json parts=Json::object(); unsigned sum=0;
+                        for(const char* key:{"rowsMs","bundleMs","installedMs","foreignMs","backupMs"}) {
+                            const auto part=source->find(key);
+                            if(part==source->end() || !part->is_number_unsigned() || *part>180000u) break;
+                            sum+=part->get<unsigned>(); parts[key]=*part;
+                        }
+                        const auto passes=source->find("statusPasses");
+                        if(parts.size()==5 && sum<=bounded["firstControlParts"]["themeStateMs"].get<unsigned>() &&
+                            passes!=source->end() && passes->is_number_unsigned() && *passes>=1u && *passes<=128u) {
+                            parts["statusPasses"]=*passes; bounded["themeStateParts"]=std::move(parts);
+                        }
+                    }
                 }
                 result["helperTiming"]=std::move(bounded);
             }

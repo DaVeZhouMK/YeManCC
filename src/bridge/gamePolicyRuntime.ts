@@ -28,6 +28,7 @@ function retireWork(): void {
 }
 let powerHeld = true, powerGeneration = 0;
 let powerNotificationSequence: number | undefined;
+let powerSuspendSerial: number | undefined;
 let dirty = true;
 let appliedPerformance = '';
 let tdpAppliedIntent = '';
@@ -85,13 +86,14 @@ async function reconcile(): Promise<void> {
   if (!dirty && tdpPending && Date.now() < tdpNextCheck) return;
   return resumeQueue.run(powerGeneration, async ownerCurrent => {
   const generation = epoch;
-  const notificationSequence = getSharedPowerLifecycle()?.observedNotificationSequence;
+  const admittedPower = getSharedPowerLifecycle();
   const game = getPolicyGame();
   const admittedGeneration = powerGeneration;
   const current = () => {
     const power = getSharedPowerLifecycle();
     return ownerCurrent() && active && !powerHeld && generation === epoch && isSharedPowerLifecycleAdmitted(power) &&
-      power?.generation === admittedGeneration && power.observedNotificationSequence === notificationSequence;
+      power?.generation === admittedGeneration && power.observedNotificationSequence === admittedPower?.observedNotificationSequence &&
+      power.suspendSerial === admittedPower?.suspendSerial;
   };
   if (!current()) return;
   running = true; runningCurrent = current;
@@ -149,7 +151,13 @@ async function reconcile(): Promise<void> {
       if (tdpChecksRemaining <= 0) tdpPending = false;
       else { tdpNextCheck = now + (tdpChecksRemaining === 2 ? 3000 : 7000); tdpChecksRemaining -= 1; }
     };
-    if (!gameCurrent()) { await reconcileTdp(); if (current()) dirty = false; return; }
+    if (!gameCurrent()) {
+      // A dedicated bank may own TDP once the target is confirmed. Preserve
+      // the original due time rather than charging a failed write for waiting.
+      if (!Object.values(config.entries).some(entry => entry.enabled !== false)) await reconcileTdp();
+      if (current()) dirty = false;
+      return;
+    }
     if (!dirty) { await reconcileTdp(); return; }
     const globalFrames = await loadGlobalFrameRates();
     const frameOwner = enabledEntry ? config.rtss?.[gamePolicyKey(game)] : undefined;
@@ -230,6 +238,7 @@ function invalidate(tdp = false): void { epoch += 1; retireWork(); dirty = true;
 export function startGamePolicyRuntime(): void {
   if (active) return;
   active = true; dirty = true; powerHeld = true; powerGeneration = 0; powerNotificationSequence = undefined;
+  powerSuspendSerial = undefined;
   followsTemplateDefaults = null;
   resetTdpChecks();
   ensureRetry();
@@ -240,8 +249,9 @@ export function startGamePolicyRuntime(): void {
       () => { if (active) { appliedPerformance = ''; tdpAppliedIntent = ''; appliedCpuIntent = ''; dirty = true; ensureRetry(); } }),
     onSharedPowerLifecycle(power => {
       if (!active) return;
-      const scopeChanged = power.observedNotificationSequence !== powerNotificationSequence;
+      const scopeChanged = power.observedNotificationSequence !== powerNotificationSequence || power.suspendSerial !== powerSuspendSerial;
       powerNotificationSequence = power.observedNotificationSequence;
+      powerSuspendSerial = power.suspendSerial;
       if (!isSharedPowerLifecycleAdmitted(power)) {
         if (!powerHeld) epoch += 1;
         retireWork(); powerHeld = true; stopRetry?.(); stopRetry = null;
@@ -260,13 +270,12 @@ export function startGamePolicyRuntime(): void {
         retireWork(); ensureRetry(); void reconcile();
       }
       lastWakeGeneration = Math.max(lastWakeGeneration, power.generation);
-    }, { observeNotificationSequence: true }),
+    }, { observeNotificationSequence: true, observeSuspendSerial: true }),
     subscribeMonitorSnapshot(observeTdp),
     subscribePolicyGameStatus(() => invalidate(true)),
-    subscribeGameTargetReadiness((ready) => {
-      if (!ready) invalidate(true);
-      else invalidate(true);
-    }),
+    // Revalidating the same game can follow a same-generation observation.
+    // Only a new wake or a change of policy should restart TDP settling.
+    subscribeGameTargetReadiness(() => invalidate()),
     watch(powerSourceMode,() => invalidate(true)),
     // Late battery classification can change fresh AC defaults from55 to120
     // without an AC/DC transition. Reuse the original bounded reconciliation.

@@ -41,6 +41,7 @@ static bool g_webviewReady = true, directFocusAllowed = true, altFocusAllowed = 
 static unsigned foregroundAttempts = 0, altAttempts = 0, windowRestores = 0;
 static unsigned foregroundReads = 0, findWindowCalls = 0;
 static unsigned windowPropertyReads = 0;
+static std::array<std::atomic<bool>, 2> g_domainLogEnabled{};
 static std::function<void()> duringImageQuery;
 static json discoveryReceipts=json::array();
 static json uiHandoffReceipts=json::array();
@@ -335,6 +336,7 @@ static void reset() {
     g_webviewReady = directFocusAllowed = altFocusAllowed = altInsertionSucceeds = true;
     altInserted = false; foregroundAttempts = altAttempts = windowRestores = 0;
     foregroundReads = findWindowCalls = windowPropertyReads = 0;duringImageQuery={}; processOpens = imageQueries = processCloses = 0;
+    g_domainLogEnabled[1].store(false);
     fixtureController.moves = 0; g_ctrl = &fixtureController;
     g_inputHostProcess = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(1));
     g_inputHostPrepared = g_inputHostNeutralized = fixtureVirtualWriterAllowed = true;
@@ -641,6 +643,43 @@ int main(int argc,char** argv) {
     test("ps5-child-reuses-same-owner-boundary", [] { useChild(); check(ps5UiOwnsInput(ps5Plan()), "PS5 child missed shared owner boundary"); });
     test("ps5-disabled-target-does-not-neutral", [] { useChild(); g_realStickTest.virtualTargetEnabled = false; check(!ps5UiOwnsInput(ps5Plan()), "PS5 disabled target suppressed"); });
     test("xbox-passthrough-not-expanded-by-this-fix", [] { useChild(); check(!steamDeckUiOwnsInput(FocusPlan{}) && !ps5UiOwnsInput(FocusPlan{}), "Other personas changed"); });
+    test("settled-disconnected-ui-skips-only-the-redundant-query", [] {
+        foregroundWindow = otherHandle;
+        check(!customSteamLibraryInputSuppressed(), "Unrelated window unexpectedly owns input");
+        const auto before = foregroundReads;
+        for (int i = 0; i != 32; ++i) gamepadProcessUiInput(0, fixtureTick + i * 50, {}, true);
+        check(foregroundReads == before && parentActions.empty() && childActions.empty(), "Idle samples revisited ownership or emitted an action");
+        gamepadProcessUiInput(0, fixtureTick + 1600, {});
+        check(foregroundReads > before, "Ordinary admission must still query ownership without the settled proof");
+    });
+    test("settled-disconnected-ui-keeps-diagnostics", [] {
+        foregroundWindow = otherHandle;
+        g_domainLogEnabled[1].store(true);
+        const auto before = foregroundReads;
+        gamepadProcessUiInput(0, fixtureTick, {}, true);
+        check(foregroundReads > before, "Diagnostic sample skipped its real admission gate");
+    });
+    test("settled-disconnected-ui-keeps-delayed-shoulder-and-release", [] {
+        g_uiShoulderPending = XINPUT_GAMEPAD_LEFT_SHOULDER;
+        g_uiShoulderPendingTick = fixtureTick;
+        gamepadProcessUiInput(0, fixtureTick + GP_UI_SHOULDER_DECISION_MS, {}, true);
+        check(g_uiShoulderPending == 0 && parentActions == std::vector<std::string>{"page-prev"}, "Lost the deferred shoulder action");
+        g_uiStartPending = true;
+        g_prevW = XINPUT_GAMEPAD_START;
+        gamepadProcessUiInput(0, fixtureTick + 100, {}, true);
+        check(!g_uiStartPending && parentActions == std::vector<std::string>{"page-prev", "debug"}, "Lost the pending release action");
+    });
+    test("settled-disconnected-ui-keeps-axis-and-trigger-recovery", [] {
+        g_curPad.sThumbLX = GP_UI_THUMB_THRESHOLD;
+        g_curPad.bLeftTrigger = XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
+        gamepadProcessUiInput(0, fixtureTick, {}, true);
+        check(parentActions == std::vector<std::string>{"slider-decrease", "nav-right"}, "Discarded analog activity when no live source was reported");
+        g_curPad = {};
+        const auto before = foregroundReads;
+        gamepadProcessUiInput(0, fixtureTick + 50, {}, true);
+        check(foregroundReads > before && g_uiNavX == 0 && g_uiNavLastEmitTick == 0 &&
+            g_uiSliderTriggerDirection == 0 && g_uiSliderTriggerLastEmitTick == 0, "Neutral transition failed to retire repeat state");
+    });
     test("child-X-held-produces-one-edit-and-no-parent-action", [] { useChild(); for (int i = 0; i != 30; ++i) sample(XINPUT_GAMEPAD_X, 1000 + i * 8); check(childActions == std::vector<std::string>{"edit"} && parentActions.empty(), "One physical X duplicated or escaped child"); check(steamDeckUiOwnsInput(deckPlan()), "Semantic X left Deck output active"); });
     test("child-two-X-presses-remain-two-legitimate-edits", [] { useChild(); sample(XINPUT_GAMEPAD_X, 1000); sample(0, 1020); sample(XINPUT_GAMEPAD_X, 1040); check(childActions == std::vector<std::string>{"edit", "edit"}, "Legitimate second X was swallowed"); });
     test("child-A-held-produces-one-accept", [] { useChild(); for (int i = 0; i != 30; ++i) sample(XINPUT_GAMEPAD_A, 1000 + i * 8); check(childActions == std::vector<std::string>{"accept"}, "A repeated without release"); });

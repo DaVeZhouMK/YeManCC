@@ -48,9 +48,12 @@ static void sgPruneRetainedWorkDeliveryLocked() {
     SgSleepTarget lease{};const bool captured=sgReadSleepTarget(lease)&&lease.pid&&lease.processCreated;
     // Retire obsolete roles before any same-pass merge can observe them.
     // Otherwise an earlier old receipt can swallow the new receipt, then clear.
-    for(auto& pending:g_sgRetainedWorkDelivery)if(pending.order&&pending.item.generation!=current&&
-        !(pending.item.kind==SgWork::WakeSuspend&&captured&&
-          lease.powerGeneration==pending.item.generation))pending={};
+    const auto wakeSequence=g_sleepPowerDispatch.observedSleepBoundarySequence();
+    const auto wakeSerial=g_sharedPowerSuspendSerial.load(std::memory_order_acquire);
+    for(auto& pending:g_sgRetainedWorkDelivery)if(pending.order&&
+        (!pending.item.wakeBoundaryMatches(wakeSequence,wakeSerial)||
+         (pending.item.generation!=current&&!(pending.item.kind==SgWork::WakeSuspend&&captured&&
+          lease.powerGeneration==pending.item.generation))))pending={};
     for(auto& pending:g_sgWorkQ)if(pending.kind==SgWork::Suspend&&
         !pending.pauseCanceledDelivery&&
         ((pending.pauseOrdinaryWitness&&!sgOrdinaryPauseCurrent(pending))||
@@ -78,6 +81,7 @@ static void sgPruneRetainedWorkDeliveryLocked() {
 }
 static bool sgWorkDeliveryCovers(const SgWorkItem& pending,const SgWorkItem& item,bool returned) {
     if(pending.pauseCanceledDelivery||pending.kind!=item.kind||pending.generation!=item.generation)return false;
+    if(!pending.wakeBoundaryMatches(item.wakeSleepSequence,item.wakeSuspendSerial))return false;
     if(item.kind!=SgWork::Suspend)return true;
     if((pending.pauseOrdinaryWitness&&!sgOrdinaryPauseCurrent(pending))||
        (pending.pauseEntryFileTime&&!sgReturnedPauseCurrent(pending)))return false;
@@ -102,6 +106,13 @@ static bool sgRetainWorkDeliveryLocked(const SgWorkItem& item,bool returned) {
            !lease.processCreated||lease.powerGeneration!=item.generation)return false;
         slot=4;
     }
+    if(item.kind==SgWork::WakeSuspend&&slot<g_sgRetainedWorkDelivery.size()) {
+        const auto sequence=g_sleepPowerDispatch.observedSleepBoundarySequence();
+        const auto serial=g_sharedPowerSuspendSerial.load(std::memory_order_acquire);
+        if(!item.wakeBoundaryMatches(sequence,serial))return false;
+        auto& retained=g_sgRetainedWorkDelivery[slot];
+        if(retained.order&&!retained.item.wakeBoundaryMatches(sequence,serial))retained={};
+    }
     if(slot>=g_sgRetainedWorkDelivery.size()||g_sgRetainedWorkDelivery[slot].order||g_sgRetainedWorkOrder==~0ull)
         throw std::bad_alloc();
     g_sgRetainedWorkDelivery[slot]={item,g_sgWorkQ.size(),++g_sgRetainedWorkOrder};return true;
@@ -111,14 +122,19 @@ static bool sgAppendWorkDeliveryLocked(const SgWorkItem& item,bool returned) {
     try{g_sgWorkQ.push_back(item);return true;}catch(const std::bad_alloc&){return sgRetainWorkDeliveryLocked(item,false);}
 }
 static bool sgTakeWorkDeliveryLocked(SgWorkItem& item) {
-    sgPruneRetainedWorkDeliveryLocked();SgRetainedWorkDelivery* first=nullptr;
-    for(auto& pending:g_sgRetainedWorkDelivery)
-        if(pending.order&&(!first||pending.order<first->order))first=&pending;
-    if(first&&first->ahead==0){item=first->item;*first={};return true;}
-    if(g_sgWorkQ.empty())return false;
-    item=g_sgWorkQ.front();g_sgWorkQ.pop_front();
-    for(auto& pending:g_sgRetainedWorkDelivery)if(pending.order&&pending.ahead)--pending.ahead;
-    return true;
+    for(;;) {
+        sgPruneRetainedWorkDeliveryLocked();SgRetainedWorkDelivery* first=nullptr;
+        for(auto& pending:g_sgRetainedWorkDelivery)
+            if(pending.order&&(!first||pending.order<first->order))first=&pending;
+        if(first&&first->ahead==0){item=first->item;*first={};}
+        else {
+            if(g_sgWorkQ.empty())return false;
+            item=g_sgWorkQ.front();g_sgWorkQ.pop_front();
+            for(auto& pending:g_sgRetainedWorkDelivery)if(pending.order&&pending.ahead)--pending.ahead;
+        }
+        if(item.wakeBoundaryMatches(g_sleepPowerDispatch.observedSleepBoundarySequence(),
+            g_sharedPowerSuspendSerial.load(std::memory_order_acquire)))return true;
+    }
 }
 static bool sgQueueReturnedPause(const SgWorkItem& item) {
     if(!sgReturnedPauseCurrent(item))return false;

@@ -4,6 +4,16 @@
 #include "decky_sidebar_session.h"
 namespace ymcc::deckyrepair::bigpicture {
 using Json=nlohmann::json;
+inline constexpr char alreadyHealthy[]="decky-bigpicture-already-healthy";
+inline bool readyBeforeClose(const Json& mode){
+    // A fresh mode read can show recovery while this stage was queued.
+    // Require the official socket, QAM hooks and a verified local reply.
+    for(const auto* field:{"deckyBackendConnected","deckyHooksInstalled","deckyClientConnected","deckyClientVerified"}){
+        const auto it=mode.find(field);
+        if(it==mode.end()||!it->is_boolean()||!it->get<bool>())return false;
+    }
+    return true;
+}
 template<class Current,class Read,class Send,class Now,class Wait>
 Json run(const steamsession::Session& session,Current current,Read read,Send send,Now now,Wait wait){
     bool entered=false;
@@ -26,6 +36,7 @@ Json run(const steamsession::Session& session,Current current,Read read,Send sen
         const auto initial=read();
         if(!current()||!same(initial))return fail("decky-bigpicture-state-changed");
         if(observedMode(initial)!="bigpicture")return fail("decky-bigpicture-state-changed");
+        if(readyBeforeClose(initial))return fail(alreadyHealthy);
         const auto started=now();
         const auto await=[&](const char* expected,unsigned long long deadline){
             while(current()&&now()<deadline){

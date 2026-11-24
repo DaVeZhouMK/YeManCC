@@ -18,7 +18,7 @@ export async function runTouchProfilesFileEntry(out,args=[]){
   report.native=native.evidence;
   const frozen=JSON.parse(fs.readFileSync(path.join(out,'native/touch-source.json'),'utf8'));
   Object.assign(pins,Object.fromEntries(frozen.headers.map(row=>[row.path,row.sha256])));
-  report.coverage=args.includes('--touch-profiles-producer')?await runTouchProfileProducerCases(native,out,report.assertions):await runTouchProfilesFileCases(native,out,report.assertions,selection);report.pass=true;
+  report.coverage=args.includes('--touch-profiles-producer')?await runTouchProfileProducerCases(native,out,report.assertions,selection):await runTouchProfilesFileCases(native,out,report.assertions,selection);report.pass=true;
  }catch(error){report.error=error.stack||String(error);}
  finally{
   await native?.close();report.sourceHashes=pins;
@@ -162,21 +162,35 @@ export async function runTouchProfileFrontendWire(out){
 
 /** Original boot producer -> actual serializer -> native configuration IPC.
  * Other feature owners remain the existing isolated fixture endpoints. */
-export async function runTouchProfileProducerCases(native,out,assertions){
+export async function runTouchProfileProducerCases(native,out,assertions,selection={}){
  const {createDiskRuntime}=await import('./diskSettings.mjs'),{bridge,sourceHashes}=await productionTouchBridge(out),rows=[];
+ const modes=['global','xbox','steam','xbox-steam'];
+ const original=modes.flatMap(mode=>['current','late-input','late-claim','active','pending','retired-reply'].map(kind=>({mode,kind,name:mode+'/'+kind,restore:false})));
+ const cases=[...original,...modes.flatMap(mode=>['current','active','pending','retired-reply'].map(kind=>({mode,kind,name:mode+'/startup-'+kind,restore:true})))];
+ const names=selection.only?.split(',')??original.map(row=>row.name);
+ assert(!selection.from&&names.length&&new Set(names).size===names.length&&names.every(name=>cases.some(row=>row.name===name)),'Unknown or duplicate touch producer case');
  const prior=globalThis.__bootTouchWire;
  try{
-  for(const mode of ['global','xbox','steam','xbox-steam'])for(const kind of ['current','late-input','late-claim']){
-   const dir=path.join(out,'producer',mode,kind),disk=await createDiskRuntime(dir,native),a=disk.a,r=a.repository;
+  for(const {mode,kind,name,restore} of cases.filter(row=>names.includes(row.name))){
+   const dir=path.join(out,'producer',name),disk=await createDiskRuntime(dir,native),a=disk.a,r=a.repository;
+   const boot='file-fixture-boot-1';
    await r.loadSettings();Object.assign(a.ports.settings,await r.loadSettings());
    const bank=await native.invoke(disk.file,{operation:'touchDefaults'}),seed=disk.read();
-   seed.screenTouchpads=structuredClone(bank);seed.input.startupObservedBoot='file-fixture-boot-1';disk.writeRaw(seed);
+   seed.screenTouchpads=structuredClone(bank);seed.input.startupObservedBoot=boot;disk.writeRaw(seed);
    Object.assign(a.ports.settings,await r.loadSettings());a.ports.state.touch=structuredClone(bank.profiles);
    const doc=a.model.createBootModeDocument(await a.boot.captureBootModeSnapshot());doc.current=mode;doc.boot=mode;doc.revision=7;
    for(const profile of Object.values(doc.global.touch.profiles))profile.transparency=65;
    for(const scene of Object.values(doc.scenes))delete scene.overrides.touch;
-   const start=disk.read();start.extensions.bootModes=structuredClone(doc);start.extensions.bootModesClaimWriteId='fixture-current-producer-claim';disk.writeRaw(start);await r.loadSettings();
-   let calls=0,reply,beforeNative,wireArgs;
+   if(restore){doc.current=mode==='global'?'xbox':'global';doc.bootEnabled=true;}
+   const start=disk.read();start.extensions.bootModes=structuredClone(doc);
+   if(!restore)start.extensions.bootModesClaimWriteId='fixture-current-producer-claim';
+   disk.writeRaw(start);
+   if(restore){
+    assert.equal((await disk.startup(boot,'touch-startup-initial')).ok,true);
+    a.ports.hooks.bootIdentity=()=>boot;
+   }
+   Object.assign(a.ports.settings,await r.loadSettings());
+   let calls=0,reply,beforeNative,wireArgs,replacement;
    globalThis.__bootTouchWire={async invoke(op,args){
     assert.equal(op,'screenTouchpads.saveProfiles');calls++;wireArgs=structuredClone(args);
     if(kind==='late-input'){
@@ -185,24 +199,61 @@ export async function runTouchProfileProducerCases(native,out,assertions){
     if(kind==='late-claim'){
      const peer=disk.read();peer.extensions.bootModesClaimWriteId='fixture-peer-producer-claim';disk.writeRaw(peer);
     }
-    beforeNative=disk.read();reply=await native.invoke(disk.file,{operation:'touchProfiles',args,controls:{active:-1}});
+    const active=['active','pending','retired-reply'].includes(kind)?0:-1;
+    beforeNative=disk.read();reply=await native.invoke(disk.file,{operation:'touchProfiles',args,controls:{active,...(kind==='pending'?{ownerInitialized:false}:{})}});
+    if(kind==='retired-reply'){
+     replacement=disk.read();replacement.extensions.bootModesClaimWriteId='fixture-peer-after-touch-commit';
+     if(restore){
+      replacement.extensions.bootModesStartupResult={schema:1,boot,mode,sourceRevision:doc.revision,revision:doc.revision+1,status:'partial',applied:[],skipped:[],pending:['peer startup result'],modules:{touch:{state:'waiting',detail:'peer owns this result'}}};
+     }
+     disk.writeRaw(replacement);
+    }
     Object.assign(a.ports.settings,await r.loadSettings());return reply.result;
    }};
    a.ports.hooks.touchWrite=async context=>{const request=a.ports.calls.filter(row=>row.op==='touch.saveProfiles').at(-1).value;return bridge.screenTouchpadsSaveProfiles(request.profiles,request.expectedProfiles,context);};
-   let result,error;try{result=await a.boot.applyBootMode(mode,doc,{startup:true});}catch(e){error=String(e);}
+   let result,error;try{if(restore)await a.boot.restoreSelectedBootMode();else result=await a.boot.applyBootMode(mode,doc,{startup:true});}catch(e){error=String(e);}
    assert.equal(calls,1,'Actual producer did not reach original native touch handler');
-   assert.equal(wireArgs.bootContext.extensions.bootModesClaimWriteId,start.extensions.bootModesClaimWriteId);
+   assert.equal(wireArgs.bootContext.extensions.bootModesClaimWriteId,restore?beforeNative.extensions.bootModesClaimWriteId:start.extensions.bootModesClaimWriteId);
    const after=disk.read();assert.equal(reply.runtime.windowCreateAttempts,0);assert.equal(reply.runtime.touchWindows,false);assert.equal(reply.runtime.injectedInputs,0);
-   if(kind==='current'){
-    assert.equal(error,undefined,error);assert.equal(reply.result.settingsSaved,true);assert.equal(reply.mainCommits,1);assert.equal(result.receipt.modules.touch.state,'saved');
+   const receipt=restore?after.extensions.bootModesStartupResult:result?.receipt;
+   if(!['late-input','late-claim'].includes(kind)){
+    assert.equal(reply.result.settingsSaved,true);assert.equal(reply.mainCommits,1);
+    assert.equal(reply.result.activeApplication,kind==='current'?'not-requested':kind==='pending'?'pending':'applied');
+    assert.equal(reply.result.applicationConfirmed,['active','retired-reply'].includes(kind));
+    if(kind==='retired-reply'){
+     assert.match(error??'',/未提交旧快照/);assert.equal(after.extensions.bootModesClaimWriteId,'fixture-peer-after-touch-commit');
+     if(restore){assert.deepEqual(after,replacement,'Late renderer replaced the peer result or published its own active marker');assert.notEqual(after.extensions.bootModesActiveBoot,boot);}
+    }else{
+     assert.equal(error,undefined,error);assert.equal(receipt.modules.touch.state,kind==='active'?'active':kind==='pending'?'waiting':'saved');
+     assert.equal(receipt.applied.includes('屏幕触摸配置'),kind==='active');
+     assert.equal(receipt.pending.some(message=>message.startsWith('屏幕触摸：整组已保存')),kind==='pending');
+     if(restore){
+      assert.equal(after.extensions.bootModesActiveBoot,boot);assert.equal(after.extensions.bootModesAppliedBoot,boot);
+      assert.equal(receipt.boot,boot);assert.equal(receipt.mode,mode);assert.equal(receipt.sourceRevision,doc.revision);
+      assert.equal(receipt.revision,doc.revision+1);assert.equal(receipt.revision,after.extensions.bootModes.revision);
+      assert.equal(receipt.revision,wireArgs.bootContext.revision);
+     }
+    }
     for(const profile of Object.values(after.screenTouchpads.profiles))assert.equal(profile.transparency,65);
    }else{
     assert(error,'Stale producer was accepted');assert.equal(reply.result.settingsSaved,false);assert.equal(reply.result.reason,'boot-mode-context-changed');assert.equal(reply.mainCommits,0);assert.deepEqual(after,beforeNative,'Old producer changed files after ownership changed');
     for(const [persona,profile]of Object.entries(after.screenTouchpads.profiles))assert.equal(profile.transparency,bank.profiles[persona].transparency);
    }
    assert.equal(after.input.revision,beforeNative.input.revision);assert.deepEqual(after.gameProfiles,start.gameProfiles);
+   if(restore)assert.equal((await disk.startup(boot,'touch-startup-reopen')).ok,true);
    const reopened=await disk.moduleAt('reopened'),loaded=await reopened.repository.loadSettings();assert.deepEqual(loaded.screenTouchpads,after.screenTouchpads);
-   const row={name:mode+'/'+kind,mode,kind,pass:true,actualNativeRequests:calls,error:error??null,reply,wireArgs,after};rows.push(row);assertions.push(row);disk.flush();
+   let overview=null;
+   if(restore){
+    reopened.ports.hooks.bootIdentity=()=>boot;
+    const stable=disk.read(),writesBefore=disk.trace.filter(row=>row.op==='write').length;
+    await reopened.boot.restoreSelectedBootMode();
+    overview=(await reopened.boot.loadBootModes({overviewOnly:true})).startupResult;
+    assert.deepEqual(overview,receipt,'Fresh overview did not retain the diagnostic receipt');
+    assert.deepEqual(disk.read(),stable,'Same-boot relaunch touched the saved configuration');
+    assert.equal(disk.trace.filter(row=>row.op==='write').length,writesBefore,'Same-boot relaunch attempted a duplicate settings write');
+    assert.equal(reopened.ports.calls.some(row=>row.op==='touch.saveProfiles'),false,'Same-boot relaunch replayed the touch owner');
+   }
+   const row={name,mode,kind,restore,pass:true,actualNativeRequests:calls,error:error??null,moduleReceipt:receipt?.modules.touch??null,overview,reply,wireArgs,after};rows.push(row);assertions.push(row);disk.flush();
    a.boot.cancelBootModeLaunches();a.boot.cancelBootModeDeferredMouse();
   }
   assert.deepEqual(fingerprints(Object.keys(sourceHashes)),sourceHashes);

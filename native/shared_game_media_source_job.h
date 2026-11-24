@@ -14,6 +14,7 @@ class SourceJob final {
         bool assigned=false,returned=false;
         std::vector<steaminfo::transfer::Handle> members;
         std::unique_ptr<steaminfo::transfer::Export> source;
+        std::wstring ownedStaging;
         sleeppower::remote::NativeOwnedTaskBorrow power;
         sleeppower::task::Transfer transfer;
         State* next=nullptr;
@@ -97,17 +98,25 @@ class SourceJob final {
         // After observation succeeds, a partial close can remove the Job or
         // completion port. Reaping then retries only outstanding handle return.
         if(!s.returned){if(!drain(s,budget))return false;s.returned=true;}
+        // A force-stopped child cannot run its own file cleanup. Keep the
+        // exact staging path in the same ledger until the Job is empty.
+        bool stagingReturned=true;
+        if(!s.ownedStaging.empty()){
+            if(DeleteFileW(s.ownedStaging.c_str()))s.ownedStaging.clear();
+            else{const auto error=GetLastError();if(error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND)s.ownedStaging.clear();else stagingReturned=false;}
+        }
         if(s.source)s.source->beginClose();
         if(!closeOwned(s))return false;
         if(s.source&&!s.source->closeOwned())return false;
         if(!s.transfer.closeOwned())return false;
-        return s.power.closeOwned();
+        return s.power.closeOwned()&&stagingReturned;
     }
     static void retain(State* s)noexcept{std::lock_guard lock(retainedMutex_);s->next=retained_;retained_=s;}
     static void abandon(State* s)noexcept{if(finalize(*s,0))delete s;else retain(s);}
 public:
-    explicit SourceJob(std::unique_ptr<steaminfo::transfer::Export> source):state_(new State){
+    explicit SourceJob(std::unique_ptr<steaminfo::transfer::Export> source,std::wstring staging={}):state_(new State){
         state_->source=std::move(source);
+        state_->ownedStaging=std::move(staging);
         state_->job=CreateJobObjectW(nullptr,nullptr);
         state_->port=CreateIoCompletionPort(INVALID_HANDLE_VALUE,nullptr,0,1);
         if(!state_->job||!state_->port){abandon(std::exchange(state_,nullptr));throw std::runtime_error("download-job-unavailable");}

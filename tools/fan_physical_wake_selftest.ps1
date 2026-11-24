@@ -1,6 +1,6 @@
-param([string]$ProjectRoot=(Split-Path -Parent $PSScriptRoot),[string]$EvidenceRoot,[string]$NativeSourcePath,[switch]$CallersOnly,[switch]$SharedPowerOnly)
+param([string]$ProjectRoot=(Split-Path -Parent $PSScriptRoot),[string]$EvidenceRoot,[string]$NativeSourcePath,[switch]$CallersOnly,[switch]$SharedPowerOnly,[switch]$WakeDiagnosticsOnly)
 $ErrorActionPreference='Stop'
-if($CallersOnly -and $SharedPowerOnly){throw 'Explicit selections are mutually exclusive'}
+if(@($CallersOnly,$SharedPowerOnly,$WakeDiagnosticsOnly).Where({$_}).Count -gt 1){throw 'Explicit selections are mutually exclusive'}
 if(-not $EvidenceRoot){$EvidenceRoot=Join-Path $env:TEMP ('fan-physical-wake-'+[guid]::NewGuid().ToString('N'))}
 New-Item -ItemType Directory -Force -Path $EvidenceRoot | Out-Null
 # NativeSourcePath is an explicit private Evidence mutation input; default is production.
@@ -40,6 +40,21 @@ $lifecycle=Get-ProductionIpcBody '    ipc_on("power.fanLifecycle", [](const json
 $manual=Get-ProductionIpcBody '    ipc_on("power.fanManualWake", [](const json& a) -> json {'
 $sharedSnapshot=(Get-ProductionFunction 'static json sharedPowerLifecycleSnapshot() {')+"`n"+
     (Get-ProductionFunction 'static void publishSharedFanWake(unsigned long long generation) noexcept {')
+$fanDeliveryAnchor='static constexpr UINT_PTR kSharedFanWakeDeliveryTimer='
+if($native.Contains($fanDeliveryAnchor)){
+    $deliveryStart=$native.IndexOf($fanDeliveryAnchor,[StringComparison]::Ordinal)
+    $deliveryPublish='static void publishSharedFanWake(unsigned long long generation) noexcept {'
+    $publishStart=$native.IndexOf($deliveryPublish,[StringComparison]::Ordinal)
+    if($publishStart -le $deliveryStart){throw 'production Fan delivery block is out of order'}
+    $sharedSnapshot=(Get-ProductionFunction 'static json sharedPowerLifecycleSnapshot() {')+"`n"+
+        $native.Substring($deliveryStart,$publishStart-$deliveryStart)+
+        (Get-ProductionFunction $deliveryPublish)
+}
+if($sharedSnapshot.Contains('g_gamepadUiWakeGeneration')){
+    $wakeState=[regex]::Matches($native,'(?m)^static std::atomic<uint64_t> g_gamepadUiWakeGeneration[^\r\n]+;')
+    if($wakeState.Count -ne 1){throw 'production gamepad wake projection storage missing/ambiguous'}
+    $sharedSnapshot=$wakeState[0].Value+"`n"+$sharedSnapshot
+}
 $queueWithContinuation='static void fanHostQueueSuspend(const char* reason,unsigned long long generation,bool resumeUnstarted) {'
 if($native.Contains($queueWithContinuation)){
     $queueDeclaration='static void fanHostQueueSuspend(const char* reason, unsigned long long generation, bool resumeUnstarted = false);'
@@ -48,6 +63,8 @@ if($native.Contains($queueWithContinuation)){
 }else{
     $queue=Get-ProductionFunction 'static void fanHostQueueSuspend(const char* reason,unsigned long long generation) {'
 }
+$disarm=Get-ProductionFunction 'static void fanLeaseKeepaliveDisarm(const char* reason, const std::string* expectedLease) {'
+$queue='static void fanLeaseKeepaliveDisarm(const char*, const std::string* = nullptr);'+"`n"+$disarm+"`n"+$queue
 $delivery=([regex]::Match($native,'(?m)^enum class FanReadyDelivery \{[^\r\n]+\};')).Value
 if(-not $delivery){throw 'production Fan delivery receipt missing'}
 $publish=Get-ProductionFunction 'static FanReadyDelivery fanHostPublishPhysicalWake(unsigned long long generation, bool refreshAdmission) noexcept {'
@@ -59,9 +76,17 @@ if($native.Contains($closeContinuation)){
     $publish=(Get-ProductionFunction $closeContinuation)+"`n"+$publish
 }
 $publish+="`n"+(Get-ProductionFunction 'static FanReadyDelivery fanHostScheduleEmergencyResume(unsigned long long sharedGeneration) {')
-$s4Admit=Get-ProductionFunction 'static bool sgAdmitS4Wake(unsigned long long callbackGeneration,ULONGLONG eventFileTime) {'
-$s4Handler=[regex]::Match($native,'(?ms)^    case WM_SG_S4_WAKE:\r?\n(?<body>.*?)^    case WM_SG_RESUME_GAME_FOCUS:').Groups['body'].Value
+$s4Admit=Get-ProductionFunction 'static bool sgAdmitS4Wake(unsigned long long callbackGeneration,ULONGLONG eventFileTime'
+$s4Handler=[regex]::Match($native,'(?ms)^    case WM_SG_S4_WAKE:(?<body>.*?)^    case WM_SG_RESUME_GAME_FOCUS:').Groups['body'].Value
 if(!$s4Handler){throw 'production S4 handler missing'}
+if($s4Handler.Contains('sgArmS4WakeRedelivery(g_hwnd)')){
+    $deliveryStart=$native.IndexOf('static std::mutex g_sgFailedS4Mutex;',[StringComparison]::Ordinal)
+    $deliveryEnd=$native.IndexOf('static void sgPostS4Wake(',[StringComparison]::Ordinal)
+    if($deliveryStart -lt 0 -or $deliveryEnd -le $deliveryStart){throw 'production S4 delivery state missing'}
+    $publish+="`nusing HWND=int;`nstatic void sleepPowerArmRedelivery(HWND){throw ::std::logic_error(`"unexpected window timer in Fan physical fixture`");}`n"
+    $publish+=$native.Substring($deliveryStart,$deliveryEnd-$deliveryStart)
+    $publish+=(Get-ProductionFunction 'static void sgArmS4WakeRedelivery(HWND window) {')+"`n"
+}
 $s4Recorder='static void fanHostRecordSharedHibernateWake(unsigned long long generation, ULONGLONG eventFileTime) {'
 if($native.Contains($s4Recorder)){$publish+="`n"+(Get-ProductionFunction $s4Recorder)}
 $publish+="`n"+$s4Admit+"`nstatic long fanSharedS4(WPARAM w, LPARAM l) {`n"+$s4Handler+"}`n"
@@ -119,7 +144,7 @@ foreach($binding in @(@($nativePath,$nativeSha),@($headerPath,$headerSha),@($fix
 if([IO.File]::ReadAllText($queuePath) -cne $queue -or [IO.File]::ReadAllText($publishPath) -cne $publish -or [IO.File]::ReadAllText($factPath) -cne $fact -or [IO.File]::ReadAllText($gatesPath) -cne $gates -or [IO.File]::ReadAllText($lifecyclePath) -cne $lifecycle -or [IO.File]::ReadAllText($manualPath) -cne $manual){throw 'extracted native caller bytes changed'}
 foreach($binding in $sharedHeaders){if((Get-FileHash -LiteralPath $binding.path -Algorithm SHA256).Hash -ne $binding.sha256){throw 'Shared power header drift'}}
 if([IO.File]::ReadAllText($snapshotPath) -cne $sharedSnapshot){throw 'extracted shared Fan projection bytes changed'}
-& $exe @($(if($CallersOnly){'--callers-only'}elseif($SharedPowerOnly){'--shared-power-only'})) *> (Join-Path $EvidenceRoot 'gate.out');$code=$LASTEXITCODE
+& $exe @($(if($CallersOnly){'--callers-only'}elseif($SharedPowerOnly){'--shared-power-only'}elseif($WakeDiagnosticsOnly){'--wake-diagnostics-only'})) *> (Join-Path $EvidenceRoot 'gate.out');$code=$LASTEXITCODE
 Get-Content (Join-Path $EvidenceRoot 'gate.out') -Tail 2
 if($code -ne 0){throw 'physical gate failed'}
 @{

@@ -7,6 +7,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 #include <deque>
@@ -18,6 +19,13 @@
 #include "sleep_cancel_ready.h"
 #include "sleep_power_state.h"
 #include "sleep_power_dispatch.h"
+#include "sleep_power_observation.h"
+#include "input_host_shared_power.h"
+#include "startup_resume_delivery.h"
+static BOOL fixtureCloseLeaseHandle(HANDLE handle){return handle==reinterpret_cast<HANDLE>(2)?TRUE:CloseHandle(handle);}
+#define CloseHandle fixtureCloseLeaseHandle
+#include "sleep_legacy_resume_journal.h"
+#undef CloseHandle
 #include "sleep_wake_admission.h"
 #include <set>
 #include <new>
@@ -50,6 +58,7 @@ static bool checkedExistingReplace=false;
 #include "SgSleepTask.inc"
 #include "SgSleepTarget.inc"
 #include "SgResumeResult.inc"
+#include "SgDirectoryResumePurpose.inc"
 #include "SgWork.inc"
 #include "SgWorkItem.inc"
 static std::atomic<bool> g_exitRequested{false},g_inputReady{false},g_sensorSuspendCallbackActive{true};
@@ -59,6 +68,7 @@ static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Suspending};
 static std::atomic<unsigned long long> g_powerGeneration{11},g_resumeReadyGeneration{0};
 static std::atomic<ULONGLONG> g_sgOriginalPowerButtonWakeFileTime{300},g_sgLastPowerButtonWakeEventFileTime{300};
 static std::atomic<ULONGLONG> g_sgLastPowerButtonSleepIntentFileTime{200};
+static std::atomic<ULONGLONG> g_sgClosedSleepIntentFileTime{0};
 static std::atomic<ULONGLONG> g_sgLatestSleepEntryFileTime{200},g_sgLatestUserSleepEntryFileTime{200};
 static std::atomic<ULONGLONG> g_sgLastKernel506EventFileTime{0},g_sgLastKernel507EventFileTime{0};
 static std::atomic<int> g_sgLastKernel506Reason{-1},g_sgLastKernel507Reason{-1};
@@ -109,6 +119,8 @@ static bool g_sgModernStandbyActive=true,g_sgModernWakeClassified=false,g_sgRepa
 static ULONGLONG g_sgSleepQueryGeneration=11,g_sgModernWakeClassifiedTick=0,g_sgRetryDueTick=1,g_sgSleepTriggerTick=1;
 static double g_sgSleepTriggerEpoch=1;
 static unsigned resumeCalls=0,rearmCalls=0,readyNotices=0,gateOpenCalls=0;
+static unsigned fanResumeCalls=0,sharedReadyCalls=0;
+static unsigned long long rearmGeneration=0,fanResumeGeneration=0,sharedReadyGeneration=0;
 static std::string selectedStage,selectedEvent;
 static std::mutex latchMutex;
 static std::condition_variable latchCv;
@@ -160,18 +172,30 @@ static bool sgResumeMarkerDefinitelyStale(const std::wstring&,DWORD){return fals
 static void sgInitNt(){}
 static bool sgSleepRetryActive(){return g_sgRetryInProgress;}
 static bool focusQueryProcessIdentity(DWORD pid,void*,ULONGLONG* created){barrier("identity-query");if(ownedLeaseMode){HANDLE p=::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);*created=p?ownedBirth(p):0;if(p)::CloseHandle(p);return *created!=0;}*created=456;return pid==123;}
-static void focusSingleResumedGame(const std::vector<DWORD>& pids,ULONGLONG,unsigned long long){if(!pids.empty())++focusCalls;}
+static void focusSingleResumedGame(const std::vector<DWORD>& pids,ULONGLONG,const ymcc::sleeppower::SharedPowerV1&){if(!pids.empty())++focusCalls;}
+static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1*,uint32_t) noexcept;
+#include "sgAcquireResumeFiles.inc"
 static HANDLE fakeOpenProcess(DWORD access,BOOL inherit,DWORD pid){barrier("process-open");const auto h=ownedLeaseMode?::OpenProcess(access,inherit,pid):reinterpret_cast<HANDLE>(2);if(ownedLeaseMode&&!keepResumeFailure&&transientVetoStage=="open")applyTransientVeto();return h;}
 static BOOL fakeCloseHandle(HANDLE h){return ownedLeaseMode?::CloseHandle(h):TRUE;}
 static ULONGLONG nativeProcessCreatedFromHandle(HANDLE h){barrier("opened-birth");const auto value=ownedLeaseMode?ownedBirth(h):456;if(ownedLeaseMode&&!keepResumeFailure&&transientVetoStage=="birth")applyTransientVeto();return value;}
 static void fakeSleep(DWORD){barrier("resume-delay");}
-static LONG fakeNtResume(HANDLE h){++ntCalls;if(ownedLeaseMode&&keepResumeFailure){ownedResumeStatuses.push_back(-1);return -1;}if(ownedLeaseMode){using Fn=LONG(NTAPI*)(HANDLE);const auto fn=reinterpret_cast<Fn>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"NtResumeProcess"));if(!fn)return -1;++actualOwnedNtCalls;if(std::this_thread::get_id()==fixtureWorkerId)++actualKernelNtCallsOnWorker;const LONG status=fn(h);if(actualOwnedNtCalls==1&&transientVetoStage=="nt")applyTransientVeto();ownedResumeStatuses.push_back(status);if(status>=0)++resumeCalls;return status;}if(keepResumeFailure||suspendCount<=0)return -1;--suspendCount;++resumeCalls;barrier("nt-return");return 0;}
+static unsigned ntCallsWithBothLeases=0;
+static LONG fakeNtResume(HANDLE h){
+ ++ntCalls;
+ const auto held=[&](const std::wstring& dir){
+    const auto lock=ymcc::sleepLegacyResume::paths(dir,ownedTarget.pid).lock;
+    const HANDLE probe=CreateFileW(lock.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+    if(probe!=INVALID_HANDLE_VALUE){::CloseHandle(probe);return false;}
+    return GetLastError()==ERROR_SHARING_VIOLATION;
+ };
+ if(held(SG_SLEEP_LEASE_DIR)&&held(SG_MANUAL_DIR))++ntCallsWithBothLeases;
+ if(ownedLeaseMode&&keepResumeFailure){ownedResumeStatuses.push_back(-1);return -1;}if(ownedLeaseMode){using Fn=LONG(NTAPI*)(HANDLE);const auto fn=reinterpret_cast<Fn>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"NtResumeProcess"));if(!fn)return -1;++actualOwnedNtCalls;if(std::this_thread::get_id()==fixtureWorkerId)++actualKernelNtCallsOnWorker;const LONG status=fn(h);if(actualOwnedNtCalls==1&&transientVetoStage=="nt")applyTransientVeto();ownedResumeStatuses.push_back(status);if(status>=0)++resumeCalls;return status;}if(keepResumeFailure||suspendCount<=0)return -1;--suspendCount;++resumeCalls;barrier("nt-return");return 0;
+}
 static auto fnNtResume=&fakeNtResume;
 #define OpenProcess fakeOpenProcess
 #define CloseHandle fakeCloseHandle
 #define Sleep fakeSleep
 #include "sgDrainProcessSuspendCountIfCurrent.inc"
-#include "sgDrainProcessSuspendCount.inc"
 #include "resume_delays.inc"
 namespace WakeGameResume {
 struct ThreadState {bool known=false;unsigned total=0,suspended=0;bool allRunning()const{return known&&total&&suspended==0;}};
@@ -192,13 +216,19 @@ static bool fixtureNativePowerAdmitted(){ymcc::sleeppower::SharedPowerV1 power;r
 static BOOL fakeKillTimer(HWND,UINT_PTR){return TRUE;}
 #define KillTimer fakeKillTimer
 static void sleepRecoveryAutoCloseSuspendEpisode(){barrier("episode-close");}
-static void inputHostRequestPowerRearm(unsigned long long,const char*){++rearmCalls;}
+static unsigned steamCancelCalls=0;
+static bool steamCancelAtReady=false;
+static void sleepRecoveryAutoCancelPreparedSuspend(){
+    ++steamCancelCalls;steamCancelAtReady=fixtureNativePowerAdmitted();
+    if(selectedEvent=="steam-query-canceled-fault")throw std::bad_alloc();
+}
+static void inputHostRequestPowerRearm(unsigned long long generation,const char*){++rearmCalls;rearmGeneration=generation;}
 static void appendFanLifecycleLog(const char*,const json&){++readyNotices;}
-static void fanHostScheduleEmergencyResume(unsigned long long){}
+static void fanHostScheduleEmergencyResume(unsigned long long generation){++fanResumeCalls;fanResumeGeneration=generation;}
 static unsigned long long currentFanPowerGeneration(){return currentPowerGeneration();}
 static void ipc_emit(const char*,const json&){}
-static void deckySidebarResumeAfterIntent(unsigned long long){}
-static void publishSharedPowerLifecycle(const char*){}
+[[maybe_unused]] static void deckySidebarResumeAfterIntent(unsigned long long){}
+static void publishSharedPowerLifecycle(const char* reason){if(std::string_view(reason)!="sleep-intent-canceled")return;++sharedReadyCalls;ymcc::sleeppower::SharedPowerV1 power;if(ymcc::sleeppower::capturePower(&readSharedSystemPower,power))sharedReadyGeneration=power.generation;}
 struct EventInput{int eventId,reason,targetState;ULONGLONG originalTime;};
 static thread_local EventInput incoming{506,0,0,400};
 static bool sgRenderKernelPowerEvent(EVT_HANDLE,std::string& xml){xml="inert-sdk-event-leaf";return true;}
@@ -207,9 +237,9 @@ static int sgKernelPowerEventDataInt(const std::string&,const char*){return inco
 static int sgKernelPowerReason(const std::string&){return incoming.reason;}
 static ULONGLONG sgKernelPowerEventFileTime(const std::string&){return incoming.originalTime;}
 namespace ymcc::abnormalsleep {static void publishConfirmedWake(std::atomic<ULONGLONG>& marker,ULONGLONG at){sgPublishSleepEventTime(marker,at);}}
-namespace ymcc::sleep_residency {static json makeEvidence(const std::string&){return json::object();}}
+#include "sleep_residency_evidence.h"
 static void sgSleepTimeoutRecordSystemSuccess(ULONGLONG){}
-static void sgSleepTimeoutRecordKernel(int,int,ULONGLONG,ULONGLONG){} // Original callback cache terminal; no classification is exercised here.
+static void sgSleepTimeoutRecordKernel(int,int,ULONGLONG,ULONGLONG,bool=false,bool=false){} // Original callback cache terminal; no classification is exercised here.
 static void sgStaticScanCancel(const char*){}
 static void sgSleepTimeoutObserveCompleted(const json&,ULONGLONG,ULONGLONG,int){}
 static json sgSleepEnvironmentSnapshot(){return json::object();}
@@ -230,9 +260,18 @@ static bool sgHasMarkerFiles(const std::wstring& dir){std::error_code ec;if(dir=
 static std::string sgReadFile(const std::wstring& p){if(ownedLeaseMode&&ntCalls>=4&&workerReadFailureArmed.exchange(false)){++workerMarkerReadFailures;workerReadFailureOnWorker=std::this_thread::get_id()==fixtureWorkerId;return {};}if(p.find(L"quickapp_suspended.json")!=std::wstring::npos)return {};if(ownedLeaseMode)return ActualMarkerReaders::sgReadFile(p);std::string text;return sgReadResumeMarkerChecked(p,text)?text:std::string();}
 #include "sgMarkerCreated.inc"
 #include "sgMarkerIsSuspended.inc"
+static BOOL fixtureProcessIdToSessionId(DWORD pid,DWORD* session){
+    barrier("lease-validate");
+    if(!ownedLeaseMode&&pid==ownedTarget.pid)
+        return ::ProcessIdToSessionId(GetCurrentProcessId(),session);
+    return ::ProcessIdToSessionId(pid,session);
+}
+#define ProcessIdToSessionId fixtureProcessIdToSessionId
 #include "nativeValveValidateOwnedSuspendedTarget.inc"
+#undef ProcessIdToSessionId
 static bool sgWriteFileAtomic(const std::wstring& p,const std::string& s){if(p==L"controlled-trigger")return true;std::ofstream f{std::filesystem::path(p)};f<<s;return static_cast<bool>(f);}
 static bool sleepRecoveryAutoAllows(unsigned long long,unsigned long long){return false;}
+static void postWakeGameRecoveryStatus(ULONGLONG,bool,const std::string&,size_t,ptrdiff_t) noexcept {}
 static bool nativeMonitorExcluded(const std::wstring&){return true;}
 static std::vector<std::wstring> sgExcludes(){return {};}
 static bool sgNameExcludedBy(const std::wstring&,const std::vector<std::wstring>&){return true;}
@@ -287,6 +326,10 @@ static void applyTransientVeto(){
 }
 // Original worker code below. Unselected power/Steam actions refuse instead of running.
 static std::atomic<bool> g_sgEntryHandoffPending{false},g_sgEntryHandoffReady{false},g_sleepRecoveryAutoPending{false};
+static std::atomic<bool> g_startupResumeEnabled{false};
+static ymcc::sleepStartupResume::Delivery g_startupResumeDelivery;
+static void sgCollectStartupResumeScopeUnlocked(){throw std::logic_error("unexpected startup collection in cancellation fixture");}
+static void sgServiceStartupResume(const ymcc::sleeppower::SharedPowerV1&){throw std::logic_error("unexpected startup delivery in cancellation fixture");}
 static std::atomic<unsigned long long> g_sgPauseWorkCompletedGeneration{0};
 namespace ymcc::threadRole {static void describe(const wchar_t*){fixtureWorkerId=std::this_thread::get_id();fixtureWorkerRoleReady.store(true,std::memory_order_release);}}
 static ULONGLONG sleepRecoveryAutoWaitMs(ULONGLONG){return ~ULONGLONG{0};}
@@ -299,7 +342,7 @@ static void sleepRecoveryAutoGameReleased(unsigned long long){
 #include "powerLifecycleMatches.inc"
 [[noreturn]] static void workerRejectUnselected(){++workerUnexpectedActions;throw std::runtime_error("unselected original worker action");}
 static SgSuspendResult sgPauseSleepTarget(unsigned long long,const SgWorkItem* =nullptr){workerRejectUnselected();}
-static void sgRealWake(const char*,unsigned long long){workerRejectUnselected();}
+static void sgRealWake(const char*,unsigned long long,const SgWorkItem* =nullptr){workerRejectUnselected();}
 static void publishPowerResumeReady(unsigned long long){workerRejectUnselected();}
 static void sgApplyLongSleepResumeGrace(unsigned long long){workerRejectUnselected();}
 static bool sgResumeClassificationHeld(unsigned long long){workerRejectUnselected();}
@@ -334,8 +377,8 @@ static int runOwnedLease(const std::string& mode){
  const bool permanent=mode=="transient-permanent",batchAppend=mode=="transient-batch-append"||(existingMode&&existingKind=="append"),batchMerge=mode=="transient-batch-merge"||(existingMode&&existingKind!="append"),readyHold=mode=="transient-ready-hold";
  const bool veto=transient&&!workerMode&&!permanent&&!batchAppend&&!batchMerge&&!readyHold&&mode!="transient-resume";
  if(veto){const auto value=mode.substr(10);const auto split=value.find('-');transientVetoKind=value.substr(0,split);transientVetoStage=split==std::string::npos?"tick":value.substr(split+1);}
- const bool manual=mode=="manual-marker",wrongBirth=mode=="wrong-birth",newer=mode=="newer-boundary";
- if(!same&&!continued&&!manual&&!wrongBirth&&!newer)throw std::runtime_error("unknown owned lease selector");
+ const bool manual=mode=="manual-marker",wrongBirth=mode=="wrong-birth",newer=mode=="newer-boundary",olderTask=mode=="older-task-generation";
+ if(!same&&!continued&&!manual&&!wrongBirth&&!newer&&!olderTask)throw std::runtime_error("unknown owned lease selector");
  DWORD handlesBefore=0,handlesAfter=0,handlesAfterCreate=0,handlesBeforeAbort=0,handlesBeforeCleanup=0;GetProcessHandleCount(GetCurrentProcess(),&handlesBefore);
  const auto unique=std::to_string(GetCurrentProcessId())+"-"+std::to_string(GetTickCount64());
  const std::string readyName="Local\\YMCC_LeaseReady_"+unique,stopName="Local\\YMCC_LeaseStop_"+unique;
@@ -349,19 +392,21 @@ static int runOwnedLease(const std::string& mode){
  GetProcessHandleCount(GetCurrentProcess(),&handlesAfterCreate);
  const auto actualBirth=ownedBirth(child.hProcess);
  const auto dir=std::filesystem::current_path()/wide("owned-lease-"+unique);
- std::filesystem::create_directory(dir);SG_DIR=dir.wstring();SG_SLEEP_LEASE_DIR=dir.wstring();SG_MANUAL_DIR=(dir/L"manual").wstring();
+ if(!std::filesystem::create_directory(dir)||!std::filesystem::create_directory(dir/L"manual"))throw std::runtime_error("owned lease directories already exist");
+ SG_DIR=dir.wstring();SG_SLEEP_LEASE_DIR=dir.wstring();SG_MANUAL_DIR=(dir/L"manual").wstring();
  const auto marker=dir/(std::to_wstring(child.dwProcessId)+L".txt");
  {std::ofstream f(marker,std::ios::binary);if(mode.ends_with("-bom"))f<<"\xEF\xBB\xBF";f<<"created="<<actualBirth<<"|state=suspended|generation=11\n";}
  ownedLeaseMode=true;ownedLeaseReady=ready;testManualMarker=manual;
  const auto expectedBirth=wrongBirth?actualBirth+1:actualBirth;
  ownedTarget={child.dwProcessId,expectedBirth,1,11,true,true};
- g_powerGeneration=same?11:12;
+ g_powerGeneration=same||olderTask?11:12;
  const auto receiptTime=GetTickCount64();
  g_sleepPowerDispatch.callback(PBT_APMSUSPEND,receiptTime,[](const auto&){return true;},200);
  const auto pending=g_sleepPowerDispatch.pendingReplay();
  const auto receipt=g_sleepPowerDispatch.forwarded(pending.sequence,pending.type,GetTickCount64());
  if(!receipt||receipt.fileTime100ns!=200||receipt.tick!=receiptTime)throw std::runtime_error("owned trigger exact receipt not claimed");
  sgMarkSleepTrigger(&receipt);g_sleepPowerDispatch.complete(receipt,GetTickCount64());
+ if(olderTask)g_powerGeneration=12; // Retain the old task and lease as Native advances.
  const auto taskBefore=g_sgTask.generation;
  if(newer){incoming={506,1,0,400};sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(1));}
  GetProcessHandleCount(GetCurrentProcess(),&handlesBeforeAbort);
@@ -402,7 +447,7 @@ static int runOwnedLease(const std::string& mode){
  const DWORD runningWait=WaitForSingleObject(ready,250);
  const bool running=runningWait==WAIT_OBJECT_0,retained=ownedTarget.markerOwned;
  const bool markerRetained=std::filesystem::exists(marker);
- const bool resumeExpected=same||continued;
+ const bool resumeExpected=same||continued||olderTask;
  const bool issuedBeforeVeto=veto&&transientVetoStage=="nt";
  const bool workerSafe=!workerMode||(idleAutoPasses==0&&((checkedBoundaryMode&&transientVetoKind=="exit")||(workerCompletion&&workerCompletionOutsideOperation))&&workerJoinReturned&&!g_sgWorkThread.joinable()&&workerUnexpectedActions==0);
  const bool existingVeto=existingKind=="merge-replaced"||existingKind=="merge-done";
@@ -410,7 +455,9 @@ static int runOwnedLease(const std::string& mode){
  const bool existingDistinct=existingKind=="stale-owner"||existingKind=="stale-identity"||existingKind=="stale-owner-done"||existingKind=="stale-owner-final";
  const bool existingNormal=checkedIoFailures.load()==(existingKind=="known-into-empty"?0U:1U)&&existingClock&&queuedTargets==((existingKind=="append"||existingDistinct)?2U:1U)&&g_manualPausedPid==child.dwProcessId+1&&(existingVeto?(!running&&retained&&markerRetained&&actualOwnedNtCalls==0):(running&&!retained&&!markerRetained&&actualKernelNtCallsOnWorker==8))&&!g_sgWakeRecoveryPending.load()&&focusCalls==0;
  const bool normal=!abortThrewAllocation&&workerSafe&&(existingMode?existingNormal:checkedBoundaryMode?(!running&&retained&&markerRetained&&actualOwnedNtCalls==0&&transientVetoApplied&&focusCalls==0&&(transientVetoKind=="exit"||!g_sgWakeRecoveryPending.load())):checkedPermanentMode?(!running&&retained&&markerRetained&&!g_sgWakeRecoveryPending.load()&&actualOwnedNtCalls==0&&checkedIoFailures.load()==WakeGameResume::attemptCount+1):checkedGenerationMode?(!running&&retained&&markerRetained&&!g_sgWakeRecoveryPending.load()&&actualOwnedNtCalls==0):workerReplaceMode?(!running&&retained&&markerRetained&&actualOwnedNtCalls==0&&workerMarkerReplacements==1):veto?(running==issuedBeforeVeto&&retained&&markerRetained&&actualOwnedNtCalls==(issuedBeforeVeto?1U:0U)&&focusCalls==0):permanent?(!running&&retained&&markerRetained&&!g_sgWakeRecoveryPending.load()&&actualOwnedNtCalls==0):resumeExpected?(running&&!retained&&!markerRetained&&(!readyHold||callsWhileNotReady==0)&&(!(batchAppend||batchMerge)||(oldBatchStarted==queuedBatchStarted&&oldBatchAttempt==queuedBatchAttempt&&queuedTargets==(batchAppend?2U:1U)&&g_manualPausedPid==child.dwProcessId+1))):(!running&&retained&&markerRetained&&ntCalls==0));
- const bool safe=(!wrongBirth||ntCalls==0)&&(!newer||(!fixtureNativePowerAdmitted()&&rearmCalls==0));
+ const bool readyCurrent=(!same&&mode!="continued-generation"&&!olderTask)||
+  (rearmCalls==1&&fanResumeCalls==1&&sharedReadyCalls==1&&rearmGeneration==g_powerGeneration&&fanResumeGeneration==g_powerGeneration&&sharedReadyGeneration==g_powerGeneration&&(!olderTask||taskBefore==11));
+ const bool safe=(!wrongBirth||ntCalls==0)&&(!newer||(!fixtureNativePowerAdmitted()&&rearmCalls==0&&fanResumeCalls==0&&sharedReadyCalls==0));
  const auto taskAfter=g_sgTask.generation;const auto phase=g_powerLifecycle.load();
  const auto productCalls=ntCalls;const auto productResume=resumeCalls;const auto birthText=std::to_string(actualBirth);
  GetProcessHandleCount(GetCurrentProcess(),&handlesBeforeCleanup);
@@ -423,11 +470,14 @@ static int runOwnedLease(const std::string& mode){
  GetExitCodeProcess(child.hProcess,&exitCode);
  const bool closedThread=CloseHandle(child.hThread)!=FALSE,closedProcess=CloseHandle(child.hProcess)!=FALSE;
  const bool closedReady=CloseHandle(ready)!=FALSE,closedStop=CloseHandle(stop)!=FALSE;
- std::error_code ec;std::filesystem::remove(marker,ec);std::filesystem::remove(dir,ec);
+ std::error_code ec;std::filesystem::remove(marker,ec);
+ const bool leaseDirectoriesReturned=std::filesystem::remove(dir/L"manual",ec)&&!ec&&std::filesystem::remove(dir,ec)&&!ec;
  GetProcessHandleCount(GetCurrentProcess(),&handlesAfter);
- const bool cleanup=cleanupResume&&exitWait==WAIT_OBJECT_0&&exitCode==0&&closedThread&&closedProcess&&closedReady&&closedStop&&handlesBefore==handlesAfter;
+ const bool cleanup=cleanupResume&&exitWait==WAIT_OBJECT_0&&exitCode==0&&closedThread&&closedProcess&&closedReady&&closedStop&&handlesBefore==handlesAfter&&leaseDirectoriesReturned;
  const bool ownedResourcesReturned=cleanupResume&&exitWait==WAIT_OBJECT_0&&exitCode==0&&closedThread&&closedProcess&&closedReady&&closedStop&&handlesBeforeAbort==handlesBeforeCleanup&&handlesAfter+4==handlesAfterCreate;
- const json result={{"stage","owned-lease"},{"event",mode},{"callbackPublished",true},{"safe",safe},{"normal",normal},
+ const json result={{"stage","owned-lease"},{"event",mode},{"callbackPublished",true},{"safe",safe},{"normal",normal&&readyCurrent},
+  {"readyCurrent",readyCurrent},{"rearmGeneration",rearmGeneration},{"fanResumeGeneration",fanResumeGeneration},{"sharedReadyGeneration",sharedReadyGeneration},{"sharedReadyCalls",sharedReadyCalls},
+  {"ntCallsWithBothLeases",ntCallsWithBothLeases},{"leaseDirectoriesReturned",leaseDirectoriesReturned},
   {"ownedPid",child.dwProcessId},{"ownedProcessCreated100ns",birthText},{"expectedProcessCreated100ns",std::to_string(expectedBirth)},
   {"leaseGeneration",11},{"taskGenerationBefore",taskBefore},{"taskGenerationAfter",taskAfter},{"nativeGeneration",g_powerGeneration.load()},
   {"ownedChildRunningBeforeFixtureCleanup",running},{"markerOwnedBeforeFixtureCleanup",retained},{"markerFileBeforeFixtureCleanup",markerRetained},
@@ -436,8 +486,21 @@ static int runOwnedLease(const std::string& mode){
   {"fixtureCleanupResumeThread",cleanupResume},{"ownedChildExitWait",exitWait},{"ownedChildExitCode",exitCode},
   {"handlesBefore",handlesBefore},{"handlesAfterCreate",handlesAfterCreate},{"handlesBeforeAbort",handlesBeforeAbort},{"handlesBeforeCleanup",handlesBeforeCleanup},{"handlesAfter",handlesAfter},{"allFourHandlesClosed",closedThread&&closedProcess&&closedReady&&closedStop},{"cleanupComplete",cleanup},{"coldProcessBaselineEqual",handlesBefore==handlesAfter},{"ownedResourcesReturned",ownedResourcesReturned},{"coldCreateProcessHandleDelta",static_cast<int>(handlesAfterCreate)-static_cast<int>(handlesBefore)-4},
   {"markerAndIdentityTransportControlled",true},{"actualProductResumeAndAbortBodies",true},{"actualMarkSleepTriggerBody",true},{"originalDispatchReceiptClaimedAndCompleted",true},{"actualOwnedNtResumeProcess",actualOwnedNtCalls!=0},{"realSystemSleep",false},{"existingAppOrGameControlled",false}};
- std::cout<<result.dump()<<'\n';return normal&&safe&&ownedResourcesReturned?0:2;
+ std::cout<<result.dump()<<'\n';return normal&&readyCurrent&&safe&&ownedResourcesReturned&&ntCallsWithBothLeases==ntCalls?0:2;
 }
+
+struct FixtureLeaseDirectories {
+    std::filesystem::path root;
+    explicit FixtureLeaseDirectories(const std::filesystem::path& parent):root(parent/(L"cancel-lease-"+std::to_wstring(GetCurrentProcessId()))) {
+        if(!std::filesystem::create_directory(root))throw std::runtime_error("fixture lease directory already exists");
+        SG_DIR=root.wstring();SG_SLEEP_LEASE_DIR=(root/L"sleep").wstring();SG_MANUAL_DIR=(root/L"manual").wstring();
+        if(!std::filesystem::create_directory(SG_SLEEP_LEASE_DIR)||!std::filesystem::create_directory(SG_MANUAL_DIR))throw std::runtime_error("fixture lease paths already exist");
+    }
+    bool finish()const{
+        std::error_code ec;
+        return std::filesystem::remove(SG_SLEEP_LEASE_DIR,ec)&&!ec&&std::filesystem::remove(SG_MANUAL_DIR,ec)&&!ec&&std::filesystem::remove(root,ec)&&!ec;
+    }
+};
 
 int main(int argc,char** argv){try{
     if(argc==4&&std::string(argv[1])=="--owned-lease-child")return ownedLeaseChild(argv[2],argv[3]);
@@ -462,6 +525,7 @@ int main(int argc,char** argv){try{
         return ok?0:2;
     }
 
+    const FixtureLeaseDirectories files(std::filesystem::current_path());
     keepResumeFailure=selectedStage=="resume-delay";
     if(selectedEvent=="partial-running-confirmation")suspendCount=3;
     if(selectedEvent=="late506-before-cancel"){
@@ -482,14 +546,21 @@ int main(int argc,char** argv){try{
         });
     }
     if(raced){std::unique_lock lock(latchMutex);if(!latchCv.wait_for(lock,std::chrono::seconds(2),[]{return operationGate;}))throw std::runtime_error("operation holder not ready");}
-    sgAbortSleepIntent(selectedEvent=="late506-before-cancel"?"query-canceled":"inert-fixture-cancel",selectedEvent=="late506-before-cancel"?500:0);
+    const bool queryCancel=selectedEvent=="late506-before-cancel"||selectedEvent.starts_with("steam-query-canceled")||
+        (selectedStage=="gate-open-log"&&selectedEvent=="new-suspend");
+    sgAbortSleepIntent(queryCancel?"query-canceled":"inert-fixture-cancel",selectedEvent=="late506-before-cancel"?500:0);
     if(publisher.joinable())publisher.join();
     const auto phase=g_powerLifecycle.load();
     const bool superseding=selectedEvent=="new506-user"||selectedEvent=="new506-nonuser"||selectedEvent=="partial-running-confirmation"||selectedEvent=="unknown-running-confirmation"||selectedEvent=="new-suspend"||selectedEvent=="new-query"||selectedEvent=="exit";
     const bool early=selectedStage!="nt-return"&&selectedStage!="trace-log"&&selectedStage!="episode-close"&&selectedStage!="gate-open-log";
     const bool safe=!superseding||(!fixtureNativePowerAdmitted()&&!rearmCalls&&!readyNotices&&(selectedStage=="gate-open-log"||phase!=PowerLifecycle::Ready)&&(!early||resumeCalls==0));
     const bool normal=superseding||(resumeCalls==(keepResumeFailure?0U:1U)&&rearmCalls==1&&readyNotices==1&&phase==PowerLifecycle::Ready&&fixtureNativePowerAdmitted());
+    const bool steamCancelExpected=queryCancel&&!superseding;
+    const bool steamCancelMatches=steamCancelCalls==(steamCancelExpected?1u:0u)&&steamCancelAtReady==steamCancelExpected;
     const bool delivered=!raced||eventPublished;
-    std::cout<<json({{"settlementQueries",WakeGameResume::queryCalls},{"rawHardwareAllowed",hardwareWriteAllowed()},{"effectiveHardwareAllowed",fixtureNativePowerAdmitted()},{"ntCalls",ntCalls},{"focusCalls",focusCalls},{"markerRemovals",markerRemovals},{"suspendCount",suspendCount},{"operationHeldAtPublication",operationHeld},{"stage",selectedStage},{"event",selectedEvent},{"callbackPublished",delivered},{"resumeCalls",resumeCalls},{"rearmCalls",rearmCalls},{"readyNotices",readyNotices},{"gateOpenCalls",gateOpenCalls},{"phase",static_cast<int>(phase)},{"safe",safe},{"normal",normal},{"originalEntry",g_sgLatestSleepEntryFileTime.load()},{"originalWake",g_sgOriginalPowerButtonWakeFileTime.load()},{"taskGeneration",g_sgTask.generation},{"markerOwned",ownedTarget.markerOwned},{"pendingSuspend",g_sleepPowerDispatch.pendingSuspend()},{"physicalCalls",0}}).dump()<<'\n';
-    return delivered&&safe&&normal&&!(suspendCount>0&&!markerFile)&&!(selectedEvent=="unknown-running-confirmation"&&!ownedTarget.markerOwned)?0:2;
+    const bool leaseDirectoriesReturned=files.finish();
+    std::cout<<json({{"ntCallsWithBothLeases",ntCallsWithBothLeases},{"leaseDirectoriesReturned",leaseDirectoriesReturned},
+        {"steamCancelCalls",steamCancelCalls},{"steamCancelAtReady",steamCancelAtReady},{"steamCancelMatches",steamCancelMatches},
+        {"settlementQueries",WakeGameResume::queryCalls},{"rawHardwareAllowed",hardwareWriteAllowed()},{"effectiveHardwareAllowed",fixtureNativePowerAdmitted()},{"ntCalls",ntCalls},{"focusCalls",focusCalls},{"markerRemovals",markerRemovals},{"suspendCount",suspendCount},{"operationHeldAtPublication",operationHeld},{"stage",selectedStage},{"event",selectedEvent},{"callbackPublished",delivered},{"resumeCalls",resumeCalls},{"rearmCalls",rearmCalls},{"readyNotices",readyNotices},{"gateOpenCalls",gateOpenCalls},{"phase",static_cast<int>(phase)},{"safe",safe},{"normal",normal},{"originalEntry",g_sgLatestSleepEntryFileTime.load()},{"originalWake",g_sgOriginalPowerButtonWakeFileTime.load()},{"taskGeneration",g_sgTask.generation},{"markerOwned",ownedTarget.markerOwned},{"pendingSuspend",g_sleepPowerDispatch.pendingSuspend()},{"physicalCalls",0}}).dump()<<'\n';
+    return delivered&&safe&&normal&&steamCancelMatches&&leaseDirectoriesReturned&&ntCallsWithBothLeases==ntCalls&&!(suspendCount>0&&!markerFile)&&!(selectedEvent=="unknown-running-confirmation"&&!ownedTarget.markerOwned)?0:2;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 3;}}

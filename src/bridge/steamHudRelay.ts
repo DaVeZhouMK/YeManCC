@@ -24,7 +24,10 @@ export function createSteamHudRelay(deps:SteamHudRelayDeps) {
   const currentNow=async(current?:MonitorOutputCurrent)=>{try{return !current||await current();}catch{return false;}};
   const key=(s:HudClientStatus|null)=>s?.game?JSON.stringify(s.game):'';
   const notify=()=>{try{deps.statusChanged?.();}catch{}};
-  const hello=()=>{if(peer&&!disposed)void deps.reply(peer.connection,{type:'hud-ready',protocol:HUD_PROTOCOL,runId:peer.runId}).catch(()=>false);};
+  const hello=(snapshotRefresh?:false)=>{
+    if(peer&&!disposed)void deps.reply(peer.connection,{type:'hud-ready',protocol:HUD_PROTOCOL,runId:peer.runId,
+      ...(snapshotRefresh===false?{snapshotRefresh}:{})}).catch(()=>false);
+  };
   const available=()=>!absent&&!!peer&&status?.capable===true&&!!status.game&&!disposed;
   function cancelTick(){if(tick!==null)deps.clearTimer(tick);tick=null;}
   function stopSample(){cancelTick();releaseSample?.();releaseSample=null;}
@@ -108,7 +111,7 @@ export function createSteamHudRelay(deps:SteamHudRelayDeps) {
       else if(wasAbsent){hiddenKnown=false;}
       notify();
     },
-    hello,available,visible:()=>confirmed||uncertain||!hiddenKnown,
+    preferencesReady:()=>hello(false),available,visible:()=>confirmed||uncertain||!hiddenKnown,
     state:():'shown'|'hidden'|'unknown'=>confirmed?'shown':uncertain||!hiddenKnown?'unknown':'hidden',
     async setVisible(show:boolean,preferences:MonitorOutputPreferences,current?:MonitorOutputCurrent):Promise<OutputAck>{
       if(current&&!await currentNow(current))return {confirmed:false,reason:expired};

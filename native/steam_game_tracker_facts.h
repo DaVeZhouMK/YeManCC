@@ -12,7 +12,7 @@
 #include <limits>
 #include <mutex>
 #include <optional>
-#include <sstream>
+#include <type_traits>
 #include <vector>
 
 // PRIVATE / UNBUILT. Unique EXE and Steam layers remain separate. This owner
@@ -156,23 +156,32 @@ inline TrackerGroupObservation projectGroup(const TrackerInventoryProjection& in
     }
     out.status=TrackerGroupStatus::Observed;out.reason="steam-tracker-group-observed";return out;
 }
-inline std::shared_ptr<const TrackerParsedSource> projectSource(std::uint64_t revision,
-    const std::vector<std::string>& lines,std::uint32_t pid,const std::string& path,
+using TrackerSourceInventories=std::array<ymcc::sleepsteam::TrackedProcessInventory,2>;
+struct FreshStartupProjection {
+    std::vector<std::string_view> lines;
+    TrackerSourceInventories inventories;
+};
+template <typename Line>
+inline std::shared_ptr<const TrackerParsedSource> projectSourceImpl(std::uint64_t revision,
+    const std::vector<Line>& lines,std::uint32_t pid,const std::string& path,
     const std::string& earliest,const std::string& latest,
     const ymcc::sleepsteam::TrackedProcessInventory* lifetime=nullptr,
-    const ymcc::sleepsteam::TrackedProcessInventory* running=nullptr) {
+    const ymcc::sleepsteam::TrackedProcessInventory* running=nullptr,
+    TrackerSourceInventories* inventories=nullptr) {
     if(!revision)return {};
     auto parsed=std::make_shared<TrackerParsedSource>();parsed->sourceRevision=revision;
     std::optional<ymcc::sleepsteam::TrackedSourceScopes> scanned;
-    if(!lifetime&&!running)scanned.emplace(ymcc::sleepsteam::trackedSourceScopes(lines,pid,path,earliest,latest));
-    const auto bindings=scanned?std::array<ymcc::sleepsteam::Binding,2>{}:
-        ymcc::sleepsteam::trackScopes(lines,pid,path,earliest,latest);
+    std::array<ymcc::sleepsteam::Binding,2> bindings;
+    if(!lifetime&&!running)scanned.emplace(ymcc::sleepsteam::trackedSourceScopesImpl(lines,pid,path,earliest,latest));
+    else if constexpr(std::is_same_v<Line,std::string>)bindings=ymcc::sleepsteam::trackScopes(lines,pid,path,earliest,latest);
+    else return {};
     const auto project=[&](ymcc::sleepsteam::TrackingScope scope,TrackerLogScope declared){
         TrackerScopeProjection out;out.inventory.sourceRevision=out.binding.sourceRevision=revision;
         out.inventory.scope=out.binding.scope=declared;
         const auto* supplied=scope==ymcc::sleepsteam::TrackingScope::ProcessLifetime?lifetime:running;
-        const auto generated=supplied||scanned?ymcc::sleepsteam::TrackedProcessInventory{}:
-            ymcc::sleepsteam::trackedProcessInventory(lines,scope);
+        ymcc::sleepsteam::TrackedProcessInventory generated;
+        if constexpr(std::is_same_v<Line,std::string>)
+            if(!supplied&&!scanned)generated=ymcc::sleepsteam::trackedProcessInventory(lines,scope);
         const auto& inventory=supplied?*supplied:scanned?
             scanned->inventories[scope==ymcc::sleepsteam::TrackingScope::ProcessLifetime?1:0]:generated;
         out.inventory.complete=inventory.complete;out.inventory.reason=inventory.reason;
@@ -204,7 +213,27 @@ inline std::shared_ptr<const TrackerParsedSource> projectSource(std::uint64_t re
     };
     parsed->processLifetime=project(ymcc::sleepsteam::TrackingScope::ProcessLifetime,TrackerLogScope::ProcessLifetime);
     parsed->runningList=project(ymcc::sleepsteam::TrackingScope::RunningListAndProcess,TrackerLogScope::RunningListAndProcess);
+    if(inventories&&scanned)*inventories=std::move(scanned->inventories);
     return parsed;
+}
+inline std::shared_ptr<const TrackerParsedSource> projectSource(std::uint64_t revision,
+    const std::vector<std::string>& lines,std::uint32_t pid,const std::string& path,
+    const std::string& earliest,const std::string& latest,
+    const ymcc::sleepsteam::TrackedProcessInventory* lifetime=nullptr,
+    const ymcc::sleepsteam::TrackedProcessInventory* running=nullptr) {
+    return projectSourceImpl(revision,lines,pid,path,earliest,latest,lifetime,running);
+}
+// Match getline: keep interior empty rows and CR bytes, with no extra row at EOF.
+template <typename Line=std::string_view>
+inline std::vector<Line> sourceLines(std::string_view bytes) {
+    std::vector<Line> lines;
+    while(!bytes.empty()){
+        const auto end=bytes.find('\n');
+        lines.emplace_back(bytes.substr(0,end));
+        if(end==std::string_view::npos)break;
+        bytes.remove_prefix(end+1);
+    }
+    return lines;
 }
 struct FactSlot;
 struct TrackerFlight final {
@@ -571,9 +600,12 @@ public:
         view->complete=observation.metadataComplete;
         view->diagnosticOnly=kind==SteamLogKind::GameProcess&&policy==SteamLogReadPolicy::TruncatedDiagnostic&&observation.availableKnown&&observation.available&&observation.truncatedKnown&&observation.truncated&&observation.bytes;
         if(kind==SteamLogKind::GameProcess&&policy!=SteamLogReadPolicy::Raw&&(view->complete||view->diagnosticOnly)){
-            std::istringstream input(*observation.bytes);std::string line;
-            if(view->diagnosticOnly)std::getline(input,line);
-            while(std::getline(input,line))view->lines.push_back(line);
+            std::string_view bytes=*observation.bytes;
+            if(view->diagnosticOnly){
+                const auto end=bytes.find('\n');
+                bytes.remove_prefix(end==std::string_view::npos?bytes.size():end+1);
+            }
+            view->lines=tracker_detail::sourceLines<std::string>(bytes);
             auto inventories=ymcc::sleepsteam::trackedProcessInventories(view->lines);
             view->runningInventory=std::move(inventories[0]);
             view->lifetimeInventory=std::move(inventories[1]);
@@ -832,7 +864,8 @@ public:
 private:
     // Borrow the token so a fresh two-source consumer retains its physical
     // slot until the console observation and final held-context check return.
-    std::shared_ptr<const TrackerSnapshot> observeImpl(TrackerFlightToken& token, const std::shared_ptr<ProcessLease>& lease) {
+    std::shared_ptr<const TrackerSnapshot> observeImpl(TrackerFlightToken& token, const std::shared_ptr<ProcessLease>& lease,
+        tracker_detail::FreshStartupProjection* startup=nullptr) {
         const auto flight = token.owner_ == this ? token.flight_ : nullptr;
         TrackerKey key; if (flight) key.observation = flight->key->facts();
         TrackerSourceObservation observation; std::string earliest,latest;
@@ -884,23 +917,21 @@ private:
             const auto& game = key.observation.selectedGame;
             earliest = mainReadTailPort().localSecond(game.birth > 20000000ULL ? game.birth - 20000000ULL : 0);
             latest = mainReadTailPort().localSecond(game.birth <= (std::numeric_limits<std::uint64_t>::max)() - 30000000ULL ? game.birth + 30000000ULL : game.birth);
-            std::vector<std::string> lines; std::istringstream input(*observation.bytes); std::string line;
-            while (std::getline(input,line)) lines.push_back(line);
-            parsedSource=tracker_detail::projectSource(observation.sourceRevision,lines,game.pid,
-                mainReadTailPort().selectedPathUtf8(game.exactPath),earliest,latest);
+            auto lines=tracker_detail::sourceLines(*observation.bytes);
+            tracker_detail::TrackerSourceInventories inventories;
+            parsedSource=tracker_detail::projectSourceImpl(observation.sourceRevision,lines,game.pid,
+                mainReadTailPort().selectedPathUtf8(game.exactPath),earliest,latest,nullptr,nullptr,startup?&inventories:nullptr);
             if(!parsedSource)return refuse(TrackerStatus::SourceIncomplete,true);
             groupObservation=std::make_shared<const TrackerGroupObservation>(parsedSource->processLifetime.group);
             const auto& projected=parsedSource->processLifetime.binding;
             const auto binding=ymcc::sleepsteam::Binding{projected.status,projected.at,projected.appid,projected.sourceLine,projected.exactPath};
-            if (binding.status != "tracked" || !binding.exactPath || !binding.line || binding.line > lines.size())
-                return refuse(tracker_detail::parserStatus(binding.status),true);
-            // Full decimal from the exact selected row; original unsignedDecimal
-            // and exactGameId, never short-ID/low24/title/unique-process guessing.
-            const auto& row = lines[binding.line - 1]; const auto begin = row.find("AppID ");
-            if (begin == std::string::npos) return refuse(TrackerStatus::FullGameIdUnknown,true);
-            const auto end = row.find(' ',begin + 6); std::uint64_t full = 0;
-            if (end == std::string::npos || !ymcc::sleepsteam::unsignedDecimal(row.substr(begin + 6,end - begin - 6),full) ||
-                !exactGameId(binding.appid,full)) return refuse(TrackerStatus::FullGameIdUnknown,true);
+            if (binding.status != "tracked" || !binding.exactPath || !binding.line || binding.line > lines.size()) {
+                const auto status=tracker_detail::parserStatus(binding.status);
+                if(startup&&status==TrackerStatus::ParserUnknown)*startup={std::move(lines),std::move(inventories)};
+                return refuse(status,true);
+            }
+            if (!projected.fullGameIdKnown) return refuse(TrackerStatus::FullGameIdUnknown,true);
+            const auto full=projected.fullGameId;
             if (!contextCurrent(lease,flight->key)) return refuse(TrackerStatus::ContextChanged);
             TrackerCacheProvenance provenance;
             provenance.sourceReadThisFlight = true; // ProcessOnly is the only supported source route.
@@ -924,7 +955,8 @@ public:
         const auto flight=token.owner_==this?token.flight_:nullptr;
         if(!flight||!flight->freshSource||!tracker_detail::ownerCurrent(pureOwnerCurrent)||!contextCurrent(lease,flight->key))return result;
         const auto startupGeneration=startupReadGeneration();
-        result.tracker=observeImpl(token,lease);
+        tracker_detail::FreshStartupProjection startup;
+        result.tracker=observeImpl(token,lease,&startup);
         // Producer-only handoff: never place process-object evidence in the
         // original fact cache or a memory peek. Exact-child binding stays intact.
         if(result.tracker&&result.tracker->status==TrackerStatus::ParserUnknown&&
@@ -933,9 +965,11 @@ public:
             const auto key=MainTrackerFactsAdapter::sourceKey({flight->key->facts().steam.pid,flight->key->facts().steam.birth,flight->key->facts().steam.root});
             auto source=std::make_shared<SteamLogSourceView>();source->steam=flight->key->facts().steam;
             source->observation=result.tracker->observation;source->complete=true;source->kind=SteamLogKind::GameProcess;source->policy=SteamLogReadPolicy::CompleteOnly;
-            std::istringstream input(*source->observation.bytes);std::string line;while(std::getline(input,line))source->lines.push_back(line);
-            auto inventories=ymcc::sleepsteam::trackedProcessInventories(source->lines);
-            source->runningInventory=std::move(inventories[0]);source->lifetimeInventory=std::move(inventories[1]);
+            // Same immutable bytes and inventories as the tracker projection.
+            // The handoff still owns its strings and rebinds any parent PID.
+            source->lines.reserve(startup.lines.size());
+            for(const auto line:startup.lines)source->lines.emplace_back(line);
+            source->runningInventory=std::move(startup.inventories[0]);source->lifetimeInventory=std::move(startup.inventories[1]);
             const auto current=[&]{return contextCurrent(lease,flight->key)&&tracker_detail::ownerCurrent(pureOwnerCurrent);};
             (void)captureStartupFromSource(key,current,source,startupGeneration);
             result.startupHandoff=startupHandoffFromSource(key,lease,current,source,startupGeneration);

@@ -4,11 +4,17 @@
 #include <vector>
 #include <stdexcept>
 #include "json.hpp"
+#include "sleep_power_state.h"
 using json=nlohmann::json;
 enum class YmccFamily {Unknown,AsusRogAlly,AsusRogAllyX,AsusRogAllyClassic,AsusRogAllyXClassic};
 struct {YmccFamily family=YmccFamily::Unknown;std::string deviceClass;} g_machineIdentity;
 static HWND g_hwnd=nullptr;static bool realTimer=false,timerOn=false,writeOk=true,compatible=true;static ULONGLONG fakeNow=0;static int writes=0,checks=0;static json disk;
-struct SettingsFileGuard{};static std::wstring YM_SETTINGS_FILE=L"memory-only";
+static ymcc::sleeppower::SharedPowerV1 publicPower;
+static bool losePowerOnSettingsLock=false;
+static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,std::uint32_t){*out=publicPower;return 1;}
+static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& out){return ymcc::sleeppower::capturePower(readSharedSystemPower,out);}
+static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& power){return ymcc::sleeppower::powerCurrent(readSharedSystemPower,power);}
+struct SettingsFileGuard{SettingsFileGuard(){if(losePowerOnSettingsLock)++publicPower.suspendSerial;}};static std::wstring YM_SETTINGS_FILE=L"memory-only";
 static std::string ymSettingsReadRaw(const std::wstring&){return disk.dump();}
 static json ymSettingsReadUnlocked(){return disk;}static json ymSettingsRead(){return disk;}
 static bool ymSettingsHasCompatibleWriteBase(const std::string&,const json&){return compatible;}
@@ -27,7 +33,7 @@ static BOOL testKillTimer(HWND h,UINT_PTR id){timerOn=false;return realTimer?::K
 static void check(const char* name,bool pass){++checks;std::cout<<name<<"="<<(pass?"PASS":"FAIL")<<std::endl;if(!pass)throw std::runtime_error(name);}
 static json pref(int value=-5,bool enabled=true){return {{"schema",1},{"enabled",enabled},{"value",value},{"vendor","amd"},{"unit","co_step"},{"identity",{{"vendor","amd"},{"family","fixture"}}}};}
 static json request(const json& p,unsigned long long token){return {{"token",token},{"preference",p},{"receipt",{{"accepted",true},{"vendor","amd"},{"unit","co_step"},{"requested",{{"value",p["enabled"].get<bool>()?p["value"].get<int>():0}}}}}};}
-static void reset(){cpuUvTrialStop("reset");g_cpuUvTrial=CpuUvTrialState{};fakeNow=0;writes=0;writeOk=true;compatible=true;g_machineIdentity.family=YmccFamily::Unknown;disk={{"schemaVersion",1},{"cpu",{{"otherSetting",44}}},{"input",{{"unchanged",true}}}};}
+static void reset(){cpuUvTrialStop("reset");g_cpuUvTrial=CpuUvTrialState{};fakeNow=0;writes=0;writeOk=true;compatible=true;losePowerOnSettingsLock=false;publicPower={};publicPower.generation=1;publicPower.flags=ymcc::sleeppower::kKnown|ymcc::sleeppower::kHardwareAllowed;g_machineIdentity.family=YmccFamily::Unknown;disk={{"schemaVersion",1},{"cpu",{{"otherSetting",44}}},{"input",{{"unchanged",true}}}};}
 static void arm(const json& p){auto b=cpuUvTrialBegin();check("arm-accepted",cpuUvTrialArm(request(p,b["token"]))["pending"]==true);}
 static LRESULT CALLBACK proc(HWND h,UINT m,WPARAM w,LPARAM l){if(m==WM_TIMER&&w==CPU_UV_TRIAL_TIMER){cpuUvTrialTick();return 0;}return DefWindowProcW(h,m,w,l);}
 int main(int argc,char** argv){try{
@@ -40,6 +46,11 @@ int main(int argc,char** argv){try{
  reset();arm(pref());fakeNow=29999;cpuUvTrialTick();check("no-early-persistence",writes==0&&g_cpuUvTrial.pending);disk["cpu"]["otherSetting"]=33;fakeNow=30000;cpuUvTrialTick();check("one-save-at-30s",writes==1&&g_cpuUvTrial.stage=="saved");check("unrelated-concurrent-data-preserved",disk["cpu"]["otherSetting"]==33&&disk["input"]["unchanged"]==true);cpuUvTrialTick();check("no-duplicate-save",writes==1);
  for(const auto reason:{"exit","interrupted","suspended"}){reset();arm(pref());fakeNow=29000;cpuUvTrialStop(reason);fakeNow=40000;cpuUvTrialTick();check(reason,writes==0&&!timerOn);}
  reset();auto first=cpuUvTrialBegin(),second=cpuUvTrialBegin();check("old-result-cannot-arm-new-trial",cpuUvTrialArm(request(pref(),first["token"]))["ok"]==false);check("new-token-still-works",cpuUvTrialArm(request(pref(),second["token"]))["pending"]==true);
+ reset();auto beforeSleep=cpuUvTrialBegin();++publicPower.suspendSerial;check("coalesced-ready-rejects-old-apply-receipt",cpuUvTrialArm(request(pref(),beforeSleep["token"]))["ok"]==false&&!timerOn&&g_cpuUvTrial.stage=="suspended");arm(pref());
+ reset();publicPower.flags|=ymcc::sleeppower::kNotificationPending;auto pendingSleep=cpuUvTrialBegin();check("pending-sleep-rejects-new-begin",pendingSleep["stage"]=="suspended"&&!timerOn);publicPower.flags&=~ymcc::sleeppower::kNotificationPending;check("rejected-begin-cannot-arm-after-ready",cpuUvTrialArm(request(pref(),pendingSleep["token"]))["ok"]==false);arm(pref());
+ reset();arm(pref());++publicPower.publicationRevision;check("metadata-publication-keeps-current-trial",!cpuUvTrialPowerChanged()&&timerOn);++publicPower.generation;fakeNow=30000;cpuUvTrialTick();check("missed-suspend-broadcast-cannot-save-on-wake",writes==0&&!timerOn&&g_cpuUvTrial.stage=="suspended");arm(pref(-8));fakeNow=60000;cpuUvTrialTick();check("fresh-post-wake-trial-saves",writes==1&&disk["cpu"]["undervolt"]["value"]==-8);
+ reset();arm(pref());++publicPower.suspendSerial;check("public-projection-retires-timer",cpuUvTrialPowerChanged()&&!timerOn&&!g_cpuUvTrial.pending&&!cpuUvTrialPowerChanged());
+ reset();arm(pref());losePowerOnSettingsLock=true;fakeNow=30000;cpuUvTrialTick();check("power-change-while-waiting-for-settings-lock-blocks-save",writes==0&&!timerOn&&g_cpuUvTrial.stage=="suspended");
  reset();arm(pref());fakeNow=20000;arm(pref(-8));fakeNow=30000;cpuUvTrialTick();check("edit-restarts-full-30s",writes==0);fakeNow=50000;cpuUvTrialTick();check("latest-only-saved",disk["cpu"]["undervolt"]["value"]==-8&&writes==1);
  reset();arm(pref());disk["cpu"]["undervolt"]=pref(-2);fakeNow=30000;cpuUvTrialTick();check("concurrent-voltage-edit-not-overwritten",writes==0&&g_cpuUvTrial.error=="voltage_settings_changed");
  reset();arm(pref());writeOk=false;fakeNow=30000;cpuUvTrialTick();check("save-failure-no-retry-loop",writes==0&&!timerOn&&g_cpuUvTrial.stage=="failed");

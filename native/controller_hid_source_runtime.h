@@ -122,14 +122,14 @@ static bool context(Epoch& e,std::wstring* path=nullptr) {
 // Locate the selected source's actual XUSB node, even when the original slot
 // names an alias HID interface. Never bind through an arbitrary USB hub or
 // a shared/sentinel container GUID.
-static bool sameXusbSource(const std::wstring& rawPath,const std::wstring& slotPath) {
+static bool sameXusbSource(const std::wstring& rawPath,const std::wstring& slotPath,bool requireXusb=false) {
     DEVINST selected=0,raw=0;std::wstring selectedId,rawId;
     if(!ymccBackgroundUi::interfaceNode(slotPath,selected,selectedId) ||
        !ymccBackgroundUi::interfaceNode(rawPath,raw,rawId))return false;
     // Different interface classes may expose the same selected PnP devnode.
     // Require both exact node and full instance identity; never VID/PID, a
     // shared container or a common USB parent. Other devices keep the old path.
-    if(selected==raw && _wcsicmp(selectedId.c_str(),rawId.c_str())==0)return true;
+    if(!requireXusb && selected==raw && _wcsicmp(selectedId.c_str(),rawId.c_str())==0)return true;
     std::wstring sourceId;
     for(unsigned depth=0;depth<8;++depth) {
         std::wstring service;
@@ -376,6 +376,16 @@ static bool win5WakeRawAllowed(std::uint64_t queuedTick=~std::uint64_t{0}) {
     }
     return !g_sleepPowerDispatch.pendingSuspend() && queuedTick>floorTick;
 }
+
+static unsigned applyWin5CachedRawSticks(const Epoch& source,const XINPUT_GAMEPAD& native,Sample* raw,bool allowed) {
+    // Reuse the admitted FSE source; this never grants a new reader or changes a retained wake.
+    const auto host=raw && allowed && g_realStickTest.virtualTargetEnabled &&
+        g_machineIdentity.family==YmccFamily::Gpd && g_machineIdentity.deviceClass=="HandheldCompanion.Devices.GPDWin5" &&
+        !g_inputHostVirtualIntentWriters.load(std::memory_order_acquire) &&
+        g_inputHostMatchedSteamDeck.load(std::memory_order_acquire) ? inputHostEpochToken() : 0;
+    static ymcc::commonhid::CachedRawStickHandoff handoff;
+    return handoff.apply(host && host!=g_win5WakeReaderHost.load(std::memory_order_acquire)?host:0,source,native,raw);
+}
 }
 
 static bool commonControllerHidRead(XINPUT_GAMEPAD& pad,CommonControllerHidRead& receipt,bool sourceEligible,bool publishUi) {
@@ -384,22 +394,34 @@ static bool commonControllerHidRead(XINPUT_GAMEPAD& pad,CommonControllerHidRead&
     const bool contextKnown=sourceEligible && context(e);
     EligibilityEvidence eligibility;
     const bool allowed=contextKnown && eligible(&eligibility);
-    if(allowed)isolationDirect::observe(publishUi,e);
+    const bool cold=isolationDirect::coldScene();
+    // Do not borrow this reader from another physical source or arm it merely
+    // because an idle pad read is neutral. Current XInput activity wins.
+    const bool xinputActive=cold && allowed && (ymcc::commonhid::basicActive(pad) || pad.bLeftTrigger || pad.bRightTrigger);
+    static Epoch coldXinputWitness;
+    if(cold && allowed && coldXinputWitness!=e)coldXinputWitness={};
+    if(xinputActive)coldXinputWitness=e;
+    const bool xinputProven=cold && allowed && coldXinputWitness==e;
+    const auto now=cold?GetTickCount64():0;
+    const bool rawFirst=cold && allowed && !xinputActive && win5WakeRawAllowed() &&
+        lane.readColdPrimary(e,pad,now,isolationDirect::key.coldIntent && isolationDirect::lane.selected(),sample);
+    if(allowed)isolationDirect::observe(publishUi,e,rawFirst || xinputProven);
     else isolationDirect::withdraw();
     const bool rawAllowed=win5WakeRawAllowed();
     const bool samplesAllowed=isolationDirect::sampleReadAllowed(allowed);
     const bool wakeFallback=isolationDirect::key.wakeSuspend!=0;
-    const bool directUsed=wakeFallback
+    const bool directUsed=!rawFirst && (wakeFallback || isolationDirect::key.coldIntent
         ? isolationDirect::lane.readWakeFallback(e,samplesAllowed,pad,GetTickCount64(),sample)
-        : isolationDirect::lane.read(e,samplesAllowed,pad,sample,false);
-    const bool used=directUsed || lane.read(e,rawAllowed && (wakeFallback?allowed:samplesAllowed),pad,sample);
+        : isolationDirect::lane.read(e,samplesAllowed,pad,sample,false));
+    const bool used=rawFirst || directUsed || (!cold && lane.read(e,rawAllowed && (wakeFallback?allowed:samplesAllowed),pad,sample));
+    const auto nativeStickMask=applyWin5CachedRawSticks(e,pad,used && !directUsed && !wakeFallback?&sample:nullptr,allowed);
     const auto observation=!sourceEligible?ReadObservation::OriginalSourceNotApplicable:
         !contextKnown?ReadObservation::ContextUnavailable:!allowed?ReadObservation::SessionInactive:
         used?ReadObservation::Selected:!lane.hasSample()?ReadObservation::AwaitingHid:ReadObservation::OriginalRetained;
     observeRead(observation,e,contextKnown,allowed,used,lane.hasSample(),&eligibility);
     if(used) {
         pad=inputCanonicalizeGamepad(sample.pad);
-        receipt={sample.sequence,sample.observedTick,sample.independentTriggers,sample.completeBasic,sample.combinedTriggerRaw,sample.isolationSharedRead};
+        receipt={sample.sequence,sample.observedTick,sample.independentTriggers,sample.completeBasic,sample.combinedTriggerRaw,sample.isolationSharedRead,nativeStickMask};
     }
     static bool previous=false;
     static bool previousShared=false;
@@ -416,7 +438,7 @@ static bool commonControllerHidRead(XINPUT_GAMEPAD& pad,CommonControllerHidRead&
         witnessedWakeSuspend=wakeSuspend;witnessedWakeNotice=wakeNotice;
         try {appendNativeLifecycleLog("gamepad-common-hid-shared-read-first-selection",{{"schemaVersion",1},
             {"power",e.power},{"edge",edge},{"topology",e.topology},{"identity",e.identity},
-            {"readerRole",wakeFallback?"win5-kept-sd-wake":"original-isolation"},
+            {"readerRole",wakeFallback?"win5-kept-sd-wake":isolationDirect::key.coldIntent?"cold-fse":"original-isolation"},
             {"wakeSuspendSerial",wakeSuspend},{"wakeNotificationSequence",wakeNotice},
             {"occupant",e.occupant},{"slot",e.slot},{"reportSequence",sample.sequence},
             {"reportObservedTick",sample.observedTick},{"gameConsumptionProven",false}});}catch(...){ }
@@ -425,6 +447,7 @@ static bool commonControllerHidRead(XINPUT_GAMEPAD& pad,CommonControllerHidRead&
             {"selected",used},{"slot",e.slot},{"reportSequence",used?sample.sequence:0},
             {"reportObservedTick",used?sample.observedTick:0},{"triggerSource",used&&sample.independentTriggers?"hid-independent":"original-xinput"},
             {"transport",used&&sample.isolationSharedRead?"isolation-shared-hid-read":"raw-input"},
+            {"readerRole",directUsed&&isolationDirect::key.coldIntent?"cold-fse":directUsed&&wakeFallback?"win5-kept-sd-wake":"existing"},
             {"power",e.power},{"topology",e.topology},{"identity",e.identity},
             {"scope","same-physical-source-data;original-mapping-isolation-and-host-owner"},
             {"gameConsumptionProven",false}});}catch(...){}
@@ -443,6 +466,10 @@ static bool commonControllerHidUiDrainPending() {
     if(isolationDirect::key.wakeSuspend){
         Epoch source;bool reuse=false;
         return eligible() && context(source) && isolationDirect::currentWin5Wake(source,current,reuse) && reuse;
+    }
+    if(isolationDirect::key.coldIntent){
+        Epoch source;bool reuse=false;
+        return eligible() && context(source) && isolationDirect::currentColdFse(source,current,reuse) && reuse;
     }
     return isolationDirect::current(current) && current==isolationDirect::key;
 }

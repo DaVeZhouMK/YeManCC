@@ -58,21 +58,70 @@ internal sealed class RemoteProcessWait(SafeWaitHandle handle) : WaitHandle
     internal RemoteProcessWait Initialize() {SafeWaitHandle=handle;return this;}
 }
 
+// Cleanup ownership only. This carries no power permission and never retries a
+// remote terminal delivery. The original serial caller retains it until all
+// local import resources have actually returned.
+public sealed class RemoteNativePowerImportOwner : IDisposable
+{
+    private readonly object gate=new();
+    internal SafeWaitHandle? RawProvider,RawNative;
+    internal RemoteProcessWait? Provider,NativeEvent;
+    internal ManualResetEvent? Stop,Revoked;
+    internal RemoteNativePowerScope? Candidate;
+    public bool LocalReturnComplete
+    { get { lock(gate)return Candidate is null&&RawProvider is null&&RawNative is null&&
+        Provider is null&&NativeEvent is null&&Stop is null&&Revoked is null; } }
+    private static void Close<T>(ref T? owner,ref Exception? failure) where T:class,IDisposable
+    {
+        if(owner is null)return;
+        try{owner.Dispose();owner=null;}catch(Exception error){failure??=error;}
+    }
+    public void Dispose()
+    {
+        lock(gate)
+        {
+            Exception? failure=null;
+            if(Candidate is not null)
+            {
+                try{Candidate.Dispose();if(Candidate.LocalReturnComplete)Candidate=null;}
+                catch(Exception error){failure=error;}
+            }
+            // Once a candidate owns a reader its events belong only to it.
+            // Partial construction never starts a reader, so independent raw
+            // and wrapper resources can each return without skipping siblings.
+            Close(ref NativeEvent,ref failure);Close(ref Provider,ref failure);
+            Close(ref Stop,ref failure);Close(ref Revoked,ref failure);
+            Close(ref RawNative,ref failure);Close(ref RawProvider,ref failure);
+            if(failure is not null)throw new IOException("Original unpublished shared-power local return incomplete",failure);
+        }
+    }
+}
+
+public sealed class RemoteNativePowerLocalReturnException(RemoteNativePowerImportOwner owner,string message)
+    : IOException(message)
+{ public RemoteNativePowerImportOwner LocalOwner { get; }=owner; }
+
 public sealed class RemoteNativePowerScope : IRemoteNativePowerScope
 {
     private readonly object gate=new();
     private readonly RemotePowerOfferV1 offer;
     private readonly RemoteProcessWait providerExited;
     private readonly RemoteProcessWait nativeRevoked;
-    private readonly ManualResetEvent revoked=new(false),stop=new(false);
+    private readonly ManualResetEvent revoked,stop;
     private Thread? mirror;
     private int cancelled,disposed;
     private bool returnedPrepared,returnedDeliveryAttempted;
-    private RemoteNativePowerScope(RemotePowerOfferV1 value,RemoteProcessWait provider,RemoteProcessWait native)
-    {offer=value;providerExited=provider;nativeRevoked=native;}
+    private RemotePowerSettlementOutcome preparedOutcome;
+    private RemotePowerSettlementFlags preparedFlags;
+    private RemoteNativePowerScope(RemotePowerOfferV1 value,RemoteProcessWait provider,RemoteProcessWait native,
+        ManualResetEvent localRevoked,ManualResetEvent localStop)
+    {offer=value;providerExited=provider;nativeRevoked=native;revoked=localRevoked;stop=localStop;}
     public RemotePowerDescriptorV1 Binding=>offer.Binding;
     public WaitHandle Revoked=>revoked;
     public WaitHandle ProviderExited=>providerExited;
+    // Local import resources only. This never certifies SDK/device/occupancy
+    // return, Native power or remote settlement delivery.
+    public bool LocalReturnComplete { get { lock(gate)return disposed==2; } }
 
     // Parent identity comes from the original launcher/held parent owner, never
     // from the received offer. Path alone cannot select one of several Native
@@ -88,14 +137,36 @@ public sealed class RemoteNativePowerScope : IRemoteNativePowerScope
         return TryImport(value,trustedNativeImagePath,out scope,out reason);
     }
 
+    // Explicit cleanup handoff for the original Host serial owner. A rejected
+    // import can return a cleanup-only owner; it can never be used as a scope.
+    public static bool TryImportFromParent(RemotePowerOfferV1 value,RemotePowerProcessV1 trustedNativeParent,
+        string trustedNativeImagePath,RemotePowerPurpose requiredPurpose,
+        out RemoteNativePowerScope? scope,out string reason,out RemoteNativePowerImportOwner? failedLocalOwner)
+    {
+        scope=null;failedLocalOwner=null;reason="remote-power-parent-identity";
+        if(trustedNativeParent.Pid==0||trustedNativeParent.Birth100ns==0||!SameProcess(value.Binding.Provider,trustedNativeParent))return false;
+        if(value.Binding.Purpose!=requiredPurpose){reason="remote-power-parent-purpose";return false;}
+        return TryImportOwned(value,trustedNativeImagePath,out scope,out reason,out failedLocalOwner);
+    }
+
     // trustedNativeImagePath is a local installation/source pin supplied by the
     // caller, never a path copied from the received offer. The exact pipe server
     // PID is additionally verified by the kernel on every exchange.
     public static bool TryImport(RemotePowerOfferV1 value,string trustedNativeImagePath,
         out RemoteNativePowerScope? scope,out string reason)
     {
-        scope=null;reason="remote-power-import-unavailable";
-        RemoteProcessWait? provider=null,native=null;RemoteNativePowerScope? candidate=null;
+        bool accepted=TryImportOwned(value,trustedNativeImagePath,out scope,out reason,out var failedLocalOwner);
+        if(failedLocalOwner is not null)
+            throw new RemoteNativePowerLocalReturnException(failedLocalOwner,reason);
+        return accepted;
+    }
+    private static bool TryImportOwned(RemotePowerOfferV1 value,string trustedNativeImagePath,
+        out RemoteNativePowerScope? scope,out string reason,out RemoteNativePowerImportOwner? failedLocalOwner)
+    {
+        scope=null;failedLocalOwner=null;reason="remote-power-import-unavailable";
+        var localOwner=new RemoteNativePowerImportOwner();
+        RemoteProcessWait? provider=null,native=null,failedInputProvider=null;RemoteNativePowerScope? candidate=null;
+        bool authenticatedInputBind=false;
         try
         {
             if(string.IsNullOrWhiteSpace(trustedNativeImagePath)||!Path.IsPathFullyQualified(trustedNativeImagePath)||
@@ -108,9 +179,9 @@ public sealed class RemoteNativePowerScope : IRemoteNativePowerScope
             {
                 if(self.IsInvalid||!Native.Identity(self,out var selfIdentity)||!SameProcess(selfIdentity,value.Binding.Consumer))
                 {reason="remote-power-consumer-identity";return false;}
-                var handle=Native.OpenHeldProcess(value.Binding.Provider.Pid);
-                if(handle.IsInvalid){handle.Dispose();reason="remote-power-provider-open";return false;}
-                provider=new RemoteProcessWait(handle).Initialize();
+                var handle=Native.OpenHeldProcess(value.Binding.Provider.Pid);localOwner.RawProvider=handle;
+                if(handle.IsInvalid){reason="remote-power-provider-open";return false;}
+                provider=new RemoteProcessWait(handle).Initialize();localOwner.Provider=provider;localOwner.RawProvider=null;
                 if(!Native.Identity(handle,out var identity)||!SameProcess(identity,value.Binding.Provider)||identity.Session!=selfIdentity.Session)
                 {reason="remote-power-provider-identity";return false;}
                 if(!Native.SameUser(self,handle)){reason="remote-power-provider-user";return false;}
@@ -119,19 +190,62 @@ public sealed class RemoteNativePowerScope : IRemoteNativePowerScope
             }
             if(!Exchange(value,provider,RemoteWireCommand.Bind,default,out var response,out string transportReason)){reason="remote-power-bind-"+transportReason;return false;}
             if(response.Accepted!=1||!SameDescriptor(value.Binding,response.Binding)){reason="remote-power-bind-rejected";return false;}
+            // No caller has received this scope or entered an input effect.
+            // Only this exact authenticated successful Bind permits command-only
+            // settlement on a later local setup failure. Uncertain Bind stays debt.
+            if(value.Binding.Purpose is RemotePowerPurpose.InputLifecycle or RemotePowerPurpose.InputFrame)
+            { authenticatedInputBind=true; failedInputProvider=provider; }
             string eventName="Local\\"+value.PipeName+"."+value.Binding.Scope.Low+"."+value.Binding.Scope.High+".Cancel";
-            var eventHandle=Native.OpenEvent(0x00100000,false,eventName);
-            if(eventHandle.IsInvalid){eventHandle.Dispose();reason="remote-power-event-open";return false;}
-            native=new RemoteProcessWait(eventHandle).Initialize();
-            candidate=new RemoteNativePowerScope(value,provider,native);provider=null;native=null;
+            var eventHandle=Native.OpenEvent(0x00100000,false,eventName);localOwner.RawNative=eventHandle;
+            if(eventHandle.IsInvalid){reason="remote-power-event-open";return false;}
+            native=new RemoteProcessWait(eventHandle).Initialize();localOwner.NativeEvent=native;localOwner.RawNative=null;
+            localOwner.Revoked=new ManualResetEvent(false);localOwner.Stop=new ManualResetEvent(false);
+            candidate=new RemoteNativePowerScope(value,provider,native,localOwner.Revoked,localOwner.Stop);
+            localOwner.Candidate=candidate;localOwner.Provider=null;localOwner.NativeEvent=null;localOwner.Revoked=null;localOwner.Stop=null;
+            provider=null;native=null;
             if(candidate.nativeRevoked.WaitOne(0)||candidate.providerExited.WaitOne(0)||
-               !candidate.Current(value.Binding.Purpose)){candidate.Dispose();candidate=null;reason="remote-power-initial-current";return false;}
+               !candidate.Current(value.Binding.Purpose)){reason="remote-power-initial-current";return false;}
             candidate.mirror=new Thread(candidate.MirrorCancellation){IsBackground=true,Name="YMCC shared power IPC cancellation"};
-            candidate.mirror.Start();scope=candidate;candidate=null;reason="";return true;
+            candidate.mirror.Start();scope=candidate;localOwner.Candidate=null;candidate=null;reason="";return true;
         }
         catch(Exception error) when(error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or System.Threading.ThreadStateException or OutOfMemoryException)
         {reason="remote-power-import-"+error.GetType().Name;return false;}
-        finally{candidate?.Dispose();native?.Dispose();provider?.Dispose();}
+        finally
+        {
+            // This still owns the unpublished candidate. Stop and join its local
+            // cancellation reader before reporting zero command borrowers. There
+            // is no SDK/endpoint/occupancy release assertion in flags10.
+            if(scope is null && authenticatedInputBind && failedInputProvider is not null)
+            {
+                RemoteSettlementDelivery delivery=RemoteSettlementDelivery.Unknown;
+                try
+                {
+                    candidate?.Withdraw();
+                    if(candidate?.mirror is { IsAlive:true } mirror&&!mirror.Join(1000))
+                        throw new IOException("Unpublished original cancellation reader remains owned");
+                    var receipt=new RemotePowerSettlementV1 {Size=80,Version=1,Scope=value.Binding.Scope,
+                        Request=value.Binding.Request,Provider=value.Binding.Provider,Consumer=value.Binding.Consumer,
+                        Outcome=RemotePowerSettlementOutcome.InputOperationReturned,
+                        Flags=RemotePowerSettlementFlags.InputOperationFinished};
+                    if(Exchange(value,failedInputProvider,RemoteWireCommand.Settle,receipt,out var response,out _))
+                        delivery=response.Accepted==1?RemoteSettlementDelivery.Acknowledged:RemoteSettlementDelivery.Rejected;
+                }
+                catch(Exception error) when(error is IOException or UnauthorizedAccessException or ArgumentException or
+                    InvalidOperationException or System.ComponentModel.Win32Exception or OutOfMemoryException)
+                { /* One actual attempt only. Unknown delivery never refunds or replays it. */ }
+                reason+=";input-command-settlement="+delivery.ToString();
+            }
+            // Independent ownership returns even when another local disposal
+            // fails. No cleanup exception may silently skip the remaining owner.
+            try { localOwner.Dispose(); }
+            catch(Exception error)
+            {
+                // This exact preallocated owner reaches the caller even when
+                // cleanup fails. No thread or global pending-resource queue.
+                reason+=";local-return="+error.GetType().Name;
+            }
+            if(!localOwner.LocalReturnComplete)failedLocalOwner=localOwner;
+        }
     }
     private void MirrorCancellation()
     {
@@ -166,6 +280,17 @@ public sealed class RemoteNativePowerScope : IRemoteNativePowerScope
             Withdraw();return false;
         }
     }
+    // Input effect path: original authenticated import already proved the
+    // Native tuple/purpose. Every boundary checks the original kernel event;
+    // no per-frame IPC, recapture, epoch or new power fact is introduced.
+    public bool InputCurrentLocal(RemotePowerPurpose requiredPurpose)
+    {
+        if(requiredPurpose is not (RemotePowerPurpose.InputLifecycle or RemotePowerPurpose.InputFrame)||
+           requiredPurpose!=offer.Binding.Purpose)return false;
+        lock(gate){return LocalCurrent();}
+    }
+    private static bool Terminal(RemotePowerSettlementOutcome outcome)=>
+        outcome is RemotePowerSettlementOutcome.Returned or RemotePowerSettlementOutcome.InputOperationReturned;
     public void CancelLocal()
     {
         Interlocked.Exchange(ref cancelled,1);
@@ -177,11 +302,14 @@ public sealed class RemoteNativePowerScope : IRemoteNativePowerScope
         receipt=default;lock(gate)
         {
             if(disposed!=0||returnedPrepared||(flags&~RemotePowerSettlementFlags.AllReturned)!=0||
-               outcome is not (RemotePowerSettlementOutcome.Unknown or RemotePowerSettlementOutcome.Returned or RemotePowerSettlementOutcome.RetainedResources)||
-               (outcome==RemotePowerSettlementOutcome.Returned&&flags!=RemotePowerSettlementFlags.AllReturned))return false;
+               outcome is not (RemotePowerSettlementOutcome.Unknown or RemotePowerSettlementOutcome.Returned or RemotePowerSettlementOutcome.RetainedResources or RemotePowerSettlementOutcome.InputOperationReturned)||
+               (outcome==RemotePowerSettlementOutcome.Returned&&flags!=RemotePowerSettlementFlags.AllReturned)||
+               (outcome==RemotePowerSettlementOutcome.InputOperationReturned&&
+                (offer.Binding.Purpose is not (RemotePowerPurpose.InputLifecycle or RemotePowerPurpose.InputFrame)||
+                 flags!=RemotePowerSettlementFlags.InputOperationFinished)))return false;
             receipt=new(){Size=80,Version=1,Scope=offer.Binding.Scope,Request=offer.Binding.Request,
                 Provider=offer.Binding.Provider,Consumer=offer.Binding.Consumer,Outcome=outcome,Flags=flags};
-            if(outcome==RemotePowerSettlementOutcome.Returned){returnedPrepared=true;Withdraw();}
+            if(Terminal(outcome)){preparedOutcome=outcome;preparedFlags=flags;returnedPrepared=true;Withdraw();}
             return true;
         }
     }
@@ -194,9 +322,14 @@ public sealed class RemoteNativePowerScope : IRemoteNativePowerScope
             if(disposed!=0||receipt.Size!=80||receipt.Version!=1||!SameKey(receipt.Scope,offer.Binding.Scope)||
                !SameKey(receipt.Request,offer.Binding.Request)||!SameProcess(receipt.Provider,offer.Binding.Provider)||
                !SameProcess(receipt.Consumer,offer.Binding.Consumer))return RemoteSettlementDelivery.Rejected;
-            if(receipt.Outcome==RemotePowerSettlementOutcome.Returned)
+            if(Terminal(receipt.Outcome))
             {
-                if(!returnedPrepared||returnedDeliveryAttempted||receipt.Flags!=RemotePowerSettlementFlags.AllReturned)
+                bool correctFlags=receipt.Outcome==RemotePowerSettlementOutcome.Returned
+                    ? receipt.Flags==RemotePowerSettlementFlags.AllReturned
+                    : offer.Binding.Purpose is (RemotePowerPurpose.InputLifecycle or RemotePowerPurpose.InputFrame)&&
+                      receipt.Flags==RemotePowerSettlementFlags.InputOperationFinished;
+                if(!returnedPrepared||returnedDeliveryAttempted||!correctFlags||
+                   receipt.Outcome!=preparedOutcome||receipt.Flags!=preparedFlags)
                     return RemoteSettlementDelivery.Rejected;
                 // Reserve the one terminal delivery before any IO. Unknown,
                 // rejection, cancellation and exceptions never refund it.
@@ -207,14 +340,36 @@ public sealed class RemoteNativePowerScope : IRemoteNativePowerScope
             return response.Accepted==1?RemoteSettlementDelivery.Acknowledged:RemoteSettlementDelivery.Rejected;
         }
     }
+    private static void CloseLocal(IDisposable owner,ref Exception? failure)
+    { try{owner.Dispose();}catch(Exception error){failure??=error;} }
     public void Dispose()
     {
         lock(gate)
         {
-            if(disposed!=0)return;Volatile.Write(ref disposed,1);Withdraw();
-            // No device/OEM action and no synthetic Returned receipt.
-            if(mirror is {IsAlive:true})mirror.Join();
-            mirror=null;nativeRevoked.Dispose();providerExited.Dispose();stop.Dispose();revoked.Dispose();
+            if(disposed==2)return;
+            Volatile.Write(ref disposed,1);Interlocked.Exchange(ref cancelled,1);
+            Exception? failure=null;bool stopped=false;
+            try
+            {
+                if(!stop.SafeWaitHandle.IsClosed)stopped=stop.Set();
+                else stopped=mirror is null||!mirror.IsAlive;
+            }
+            catch(Exception error){failure=error;}
+            try { if(!revoked.SafeWaitHandle.IsClosed)revoked.Set(); }
+            catch(Exception error){failure??=error;}
+            if(mirror is {IsAlive:true})
+            {
+                // Never close an event/process handle still borrowed by the
+                // cancellation reader. One bounded join; the next original
+                // serial cleanup owns any continuation, without a new worker.
+                if(!stopped||!mirror.Join(1000))
+                    throw new IOException("Original shared-power cancellation reader remains owned",failure);
+            }
+            mirror=null;
+            CloseLocal(nativeRevoked,ref failure);CloseLocal(providerExited,ref failure);
+            CloseLocal(stop,ref failure);CloseLocal(revoked,ref failure);
+            if(failure is not null)throw new IOException("Original shared-power local return incomplete",failure);
+            Volatile.Write(ref disposed,2);
         }
     }
     private static bool Exchange(RemotePowerOfferV1 value,RemoteProcessWait provider,RemoteWireCommand command,
@@ -246,7 +401,7 @@ public sealed class RemoteNativePowerScope : IRemoteNativePowerScope
     }
     private static bool Known(SharedPowerSnapshotV1 value)=>value.Size==48&&value.Version==1&&value.Generation!=0&&value.Phase<=3&&(value.Flags&1)!=0;
     internal static bool ValidDescriptor(RemotePowerDescriptorV1 v)=>v.Size==128&&v.Version==1&&v.Reserved==0&&
-        v.Purpose is RemotePowerPurpose.Observation or RemotePowerPurpose.FanResume or RemotePowerPurpose.FanWrite&&
+        v.Purpose is RemotePowerPurpose.Observation or RemotePowerPurpose.FanResume or RemotePowerPurpose.FanWrite or RemotePowerPurpose.InputLifecycle or RemotePowerPurpose.InputFrame&&
         (v.Scope.Low!=0||v.Scope.High!=0)&&(v.Request.Low!=0||v.Request.High!=0)&&v.Provider.Pid!=0&&v.Provider.Birth100ns!=0&&
         v.Consumer.Pid!=0&&v.Consumer.Birth100ns!=0&&Known(v.Captured)&&(v.Captured.Flags&4)==0;
     internal static bool ValidStem(string value)

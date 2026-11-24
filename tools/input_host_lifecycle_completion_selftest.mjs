@@ -36,6 +36,7 @@ const sha=b=>createHash('sha256').update(b).digest('hex');
 const files=[...new Set(['tools/input_host_lifecycle_completion_selftest.mjs','tools/fixtures/input_host_lifecycle_completion/fixture.cpp','tools/fixtures/legion_motion_consumer/extract_main.mjs','tools/lib/hc_controller_motion_fixture.mjs','tools/fixtures/hc_remaining_model_capabilities/expectations.mjs','tools/lib/hc_motion_matrix_guard.mjs','native/input_host_lifecycle_claim.h','deps/json/json.hpp',...INFRASTRUCTURE,'native/virtual_controller_ui_output_runtime.h'])];
 const portReferenceNames=['native/virtual_controller_queued_start_runtime.h','native/msi_power_rearm_work_runtime.h','native/virtual_controller_start_runtime.h'];
 for(const name of portReferenceNames)files.push(name);
+files.push('native/sleep_power_state.h');
 const playerReference=fs.readFileSync(path.join(repo,portReferenceNames[0]),'utf8');
 const powerReference=fs.readFileSync(path.join(repo,portReferenceNames[1]),'utf8');
 const startupReference=fs.readFileSync(path.join(repo,portReferenceNames[2]),'utf8');
@@ -46,6 +47,7 @@ const inputs=[{path:source,sha256:sha(fs.readFileSync(source))},...files.map(fil
 const main=fs.readFileSync(source,'utf8');
 const worker=extract(main,'inputHostRunQueuedLifecycleWork'),guard=extract(main,'RecoveryStateBusyGuard','struct');
 const queueWork=extract(main,'InputHostLifecycleWork','struct');
+const foregroundReady=extract(main,'MsiNativeForegroundReadyWork','struct');
 assert.equal([...main.matchAll(/^\s*#\s*include\s*"virtual_controller_ui_output_runtime\.h"\s*$/gm)].length,1,'main must include the actual host runtime header exactly once');
 const hostPath=path.join(repo,'native/virtual_controller_ui_output_runtime.h');
 const hostBytes=fs.readFileSync(hostPath);
@@ -57,16 +59,17 @@ const sliced=worker.code.slice(0,brace+1)+'\n        dispatchTestWork(reason);\n
 const headerPath=path.join(repo,'native/input_host_lifecycle_claim.h');
 const hasHeader=worker.code.includes('LifecycleClaimGuard');
 if(hasHeader)fs.copyFileSync(headerPath,path.join(out,'input_host_lifecycle_claim.h'),fs.constants.COPYFILE_EXCL);
+fs.copyFileSync(path.join(repo,'native/sleep_power_state.h'),path.join(out,'sleep_power_state.h'),fs.constants.COPYFILE_EXCL);
 let cpp=fs.readFileSync(path.join(repo,files[1]),'utf8');
-for(const[k,v]of Object.entries({HEADER:hasHeader?'#include "input_host_lifecycle_claim.h"':'',QUEUE_WORK:queueWork.code,RECOVERY_GUARD:guard.code,READ_HOST:host.code,WORKER:sliced})){
+for(const[k,v]of Object.entries({HEADER:hasHeader?'#include "input_host_lifecycle_claim.h"':'',QUEUE_WORK:foregroundReady.code+'\n'+queueWork.code,RECOVERY_GUARD:guard.code,READ_HOST:host.code,WORKER:sliced})){
   assert.equal(cpp.split('@@'+k+'@@').length,2);cpp=cpp.replace('@@'+k+'@@',()=>v);
 }
 assert(!/@@\w+@@/.test(cpp));
 writeFresh(path.join(out,'fixture.cpp'),cpp);fs.copyFileSync(path.join(repo,'deps/json/json.hpp'),path.join(out,'json.hpp'),fs.constants.COPYFILE_EXCL);
 const selection=lifecycleCompletionTools(),native=selection.native;
 const fixturePortScope={ordinaryNonMsiQueueOnly:true,virtualTargetEnabled:false,startupInputState:'Idle',typedPlayerPowerWakeRecoveryPaths:'unsupported terminal aborts on entry',sleepRepairPowerAdmission:'empty shared_ptr; no repair dispatch',originalCaseNamesAndBodiesUnchanged:true,referenceSources:portReferenceNames};
-const receipt={selection:selected,fixturePortScope,status:'running',source,sourceSha256:inputs[0].sha256,inputs,bindings:[worker,guard,host,queueWork].map(({code,...rest})=>rest),configurations:[],processes:[],toolSelection:{native,files:selection.files},hardwareIo:false,hostStarted:false,wholeDeviceDispatchExecuted:false};
-writeJson(path.join(out,'source-functions.json'),[worker,guard,host,queueWork]);
+const receipt={selection:selected,fixturePortScope,status:'running',source,sourceSha256:inputs[0].sha256,inputs,bindings:[worker,guard,host,foregroundReady,queueWork].map(({code,...rest})=>rest),configurations:[],processes:[],toolSelection:{native,files:selection.files},hardwareIo:false,hostStarted:false,wholeDeviceDispatchExecuted:false};
+writeJson(path.join(out,'source-functions.json'),[worker,guard,host,foregroundReady,queueWork]);
 const system32=path.dirname(native.commandProcessor),windows=path.dirname(system32);
 const childEnvironment={...process.env};
 for(const key of Object.keys(childEnvironment))if(['CL','_CL_','LINK','_LINK_','PATH','INCLUDE','LIB','LIBPATH','VSLANG','SYSTEMROOT','WINDIR','VS_UNICODE_OUTPUT'].includes(key.toUpperCase()))delete childEnvironment[key];

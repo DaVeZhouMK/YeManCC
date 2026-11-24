@@ -82,11 +82,40 @@ inline BOOL CALLBACK collectTaskbar(HWND hwnd, LPARAM context) {
     return TRUE;
 }
 
+inline bool observeTaskbars(TaskbarProbe& probe) {
+    // A single taskbar can be sampled without walking unrelated windows. If
+    // two land on this monitor during a shell transition, keep the old Z order.
+    const HWND desktop = GetDesktopWindow();
+    HWND matched = nullptr;
+    const wchar_t* const classes[]{L"Shell_TrayWnd", L"Shell_SecondaryTrayWnd"};
+    unsigned remaining = 32;
+    const auto fallback = [&] { return EnumWindows(collectTaskbar, reinterpret_cast<LPARAM>(&probe)) != FALSE; };
+    if (!desktop) return fallback();
+    for (const auto* name : classes) {
+        HWND after = nullptr;
+        for (;;) {
+            SetLastError(ERROR_SUCCESS);
+            const HWND window = FindWindowExW(desktop, after, name, nullptr);
+            if (!window) {
+                if (GetLastError() != ERROR_SUCCESS) return fallback();
+                break;
+            }
+            if (window == after || remaining-- == 0) return fallback();
+            after = window;
+            if (MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST) != probe.monitor) continue;
+            if (matched) return fallback();
+            matched = window;
+        }
+    }
+    if (matched) collectTaskbar(matched, reinterpret_cast<LPARAM>(&probe));
+    return true;
+}
+
 inline bool safeMonitorArea(HMONITOR targetMonitor, RECT& area) {
     MONITORINFO mi{sizeof(mi)};
     if (!targetMonitor || !GetMonitorInfoW(targetMonitor, &mi)) return false;
     TaskbarProbe probe{targetMonitor, mi.rcMonitor, mi.rcWork, mi.rcWork};
-    const bool enumerated = EnumWindows(collectTaskbar, reinterpret_cast<LPARAM>(&probe)) != FALSE;
+    const bool enumerated = observeTaskbars(probe);
     // Unknown/failed observations retain the conservative work area. A saved
     // fullscreen game or the primary monitor's auto-hide flag cannot override
     // a visible taskbar on this monitor.

@@ -1,5 +1,5 @@
 // 野蛮系统控制台: one passive mirror. No Python/main.py or own settings.
-import { MirrorClient, type Bootstrap, type ClientState, type Choice, type MirrorSnapshot, type MirrorCommand, type MirrorField } from './mirrorClient';
+import { MirrorClient, type Bootstrap, type ClientState, type Choice, type MirrorSnapshot, type MirrorCommand, type MirrorField, type MirrorPerformanceIntentView } from './mirrorClient';
 import { DECKY_GYRO_CHOICES } from '../../src/bridge/deckyInputOptions';
 import {losslessProgramLabel,losslessToggleLabel} from '../../src/bridge/losslessProgramState';
 import { FRAME_RATE_CEILINGS } from '../../src/bridge/frameRateModel';
@@ -32,14 +32,14 @@ declare global { interface Window { __YMCC_DECKY_MIRROR__?: Bootstrap; __YMCC_DE
 export default function createYmccPlugin() {
 const React = SP_REACT;
 const panelStyle=typeof __YMCC_DECKY_PANEL_STYLE__==='string'?__YMCC_DECKY_PANEL_STYLE__:'grouped';
-const disposeHudProbe = typeof __YMCC_HUD_PROBE_BUILD__ !== 'undefined' && __YMCC_HUD_PROBE_BUILD__
-  ? installSteamHudProbe({host:window,react:React,reactDom:typeof SP_REACTDOM==='undefined'?undefined:SP_REACTDOM,ui:DFL,routerHook}) : null;
 const { PanelSection, PanelSectionRow, SliderField, DropdownItem, ToggleField, ButtonItem } = DFL;
 if (typeof useQuickAccessVisible !== 'function') throw new Error('YMCC QAM 可见性需要 Decky API 2；未启动镜像连接');
 if (!SliderField || !DropdownItem || !ToggleField) throw new Error('YMCC 需要 Steam 原生调节控件；未启动镜像连接');
+let dismounted=false;
 const client = new MirrorClient({ bootstrap: () => window.__YMCC_DECKY_MIRROR__, socket: url => new WebSocket(url),
   connectionCheckCompleted:()=>{if(!dismounted)window.dispatchEvent(new Event('ymcc-decky-connection-result'));},
   transportDisconnected:facts=>{try{window.console.info('[YMCC:DeckyClient] '+JSON.stringify({schema:1,stage:'mirror-disconnect',...facts}));}catch{}},
+  nativeSnapshotObserved:facts=>{try{window.console.info('[YMCC:DeckyClient] '+JSON.stringify({schema:1,stage:'mirror-native-snapshot',...facts}));}catch{}},
   tdpActionSettled:facts=>{try{window.console.info('[YMCC:DeckyClient] '+JSON.stringify({schema:1,stage:'tdp-action-settled',...facts}));}catch{}},
   schedule: (action, delay) => setTimeout(action, delay), cancel: handle => clearTimeout(handle), clientId: crypto.randomUUID(),buildId:typeof __YMCC_DECKY_BUILD_ID__==='string'?__YMCC_DECKY_BUILD_ID__:undefined,steam:() => observeSteamRunning(DFL.Router) });
 // Keep the authenticated link while loaded; hidden QAM requests no business snapshots.
@@ -50,9 +50,11 @@ const {disposeMonitorHud,disposeWallpaper,disposeLoaderUpdate}=(()=>{
     const disposeMonitorHud=typeof __YMCC_HUD_PROBE_BUILD__ !== 'undefined' && __YMCC_HUD_PROBE_BUILD__?null
       :installSteamMonitorHud({host:window,react:React,reactDom:typeof SP_REACTDOM==='undefined'?undefined:SP_REACTDOM,ui:DFL,routerHook,client});
     if(disposeMonitorHud)initialized.push(disposeMonitorHud);
-    const disposeWallpaper=typeof __YMCC_HUD_PROBE_BUILD__ !== 'undefined' && __YMCC_HUD_PROBE_BUILD__?null:installSteamWallpaper({host:window,react:React,reactDom:typeof SP_REACTDOM==='undefined'?undefined:SP_REACTDOM,ui:DFL,routerHook,client});
+    const disposeWallpaper=typeof __YMCC_HUD_PROBE_BUILD__ !== 'undefined' && __YMCC_HUD_PROBE_BUILD__?null
+      :installSteamWallpaper({host:window,react:React,reactDom:typeof SP_REACTDOM==='undefined'?undefined:SP_REACTDOM,ui:DFL,routerHook,client});
     if(disposeWallpaper)initialized.push(disposeWallpaper);
-    const disposeLoaderUpdate=typeof __YMCC_HUD_PROBE_BUILD__ !== 'undefined' && __YMCC_HUD_PROBE_BUILD__?null:installLoaderUpdateRow({host:window,ui:DFL,reactDom:typeof SP_REACTDOM==='undefined'?undefined:SP_REACTDOM,routerHook,client});
+    const disposeLoaderUpdate=typeof __YMCC_HUD_PROBE_BUILD__ !== 'undefined' && __YMCC_HUD_PROBE_BUILD__?null
+      :installLoaderUpdateRow({host:window,ui:DFL,reactDom:typeof SP_REACTDOM==='undefined'?undefined:SP_REACTDOM,routerHook,client});
     return {disposeMonitorHud,disposeWallpaper,disposeLoaderUpdate};
   }catch(error){
     // A rejected module has no onDismount callback. Return the owners already
@@ -62,63 +64,64 @@ const {disposeMonitorHud,disposeWallpaper,disposeLoaderUpdate}=(()=>{
     throw error;
   }
 })();
+let disposeHudProbe:ReturnType<typeof installSteamHudProbe>|undefined;
 // Views own gestures/subscriptions, the plugin owns accepted commands. Detached
 // queues survive QAM unmount and are reused on reentry, then release all demand.
-type ContentIntents={performance:PerformanceIntentQueue<MirrorSnapshot>;fan:FanChoiceDebounce;attached:boolean;hide:()=>void;detach:()=>void;dispose:()=>void};
+type ContentIntents={performance:PerformanceIntentQueue<MirrorPerformanceIntentView>;fan:FanChoiceDebounce;attached:boolean;hide:()=>void;detach:()=>void;dispose:()=>void};
 const activeContentIntents=new Set<ContentIntents>();
 function createContentIntents():ContentIntents {
   const detached=[...activeContentIntents].find(intents=>!intents.attached);
   if(detached){detached.attached=true;return detached;}
 
 const fanChoice = new FanChoiceDebounce({state:()=>client.snapshot(),send:choice=>client.mutate('fan.setChoice',{choice:choice.value},choice.snapshot),schedule:(action,delay)=>setTimeout(action,delay),cancel:handle=>clearTimeout(handle)});
-const performanceChoice=new PerformanceIntentQueue<MirrorSnapshot>({confirmOnSnapshot:true,current:()=>{const s=client.snapshot();return s.connected&&s.snapshot?.ready?s.snapshot:null;},
+const performanceChoice=new PerformanceIntentQueue<MirrorPerformanceIntentView>({confirmOnSnapshot:true,current:()=>client.performanceIntentSnapshot(),
   sameSource:(a,b)=>a.runId===b.runId&&a.generation===b.generation&&a.game?.identity===b.game?.identity&&a.performance?.sourceRevision===b.performance?.sourceRevision&&a.performance?.side===b.performance?.side&&a.performance?.scope===b.performance?.scope&&a.performance?.mode===b.performance?.mode,
-  allowed:(patch,s)=>!client.snapshot().busy&&!!s.performance&&s.actions?.performance===true&&performancePatchAllowed(patch,s.performance),value:(key,s)=>s.performance?.controls.find(c=>c.key===key)?.value,
+  allowed:(patch,s)=>!client.isBusy()&&!!s.performance&&s.actions?.performance===true&&performancePatchAllowed(patch,s.performance),value:(key,s)=>s.performance?.controls.find(c=>c.key===key)?.value,
   send:intent=>client.mutate('performance.setControls',{patch:intent.patch},intent.view),schedule:(action,delay)=>setTimeout(action,delay),cancel:handle=>clearTimeout(handle)});
   const owner={};let disposed=false;
   const intents:ContentIntents={performance:performanceChoice,fan:fanChoice,attached:true,
     hide:()=>{performanceChoice.end();fanChoice.end();},
     detach:()=>{intents.attached=false;intents.hide();sync();},
-    dispose:()=>{if(disposed)return;disposed=true;activeContentIntents.delete(intents);stopState();stopPerformance();stopFan();performanceChoice.dispose();fanChoice.dispose();client.setIntentPending(owner,false);}};
+    dispose:()=>{if(disposed)return;disposed=true;activeContentIntents.delete(intents);stopPerformanceState();stopFanState();stopPerformance();stopFan();performanceChoice.dispose();fanChoice.dispose();client.setIntentPending(owner,false);}};
+  const hasWork=()=>performanceChoice.hasWork()||fanChoice.hasWork();
   const sync=()=>{
     if(disposed)return;
-    const active=!!performanceChoice.snapshot()||fanChoice.hasWork();
+    const active=hasWork();
     client.setIntentPending(owner,active);
     if(!intents.attached&&!active)intents.dispose();
   };
   const stopPerformance=performanceChoice.subscribe(sync),stopFan=fanChoice.subscribe(sync);
-  const stopState=client.subscribe(next=>{performanceChoice.observe(next.connected&&next.snapshot?.ready?next.snapshot:null);fanChoice.observe(next);});
+  const stopPerformanceState=client.subscribePerformanceIntent(view=>performanceChoice.observe(view),()=>performanceChoice.hasWork());
+  const stopFanState=client.subscribe(next=>fanChoice.observe(next),{when:()=>fanChoice.hasWork(),skipDisplayRefresh:true});
   activeContentIntents.add(intents);
   return intents;
 }
 const bootstrapListener = () => client.bootstrapChanged();
-window.addEventListener('ymcc-decky-bootstrap',bootstrapListener);
 const qamConnectionListener=()=>{void client.checkConnectionOnOpen().catch(()=>false);};
-window.addEventListener('ymcc-decky-connection-check',qamConnectionListener);
 // Recover a missed initial native notification even when no sidebar, wallpaper
 // or updater owns transport yet. The existing observation lease reads only the
 // native property and shares the client's original capped local retry. It ends
 // on any defined binding, including OFF/invalid, and never grants a socket.
 // Existing consumers decide transport authority from the current native data.
-const stopBootstrapReconcile = (()=>{
-  const stopConnection=client.subscribe(state=>{
+let stopBootstrapConnection:(()=>void)|undefined,stopBootstrapWait:(()=>void)|undefined;
+function startBootstrapReconcile(){
+  stopBootstrapConnection=client.subscribe(state=>{
     if(!state.connected)return;
     const nativeBinding=window.__YMCC_DECKY_MIRROR__;
     if(nativeBinding&&nativeBinding.revoked!==true)window.dispatchEvent(new Event('ymcc-decky-bootstrap'));
   },{connectionOnly:true});
-  const stopWaiting=window.__YMCC_DECKY_MIRROR__==null?client.waitForBootstrap({},()=>{
+  if(window.__YMCC_DECKY_MIRROR__==null)stopBootstrapWait=client.waitForBootstrap({},()=>{
     if(window.__YMCC_DECKY_MIRROR__!=null)window.dispatchEvent(new Event('ymcc-decky-bootstrap'));
-  }):()=>{};
-  return()=>{stopWaiting();stopConnection();};
-})();
+  });
+}
 const directContent = <Content />;
 // Steam centers QAM SVG icons with native dimensions/margins; a text span skips that rule.
 // Keep the Y outline centered in its viewBox and leave the tab height to Steam.
 const consoleIcon = <svg aria-label="野蛮系统控制台" role="img" viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
   <path d="M4.5 4H8L12 10.5L16 4H19.5L13.5 13.25V20H10.5V13.25Z" />
 </svg>;
-const placement = installConsoleTab(DFL, window, directContent, consoleIcon);
-const directConsoleInstalled = placement.active;
+let placement:ReturnType<typeof installConsoleTab>|undefined;
+let directConsoleInstalled=false;
 const fieldLabels: Record<string, string> = { audioOptimization:'掌机专用低音强化', monitor:'监控总开关', padPersona: '虚拟手柄', gyroEnabled: '陀螺仪', gyroPreset: '陀螺仪预设', speedFactor: '游戏变速', losslessScaling: 'LosslessScaling 插帧' };
 const labelStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px', width: '100%', fontSize: '12px', lineHeight: '16px' };
 const smallLabel = (label: string) => <span className="ymcc-field-label">{label}</span>;
@@ -163,12 +166,12 @@ function Content() {
   if(!intentsRef.current)intentsRef.current=createContentIntents();
   const intents=intentsRef.current;
   const performanceChoice=intents.performance,fanChoice=intents.fan;
-  const [state, setState] = React.useState(client.snapshot());
-  const [performancePending, setPerformancePending] = React.useState(performanceChoice.snapshot());
+  const visible = useQuickAccessVisible();
+  const [state, setState] = React.useState(():ClientState => visible ? client.snapshot() : {connected:false,snapshot:null,notice:'',busy:false});
+  const [performancePending, setPerformancePending] = React.useState(() => performanceChoice.snapshot());
   const [frameDraft, setFrameDraft] = React.useState(null as number|null);
   const frameStart=React.useRef(null) as {current:MirrorSnapshot|null};
-  const [fanPending, setFanPending] = React.useState(fanChoice.snapshot());
-  const visible = useQuickAccessVisible();
+  const [fanPending, setFanPending] = React.useState(() => fanChoice.snapshot());
   // Steam can recreate a QAM page without restarting this loaded module.
   // A hidden/unmounted page must lose its callback authority, including a late
   // native slider release that would otherwise end the replacement page's drag.
@@ -196,18 +199,24 @@ function Content() {
   const menu = React.useRef(null) as { current: null | { snapshot: MirrorSnapshot; field: string; selecting: boolean; timer: ReturnType<typeof setTimeout> | null } };
   const sessionVisible = visible || menuActive;
   const visibilityOwner=React.useRef({});
-  React.useEffect(() => client.subscribe((next: ClientState) => {
-    const owned=menu.current, current=next.snapshot;
-    if(owned && !owned.selecting){
-      if(!next.connected||next.busy||!current?.ready||!sameMenuSource(owned.snapshot,current,owned.field)){
-        if(owned.timer)clearTimeout(owned.timer); menu.current=null; setMenuActive(false);
-      }else if(current.revision!==owned.snapshot.revision){
-        // Keep the original deadline; submit the same target against fresh facts.
-        owned.snapshot=structuredClone(current);
+  // Background intent queues own their subscriptions. A retained hidden view
+  // needs neither their snapshots nor another wire read on re-entry. Subscribe
+  // before paint so the first visible frame uses the current client state.
+  React.useLayoutEffect(() => {
+    if(!sessionVisible)return;
+    return client.subscribe((next: ClientState) => {
+      const owned=menu.current, current=next.snapshot;
+      if(owned && !owned.selecting){
+        if(!next.connected||next.busy||!current?.ready||!sameMenuSource(owned.snapshot,current,owned.field)){
+          if(owned.timer)clearTimeout(owned.timer); menu.current=null; setMenuActive(false);
+        }else if(current.revision!==owned.snapshot.revision){
+          // Keep the original deadline; submit the same target against fresh facts.
+          owned.snapshot=structuredClone(current);
+        }
       }
-    }
-    setState(next);
-  }), []);
+      setState(next);
+    });
+  }, [sessionVisible]);
   React.useEffect(() => performanceChoice.subscribe(() => setPerformancePending(performanceChoice.snapshot())), []);
   React.useEffect(() => fanChoice.subscribe(() => setFanPending(fanChoice.snapshot())), []);
   React.useEffect(() => { if (!visible) { intents.hide(); const owned=menu.current;
@@ -241,7 +250,7 @@ function Content() {
   // Fan intent goes to its own power-aware owner even while shared recovery waits.
   const fanDisabled = !visible || menuActive || !!performancePending || !state.connected || state.busy || snapshot?.actions?.fan !== true || snapshot.fan.canToggle !== true;
   const apply = (command: MirrorCommand, args: Record<string, unknown>, control?:string) => {
-    if (!ownsPerformanceInteraction() || disabled || performanceChoice.snapshot() || fanChoice.hasWork() || !snapshot) return;
+    if (!ownsPerformanceInteraction() || disabled || performanceChoice.hasWork() || fanChoice.hasWork() || !snapshot) return;
     performanceChoice.cancel(); fanChoice.cancel();
     void client.mutate(command, args, snapshot).catch(() => {
       if(!ownsPerformanceInteraction() || !control || client.snapshot().snapshot?.runId!==snapshot.runId)return;
@@ -258,11 +267,12 @@ function Content() {
   const openMenu = (fieldName: string, show: () => void) => {
     const current = client.snapshot(), field = menuField(current.snapshot,fieldName);
     if (!ownsPerformanceInteraction() || !visible || menu.current || current.busy || !current.connected || !current.snapshot?.ready || !menuAllowed(current.snapshot,menuCommand(fieldName,current.snapshot)) || !field?.supported) return false;
-    if(fanChoice.hasWork()||performanceChoice.snapshot()&&(!fieldName.startsWith('performance.')||fieldName==='performance.powerScheme'))return false;
+    if(fanChoice.hasWork()||performanceChoice.hasWork()&&(!fieldName.startsWith('performance.')||fieldName==='performance.powerScheme'))return false;
     if (['padPersona','gyroPreset'].includes(fieldName)&&current.snapshot.virtualController?.locked)return false;
     if (fieldName === 'gyroPreset' && menuField(current.snapshot,'gyroEnabled')?.value !== 'on') return false;
     performancePageToken.focusClaimed=true;
-    menu.current = { snapshot: structuredClone(current.snapshot), field: fieldName, selecting: false, timer: null };
+    // MirrorClient.snapshot() already detaches this view from the live client.
+    menu.current = { snapshot: current.snapshot, field: fieldName, selecting: false, timer: null };
     const owned = menu.current;
     owned.timer = setTimeout(() => { if (menu.current === owned && !owned.selecting) cancelMenu(); }, 45000);
     setMenuActive(true);
@@ -275,9 +285,9 @@ function Content() {
     if (!ownsPerformanceInteraction() || !owned || owned!==menu.current || owned.field !== fieldName || owned.selecting || !field || !field.choices.some(choice => choice.data === option?.data && !choice.disabled)) return;
     const current=client.snapshot();
     if(!current.connected||current.busy||!current.snapshot?.ready||!sameMenuSource(owned.snapshot,current.snapshot,fieldName)){cancelMenu(owned);return;}
-    owned.snapshot=structuredClone(current.snapshot);
+    owned.snapshot=current.snapshot;
     if (fieldName!=='padPersona' && (!fieldName.startsWith('performance.')||fieldName==='performance.powerScheme') && option.data === field.value && !field.inherited) { cancelMenu(); return; }
-    if(fanChoice.hasWork()||performanceChoice.snapshot()&&(!fieldName.startsWith('performance.')||fieldName==='performance.powerScheme'))return;
+    if(fanChoice.hasWork()||performanceChoice.hasWork()&&(!fieldName.startsWith('performance.')||fieldName==='performance.powerScheme'))return;
     if(fieldName.startsWith('performance.')){
       const key=fieldName.slice(12);
       if(key!=='powerScheme'){performanceChoice.choose(key,option.data,owned.snapshot);cancelMenu(owned);return;}
@@ -387,7 +397,7 @@ function Content() {
       <GameProfileControls snapshot={snapshot} disabled={disabled} pending={!!performancePending||!!fanPending||frameDraft!==null} change={(value,owned)=>{if(ownsPerformanceInteraction()&&!disabled&&!performancePending&&!fanPending&&frameDraft===null)void client.mutate('game.setField',{field:'profile',value},owned).catch(()=>{});}}/>
       {heading('性能调度')}
       {/* YMCC requires a standalone power-scheme transaction; do not batch it with delayed slider edits. */}
-      {snapshot?.performance ? <PerformanceControls menus={performanceMenus} entryElementRef={tdpEntryElement} entryNavRef={tdpEntryNav} begin={()=>{if(ownsPerformanceInteraction())performanceChoice.begin();}} end={()=>{if(ownsPerformanceInteraction())performanceChoice.end();}} view={snapshot.performance} disabled={disabled||!snapshot.actions?.performance} draft={performancePending?.patch??{}} status={performancePending?.phase==='confirming'?'等待状态确认…':performancePending?.phase==='applying'?'正在应用…':performancePending?'松开后 2 秒应用':''} change={(field,value)=>{if(ownsPerformanceInteraction()&&!disabled&&snapshot){fanChoice.cancel();if(field==='powerScheme'){if(performanceChoice.snapshot())return;void client.mutate('performance.setControls',{patch:{powerScheme:value}},snapshot).catch(()=>{});}else performanceChoice.choose(field,value,snapshot);}}}/> : unavailable('性能调度待读取')}
+      {snapshot?.performance ? <PerformanceControls menus={performanceMenus} entryElementRef={tdpEntryElement} entryNavRef={tdpEntryNav} begin={()=>{if(ownsPerformanceInteraction())performanceChoice.begin();}} end={()=>{if(ownsPerformanceInteraction())performanceChoice.end();}} view={snapshot.performance} disabled={disabled||!snapshot.actions?.performance} draft={performancePending?.patch??{}} status={performancePending?.phase==='confirming'?'等待状态确认…':performancePending?.phase==='applying'?'正在应用…':performancePending?'松开后 2 秒应用':''} change={(field,value)=>{if(ownsPerformanceInteraction()&&!disabled&&snapshot){fanChoice.cancel();if(field==='powerScheme'){if(performanceChoice.hasWork())return;void client.mutate('performance.setControls',{patch:{powerScheme:value}},snapshot).catch(()=>{});}else performanceChoice.choose(field,value,snapshot);}}}/> : unavailable('性能调度待读取')}
       
       {heading('画面与散热')}
       {frameSetting && side && <PanelSectionRow><SliderField className="ymcc-decky-slider" label={<span className="ymcc-performance-label"><span>{frameLabel}</span><span>{frameSetting.fps===0?'不锁帧':`${frameDraft??frameSetting.fps} FPS`}</span></span>}
@@ -459,15 +469,15 @@ function Content() {
 }
 // Steam can reload its shared page before Loader calls onDismount. Remove only our
 // own tab/array receipts and connection while the old context is still alive.
-let dismounted = false;
 const pagehideListener=()=>dismount('plugin-pagehide');
-function dismount(source:'plugin-disposed'|'plugin-pagehide'='plugin-disposed') {
+function dismount(source:'plugin-disposed'|'plugin-pagehide'|'plugin-initialization-failed'='plugin-disposed') {
   if (dismounted) return;
   dismounted = true;
   // Independent owners must all release, even when a stale Steam surface fails.
   // Fixed stage names give one bounded diagnostic per failure, without raw errors.
   const cleanup=(stage:string,release:()=>void)=>{try{release();}catch{try{window.console?.warn?.('[YMCC:Decky] cleanup-failed:'+stage);}catch{}}};
-  cleanup('bootstrap-reconcile',stopBootstrapReconcile);
+  cleanup('bootstrap-wait',()=>stopBootstrapWait?.());
+  cleanup('bootstrap-connection',()=>stopBootstrapConnection?.());
   cleanup('pagehide-listener',()=>window.removeEventListener('pagehide',pagehideListener));
   cleanup('frontend-receipt',()=>{if(window.__YMCC_DECKY_FRONTEND__===frontendReceipt)delete window.__YMCC_DECKY_FRONTEND__;});
   cleanup('bootstrap-listener',()=>window.removeEventListener('ymcc-decky-bootstrap',bootstrapListener));
@@ -479,17 +489,31 @@ function dismount(source:'plugin-disposed'|'plugin-pagehide'='plugin-disposed') 
   for(const intents of activeContentIntents)cleanup('content-intents',()=>intents.dispose());
   activeContentIntents.clear();
   cleanup('client',()=>client.dispose(source));
-  cleanup('placement',()=>placement.dispose());
+  cleanup('placement',()=>placement?.dispose());
 }
 const frontendReceipt=Object.freeze({buildId:__YMCC_DECKY_BUILD_ID__,active:true,
   get connectionReady(){return !dismounted && client.connectionReady(window.__YMCC_DECKY_MIRROR__?.runId);},
   get connectionVerified(){return !dismounted && client.connectionVerified(window.__YMCC_DECKY_MIRROR__?.runId);},
   get connectionChecking(){return !dismounted && client.connectionChecking(window.__YMCC_DECKY_MIRROR__?.runId);},
   get connectionState(){return dismounted?'module-dismounted':client.connectionDiagnostic(window.__YMCC_DECKY_MIRROR__?.runId);},
-  get qamReady(){return !dismounted && (!directConsoleInstalled || placement.active);}});
-Object.defineProperty(window,'__YMCC_DECKY_FRONTEND__',{value:frontendReceipt,configurable:true});
-window.dispatchEvent(new Event('ymcc-decky-frontend-ready'));
-window.addEventListener('pagehide',pagehideListener);
-return { alwaysRender: true, name: '野蛮系统控制台', titleView: <></>, content: placement.active ? null : directContent,
-  icon: consoleIcon, onDismount: ()=>dismount() };
+  get qamReady(){return !dismounted && (!directConsoleInstalled || placement?.active===true);}});
+try {
+  if(typeof __YMCC_HUD_PROBE_BUILD__ !== 'undefined' && __YMCC_HUD_PROBE_BUILD__)
+    disposeHudProbe=installSteamHudProbe({host:window,react:React,reactDom:typeof SP_REACTDOM==='undefined'?undefined:SP_REACTDOM,ui:DFL,routerHook});
+  window.addEventListener('ymcc-decky-bootstrap',bootstrapListener);
+  window.addEventListener('ymcc-decky-connection-check',qamConnectionListener);
+  startBootstrapReconcile();
+  placement=installConsoleTab(DFL,window,directContent,consoleIcon);
+  directConsoleInstalled=placement.active;
+  const plugin={alwaysRender:true,name:'野蛮系统控制台',titleView:<></>,content:directConsoleInstalled?null:directContent,
+    icon:consoleIcon,onDismount:()=>dismount()};
+  window.addEventListener('pagehide',pagehideListener);
+  Object.defineProperty(window,'__YMCC_DECKY_FRONTEND__',{value:frontendReceipt,configurable:true});
+  window.dispatchEvent(new Event('ymcc-decky-frontend-ready'));
+  return plugin;
+}catch(error){
+  // Loader cannot call onDismount when the factory throws.
+  dismount('plugin-initialization-failed');
+  throw error;
+}
 }

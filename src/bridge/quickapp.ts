@@ -683,9 +683,24 @@ export async function oneClickOptiScaler(
   const sub = uninstall ? 'uninstall' : 'install';
   try {
     const args = ['optiscaler', sub, gameDir];
+    let sharedBackup = false;
     if (!uninstall) {
+      // Only the confirmed import reaches this step. The native owner resolves
+      // the selected EXE to the same card the custom game library uses.
+      const receipt = await optiClient.prepareCatalog(gamePath);
+      if (receipt.status === 'prepared') sharedBackup = true;
+      else if (receipt.status !== 'unavailable') {
+        const message = receipt.status === 'running' ? '请先退出 OPT 客户端' :
+          receipt.status === 'busy' ? 'OPT 游戏列表正忙，请稍后重试' : '未能确认 OPT 游戏卡片，请检查游戏路径或重复卡片';
+        return { ok: false, msgs: [message + '；游戏文件未修改。'] };
+      }
       args.push('--backend', backend);
       if (options.acknowledgeAntiCheatRisk === true) args.push('--acknowledge-anticheat-risk');
+    }
+    if (sharedBackup || uninstall) {
+      const state = await proc.running(['OptiscalerClient']);
+      if (state?.OptiscalerClient !== false) return { ok: false, msgs: ['请先确认 OPT 客户端已退出；游戏文件未修改。'] };
+      args.push('--game-exe', gamePath);
     }
     const r = await shell.run(await resolveOptiCtlExe(), args, 60000);
     const txt = (r.stdout || '').trim();
@@ -709,6 +724,10 @@ export async function oneClickOptiScaler(
       warnings: Array.isArray(obj?.warnings) ? obj.warnings.map(String) : [],
     };
     if (result.ok) {
+      if (!sharedBackup && !uninstall) {
+        result.clientSyncMessage = '未找到 OPT 客户端，本次使用 YMCC 备份。';
+        return result;
+      }
       // The client also recognizes an INI as an installation marker. On restore,
       // an original OPT install may remain, so do not blindly mark it uninstalled.
       let installed = !uninstall;
@@ -720,7 +739,8 @@ export async function oneClickOptiScaler(
           return result;
         }
       }
-      const sync = await syncOptiClientGame(gamePath, installed, uninstall ? undefined : result.version);
+      const sync = await syncOptiClientGame(gamePath, installed, uninstall ? undefined : result.version,
+        'existing');
       result.clientSyncMessage = sync.message;
       result.clientSyncStatus = sync.status;
     }

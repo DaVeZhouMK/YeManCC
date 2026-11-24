@@ -11,6 +11,7 @@ export interface BackgroundState {
   mediaKey?:string;
   mediaReadEpoch?:number;
   mediaAssetId?:string;
+  mediaReducedPlayback?:true;
   mediaBindingRevision?:number;
   playback?:MediaPlayback;
   enabled: boolean;
@@ -27,6 +28,7 @@ export interface DynamicBackgroundState {
   mediaKey?:string;
   mediaReadEpoch?:number;
   mediaAssetId?:string;
+  mediaReducedPlayback?:true;
   mediaBindingRevision?:number;
   playback?:MediaPlayback;
   enabled: boolean;

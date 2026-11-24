@@ -15,6 +15,7 @@ if(main.includes(manualActivity))parts.unshift(functionSource(manualActivity));
 const launch=functionSource('static void fanHostStartResumeTicket(ymcc::fan_resume::RequestTicket ticket) noexcept {');
 assert.equal(launch.split('std::thread([ticket]').length,2);
 parts.push(launch.replace('std::thread([ticket]','FixtureThread(ticket,[ticket]'));
+save('FanResumeScheduleResult.inc',range('struct FanResumeScheduleResult {','static FanResumeScheduleResult fanHostScheduleFanResume('));
 parts.push(functionSource('static FanResumeScheduleResult fanHostScheduleFanResume(unsigned long long generation, bool explicitManual, unsigned long long continuingManual) {'));
 const manualAnchor='ipc_on("power.fanManualWake", [](const json& a) -> json {';
 const manualAt=main.indexOf(manualAnchor);assert(manualAt>=0);const manualBlock=cppBlock(main,main.indexOf('{',manualAt),manualAnchor);assert.equal(main.slice(manualBlock.end,manualBlock.end+2),');');

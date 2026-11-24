@@ -850,11 +850,13 @@ async function main(): Promise<void> {
     }
   });
   if (process.env.YMCC_FAN_AUTO_CASE === 'FAN-PUBLIC-RETRY') await test('FAN-PUBLIC-RETRY one newer public admission continues the refused physical wake', async () => {
-    for (const variant of ['public-before-denial', 'redelivery-before-denial', 'public-after-denial', 'off-before-public', 'new-fan-sleep', 'new-public-sleep', 'second-denial', 'unconfirmed-newer-hint'] as const) {
+    for (const variant of ['public-before-denial', 'redelivery-before-denial', 'public-after-denial', 'off-before-public', 'new-fan-sleep', 'new-public-sleep', 'second-denial', 'unconfirmed-newer-hint', 'coalesced-suspend-serial'] as const) {
       const adapter = new AutoOwnerHost(), launcher = new SimLauncher();
       const pending = { phase: 'ready', generation: 2, hardwareWritesAllowed: false,
-        notificationPending: true, observedNotificationSequence: 9, publicationRevision: 19 } as const;
+        notificationPending: true, observedNotificationSequence: 9, publicationRevision: 19, suspendSerial: 5 } as const;
       const ready = { ...pending, hardwareWritesAllowed: true, notificationPending: false, publicationRevision: 20 };
+      const serialOnly = variant === 'coalesced-suspend-serial';
+      const newReady = serialOnly ? { ...ready, suspendSerial: ready.suspendSerial + 1 } : ready;
       let native: import('@/bridge/api').PowerLifecycleState = { phase: 'ready', generation: 1,
         hardwareWritesAllowed: true, resumeReady: true, inputReady: true, hibernateAvailable: false };
       let reads = 0, hold: Promise<void> | null = null, release!: () => void;
@@ -873,7 +875,7 @@ async function main(): Promise<void> {
       await adapter.suspend(); await lifecycle.suspend(); await adapter.resume({ generation: 3 });
       const initialWrites = adapter.enables;
       native = { ...native, phase: 'resuming', generation: 3, hardwareWritesAllowed: false, notificationPending: true, resumeReady: false };
-      api.observePublicReady(variant === 'redelivery-before-denial' ? ready : pending);
+      api.observePublicReady(variant === 'redelivery-before-denial' || serialOnly ? ready : pending);
       const held = variant === 'public-before-denial' || variant === 'redelivery-before-denial';
       if (held) hold = new Promise<void>(r => { release = r; });
       const before = reads;
@@ -894,15 +896,15 @@ async function main(): Promise<void> {
       if (variant === 'new-fan-sleep') { lifecycle.setPowerGeneration(4); lifecycle.observePowerBoundary('suspending', 4); }
       if (variant !== 'second-denial') native = { ...native, phase: 'ready', hardwareWritesAllowed: true, notificationPending: false, resumeReady: true };
       const beforeReady = reads;
-      if (variant !== 'redelivery-before-denial') api.observePublicReady(variant === 'new-public-sleep' ? { ...ready, generation: 4 } : ready);
+      if (variant !== 'redelivery-before-denial') api.observePublicReady(variant === 'new-public-sleep' ? { ...newReady, generation: 4 } : newReady);
       release?.(); await flush();
       const cancelled = variant === 'off-before-public' || variant === 'new-fan-sleep' || variant === 'new-public-sleep';
       const shouldContinue = !cancelled && variant !== 'second-denial';
-      assert.equal(adapter.enables, initialWrites + (shouldContinue ? 1 : 0), 'newer public Ready must continue the same private wake exactly once');
+      assert.equal(adapter.enables, initialWrites + (shouldContinue ? 1 : 0), `${variant}: newer public Ready must continue the same private wake exactly once`);
       if (cancelled) assert.equal(reads, beforeReady, 'a cancelled request must not reread the Fan snapshot');
       if (variant === 'second-denial') assert.equal(reads, beforeReady + 1, 'a second rejection consumes the one Fan continuation');
       const settledReads = reads;
-      const published = variant === 'new-public-sleep' ? { ...ready, generation: 4 } : ready;
+      const published = variant === 'new-public-sleep' ? { ...newReady, generation: 4 } : newReady;
       api.observePublicReady(published); api.observePublicReady({ ...published, publicationRevision: 21 }); await flush();
       if (shouldContinue) {
         for (let duplicate = 0; duplicate < 8; ++duplicate) api.onFanResumeReady(3);

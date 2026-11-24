@@ -2,8 +2,10 @@
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';
 import {createMirrorHostFixture} from './fixtures/decky_mirror_host_fixture.mjs';import {task} from './fixtures/decky_task_paths.mjs';
 const runId='a'.repeat(32),peer={connection:'1',runId},cases=[];let sequence=0;const flush=async()=>{for(let i=0;i<120;i++)await Promise.resolve();};
+const selected=new Set();
+for(let i=2;i<process.argv.length;i+=2){const name=process.argv[i+1];assert(process.argv[i]==='--case'&&name&&!selected.has(name),'Use --case with a unique exact name');selected.add(name);}
 async function fixture(options={}){const f=await createMirrorHostFixture(options);f.state.game=null;f.ready();f.read=async()=>{f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId}});await flush();return f.replies.at(-1).message.snapshot;};f.edit=async(field,value,expected)=>{const s=expected??await f.read(),n=++sequence;f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'global.setField',runId,clientId:'global',id:'global:'+n,sequence:n,generation:s.generation,revision:s.revision,identity:'',args:{field,value}}});await flush();return f.replies.findLast(r=>r.message.id==='global:'+n)?.message;};return f;}
-async function check(name,fn){await fn();cases.push(name);}
+async function check(name,fn){if(selected.size&&!selected.has(name))return;await fn();cases.push(name);}
 await check('no-game real global schedule and persona publish without fake EXE or admission leak',async()=>{const f=await fixture(),s=await f.read();assert.equal(s.game,null);assert.equal(s.actions.global,true);assert.equal(s.global.fields.padPersona.value,'steamdeck');assert.deepEqual(Object.keys(s.global.fields).sort(),['gyroEnabled','gyroPreset','padPersona']);assert.ok(s.performance&&s.performance.scope==='global');assert.ok(!s.performance.controls.some(o=>o.key==='tdpCeiling'));assert.ok(!JSON.stringify(s).includes('controlAdmission'));assert.equal(f.counts.saves,0);f.stop();});
 await check('legacy global AC mode is rejected; continuous performance uses its own owner',async()=>{const f=await fixture();const r=await f.edit('acMode','performance');assert.equal(r.ok,false);assert.equal(f.counts.globalPowerApplies,0);assert.equal(f.counts.saves,0);f.stop();});
 await check('global input remains independent across AC/DC source changes',async()=>{const f=await fixture();f.state.powerSource='dc';const r=await f.edit('padPersona','elite');assert.equal(r.ok,true);assert.equal(f.counts.inputSaves,1);f.stop();});
@@ -51,10 +53,28 @@ await check('older native request cannot replace a newer startup generation or r
  const s=await f.read();assert.equal(s.virtualController.locked,true);assert.notEqual(s.virtualController.tone,'on');f.stop();assert.equal(f.controllerTimerCount(),0);
 });
 await check('identical controller telemetry does not invalidate snapshots at input sample rate',async()=>{
- const f=await fixture();f.state.gamepadState={virtualOutput:activeController()};await f.read();f.emit('gamepad.state',f.state.gamepadState);await flush();
- const before=f.replies.filter(r=>r.message.type==='snapshot').length;
- for(let i=0;i<120;i++){f.state.gamepadState.virtualOutput.sampledAt=i;f.emit('gamepad.state',f.state.gamepadState);}await flush();
- assert.equal(f.replies.filter(r=>r.message.type==='snapshot').length,before);assert.equal(f.controllerTimerCount(),0);f.stop();
+ let measuring=false,hostStringifies=0,clockReads=0;
+ const clock={get now(){if(measuring)clockReads++;return 0;}};
+ const f=await fixture({clock,readHooks:{hostStringify:(...args)=>{if(measuring)hostStringifies++;return JSON.stringify(...args);}}});
+ const views=()=>f.replies.filter(r=>r.message.type==='snapshot');
+ const push=()=>f.emit('gamepad.state',f.state.gamepadState);
+ try{
+  f.state.gamepadState={virtualOutput:activeController()};await f.read();push();await flush();
+  const before=views().length;
+  measuring=true;
+  for(let i=0;i<120;i++){f.state.gamepadState.virtualOutput.sampledAt=i;push();}
+  measuring=false;await flush();
+  assert.equal(views().length,before);assert.equal(f.controllerTimerCount(),0);
+  const policy={steamDeckSelfOutputBlocked:true,reason:'physical-steamdeck-self-output-blocked'};
+  f.state.virtualPolicy=policy;push();await flush();assert.equal(views().length,before+1);assert.equal(views().at(-1).message.snapshot.virtualController.tone,'warning');
+  push();await flush();assert.equal(views().length,before+1);
+  policy.steamDeckSelfOutputBlocked=false;policy.reason='';push();await flush();assert.equal(views().length,before+2);assert.equal(views().at(-1).message.snapshot.virtualController.tone,'on');
+  f.state.gamepadState.virtualOutput.sourceLive=false;push();await flush();assert.equal(views().length,before+3);assert.equal(views().at(-1).message.snapshot.virtualController.tone,'pending');
+  assert.equal(f.counts.inputSaves,0);assert.equal(f.controllerTimerCount(),0);
+  console.log(JSON.stringify({controllerPresentationMeasurements:{samples:120,hostStringifies,clockReads,extraSnapshots:0,realEdges:3,inputSaves:0}}));
+  assert.equal(hostStringifies,0,'Unchanged input samples must not serialize the Decky presentation');
+  assert.equal(clockReads,120,'Each unchanged sample reuses its startup-lock observation');
+ }finally{f.stop();assert.equal(f.controllerTimerCount(),0);}
 });
 await check('closing sidebar releases its request-scoped controller deadline timer and never issues a retry',async()=>{
  const f=await fixture();f.state.gamepadState={virtualOutput:{state:'starting',requestedPersona:'steamdeck',startProtection:protection(11)}};await f.read();assert.equal(f.controllerTimerCount(),1);
@@ -77,4 +97,5 @@ await check('native clear ACK alone arms the same bounded startup timer when the
  f.advanceController(30000);await flush();assert.equal((await f.read()).virtualController.locked,false);assert.equal(f.counts.shortcutClears,1);assert.equal(f.counts.inputSaves,1);f.stop();assert.equal(f.controllerTimerCount(),0);
 });
 
-fs.writeFileSync(path.join(task,'validation/GLOBAL-CONTROLS.json'),JSON.stringify({pass:true,cases:cases.length,results:cases,actualProductionHostRelayAdapter:true,memoryIoBoundaries:true,physicalHardwareWrites:0,realConfigWrites:0},null,2));console.log('Global controls PASS '+cases.length);
+assert(cases.length>0&&[...selected].every(name=>cases.includes(name)),'Unknown global controls case');
+fs.writeFileSync(path.join(task,'validation/GLOBAL-CONTROLS.json'),JSON.stringify({pass:true,cases:cases.length,results:cases,...(selected.size?{selection:'exact-case',selectedCases:[...selected]}:{}),actualProductionHostRelayAdapter:true,memoryIoBoundaries:true,physicalHardwareWrites:0,realConfigWrites:0},null,2));console.log('Global controls PASS '+cases.length);

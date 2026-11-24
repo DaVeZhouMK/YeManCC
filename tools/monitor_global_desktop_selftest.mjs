@@ -1,6 +1,6 @@
 // Global desktop scope regression; inert IPC only, never proof of visible native pixels.
 import fs from 'node:fs';import path from 'node:path';import {build} from 'esbuild';import {pathToFileURL} from 'node:url';import assert from 'node:assert/strict';
-const out=path.resolve('../../../Build/Tasks/YMCC-Steam-HUD-Probe/global-desktop-20261011/tests');fs.mkdirSync(out,{recursive:true});
+const out=path.resolve(process.env.YMCC_MONITOR_GLOBAL_TEST_OUT||'../../../Build/Tasks/YMCC-Steam-HUD-Probe/global-desktop-20261011/tests');fs.mkdirSync(out,{recursive:true});
 const b=await build({stdin:{resolveDir:process.cwd(),loader:'ts',contents:`export * from './src/bridge/desktopHudOwner';export * from './src/bridge/monitorHudCarrierRouter';export * from './src/bridge/monitorOutputCoordinator';export * from './src/bridge/monitorHudModel';`},bundle:true,platform:'node',format:'esm',write:false});const file=path.join(out,'production-global-under-test.mjs');fs.writeFileSync(file,b.outputFiles[0].text);const m=await import(pathToFileURL(file));
 let passed=0;const check=(name,fn)=>{fn();passed++;console.log('PASS '+name)};const prefs=m.normalizeMonitorOutput({output:'ymcc',enabled:true});
 let listener,users=0,gameReads=0,nativeCalls=[],nonce='global-desktop-session-0001',timers=new Map(),id=0;
@@ -17,13 +17,18 @@ assert((await router.setVisible(false,prefs)).confirmed);check('desktop global p
 for(const enabled of [true,false]){
  const calls=[];const coordinator=m.createMonitorOutputCoordinator({async capabilities(){return {steam:false,ymcc:true,ymccGlobal:true,ymccOwned:true}},async ensureRtss(){calls.push('rtss-backend')},async setSteam(){throw Error('global must never mutate Steam')},async setRtss(show){calls.push('rtss:'+show);return {confirmed:true}},async setYmcc(show){calls.push('ymcc:'+show);return {confirmed:true}}});
  const result=await coordinator.apply({...prefs,enabled});
- check('global '+(enabled?'on':'off')+' bypasses Steam guards without forging Steam ACK',()=>{assert(result.ok);assert.equal(result.applied,enabled?'ymcc':'off');assert.deepEqual(calls,enabled?['ymcc:false','ymcc:true','rtss-backend','rtss:false']:['ymcc:false'])});
+ check('global '+(enabled?'on':'off')+' bypasses Steam and disables RTSS OSD before any backend start',()=>{assert(result.ok);assert.equal(result.applied,enabled?'ymcc':'off');assert.deepEqual(calls,enabled?['ymcc:false','ymcc:true','rtss:false','rtss-backend']:['ymcc:false','rtss:false'])});
+}
+{
+ const calls=[];const coordinator=m.createMonitorOutputCoordinator({async capabilities(){return {steam:false,ymcc:true,ymccGlobal:true,ymccOwned:true}},async ensureRtss(){calls.push('rtss-backend')},async setSteam(){throw Error('global must not mutate Steam')},async setRtss(show){calls.push('rtss:'+show);return {confirmed:true}},async setYmcc(){throw Error('desktop close unconfirmed')}});
+ const result=await coordinator.apply({...prefs,enabled:false});
+ check('global off still closes RTSS OSD when the desktop close is unconfirmed',()=>{assert(!result.ok);assert.equal(result.phase,'hide-ymcc');assert(result.reason.includes('RTSS 游戏 OSD 已关闭'));assert.deepEqual(calls,['rtss:false'])});
 }
 {
  let shown=false;
- const coordinator=m.createMonitorOutputCoordinator({async capabilities(){return {steam:false,ymcc:true,ymccGlobal:true,ymccOwned:true}},async ensureRtss(){assert(shown);throw Error('RTSS unavailable')},async setSteam(){throw Error('Steam must not be called')},async setRtss(){throw Error('RTSS must not be called after backend failed')},async setYmcc(value){shown=value;return {confirmed:true}}});
+ const coordinator=m.createMonitorOutputCoordinator({async capabilities(){return {steam:false,ymcc:true,ymccGlobal:true,ymccOwned:true}},async ensureRtss(){assert(shown);throw Error('RTSS unavailable')},async setSteam(){throw Error('Steam must not be called')},async setRtss(){assert(shown);throw Error('OSD hide unconfirmed')},async setYmcc(value){shown=value;return {confirmed:true}}});
  const result=await coordinator.apply(prefs);
- check('RTSS backend failure cannot veto already-confirmed global desktop visibility',()=>{assert(result.ok);assert.equal(result.applied,'ymcc');assert(shown);assert(result.reason.includes('RTSS unavailable'))});
+ check('OSD failure still attempts lock startup, and neither failure can veto desktop visibility',()=>{assert(result.ok);assert.equal(result.applied,'ymcc');assert(shown);assert(result.reason.includes('OSD hide unconfirmed'));assert(result.reason.includes('RTSS unavailable'))});
 }
 const text=fs.readFileSync('src/bridge/monitorHudHost.ts','utf8');check('production host uses global scope and passively reads protected game policy without detection or Steam selection',()=>{assert(text.includes("scope:'global',target:()=>null"));assert(text.includes("},desktop,'desktop-global')"));assert(text.includes('policyGame:getPolicyGame'));assert(!text.includes('detectPolicyGame'));assert(!text.includes('subscribeGameStatus'));assert(!text.includes('game.detect'));assert(!text.includes('deckySidebar.get'));assert(!text.includes('subscribePolicyGameStatus'))});
 console.log('global desktop regression: '+passed+' cases passed; actualNativeWindow=false');fs.writeFileSync(path.join(out,'summary.json'),JSON.stringify({passed,actualNativeWindow:false,physicalMousePassVerified:false,scope:'actual owner/router/coordinator; inert native IPC'},null,2));

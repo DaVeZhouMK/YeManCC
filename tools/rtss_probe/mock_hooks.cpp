@@ -1,9 +1,20 @@
 #include <windows.h>
 #include <cwchar>
 #include <cstring>
+extern "C" __declspec(dllexport) DWORD SetFlags(DWORD mask, DWORD toggle);
 static HMODULE module;
 static wchar_t profile[MAX_PATH]{};
 static DWORD shadow=1;
+static DWORD flags=0x80000005u;
+extern "C" __declspec(dllexport) DWORD SetFlags(DWORD mask, DWORD toggle) {
+    flags = (flags & mask) ^ toggle;
+    wchar_t config[MAX_PATH]{}, value[9]{};
+    GetModuleFileNameW(module, config, MAX_PATH); *std::wcsrchr(config,L'\\')=0;
+    wcscat_s(config, L"\\Profiles\\Config");
+    swprintf_s(value, L"%08lX", flags);
+    WritePrivateProfileStringW(L"Shared", L"Flags", value, config);
+    return flags;
+}
 extern "C" __declspec(dllexport) void LoadProfile(LPCSTR name) {
     if (GetFileAttributesW(L"mock-fault-sdk") != INVALID_FILE_ATTRIBUTES)
         RaiseException(0xe0234567,0,0,nullptr);

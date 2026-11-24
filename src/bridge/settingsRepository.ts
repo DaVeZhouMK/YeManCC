@@ -739,19 +739,22 @@ async function readSettingsText(path: string, maxBytes: number): Promise<string 
   }
 }
 
+function hasBoundedSettingsDepth(root: object, depth: number): boolean {
+  const pending: Array<{ value: object; depth: number }> = [{ value: root, depth }];
+  while (pending.length) {
+    const { value, depth } = pending.pop()!;
+    if (depth > 64) return false;
+    for (const child of Object.values(value)) {
+      if (child !== null && typeof child === 'object') pending.push({ value: child, depth: depth + 1 });
+    }
+  }
+  return true;
+}
+
 function parseSettingsDocument(raw: string): JsonObject | null {
   try {
     const parsed = JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw);
-    if (!isObject(parsed)) return null;
-    const pending: Array<{ value: object; depth: number }> = [{ value: parsed, depth: 0 }];
-    while (pending.length) {
-      const { value, depth } = pending.pop()!;
-      if (depth > 64) return null;
-      for (const child of Object.values(value)) {
-        if (child !== null && typeof child === 'object') pending.push({ value: child, depth: depth + 1 });
-      }
-    }
-    return parsed;
+    return isObject(parsed) && hasBoundedSettingsDepth(parsed, 0) ? parsed : null;
   } catch { return null; }
 }
 
@@ -772,8 +775,9 @@ async function readLegacyLaunchApps(dir: string): Promise<JsonObject | null> {
   if (raw === null) return null;
   try {
     const parsed: unknown = JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw);
-    if (Array.isArray(parsed)) return { apps: parsed };
-    return isObject(parsed) ? parsed : null;
+    // Check depth at the final quickApps location, including the legacy array wrapper.
+    const section = Array.isArray(parsed) ? { apps: parsed } : parsed;
+    return isObject(section) && hasBoundedSettingsDepth(section, 1) ? section : null;
   } catch {
     return null;
   }
@@ -884,8 +888,8 @@ function assertCompatibleSchema(document: JsonObject): void {
 }
 
 /** Validate on explicit reads, not a timer: native checks a 100ns file stamp and
- * returns no JSON for an unchanged document. Coalesced callers own snapshots. */
-export async function loadSettings(): Promise<UnifiedSettings> {
+ * returns no JSON for an unchanged document. Never expose the shared document. */
+async function readSettings<T>(select: (document: UnifiedSettings) => T): Promise<T> {
   if (!loadPromise) {
     const generation = settingsGeneration;
     const cacheAtReadStart = cache;
@@ -1010,8 +1014,21 @@ export async function loadSettings(): Promise<UnifiedSettings> {
     loadPromise = task;
   }
   const task = loadPromise;
-  try { return snapshotSettingsData(await task); }
+  try { return select(await task); }
   finally { if (loadPromise === task) loadPromise = null; }
+}
+
+export function loadSettings(): Promise<UnifiedSettings> {
+  return readSettings<UnifiedSettings>(snapshotSettingsData);
+}
+
+/** Prepare a sibling-file read without copying settings. A runtime fallback
+ * after failed location discovery cannot authorize I/O at the default path. */
+export function validateSettingsRead(): Promise<void> {
+  return readSettings(() => {
+    if (!settingsLocationResolved)
+      throw new Error(recoveryState.message || '无法获取有效的原生配置位置');
+  });
 }
 
 export class VirtualStartProtectionActive extends Error {
@@ -1127,9 +1144,9 @@ async function writeSettings(
   }
 }
 
-export async function readSettingsSection<T extends JsonObject = JsonObject>(section: SettingsSection): Promise<T> {
-  const settings = await loadSettings();
-  return structuredClone((settings[section] || {}) as T);
+export function readSettingsSection<T extends JsonObject = JsonObject>(section: SettingsSection): Promise<T> {
+  // Keep the same file validation, but detach only the requested section.
+  return readSettings(settings => snapshotSettingsData((settings[section] || {}) as T));
 }
 
 /** After the initial settings read, check before each new write without another IPC. */

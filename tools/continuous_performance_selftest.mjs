@@ -54,6 +54,36 @@ function freshSchedule(){return evaluate(serviceSource,{
   './autofloat':realFloatBackend??{pauseContinuousFloatForTdpEdit:async()=>{const owner=residentOwner;if(!owner)return null;return {current:()=>residentOwner===owner,accept:(requested,accepted)=>{owner.lastReceipt={requested,accepted}},release(){}}},disableFloat:async()=>{writes.push({kind:'stop'})},enableContinuousFloat:async(bank,s,t,current,applyCore,receipt)=>{residentOwner={current,applyCore};writes.push({kind:'float',side:s,tdp:bank.tdp,target:t,receipt})},setFloatRtssLinked(){},getFloatInfo:()=>({enabled:false}),updateContinuousFloatCoreRules(){},holdContinuousFloatAfterCoreChange(){},cancelPendingRtssSync(){},notifyTdpMaxChanged:async()=>{},applyFloatSettings:async()=>{},enableFloat:async()=>{},setFloatTarget:async()=>{}},
 },{Date:TestDate});}
 const schedule=freshSchedule();
+if(process.argv.includes('--wake-admission-only')) {
+ const out=process.argv[2];assert(out&&!out.startsWith('--'),'Explicit wake admission evidence directory required');
+ settings.input={};
+ settings.performanceSchedule={configured:true,enabled:true,controls:{ac:models.defaultContinuousBank('ac'),dc:models.defaultContinuousBank('dc')}};
+ const defer=()=>{let resolve;const promise=new Promise(done=>{resolve=done});return{promise,resolve};};
+ let admitted=true;
+ const powerEntered=defer(),powerRelease=defer(),readPower=yeman.detectPowerModeReliable;
+ yeman.detectPowerModeReliable=async()=>{powerEntered.resolve();await powerRelease.promise;return 'ac';};
+ const abandoned=schedule.restorePerformanceScheduleAfterWake('ac',false,()=>admitted);
+ await powerEntered.promise;admitted=false;powerRelease.resolve();
+ assert.equal(await abandoned,'retry-on-ready');assert.deepEqual(writes,[]);
+ yeman.detectPowerModeReliable=readPower;
+ admitted=true;assert.equal(await schedule.restorePerformanceScheduleAfterWake('ac',false,()=>admitted),'settled');
+ assert.equal(writes.filter(row=>row.kind==='tdp').length,1);
+ assert.equal(writes.filter(row=>row.kind==='cpu').length,1);
+
+ writes.length=0;
+ const tdpEntered=defer(),tdpRelease=defer(),setTdp=yeman.setTdp;
+ yeman.setTdp=async(...args)=>{const result=await setTdp(...args);tdpEntered.resolve();await tdpRelease.promise;return result;};
+ const partial=schedule.restorePerformanceScheduleAfterWake('ac',false,()=>admitted);
+ await tdpEntered.promise;admitted=false;tdpRelease.resolve();
+ assert.equal(await partial,'unconfirmed');
+ assert.equal(writes.filter(row=>row.kind==='tdp').length,1);
+ assert.equal(writes.filter(row=>row.kind==='cpu').length,0);
+ assert.equal(schedule.isPerformanceScheduleBusy(),false);
+ fs.mkdirSync(out,{recursive:true});
+ const rows=['revoked before actions; current wake can reapply once','revoked after TDP dispatch; later CPU phase stopped and original TDP not replayed'];
+ fs.writeFileSync(path.join(out,'wake-admission.json'),JSON.stringify({pass:true,rows},null,2),{flag:'wx'});
+ console.log(JSON.stringify({pass:true,rows}));process.exit(0);
+}
 if(process.argv.includes('--boot-preferences-only')){
  const {runPerformancePreferenceOwners}=await import('./boot_modes_fixture/performancePreferences.mjs');
  const out=process.argv[2];if(!out)throw Error('Explicit preference evidence path required');

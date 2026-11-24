@@ -6,6 +6,13 @@ export function prepareRecoveryPublisher(main){
  const bindings=[],names=['readSharedSystemPower','captureRecoveryPowerProjection','recoveryStateCopyText','recoveryStatePublishInto','commitPowerResume'],parts=names.map(name=>({name,code:extract(main,'function',name,'native/main.cpp',bindings)}));
  const accessor=main.match(/^(?:\[\[maybe_unused\]\] )?static bool captureSharedPowerLifecycle\([^;\r\n]*\{\r?$/m);assert(accessor);const accessorBlock=cppBlock(main,main.indexOf('{',accessor.index),'public Native capture accessor'),accessorCode=main.slice(accessor.index,accessorBlock.end);parts.splice(1,0,{name:'captureSharedPowerLifecycle',code:accessorCode});bindings.push({symbol:'captureSharedPowerLifecycle',kind:'function',file:'native/main.cpp',startUtf8Byte:Buffer.byteLength(main.slice(0,accessor.index)),endUtf8ByteExclusive:Buffer.byteLength(main.slice(0,accessorBlock.end)),sha256:sha(accessorCode)});
  const enumeration=main.match(/^enum class PowerLifecycle\s*:\s*uint8_t\s*\{[^\n]+\};/m);assert(enumeration);
+ if(parts.find(p=>p.name==='commitPowerResume').code.includes('g_gamepadUiWakeGeneration')){
+  const rows=[...main.matchAll(/^static std::atomic<uint64_t> g_gamepadUiWakeGeneration[^\r\n]+;/gm)];
+  assert.equal(rows.length,1,'actual gamepad wake projection storage');
+  const [{0:code,index}]=rows,startUtf8Byte=Buffer.byteLength(main.slice(0,index)),symbol='g_gamepadUiWakeGeneration';
+  bindings.push({symbol,kind:'declaration',file:'native/main.cpp',startUtf8Byte,endUtf8ByteExclusive:startUtf8Byte+Buffer.byteLength(code),sha256:sha(code)});
+  parts.unshift({name:symbol,code});
+ }
  return {enumeration:enumeration[0],code:parts.map(p=>p.code).join('\n\n'),bindings,compiledParts:parts.map(p=>({symbol:p.name,sha256:sha(p.code)}))};
 }
 export function prepareRecoveryPublisherLifecycle(main){const bindings=[],names=['recoveryStateAttachBoundary','recoveryStateRetireBoundary','recoveryStateOwnProcessStartKey','recoveryStatePublisherStart','recoveryStatePublisherStop'],parts=names.map(name=>({name,code:extract(main,'function',name,'native/main.cpp',bindings)}));return {code:parts.map(p=>p.code).join('\n\n'),bindings,compiledParts:parts.map(p=>({symbol:p.name,sha256:sha(p.code)}))};}

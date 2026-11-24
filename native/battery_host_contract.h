@@ -2,6 +2,6 @@
 #pragma once
 namespace ymcc::batterycharge {
 inline constexpr int kHostProtocol=2;
-inline constexpr const char* kHostSourceId="fe351be2fb442f92f96d8dcc9fcc219f1f52eb54d33888e224e6243f45635421";
+inline constexpr const char* kHostSourceId="0bbe41a9077e5b250a7a056d509954642ddefc624654d885bc84b071afa2af30";
 inline constexpr const char* kHostImplementation="in-process-60s-msi-cg3em-ap-v1";
 }

@@ -18,13 +18,13 @@
    candidate::g_gmSetMode(candidate::g_gm,0);candidate::g_gmSetOffset(candidate::g_gm,0,0,0,0);write({{"keep",{{"unrelated",true}}}});
    fake_sdk::opened=fake_sdk::closed=0;fake_sdk::handlers.clear();fake_sdk::badNumericMask=fake_sdk::badTimeMask=fake_sdk::frozenMask=0;fake_sdk::frameValue=0;
    candidate::g_sensorThreadMailbox.open();candidate::inputCaptureWindowsSelectionSetStaOpen(true);candidate::g_powerLifecycle=candidate::PowerLifecycle::Ready;
-   std::atomic_store(&candidate::g_windowsSelectionWorkerContext,std::shared_ptr<const candidate::WindowsSelectionWorkerContext>{});
+   candidate::g_windowsSelectionWorkerContext.store(std::shared_ptr<const candidate::WindowsSelectionWorkerContext>{});
    candidate::nativeBusTicks=candidate::pendingFrames=candidate::committedFrames=0;candidate::nativeProcessWitness=true;fake_sdk::onPump=[](){candidate::nativeBusPump();};
    independentInput={1,2,3,.1,.2,.9};fake_sdk::rawAxes=independentInput;candidate::nativeBusPump();
    const auto capability=candidate::inputCaptureMotionCapabilityReceipt(candidate::g_sensorMeta,false);
    const auto expectedClass=generic["expectedClass"].get<std::string>();
    txCheck(capability.value("deviceClass",std::string{})==expectedClass&&capability.value("modelSelectorBound",false),"actual generic fallback recipe binds without exact device identity: "+expectedClass);
-   const auto context=std::atomic_load(&candidate::g_windowsSelectionWorkerContext);const bool current=candidate::inputCaptureWindowsSelectionContextCurrent(context);
+   const auto context=candidate::g_windowsSelectionWorkerContext.load();const bool current=candidate::inputCaptureWindowsSelectionContextCurrent(context);
    txCheck(current,"actual generic source publishes usable processing context: "+expectedClass);
    if(!current){traces.push_back({{"phase","generic-context-unavailable"},{"expectedClass",expectedClass},{"capability",capability},{"identity",originalIdentity}});continue;}
    json observation={{"recorded",true},{"contextCurrent",true},{"observationSerial",1},{"lastObservation",{{"deviceClass",candidate::g_machineIdentity.deviceClass},{"pairs",json::array()}}}};

@@ -26,8 +26,8 @@ def sha(data):return hashlib.sha256(data).hexdigest()
 def need(value,message):
     if not value:raise RuntimeError(message)
 def save(file,value):file.write_text(json.dumps(value,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-def block(text,pattern):
-    masked=helper.mask_cpp(text)
+def block(text,pattern,*,masked=None):
+    if masked is None:masked=helper.mask_cpp(text)
     matches=list(re.finditer(pattern,masked,re.M))
     need(len(matches)==1,'Expected unique source block: '+pattern)
     start=matches[0].start();opening=masked.index('{',start);end=opening+1;depth=1

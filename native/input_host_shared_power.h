@@ -62,6 +62,11 @@ public:
     // Only the original serial request/Host owner calls cancel or releases its
     // cache. Pure current() may run at the final transport issue boundary.
     void cancel()noexcept{retired_.store(true,std::memory_order_release);registration_.cancel();}
+    std::shared_ptr<sleeppower::RevocationMirrors::CancellationLink> linkCancellationEvent(HANDLE event)noexcept {
+        auto link=registration_.linkEvent(event);
+        if(link&&!current())link->signal();
+        return link;
+    }
 };
 
 // Caller holds the existing Host transaction mutex. Cache only one current

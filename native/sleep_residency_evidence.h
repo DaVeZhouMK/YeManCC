@@ -77,7 +77,12 @@ inline json makeEvidence(const std::string& xml) {
         "ScenarioInstanceId", "ScenarioInstanceIdV2", "BootId",
         "EnergyDrain", "NonResiliencyTimeInUs", "ResiliencyDripsTimeInUs", "ResiliencyHwDripsTimeInUs",
         "ScreenOffDurationInUs", "SleepDurationInUs", "ScreenOffSwDripsResidencyInUs", "ScreenOffHwDripsResidencyInUs",
-        "SleepSwDripsResidencyInUs", "SleepHwDripsResidencyInUs", "GdiOnTime", "DwmSyncFlushTime", "MonitorPowerOnTime"
+        "SleepSwDripsResidencyInUs", "SleepHwDripsResidencyInUs", "GdiOnTime", "DwmSyncFlushTime", "MonitorPowerOnTime",
+        "BatteryRemainingCapacityOnExit", "BatteryFullChargeCapacityOnExit",
+        "ScreenOffEnergyCapacityAtStart", "ScreenOffEnergyCapacityAtEnd",
+        "SleepEnergyCapacityAtStart", "SleepEnergyCapacityAtEnd",
+        "ScreenOffFullEnergyCapacityAtStart", "ScreenOffFullEnergyCapacityAtEnd",
+        "SleepFullEnergyCapacityAtStart", "SleepFullEnergyCapacityAtEnd"
     };
     for (const auto field : fields) {
         const auto it = data.values.find(field);
@@ -107,6 +112,12 @@ inline json makeEvidence(const std::string& xml) {
         return values[key].get<std::uint64_t>();
     };
     const auto duration = number("DurationInUs"), sw = number("DripsResidencyInUs"), hw = number("HwDripsResidencyInUs");
+    const auto sleep = number("SleepDurationInUs");
+    const char* entryOutcome = "unknown";
+    if (entered.has_value() && sleep.has_value()) {
+        if (!*entered && *sleep == 0) entryOutcome = "not-entered";
+        else if (*entered && *sleep > 0 && duration && *sleep <= *duration) entryOutcome = "entered";
+    }
     const auto transitions = number("DripsTransitions");
     constexpr std::uint64_t minimumObservationUs = 120000000ULL;
     json result = {
@@ -114,6 +125,7 @@ inline json makeEvidence(const std::string& xml) {
         {"timing", "after-standby-exit"}, {"units", "residency-and-duration-InUs-fields:microseconds;other-fields:Windows-schema"},
         {"raw", std::move(raw)}, {"values", std::move(values)}, {"invalidFields", std::move(invalid)},
         {"windowsSleepStage", entered.has_value() ? (*entered ? "entered" : "not-entered") : "unavailable"},
+        {"windowsEntryOutcome", entryOutcome},
         {"minimumObservationUs", minimumObservationUs}, {"qualityHintThresholdPercent", 80},
         {"policy", "diagnostic-only;120s-is-not-a-Windows-entry-deadline"},
         {"hardwareZeroIsConclusive", false}, {"automaticRepairAuthorized", false}
@@ -135,5 +147,17 @@ inline json makeEvidence(const std::string& xml) {
     }
     result["assessment"] = assessment;
     return result;
+}
+
+inline std::optional<bool> sessionInProgressOnExit(const json& evidence) noexcept {
+    const auto values = evidence.find("values");
+    if (values == evidence.end() || !values->is_object()) return std::nullopt;
+    const auto continuing = values->find("IsCsSessionInProgressOnExit");
+    if (continuing == values->end() || !continuing->is_boolean()) return std::nullopt;
+    return continuing->get<bool>();
+}
+inline bool isContinuingTransition(const json& evidence, int reason) noexcept {
+    // Keep the explicit human veto and Windows hibernate handoff intact.
+    return reason != 1 && reason != 20 && sessionInProgressOnExit(evidence).value_or(false);
 }
 } // namespace ymcc::sleep_residency

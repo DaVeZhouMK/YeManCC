@@ -7,13 +7,15 @@ function Get-AppearanceSteamSession {$null} # Explicit offline public Steam fact
 New-Item -ItemType Directory -Path $Out -Force|Out-Null
 $script:ThemeRoot=Join-Path $Out ('profile-'+[guid]::NewGuid().ToString('N'))
 $script:PresetStateBase=Join-Path $Out 'states'
-$script:Live=$false;$script:Reloads=0;$script:Mode='success';$script:Rows=@();$script:Stopped=0
+$script:Live=$false;$script:Reloads=0;$script:Mode='success';$script:Rows=@();$script:Stopped=0;$script:InventoryReads=0
 $script:AppearanceFixtureMutexPrefix='Local\YMCC.CssFixture.'+[guid]::NewGuid().ToString('N')+'.'
 function New-AppearanceMutex([string]$Purpose) {
  if($Purpose -notin @('Launch','ThemeControl')){throw 'APPEARANCE_FIXTURE_MUTEX_PURPOSE_DENIED'}
  New-Object Threading.Mutex($false,($script:AppearanceFixtureMutexPrefix+$Purpose))
 }
 function Get-BackendProcesses {if($script:Live){[pscustomobject]@{Id=42;Path=$script:BackendExe}}}
+function Update-AppearanceProcessInventory {$script:InventoryReads++}
+function Start-ResidentAppearanceBackend {throw 'No backend start allowed in this fixture'}
 function Test-BackendOwner {$script:Live}
 function Assert-SingleAppearanceBackend($Processes){if(@($Processes).Count -ne 1){throw "fixture instance identity"}}
 function Test-CssDesktopEditing {$true}
@@ -43,10 +45,10 @@ function Rejected([scriptblock]$Action){try{& $Action|Out-Null;return $false}cat
 Invoke-PresetPrepare|Out-Null
 $script:Live=$true;$script:Rows=@(Get-ThemeRows|Where-Object name -ne 'YMCC Game Details'|ForEach-Object{[pscustomobject]@{name=$_.name;enabled=$_.configured}})
 $before=Get-AppearanceStatus
-Assert ($before.backendReady -and $before.backendReloadRequired -and ($before.themes|Where-Object name -eq 'YMCC Game Details').backendEnabled -eq $null) 'Reproduce running seven-theme backend while the eighth theme already exists and is active on disk'
+Assert ($before.backendReady -and $before.backendReloadRequired -and ($before.themes|Where-Object name -eq 'YMCC Game Details').backendEnabled -eq $null) 'Reproduce a running backend that has not yet loaded one of the seven installed themes'
 $hashes=@{};foreach($row in Get-ThemeRows){$hashes[$row.name]=Get-AppearanceConfigValue $row.config}
 $result=Invoke-AppearanceReload ([pscustomobject]@{targetId=$before.targetId;expectedRevision=$before.revision})
-Assert ($result.ok -and !$result.started -and $result.reloaded -and $result.snapshot.configuredMatchesBackend -and !$result.snapshot.backendReloadRequired) 'In-place reload discovers and confirms all eight themes without a helper or restart'
+Assert ($result.ok -and !$result.started -and $result.reloaded -and $result.snapshot.configuredMatchesBackend -and !$result.snapshot.backendReloadRequired) 'In-place reload discovers and confirms all seven themes without a helper or restart'
 Assert ((Test-CssDesktopEditing) -and $script:Stopped -eq 0 -and $script:Reloads -eq 1) 'An open Desktop is preserved and no direct style cleanup or backend termination occurs'
 Assert (@($result.snapshot.themes|Where-Object {$_.configured -and $_.backendEnabled}).Count -eq 7) 'The resulting seven-of-seven state matches disk and backend'
 foreach($row in Get-ThemeRows){Assert ((Get-AppearanceConfigValue $row.config) -ceq $hashes[$row.name]) ('Exact configuration values preserved: '+$row.name)}
@@ -59,7 +61,7 @@ foreach($mode in @('errors','malformed','missing','edited')){
  Assert ((Read-PresetState).pendingReload -eq $true) ('Unconfirmed '+$mode+' keeps the reload requirement')
 }
 $script:Mode='success';Invoke-PresetPrepare $true|Out-Null;$started=Start-AppearanceBackend
-Assert ($started.ok -and !$started.started -and $script:Stopped -eq 0) 'Ensure can reuse the running editor-owned backend for a pending resource reload'
+Assert ($started.ok -and !$started.started -and $script:Stopped -eq 0 -and $script:InventoryReads -eq 1) 'Ensure reuses the running editor-owned backend after one shared inventory read'
 $script:Live=$false;$count=$script:Reloads
 Assert (Rejected {Invoke-AppearanceReload}) 'Reload does not create a missing backend'
 Assert ($script:Reloads -eq $count) 'Missing backend rejection makes no reset call'

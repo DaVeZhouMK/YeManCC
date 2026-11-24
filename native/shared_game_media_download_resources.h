@@ -60,6 +60,8 @@ class CpuGate {
   uint64_t calmSince_ = 0;
 
 public:
+  static constexpr uint64_t calmWindowMs = 10000;
+
   const char *observe(std::optional<double> usage, int threshold,
                       uint64_t time) {
     if (!usage || !std::isfinite(*usage) || *usage < 0 || *usage > 100) {
@@ -79,7 +81,7 @@ public:
     }
     if (!calmSince_)
       calmSince_ = time;
-    if (time - calmSince_ < 10000)
+    if (time - calmSince_ < calmWindowMs)
       return "cpu-recovering";
     overloaded_ = false;
     calmSince_ = 0;
@@ -112,5 +114,6 @@ struct ResourcePorts {
   };
   std::function<std::optional<double>(uint64_t)> cpu;
   std::function<bool()> foreground;
+  std::function<void(const std::string&,int,const char*,DWORD,uint64_t,bool)> playbackAttempt;
 };
 } // namespace ymcc::media::downloads

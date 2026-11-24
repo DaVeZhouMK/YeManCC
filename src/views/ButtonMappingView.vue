@@ -24,7 +24,7 @@ import ControllerFeedbackCapabilitiesCard from '@/components/ControllerFeedbackC
 import ControllerCalibrationCard from '@/components/ControllerCalibrationCard.vue';
 import ControllerShortcutEditorView from '@/views/ControllerShortcutEditorView.vue';
 import { compareAndSwapInputSettings, onInputSettingsChanged, VirtualStartProtectionActive, type InputSettingsSnapshot } from '@/bridge/settingsRepository';
-import { invoke, on } from '@/bridge/ipc';
+import { invoke, on, setGyroTelemetryInterest } from '@/bridge/ipc';
 import { gamepadEnvironmentNotice } from '@/bridge/gamepadEnvironmentNotice';
 import type { HidHideSetupSnapshot } from '@/bridge/hidHideSetupPrompt';
 import { normalizeOemKeysSnapshot } from '@/bridge/controllerShortcutRules';
@@ -469,6 +469,7 @@ onMounted(() => {
     if (state?.sensorPresent === true || normalizeGyroTelemetry(state)?.gamepadMotionPlane)
       physicalGyroSupported.value = true;
   });
+  setGyroTelemetryInterest(physicalGyroSupported, true);
   // OneX firmware chords can press and release between gamepad.state snapshots.
   // This receipt only marks observed input; the preview keeps actual held state.
   stopOemObserved = on<unknown>('oem.keys.observed', receipt => {
@@ -510,6 +511,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   channelStatusMounted = false; ++channelReadEpoch;
   stopPhysicalGyro?.();
+  setGyroTelemetryInterest(physicalGyroSupported, false);
   stopOemObserved?.();
   ++targetSaveEpoch;
   targetOperationDeadline = null; targetOperationEpoch = 0; targetOperationPersona = null;
@@ -518,10 +520,10 @@ onBeforeUnmount(() => {
   controllerActive = false; ++profileRemovalEpoch; profileRemoval.value = null;
   stopOverride?.(); stopBackendState?.(); stopShortcutRuntime?.(); stopInputSettings?.();
 });
-onActivated(() => { controllerActive=true; refreshTargetWait(); void loadTarget().catch(() => undefined); if (channelWasInactive) { channelWasInactive=false; void readPhysicalChannelCapabilities(); } });
+onActivated(() => { controllerActive=true; setGyroTelemetryInterest(physicalGyroSupported, true); refreshTargetWait(); void loadTarget().catch(() => undefined); if (channelWasInactive) { channelWasInactive=false; void readPhysicalChannelCapabilities(); } });
 // The controller page is cached by KeepAlive. Do not leave a Teleport-ed
 // modal visible after navigating to another page.
-onDeactivated(() => { controllerActive=false; channelWasInactive=true; ++channelReadEpoch; observedOemKeys.value=[]; physicalGyroSupported.value=null; ++profileRemovalEpoch; editorOpen.value=false; profileRemoval.value=null; });
+onDeactivated(() => { controllerActive=false; setGyroTelemetryInterest(physicalGyroSupported, false); channelWasInactive=true; ++channelReadEpoch; observedOemKeys.value=[]; physicalGyroSupported.value=null; ++profileRemovalEpoch; editorOpen.value=false; profileRemoval.value=null; });
 function openShortcutEditor(): void {
   if (editorOpen.value) return;
   editorOpen.value = true;

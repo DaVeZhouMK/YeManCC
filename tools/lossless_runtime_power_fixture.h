@@ -30,9 +30,13 @@
 #undef GetClassNameW
 #endif
 #include "sleep_power_revocation.h"
+#include "sleep_wake_admission.h"
 #include "json.hpp"
 namespace ymcc::screenpads {template<class... Args> inline void ownerSharedPowerChanged(const Args&...){}}
 namespace ymcc::http {inline ULONGLONG timeoutBudget(long long){throw std::runtime_error("unselected-http-budget");}}
+#if defined(YMCC_LOSSLESS_RUNTIME_ENTRY_ONLY)
+namespace ymcc::inputHost::msiPowerWork {inline void readyDelivery(const sleeppower::SharedPowerV1&){} }
+#endif
 namespace ymcc::losslessRuntimePowerFixture {
 using json=nlohmann::json;
 inline std::wstring folder;
@@ -124,6 +128,7 @@ inline std::function<json(const json&)> watchEntry;
 inline std::atomic<unsigned> endpointDiscoveries{0},endpointEmits{0};
 inline std::atomic<unsigned> commonEmits{0};
 inline std::atomic<bool> endpointReceiptKnown{false};
+inline std::atomic<std::uint64_t> endpointGeneration{0},endpointSequence{0},endpointSuspendSerial{0};
 inline int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,uint32_t bytes){return reader(out,bytes);}
 inline std::string W2U(const std::wstring& value){
     if(value.empty())return {};if(value.size()>INT_MAX)throw std::length_error("fixture text size");
@@ -134,7 +139,10 @@ inline std::string W2U(const std::wstring& value){
 inline RuntimeMonitor& fixtureMonitor(){return *endpoint;}
 inline void ipc_emit(const char* name,const json& value){
     if(std::string(name)=="power.lifecycleChanged"){++commonEmits;return;}
-    endpointReceiptKnown=std::string(name)=="lossless.runtime"&&value.at("known").get<bool>();++endpointEmits;
+    endpointReceiptKnown=std::string(name)=="lossless.runtime"&&value.at("known").get<bool>();
+    endpointGeneration=value.value("powerGeneration",std::uint64_t{0});
+    endpointSequence=value.value("powerNotificationSequence",std::uint64_t{0});
+    endpointSuspendSerial=value.value("powerSuspendSerial",std::uint64_t{0});++endpointEmits;
 }
 inline std::map<std::string,std::function<json(const json&)>> readEntries;
 template<class F> void ipc_on(const char* name,F value){if(std::string(name)=="lossless.detect"||std::string(name)=="lossless.getState")readEntries[name]=value;else watchEntry=value;}
@@ -145,9 +153,12 @@ inline void installWatch(){
 #include "watch-entry.inc"
 }
 inline std::atomic<bool> g_sharedPowerProjectionPending{false},g_sensorSuspendCallbackActive{false};
+inline std::atomic<bool> g_powerResumeCommitRedelivery{false},g_powerInputRecoverRedelivery{false},g_sleepPowerRedeliveryArmed{false};
 inline std::atomic<std::uint64_t> g_sharedPowerPublicationRevision{1};
 inline bool commonRetryRequested=false;
 inline void sleepPowerArmRedelivery(HWND){commonRetryRequested=true;}
+inline void sleepPowerArmUnknownRedelivery(HWND,unsigned long long){commonRetryRequested=true;g_sleepPowerRedeliveryArmed=true;}
+inline void sleepPowerRedeliverCommitted(HWND){}
 inline unsigned long long currentPowerGeneration(){std::lock_guard<std::mutex> lock(powerMutex);return nativePowerFact.generation;}
 inline bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& out){return ymcc::sleeppower::capturePower(reader,out);}
 inline bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& out){return ymcc::sleeppower::powerCurrent(reader,out);}
@@ -155,9 +166,26 @@ inline bool sharedSleepWakeClassified(unsigned long long){return true;}
 inline void sharedPowerProjectionConsumerFailed(const char*,
     const ymcc::sleeppower::SharedPowerV1* = nullptr,const std::uint64_t* = nullptr){}
 template<class... Args> inline void monitorSharedPowerChanged(const Args&...){}
+template<class... Args> inline bool nativeAyaLightingPublicReady(const Args&...){return true;}
+template<class... Args> inline bool projectPowerSourceRecovery(const Args&...){return true;}
+template<class... Args> inline bool deckySidebarRecheckPublicReady(const Args&...){return true;}
+template<class... Args> inline bool steamWallpaperForegroundSharedPowerChanged(const Args&...){return true;}
+inline struct { void sharedPowerChanged(const ymcc::sleeppower::SharedPowerV1&){} } g_gameOverlay;
+inline void sgOfferStartupResume(const ymcc::sleeppower::SharedPowerV1&){}
+inline bool sgSleepRetryActive(){return false;}
+inline unsigned long long currentFanPowerGeneration(){return 0;}
+enum class FanReadyDelivery { Idle, Settled, Deferred };
+inline FanReadyDelivery fanHostScheduleEmergencyResume(unsigned long long){return FanReadyDelivery::Idle;}
+inline bool fanHostPhysicalWakeCurrent(){return false;}
+inline FanReadyDelivery fanHostPublishPhysicalWake(std::uint64_t,bool){return FanReadyDelivery::Idle;}
+inline void steamAppearancePublicReady(unsigned long long){}
 inline void inputCaptureResumeSensorsForPower(){}
+inline void sgNotifyParkedWakeGameRecovery(){}
 inline bool msiNativeForegroundSharedPowerReady(const ymcc::sleeppower::SharedPowerV1&){return true;}
+inline bool msiNativeForegroundSharedPowerBoundary(const ymcc::sleeppower::SharedPowerV1&){return true;}
+inline bool radialOverlaySharedPowerChanged(const ymcc::sleeppower::SharedPowerV1&){return true;}
 inline bool focusIsolationSharedPowerChanged(const ymcc::sleeppower::SharedPowerV1&){return true;}
+inline bool cpuUvTrialPowerChanged(){return false;}
 namespace SleepRecoveryAuto {inline void powerReady(unsigned long long){}}
 inline void steamOriginalRecoveryPowerReady(unsigned long long){}
 namespace SteamControllerCursor {template<class... Args> inline void power(const Args&...){}}
@@ -265,6 +293,8 @@ inline std::vector<std::pair<std::string,std::function<void()>>> cases(){
         transition(0,3);endpoint->powerChanged();
         expect(until([]{return endpointEmits.load()==1;}),"actual-watch-public-ready-publishes-without-another-ipc");
         expect(endpointReceiptKnown&&endpointDiscoveries==1,"actual-watch-sends-fresh-original-runtime-receipt");
+        expect(endpointGeneration==41&&endpointSequence==2&&endpointSuspendSerial==1,
+            "actual-watch-receipt-carries-ready-observation-scope");
         expect(watchEntry(json{{"active",false},{"detailed",false}})==true,"actual-watch-retains-normal-off");endpoint->stop();
         bool stoppedRejected=false;try{watchEntry(json{{"active",true},{"detailed",false}});}catch(const std::runtime_error& e){stoppedRejected=std::string(e.what())=="LOSSLESS_WATCH_UNAVAILABLE";}
         expect(stoppedRejected&&endpointDiscoveries==1,"unavailable-native-watch-propagates-error-and-does-not-restart");
@@ -284,6 +314,8 @@ inline std::vector<std::pair<std::string,std::function<void()>>> cases(){
         expect(until([]{return closed.load()==1;},700),"nonready-common-fact-and-native-cancel-return-current-watch");
         transition(0,3,true);deliverCommon();
         expect(until([]{return endpointEmits.load()==2;}),"next-common-ready-renews-scope-in-same-desired-monitor");
+        expect(endpointGeneration==42&&endpointSequence==4&&endpointSuspendSerial==2,
+            "actual-watch-receipt-renews-all-scope-fields-after-suspend");
         const auto count=endpointDiscoveries.load();deliverCommon();Sleep(40);
         expect(endpointDiscoveries==count&&!commonRetryRequested,"diagnostic-common-publication-keeps-healthy-observer-and-no-retry-timer");
         g_exitRequested=true;const auto emitted=commonEmits.load();deliverCommon();

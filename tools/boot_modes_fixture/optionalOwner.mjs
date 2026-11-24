@@ -22,7 +22,7 @@ export async function runOptionalOwner(out,args=[]){
   if(stage==='display'||stage==='brightness')doc.global.display={brightness:stage==='brightness'?75:50,resolution:'1920x1080',hz:'120'};
   if(stage==='appearance')doc.global.steamAppearance={states:{Round:true}};
   if(stage==='fan')doc.global.fan={enabled:true,preset:'soft'};
-  if(stage==='sleep')doc.global.sleep.hibernate=true;
+  if(stage==='sleep')doc.global.sleep={hibernate:true,hibernateSize:60,timeouts:{acSleep:1}};
   if(stage==='monitor')doc.global.monitor={preferences:{...doc.global.monitor.preferences,output:'ymcc',enabled:true,ymccEnabled:true}};
   q.settings.extensions.bootModes=structuredClone(doc);
   let changed=false,at=0;
@@ -44,6 +44,10 @@ export async function runOptionalOwner(out,args=[]){
   let error='';try{await a.boot.applyBootMode(mode,doc,{startup:true});}catch(e){error=String(e);}
   const observedOps={charge:['charge.set','charge.release'],display:['display.set'],appearance:['appearance.apply'],fan:['fan.preset'],sleep:['hibernate.set','hibernate.size','sleep.timeout'],monitor:['monitor.apply'],brightness:['display.set']};
   const late=q.calls.slice(at).filter(row=>observedOps[stage].includes(row.op));
+  if(stage==='sleep'&&!a.model.BOOT_MODE_MODULES.includes('sleep')){
+   const row={mode,stage,kind,retired:true,changed,error,lateOps:late.map(v=>v.op)};
+   fs.appendFileSync(raw,JSON.stringify(row)+'\n');assert(!changed&&!error&&late.length===0,'Retired module reached a sleep owner');rows.push(row);continue;
+  }
   const allowed=['ack','unrelated','current'].includes(kind),row={mode,stage,kind,changed,allowed,error,lateOps:late.map(v=>v.op)};
   fs.appendFileSync(raw,JSON.stringify(row)+'\n');assert(changed,'Selected optional module boundary not reached '+JSON.stringify(row));
   if(allowed){assert(!error,JSON.stringify(row));assert(late.length>0,'Current optional module did not reach original action '+JSON.stringify(row));}

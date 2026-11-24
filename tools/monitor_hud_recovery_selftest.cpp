@@ -39,7 +39,7 @@ int runFrameLeaseBoundaries(const std::string& only={}){
   carrier.current=s;
   // Keep layout unpainted and HWND off screen; still admit show=true normal data.
   s->layoutKey=Json{{"crosshair",false},{"layout",""},{"scale",1.0},{"gap",8},{"fields",Json::object()}}.dump();
-  s->viewportKey=Carrier::viewportInfo(*s).dump();
+  s->lastViewport=Carrier::readViewport(*s);
   return s;
  };
  const auto payload=[](const std::shared_ptr<Carrier::State>& s,unsigned long long seq,unsigned long long expires){

@@ -6,6 +6,8 @@ import {createHash} from 'node:crypto';
 
 const root=path.resolve(import.meta.dirname,'..'),out=process.argv[2],onlyScenario=process.argv[3];
 const selectedArgs=process.argv.slice(4),waitIndex=selectedArgs.indexOf('--native-binding-wait');
+const documentRetirement=selectedArgs.includes('--document-retirement');
+if(documentRetirement&&(onlyScenario!=='remount-on-shared-socket'||selectedArgs.length!==2||!selectedArgs.includes('--single-viewport')))throw Error('WALLPAPER_DOCUMENT_RETIREMENT_SCOPE');
 const teardownFlags=selectedArgs.filter(arg=>arg.startsWith('--teardown-variant='));
 if(teardownFlags.length>1)throw Error('WALLPAPER_TEARDOWN_VARIANT_DUPLICATE');
 if(selectedArgs.includes('--teardown-variant'))throw Error('WALLPAPER_TEARDOWN_VARIANT_EMPTY');
@@ -38,12 +40,12 @@ if(wallpaperSourceOverride&&!bindingWaitVariant&&!teardownVariant)throw Error('W
 if(bindingWaitVariant&&(!['normal','hidden','dispose','off','invalid','revoked'].includes(bindingWaitVariant)||onlyScenario!=='cold-connected-later'))throw Error('Native binding wait requires the original cold-connected-later scenario and one known variant');
 const viewports=bindingWaitVariant||selectedArgs.includes('--single-viewport')?[{width:1280,height:800}]:[{width:1280,height:800},{width:1920,height:1200},{width:1920,height:1080},{width:3840,height:2160}];
 if(!out)throw Error('validation directory required (react.js and react-dom.js)');
-const scenarios=['shared-connected','cold-connected-later','legacy-cold-no-ready','send-once-fails','hidden-then-visible','remount-on-shared-socket','dispose-while-mounted','late-home-no-route-remount','late-home-native-selection','late-home-delayed-native-root','late-nonhome-idle','normal-home-delayed-holder','detail-ignores-home-holder','pending-ready-dedupe'];
+const scenarios=['shared-connected','cold-connected-later','legacy-cold-no-ready','send-once-fails','hidden-then-visible','remount-on-shared-socket','dispose-while-mounted','late-home-no-route-remount','late-home-native-selection','late-home-delayed-native-root','late-nonhome-idle','normal-home-delayed-holder','detail-ignores-home-holder','pending-ready-dedupe','screensaver-obscures-visible-main','screensaver-keeps-main-focus','home-qam-same-foreground'];
 if(onlyScenario&&!scenarios.includes(onlyScenario))throw Error('Unknown wallpaper scenario: '+onlyScenario);
 fs.mkdirSync(out,{recursive:true});
 const {build}=createRequire(root+'/package.json')('esbuild');
 const testedSources=[];
-let providerExpression='',listenerExpression='',entryText='',reconcileExpression='',dismountExpression='',consumerStartupExpression='';
+let providerExpression='',listenerExpression='',entryText='',reconcileExpression='',dismountExpression='',consumerStartupExpression='',reconcileFactory='';
 const entrySource=entrySourceOverride||path.join(root,'decky-plugin/src/index.tsx');
 if(bindingWaitVariant){
  const ts=createRequire(root+'/package.json')('typescript');entryText=fs.readFileSync(entrySource,'utf8');
@@ -61,7 +63,14 @@ if(bindingWaitVariant){
   const demand=entryStatements.filter(node=>ts.isExpressionStatement(node)&&node.expression.getText(tree)==="client.setPassiveDemand('connection',true)");assert.equal(demand.length,1,'original entry connection demand');
   consumerStartupExpression=[demand[0],...setup].map(node=>node.getText(tree)).join(String.fromCharCode(10));
  }
- if(bootstrapConsumers){const reconcile=declarations.find(node=>node.name.getText(tree)==='stopBootstrapReconcile');reconcileExpression=reconcile?.initializer?.getText(tree)||'(()=>{})';const dismount=entryStatements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='dismount');assert(dismount,'actual entry unload function');dismountExpression=dismount.getText(tree);}
+ if(bootstrapConsumers){
+  const start=entryStatements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='startBootstrapReconcile');
+  const legacy=declarations.find(node=>node.name.getText(tree)==='stopBootstrapReconcile');
+  assert(start||legacy?.initializer,'actual original bootstrap observation initializer');
+  reconcileExpression=start?.getText(tree)??legacy.initializer.getText(tree);
+  reconcileFactory=start?'let stopBootstrapConnection,stopBootstrapWait;'+reconcileExpression+';startBootstrapReconcile();return {stopBootstrapConnection,stopBootstrapWait};':'return {stopBootstrapReconcile:('+reconcileExpression+')};';
+  const dismount=entryStatements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='dismount');assert(dismount,'actual entry unload function');dismountExpression=dismount.getText(tree);
+ }
  const snapshot=path.join(out,'tested-source/decky-plugin/src/index.tsx');fs.mkdirSync(path.dirname(snapshot),{recursive:true});fs.writeFileSync(snapshot,entryText);testedSources.push({path:path.join(root,'decky-plugin/src/index.tsx'),actualSource:entrySource,snapshot,sha256:createHash('sha256').update(entryText).digest('hex')});
 }
 const pinSources={name:'wallpaper-exact-tested-sources',setup(builder){builder.onLoad({filter:bootstrapConsumers?/\.(?:tsx?|m?js|json|vue|png|svg)$/:/\.tsx?$/},args=>{
@@ -72,9 +81,10 @@ const pinSources={name:'wallpaper-exact-tested-sources',setup(builder){builder.o
  return{contents:bytes.toString('utf8'),loader:args.path.endsWith('.tsx')?'tsx':args.path.endsWith('.ts')?'ts':args.path.endsWith('.json')?'json':'js',resolveDir:path.dirname(args.path)};
 });}};
 const startupExport=hudStartupVariant?"export {installLoaderUpdateRow} from './decky-plugin/src/deckyLoaderUpdate';export function actualConsumerStartup({client,React,DFL,routerHook,window,SP_REACTDOM,installSteamMonitorHud,installSteamWallpaper,installLoaderUpdateRow}){"+consumerStartupExpression+";return {disposeMonitorHud,disposeWallpaper,disposeLoaderUpdate};}":'';
-const consumerExports=bootstrapConsumers?startupExport+"export {installSteamMonitorHud} from './decky-plugin/src/steamMonitorHud';export {DeckyUpdaterClient} from './decky-plugin/src/deckyUpdaterClient';export const actualInstallReconcile=(client)=>("+reconcileExpression+");export function actualDismountFactory({client,stopBootstrapReconcile,bootstrapListener,disposeMonitorHud,disposeWallpaper,disposeLoaderUpdate,placement}){let dismounted=false;const frontendReceipt={},disposeHudProbe=null,activeContentIntents=new Set();"+dismountExpression+";return dismount;}":'';
+const consumerExports=bootstrapConsumers?startupExport+"export {installSteamMonitorHud} from './decky-plugin/src/steamMonitorHud';export {DeckyUpdaterClient} from './decky-plugin/src/deckyUpdaterClient';export function actualInstallReconcile(client){"+reconcileFactory+"}export function actualDismountFactory({client,stopBootstrapReconcile,stopBootstrapConnection,stopBootstrapWait,bootstrapListener,disposeMonitorHud,disposeWallpaper,disposeLoaderUpdate,placement}){let dismounted=false;const frontendReceipt={},disposeHudProbe=null,activeContentIntents=new Set(),pagehideListener=null,qamConnectionListener=null;"+dismountExpression+";return dismount;}":'';
 const consumerPlugins=bootstrapConsumers?[(await import('./monitor_hud_vue_build.mjs')).monitorHudVuePlugin(root)]:[];
-const bundleBuild=await build({metafile:bootstrapConsumers||!!teardownVariant,stdin:{contents:consumerExports+"export {installSteamWallpaper} from './decky-plugin/src/steamWallpaper';export {MirrorClient} from './decky-plugin/src/mirrorClient';"+(bindingWaitVariant?"export const actualBootstrap="+providerExpression+";export const actualBootstrapListener=(client)=>("+listenerExpression+");":""),resolveDir:root,loader:'ts'},bundle:true,platform:'browser',format:'iife',globalName:'WallpaperStartup',plugins:[pinSources,...consumerPlugins],outfile:out+'/wallpaper-startup-bundle.js'});
+const retirementExports=documentRetirement?"export {installWallpaperRouteFallback} from './decky-plugin/src/wallpaperRouteFallback';":'';
+const bundleBuild=await build({metafile:bootstrapConsumers||!!teardownVariant,stdin:{contents:consumerExports+retirementExports+"export {installSteamWallpaper} from './decky-plugin/src/steamWallpaper';export {MirrorClient} from './decky-plugin/src/mirrorClient';"+(bindingWaitVariant?"export const actualBootstrap="+providerExpression+";export const actualBootstrapListener=(client)=>("+listenerExpression+");":""),resolveDir:root,loader:'ts'},bundle:true,platform:'browser',format:'iife',globalName:'WallpaperStartup',plugins:[pinSources,...consumerPlugins],outfile:out+'/wallpaper-startup-bundle.js'});
 if(bootstrapConsumers||teardownVariant){const actualInputPaths=Object.keys(bundleBuild.metafile.inputs).filter(p=>p!=='<stdin>').map(p=>path.resolve(root,p));for(const p of actualInputPaths)assert(testedSources.some(row=>path.resolve(row.path)===p),'actual compiled input must have an exact snapshot: '+p);const drift=testedSources.filter(row=>createHash('sha256').update(fs.readFileSync(row.actualSource||row.path)).digest('hex')!==row.sha256);assert.deepEqual(drift,[],'no source drift during actual bundle compilation');fs.writeFileSync(path.join(out,'BUNDLE-INPUTS.json'),JSON.stringify({actualInputPaths,testedSources,metafile:bundleBuild.metafile},null,2)+String.fromCharCode(10));}
 const {chromium}=createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/package.json')('playwright');
 const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});
@@ -87,7 +97,7 @@ try{
    const page=await browser.newPage({viewport});page.on('pageerror',e=>errors.push(e.message));
    await page.route('http://127.0.0.1:13140/**',route=>new URL(route.request().url()).pathname.startsWith('/asset/')?route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==','base64')}):route.fulfill({contentType:'text/html',body:'<!doctype html><style>html,body,#root{height:100%;margin:0}.native-detail,.native-home,.native-home-root{position:absolute;inset:0}.native-images{position:absolute;inset:0;background:red}</style><div id="root"></div>'}));
    await page.goto('http://127.0.0.1:13140/');for(const file of ['react.js','react-dom.js','wallpaper-startup-bundle.js']){if(realSiblingStartup&&file==='wallpaper-startup-bundle.js')await page.evaluate(()=>{window.SP_REACT=window.React;window.SP_REACTDOM=window.ReactDOM;});await page.addScriptTag({path:path.join(out,file)});}
-   await page.evaluate(({scenario,bindingWaitVariant,bootstrapConsumers,hudOnlyVariant,teardownVariant,hudTeardownVariant,hudStartupVariant,realSiblingStartup})=>{
+   await page.evaluate(({scenario,bindingWaitVariant,bootstrapConsumers,hudOnlyVariant,teardownVariant,hudTeardownVariant,hudStartupVariant,realSiblingStartup,documentRetirement})=>{
     // Instrument only this isolated document. Forward every browser operation;
     // count actual live owners rather than inferring cleanup from DOM absence.
     const trackedTypes=new Set(['visibilitychange','freeze','resume','blur','focus','pagehide','pageshow','focusin','ymcc-decky-bootstrap']);
@@ -103,6 +113,7 @@ try{
     window.IntersectionObserver=class extends NativeIntersection{constructor(callback,options){super((...args)=>{intersectionCallbacks++;callback(...args)},options)}observe(...args){activeIntersections.add(this);return super.observe(...args)}disconnect(){activeIntersections.delete(this);return super.disconnect()}};
     const resources=()=>({listeners:eventRecords.length,historyListeners:historyListeners.size,mutationObservers:activeMutations.size,intersectionObservers:activeIntersections.size,mutationCallbacks,intersectionCallbacks});
     if(bootstrapConsumers)Object.defineProperty(navigator,'onLine',{value:false,configurable:true});
+    if(scenario==='screensaver-obscures-visible-main')Object.defineProperty(document,'hasFocus',{value:()=>false,configurable:true});
     const bootstrap={...(bootstrapConsumers?{updaterProtocol:1}:{}),endpoint:'ws://127.0.0.1:18181/mirror',token:'a'.repeat(64),runId:'startup-proof',hudProtocol:1,wallpaperProtocol:1};if(bindingWaitVariant&&!['already-defined','already-revoked'].includes(hudOnlyVariant))delete window.__YMCC_DECKY_MIRROR__;else window.__YMCC_DECKY_MIRROR__=hudOnlyVariant==='already-revoked'?{...bootstrap,revoked:true}:bootstrap;
     const timers=new Set(),scheduled=[],scheduleTrace=[],socketHistory=[];let sockets=0,bootstrapEvents=0;const countBootstrap=()=>bootstrapEvents++;if(bootstrapConsumers)window.addEventListener('ymcc-decky-bootstrap',countBootstrap);
     let failedOnce=false;
@@ -113,14 +124,19 @@ try{
      listeners=new Map();sent=[];closed=false;wallpaperEnabled=true;stateRevision=1;allowReady=!!bindingWaitVariant||!['cold-connected-later','legacy-cold-no-ready'].includes(scenario);failNext=scenario==='send-once-fails'&&!failedOnce;
      addEventListener(type,fn){this.listeners.set(type,fn)}close(){this.closed=true;}
      send(text){const m=JSON.parse(text);if(hudStartupVariant&&m.command==='snapshot'&&m.subscribe!==false)queueMicrotask(()=>this.emit('message',{data:JSON.stringify({type:'snapshot',runId:this.binding.runId,probeId:m.probeId,snapshot:{runId:this.binding.runId,generation:1,revision:1,ready:false,provenance:{kind:'ymcc-native',pid:4242},game:null,fan:{supported:false,enabled:false,preset:'auto',choices:[]}}})}));if(bootstrapConsumers&&m.command==='updater.status'&&m.subscribe)queueMicrotask(()=>this.emit('message',{data:JSON.stringify({type:'ymcc-updater',runId:this.binding.runId,view:{protocol:1,revision:1,hostVersion:'0.0.37',phase:'available',targetVersion:'0.0.38',targetHash:'b'.repeat(64),percent:null,canCheck:true,canDownload:true,canInstall:false,gameRunning:false,message:''}})}));if(m.command==='wallpaper.context'&&this.failNext){this.failNext=false;failedOnce=true;throw Error('one interrupted send');}this.sent.push(m);if(m.command==='wallpaper.context'&&this.holdReplies)return;if(m.command==='wallpaper.context'&&m.requestReady&&this.allowReady)queueMicrotask(()=>this.emit('message',{data:JSON.stringify({type:'wallpaper-ready',runId:(bootstrapConsumers?this.binding:bootstrap).runId,enabled:this.wallpaperEnabled,stateRevision:this.stateRevision,contextSeq:m.contextSeq})}));if(m.command==='wallpaper.context')queueMicrotask(()=>this.emit('message',{data:JSON.stringify({type:'wallpaper',runId:(bootstrapConsumers?this.binding:bootstrap).runId,enabled:this.wallpaperEnabled,...(scenario==='legacy-cold-no-ready'?{}:{stateRevision:this.stateRevision}),contextSeq:m.contextSeq,appId:m.appId,entry:m.visible&&this.wallpaperEnabled?{assetId:'fixture',revision:'1',bindingRevision:1,kind:'image',url:'http://127.0.0.1:13140/asset/fixture.png?token='+(bootstrapConsumers?this.binding:bootstrap).token}:null})}));}
-     emit(type,event={}){if(type==='message'&&typeof event.data==='string'){const packet=JSON.parse(event.data);if((packet.type==='wallpaper'||packet.type==='wallpaper-ready')&&!Object.prototype.hasOwnProperty.call(packet,'foreground'))event={...event,data:JSON.stringify({...packet,foreground:this.nativeForeground})};}this.listeners.get(type)?.(event)}
+     emit(type,event={}){if(type==='message'&&typeof event.data==='string'){const packet=JSON.parse(event.data);if(packet.type==='wallpaper'||packet.type==='wallpaper-ready'){if(!Object.prototype.hasOwnProperty.call(packet,'foreground'))packet.foreground=this.nativeForeground;if(scenario==='shared-connected'&&!Object.prototype.hasOwnProperty.call(packet,'stateOwner'))packet.stateOwner='fixture-wallpaper-owner';event={...event,data:JSON.stringify(packet)};}}this.listeners.get(type)?.(event)}
     }
     let socket;const client=new WallpaperStartup.MirrorClient({bootstrap:bindingWaitVariant?WallpaperStartup.actualBootstrap:(()=>bootstrap),socket:()=>{sockets++;socket=new Socket();socketHistory.push(socket);return socket},schedule:(fn,delay)=>{if(bindingWaitVariant)scheduled.push(fn);const record={delay,at:performance.now(),fired:null,canceled:null};if(bindingWaitVariant)scheduleTrace.push(record);const t=setTimeout(()=>{timers.delete(t);record.fired=performance.now();fn()},delay);record.timer=t;timers.add(t);return t},cancel:t=>{timers.delete(t);const record=scheduleTrace.find(row=>row.timer===t);if(record)record.canceled=performance.now();clearTimeout(t)},clientId:'wallpaper-startup-proof'});
     // The real HUD owns a passive connection even when the sidebar is closed.
     if(!bindingWaitVariant){client.setPassiveDemand('hud',true);if(scenario!=='cold-connected-later')socket.emit('open');}
-    const lateHome=scenario.startsWith('late-home-'),lateNonhome=scenario==='late-nonhome-idle',normalHome=scenario==='normal-home-delayed-holder',detailScope=scenario==='detail-ignores-home-holder',homePage=lateHome||normalHome||realSiblingStartup,globalCarrier=lateHome||lateNonhome,nativeSelection=scenario==='late-home-native-selection'||normalHome||detailScope;
+    const lateHome=scenario.startsWith('late-home-'),lateNonhome=scenario==='late-nonhome-idle',normalHome=scenario==='normal-home-delayed-holder',detailScope=scenario==='detail-ignores-home-holder',homeQam=scenario==='home-qam-same-foreground',homePage=lateHome||normalHome||homeQam||realSiblingStartup,globalCarrier=lateHome||lateNonhome,nativeSelection=scenario==='late-home-native-selection'||normalHome||homeQam||detailScope;
     const globalComponents=new Map();const globalElement=document.createElement('div');globalElement.id='decky-globals';document.body.appendChild(globalElement);
     const globalRoot=ReactDOM.createRoot(globalElement);let renderedGlobals=[];const renderGlobals=()=>{if(renderedGlobals.length!==globalComponents.size)renderedGlobals=[...globalComponents].map(([key,Component])=>React.createElement(Component,{key}));globalRoot.render(React.createElement(React.Fragment,null,...renderedGlobals))};
+    if(scenario==='screensaver-keeps-main-focus'||homeQam){
+     Object.defineProperty(document,'hasFocus',{value:()=>true,configurable:true});
+     const root=document.getElementById('root'),parent=document.createElement('div');
+     parent.id='MainNavMenu-Rest';parent.style.height='100%';root.replaceWith(parent);parent.append(root);
+    }
     let reactRoot=ReactDOM.createRoot(document.getElementById('root'));
     let nativeAppId='730',nativeGeneration=0,nativeHolderReady=!normalHome,rerenderNative=()=>{};
     const NativeImages=({appid,previousAppid,preloadAppid})=>React.createElement('div',{className:'native-home-images native-images'});
@@ -175,15 +191,100 @@ try{
     }
     const disposeHud=bootstrapConsumers?installHud():null;
     const updater=bootstrapConsumers?new WallpaperStartup.DeckyUpdaterClient(client,'bootstrap-consumer-proof'):null;if(!hudOnlyVariant)updater?.open();
-    const dispose=hudOnlyVariant?(()=>{}):WallpaperStartup.installSteamWallpaper({host,react:React,reactDom:ReactDOM,ui:{findSP:()=>window,Router:{WindowStore:{GamepadUIMainWindowInstance:nativeWindow}},modules:new Map([['detail',{HeaderBackgroundImage:'native-detail',ImgSrc:'native-images',TopCapsule:'top-capsule'}],...(globalCarrier||normalHome||detailScope?[['home',{RecentGamesBackgroundContainer:'native-home',RecentGamesBackgroundImages:'native-home-images',RecentGamesContainer:'native-home-root'}]]:[])])},routerHook:{addPatch(p,f){patches.set(p,f);return f},removePatch(p){patches.delete(p)},...(globalCarrier?{addGlobalComponent(name,Component){globalComponents.set(name,Component);renderGlobals()},removeGlobalComponent(name){if(window.startup?.teardownFault)throw Error('inert wallpaper global removal failure');globalComponents.delete(name);renderGlobals()}}:{})},client});
+    const dispose=hudOnlyVariant?(()=>{}):WallpaperStartup.installSteamWallpaper({host,react:React,reactDom:ReactDOM,ui:{findSP:()=>window,Router:{WindowStore:{GamepadUIMainWindowInstance:nativeWindow}},modules:new Map([['detail',{HeaderBackgroundImage:'native-detail',ImgSrc:'native-images',TopCapsule:'top-capsule'}],...(globalCarrier||normalHome||homeQam||detailScope||documentRetirement?[['home',{RecentGamesBackgroundContainer:'native-home',RecentGamesBackgroundImages:'native-home-images',RecentGamesContainer:'native-home-root'}]]:[])])},routerHook:{addPatch(p,f){patches.set(p,f);return f},removePatch(p){patches.delete(p)},...(globalCarrier?{addGlobalComponent(name,Component){globalComponents.set(name,Component);renderGlobals()},removeGlobalComponent(name){if(window.startup?.teardownFault)throw Error('inert wallpaper global removal failure');globalComponents.delete(name);renderGlobals()}}:{})},client});
     let bootstrapHandler=null;if(bindingWaitVariant){bootstrapHandler=WallpaperStartup.actualBootstrapListener(client);window.addEventListener('ymcc-decky-bootstrap',bootstrapHandler);}
-    const stopReconcile=bootstrapConsumers?WallpaperStartup.actualInstallReconcile(client):()=>{};let placementsDisposed=0;const dismount=bootstrapConsumers?WallpaperStartup.actualDismountFactory({client,stopBootstrapReconcile:stopReconcile,bootstrapListener:bootstrapHandler,disposeMonitorHud:disposeHud,disposeWallpaper:dispose,disposeLoaderUpdate:()=>updater.close(),placement:{dispose(){placementsDisposed++;}}}):null;
+     const reconcile=bootstrapConsumers?WallpaperStartup.actualInstallReconcile(client):{};
+     const stopReconcile=()=>{reconcile.stopBootstrapWait?.();reconcile.stopBootstrapConnection?.();reconcile.stopBootstrapReconcile?.();};
+     let placementsDisposed=0;const dismount=bootstrapConsumers?WallpaperStartup.actualDismountFactory({client,...reconcile,bootstrapListener:bootstrapHandler,disposeMonitorHud:disposeHud,disposeWallpaper:dispose,disposeLoaderUpdate:()=>updater.close(),placement:{dispose(){placementsDisposed++;}}}):null;
     // The host announces readiness once per connection. A late Surface missed it.
     if(!['cold-connected-later','legacy-cold-no-ready','pending-ready-dedupe'].includes(scenario))socket.emit('message',{data:JSON.stringify({type:'wallpaper-ready',runId:bootstrap.runId,enabled:true})});
     if(scenario==='hidden-then-visible')Object.defineProperty(document,'visibilityState',{value:'hidden',configurable:true});
     const mount=(appId='730')=>{const props=homePage||appId===null?{}:{match:{params:{appid:appId}}};const route=patches.get(homePage?'/library/home':'/library/app/:appid')({children:React.createElement(Original,props)});reactRoot.render(route.children);};
     if(!globalCarrier&&!hudOnlyVariant)mount(detailScope?null:'730');window.startup={hudControl:{host,installHud,disposeHud,get diagnostic(){return host.__YMCC_STEAM_MONITOR_HUD__}},remountGlobals(){ReactDOM.flushSync(()=>globalRoot.render(null));renderedGlobals=[];ReactDOM.flushSync(renderGlobals);},client,scheduled,scheduleTrace,updater,socketHistory,dismount,stopReconcile,hudStatus(){return host.__YMCC_STEAM_MONITOR_HUD__?.inspect()??null},get bootstrapEvents(){return bootstrapEvents},get placementsDisposed(){return placementsDisposed},provideBinding(kind='normal'){window.__YMCC_DECKY_MIRROR__=kind==='off'?{...bootstrap,wallpaperProtocol:undefined,...(hudOnlyVariant?{hudProtocol:undefined}:{})}:kind==='invalid'?{...bootstrap,endpoint:'ws://example.com:18181/mirror'}:kind==='revoked'?{...bootstrap,revoked:true}:bootstrap;},get socket(){return socket},logs,timers,patches,resources,globalComponents,navigate(path){nativeWindow.m_locationPathname=path;for(const listener of historyListeners)listener({pathname:path},'PUSH')},mountNative(){reactRoot.render(React.createElement(Original))},changeNativeSelection(appId,replace){nativeAppId=appId;if(replace)nativeGeneration++;rerenderNative()},showNativeHolder(){nativeHolderReady=true;rerenderNative()},disposeGlobals(){if(bootstrapConsumers)window.removeEventListener('ymcc-decky-bootstrap',countBootstrap);if(bootstrapHandler)window.removeEventListener('ymcc-decky-bootstrap',bootstrapHandler);globalRoot.unmount();globalElement.remove()},get sockets(){return sockets},mount,dispose,unmount(){reactRoot.unmount();reactRoot=ReactDOM.createRoot(document.getElementById('root'))}};
-   },{scenario,bindingWaitVariant,bootstrapConsumers,hudOnlyVariant,teardownVariant,hudTeardownVariant,hudStartupVariant,realSiblingStartup});
+   },{scenario,bindingWaitVariant,bootstrapConsumers,hudOnlyVariant,teardownVariant,hudTeardownVariant,hudStartupVariant,realSiblingStartup,documentRetirement});
+   if(scenario==='home-qam-same-foreground'){
+    const image='[data-ymcc-wallpaper-surface] img';
+    const ready=()=>page.waitForFunction(selector=>document.querySelector(selector)?.naturalWidth>0,image,{timeout:3000});
+    const sample=()=>page.evaluate(selector=>({
+     sameSurface:!!startup.firstImage&&startup.firstImage===document.querySelector(selector),
+     contexts:startup.socket.sent.filter(m=>m.command==='wallpaper.context').map(({appId,visible})=>({appId,visible})),
+     losses:startup.logs.filter(line=>line.includes('"stage":"background"')).map(line=>JSON.parse(line.slice(line.indexOf('{')))),
+     timers:startup.timers.size,
+    }),image);
+    await ready();
+    await page.evaluate(selector=>{startup.firstImage=document.querySelector(selector);},image);
+    const before=await sample();
+    await page.evaluate(()=>{
+     const qam=document.createElement('div');qam.id='QuickAccess';qam.setAttribute('data-react-nav-root','true');
+     const tab=document.createElement('button');qam.append(tab);document.getElementById('MainNavMenu-Rest').append(qam);tab.focus();
+    });
+    await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+    const open=await sample();
+    check(open.sameSurface&&open.contexts.length===before.contexts.length&&open.losses.length===0&&open.timers===0,'in-document Quick Access focus keeps the foreground Home wallpaper without duplicate work');
+    // A window blur must still win even while document.hasFocus() is stale.
+    await page.evaluate(()=>window.dispatchEvent(new Event('blur')));
+    await page.waitForFunction(selector=>!document.querySelector(selector),image,{timeout:3000});
+    const blurred=await sample();
+    check(blurred.contexts.length===open.contexts.length+1&&blurred.contexts.at(-1)?.visible===false&&blurred.timers===0,'window blur withdraws exactly once even while Quick Access is open');
+    check(blurred.losses.length===1&&blurred.losses[0].veto==='window-blurred'&&blurred.losses[0].page==='/library/home','Home blur has its own bounded reason');
+    await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+    await ready();
+    const restored=await sample();
+    check(restored.contexts.length===blurred.contexts.length+1&&restored.contexts.at(-1)?.appId==='730'&&restored.contexts.at(-1)?.visible===true&&restored.timers===0,'foreground return restores the same card once with Quick Access still open');
+    await page.evaluate(()=>{document.getElementById('QuickAccess').remove();Object.defineProperty(document,'visibilityState',{value:'hidden',configurable:true});document.dispatchEvent(new Event('visibilitychange'));});
+    await page.waitForFunction(selector=>!document.querySelector(selector),image,{timeout:3000});
+    const hidden=await sample();
+    check(hidden.contexts.length===restored.contexts.length+1&&hidden.contexts.at(-1)?.visible===false&&hidden.losses.length===2&&hidden.losses.at(-1)?.veto==='document-hidden'&&hidden.timers===0,'document hide independently withdraws the restored wallpaper');
+    results.push({viewport,scenario,before,open,blurred,restored,hidden});
+    await page.evaluate(()=>{startup.unmount();startup.dispose();startup.disposeGlobals();startup.client.dispose()});await page.close();continue;
+   }
+   if(scenario==='screensaver-keeps-main-focus'){
+    const id='[data-ymcc-wallpaper-surface] img';
+    await page.waitForFunction(selector=>document.querySelector(selector)?.naturalWidth>0,id,{timeout:3000});
+    const sample=()=>page.evaluate(selector=>({focus:document.hasFocus(),visible:document.visibilityState,media:document.querySelectorAll(selector).length,contexts:startup.socket.sent.filter(m=>m.command==='wallpaper.context').map(m=>({appId:m.appId,visible:m.visible})),timers:startup.timers.size}),id);
+    const settle=()=>page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
+    const cover=(name,location)=>page.evaluate(({name,location})=>{
+     const marker=document.createElement('div');marker.id=name;marker.setAttribute('data-react-nav-root','true');
+     document.querySelector(location).append(marker);
+    },{name,location});
+    const remove=name=>page.evaluate(name=>document.getElementById(name)?.remove(),name);
+    const before=await sample();
+    await cover('ScreensaverPopup','#root');await settle();
+    check((await sample()).media===1,'a nested, non-native lookalike does not revoke wallpaper');
+    await remove('ScreensaverPopup');
+    await cover('ScreensaverPopup','#MainNavMenu-Rest');await settle();
+    const covered=await sample();
+    check(covered.focus&&covered.visible==='visible'&&covered.media===0&&covered.contexts.at(-1)?.visible===false&&covered.timers===0,'a native screensaver releases wallpaper even when the Steam document keeps focus');
+    check(covered.contexts.length===before.contexts.length+1,'opening the screensaver sends exactly one withdrawal');
+    check(await page.evaluate(()=>startup.logs.filter(line=>line.includes('"stage":"background"')&&line.includes('"veto":"screensaver"')).length===1),'native screensaver loss reports a single distinct reason');
+    await page.evaluate(()=>{const marker=document.getElementById('ScreensaverPopup'),replacement=marker.cloneNode();replacement.id='ScreensaverBrowser';marker.replaceWith(replacement);});await settle();
+    check((await sample()).media===0&&(await sample()).contexts.length===covered.contexts.length,'replacing one native screensaver with another does not restart media');
+    await remove('ScreensaverBrowser');
+    await page.waitForFunction(selector=>document.querySelector(selector)?.naturalWidth>0,id,{timeout:3000});
+    const restored=await sample();
+    check(restored.focus&&restored.media===1&&restored.contexts.at(-1)?.appId==='730'&&restored.contexts.at(-1)?.visible===true&&restored.timers===0,'removing the screensaver restores the same selection without a focus event or polling');
+    const observerCount=await page.evaluate(()=>startup.resources().mutationObservers);
+    await page.evaluate(()=>startup.dispose());await settle();
+    check(await page.evaluate(before=>startup.resources().mutationObservers<before,observerCount),'plugin retirement releases its screensaver observer');
+    results.push({viewport,scenario,before,covered,restored});
+    await page.evaluate(()=>{startup.unmount();startup.disposeGlobals();startup.client.dispose()});await page.close();continue;
+   }
+   if(scenario==='screensaver-obscures-visible-main'){
+    await page.waitForFunction(()=>startup.logs.some(line=>line.includes('"stage":"route-mounted"')),null,{timeout:3000});
+    const sample=()=>page.evaluate(()=>({focused:document.hasFocus(),visibility:document.visibilityState,images:document.querySelectorAll('[data-ymcc-wallpaper-surface] img').length,contexts:startup.socket.sent.filter(m=>m.command==='wallpaper.context').map(m=>({appId:m.appId,visible:m.visible})),timers:startup.timers.size}));
+    const pending=await sample();
+    check(!pending.focused&&pending.visibility==='visible'&&pending.images===0&&pending.contexts.length===0&&pending.timers===0,'a visible main route obscured by the Steam screensaver has no media demand');
+    await page.evaluate(()=>{Object.defineProperty(document,'hasFocus',{value:()=>true,configurable:true});window.dispatchEvent(new Event('focus'));});
+    await page.waitForFunction(()=>document.querySelector('[data-ymcc-wallpaper-surface] img')?.naturalWidth>0,null,{timeout:3000});
+    const admitted=await sample();
+    check(admitted.focused&&admitted.images===1&&admitted.timers===0&&admitted.contexts.filter(m=>m.visible).every(m=>m.appId==='730'),'the same selection renders after main focus and native proof return');
+    await page.evaluate(()=>{Object.defineProperty(document,'hasFocus',{value:()=>false,configurable:true});window.dispatchEvent(new Event('blur'));});
+    await page.waitForFunction(()=>!document.querySelector('[data-ymcc-wallpaper-surface] img'));
+    const blurred=await sample();
+    check(!blurred.focused&&blurred.images===0&&blurred.contexts.at(-1)?.visible===false&&blurred.timers===0,'return to the screensaver withdraws demand and retires media');
+    results.push({viewport,scenario,pending,admitted,blurred});
+    await page.evaluate(()=>{startup.unmount();startup.dispose();startup.disposeGlobals();startup.client.dispose()});await page.close();continue;
+   }
    if(hudStartupVariant){
     const checkpoints=[],checksBefore=checks;let failure=null;
     try{
@@ -343,6 +444,18 @@ try{
    if(scenario==='late-home-delayed-native-root'){
     await page.waitForTimeout(30);
     check(await page.evaluate(()=>startup.socket.sent.filter(m=>m.command==='wallpaper.context').length===0),'empty cached Home has no fabricated selection');
+    await page.evaluate(()=>{Object.defineProperty(document,'visibilityState',{value:'hidden',configurable:true});document.dispatchEvent(new Event('visibilitychange'));startup.mountNative();});
+    await page.waitForFunction(()=>document.querySelector('.native-home-root'),null,{timeout:3000});
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    const hiddenHome=await page.evaluate(()=>({fallbacks:document.querySelectorAll('[data-ymcc-wallpaper-fallback-route]').length,observers:startup.resources().mutationObservers,visibleContexts:startup.socket.sent.filter(m=>m.command==='wallpaper.context'&&m.visible).length}));
+    fs.writeFileSync(path.join(out,`HIDDEN-NATIVE-ROOT-${viewport.width}x${viewport.height}.json`),JSON.stringify(hiddenHome,null,2),{flag:'wx'});
+    check(hiddenHome.fallbacks===0&&hiddenHome.observers===0&&hiddenHome.visibleContexts===0,'hidden late Home insertion does not mount or observe a fallback');
+    await page.evaluate(()=>{Object.defineProperty(document,'visibilityState',{value:'visible',configurable:true});document.dispatchEvent(new Event('visibilitychange'));});
+    await page.waitForFunction(()=>document.querySelector('[data-ymcc-wallpaper-fallback-route]')&&document.querySelector('[data-ymcc-wallpaper-surface] img')?.naturalWidth>0,null,{timeout:3000});
+    await page.evaluate(()=>startup.unmount());
+    await page.waitForFunction(()=>!document.querySelector('.native-home-root')&&!document.querySelector('[data-ymcc-wallpaper-fallback-route]'),null,{timeout:3000});
+    // Keep the original positive: a visible Home appearing without another
+    // visibility or navigation event is still discovered by its DOM observer.
     await page.evaluate(()=>startup.mountNative());
    }
    if(scenario==='late-nonhome-idle'){
@@ -427,6 +540,84 @@ try{
      const current=await page.evaluate(()=>startup.resources());samples.push({turn,unmounted,current});
      check(current.listeners===baseline.listeners&&current.mutationObservers===baseline.mutationObservers&&current.intersectionObservers===baseline.intersectionObservers,'repeated route mount retains one listener/observer owner set');
     }
+    if(documentRetirement){
+     await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true})));
+     await page.waitForFunction(()=>!document.querySelector('[data-ymcc-wallpaper-surface] img'),null,{timeout:3000});
+     await page.evaluate(()=>{startup.unmount();startup.mount();});
+     await page.waitForFunction(()=>document.querySelector('[data-ymcc-wallpaper-route]'),null,{timeout:3000});
+     check(await page.locator('[data-ymcc-wallpaper-surface] img').count()===0,'same-document remount while suspended does not restore playback');
+     await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true})));
+     await page.waitForFunction(()=>document.querySelector('[data-ymcc-wallpaper-surface] img')?.naturalWidth>0,null,{timeout:3000});
+     const retired=await page.evaluate(async()=>{
+      const frame=document.createElement('iframe');
+      const replace=()=>new Promise(resolve=>{frame.addEventListener('load',resolve,{once:true});frame.srcdoc='<div id="wallpaper-frame"></div>';});
+      const initial=replace();document.body.append(frame);await initial;
+      const results=[];
+      const requests=()=>startup.socket.sent.filter(message=>message.command==='wallpaper.context').map(message=>({appId:message.appId,visible:message.visible}));
+       try{for(let turn=0;turn<5;turn++){
+       const doc=frame.contentDocument,view=frame.contentWindow;
+       const active=new Map(),mutations=new Set(),hide=[];
+       const NativeObserver=view.MutationObserver;
+       view.MutationObserver=class extends NativeObserver{
+        observe(...args){super.observe(...args);mutations.add(this);}
+        disconnect(){super.disconnect();mutations.delete(this);}
+       };
+        view.addEventListener('pagehide',event=>hide.push({trusted:event.isTrusted,persisted:event.persisted}));
+       for(const [target,types] of [[doc,['visibilitychange','freeze','resume','focusin']],[view,['blur','focus','pagehide','pageshow']]]){
+        const add=target.addEventListener,remove=target.removeEventListener;
+        for(const type of types)active.set(type,new Set());
+        target.addEventListener=function(type,listener,...args){active.get(type)?.add(listener);return add.call(this,type,listener,...args);};
+        target.removeEventListener=function(type,listener,...args){active.get(type)?.delete(listener);return remove.call(this,type,listener,...args);};
+       }
+       const count=()=>[...active.values()].reduce((total,listeners)=>total+listeners.size,0);
+       const root=ReactDOM.createRoot(doc.getElementById('wallpaper-frame'));
+        if(turn>=3){
+         let Global,historyListener=null;
+         const warm=turn===4,history={listen(listener){historyListener=listener;return()=>{historyListener=null;};}};
+         const release=WallpaperStartup.installWallpaperRouteFallback({host:view,react:React,reactDom:ReactDOM,
+          ui:{findSP:()=>view,Router:{WindowStore:{GamepadUIMainWindowInstance:{m_locationPathname:'/library/home',m_history:history}}}},
+          routerHook:{addGlobalComponent(_name,Component){Global=Component;},removeGlobalComponent(){Global=null;}},
+          homeRootClass:'native-home-root',Surface:()=>null,isDisposed:()=>false,trace:()=>{}});
+         ReactDOM.flushSync(()=>root.render(React.createElement(React.Fragment,null,
+          warm?React.createElement('div',{className:'native-home-root'}):null,React.createElement(Global))));
+         for(let n=0;warm&&!doc.querySelector('[data-ymcc-wallpaper-fallback-route]')&&n<12;n++)await new Promise(resolve=>setTimeout(resolve,16));
+         const read=()=>({listeners:count(),observers:mutations.size,history:!!historyListener,portal:!!doc.querySelector('[data-ymcc-wallpaper-fallback-route]')});
+         const mounted=read();
+         view.dispatchEvent(new view.PageTransitionEvent('pagehide',{persisted:true}));
+         view.dispatchEvent(new view.PageTransitionEvent('pagehide',{persisted:false}));
+         const suspended=read();
+         await replace();
+         const retired=read();
+         root.unmount();release();
+         results.push({fallback:true,warm,mounted,suspended,retired,afterLateUnmount:count(),hide,replaced:frame.contentDocument!==doc});
+         continue;
+        }
+       const home=turn===2,earlyUnmount=turn===0,props={match:{params:{appid:'570'}}};
+       const children=home?React.createElement('div',{className:'native-home-root'},React.createElement('div',{className:'native-home'},React.createElement('div',{className:'native-home-images native-images','data-appid':'570'}))):React.createElement('div',props,React.createElement('div',{className:'native-detail'},React.createElement('div',{className:'native-images'})));
+       const route=startup.patches.get(home?'/library/home':'/library/app/:appid')({children});
+       const before=requests(),backgroundFocused=doc.hasFocus(),mainFocused=document.hasFocus();
+       ReactDOM.flushSync(()=>root.render(route.children));
+       const mounted=count(),mountedObservers=mutations.size;
+       const during=requests();
+       if(earlyUnmount)root.unmount();
+       const beforeReplace=count();
+       await replace();
+       const afterReplace=count(),afterReplaceObservers=mutations.size;
+       if(!earlyUnmount)root.unmount();
+       results.push({home,earlyUnmount,mounted,mountedObservers,beforeReplace,afterReplace,afterReplaceObservers,afterLateUnmount:count(),replaced:frame.contentDocument!==doc,hide,mainFocused,backgroundFocused,previousRequest:before.at(-1),mountRequests:during.slice(before.length),retirementRequests:requests().slice(during.length)});
+      }}finally{frame.remove();}
+      return results;
+     });
+     fs.writeFileSync(path.join(out,`DOCUMENT-RETIREMENT-${viewport.width}x${viewport.height}.json`),JSON.stringify(retired,null,2),{flag:'wx'});
+      const routes=retired.filter(row=>!row.fallback),fallbacks=retired.filter(row=>row.fallback);
+      check(routes.length===3&&routes.every(row=>row.mounted===8&&row.beforeReplace===(row.earlyUnmount?7:8)&&row.mountedObservers===(row.home?1:0)&&row.replaced&&row.hide.length===1&&row.hide[0].trusted&&!row.hide[0].persisted),'browser replaces three instrumented route documents, two before React cleanup');
+      check(routes.every(row=>row.afterReplace===0&&row.afterReplaceObservers===0&&row.afterLateUnmount===0),'terminal pagehide retires route listeners and observations even before React unmount');
+      check(routes.every(row=>row.mainFocused&&!row.backgroundFocused&&row.previousRequest?.appId==='730'&&row.previousRequest.visible===true&&row.mountRequests.length===0&&row.retirementRequests.length===0),'a background route cannot replace the visible main selection or send context at retirement');
+      check(fallbacks.length===2&&fallbacks.every(row=>row.mounted.listeners>=4&&row.mounted.observers===1&&row.mounted.history&&row.mounted.portal===row.warm&&row.replaced),'cold and warm fallback documents start with real DOM and history owners');
+      check(fallbacks.every(row=>JSON.stringify(row.mounted)===JSON.stringify(row.suspended)),'temporary or synthetic pagehide does not retire fallback owners');
+      check(fallbacks.every(row=>row.hide.filter(event=>event.trusted&&!event.persisted).length===1&&row.retired.listeners===0&&row.retired.observers===0&&!row.retired.history&&row.afterLateUnmount===0),'terminal pagehide retires fallback observers and DOM/history listeners before React unmount');
+     check(await page.evaluate(()=>startup.client.snapshot().connected&&startup.sockets===1),'document retirement leaves the main wallpaper and shared HUD transport connected');
+    }
     lifecycleResults.push({viewport,scenario,baseline,samples});
    }
    if(scenario.startsWith('late-home-')){
@@ -461,6 +652,22 @@ try{
     await page.evaluate(()=>{Object.defineProperty(document,'visibilityState',{value:'hidden',configurable:true});document.dispatchEvent(new Event('visibilitychange'))});
     await page.waitForFunction(()=>!document.querySelector('[data-ymcc-wallpaper-surface] img'));
     check(await page.evaluate(()=>startup.client.snapshot().connected),'hidden late home releases media and retains shared HUD transport');
+    if(scenario==='late-home-no-route-remount'){
+     const hiddenWork=await page.evaluate(async()=>{
+      const originalHomes=document.getElementsByClassName,originalRoutes=document.querySelectorAll,originalStyle=window.getComputedStyle;
+      const before=startup.resources(),sent=startup.socket.sent.length;
+      let homeScans=0,routeScans=0,styleReads=0;
+      document.getElementsByClassName=function(name){if(name==='native-home-root')homeScans++;return originalHomes.call(this,name);};
+      document.querySelectorAll=function(selector){if(selector==='[data-ymcc-wallpaper-route]')routeScans++;return originalRoutes.call(this,selector);};
+      window.getComputedStyle=function(...args){styleReads++;return originalStyle.apply(this,args);};
+      try{for(let n=0;n<40;n++){
+       const node=document.createElement('span');document.body.append(node);node.remove();await Promise.resolve();
+      }}finally{document.getElementsByClassName=originalHomes;document.querySelectorAll=originalRoutes;window.getComputedStyle=originalStyle;}
+      return{homeScans,routeScans,styleReads,callbacks:startup.resources().mutationCallbacks-before.mutationCallbacks,visibleContexts:startup.socket.sent.slice(sent).filter(m=>m.command==='wallpaper.context'&&m.visible).length};
+     });
+     fs.writeFileSync(path.join(out,`HIDDEN-FALLBACK-WORK-${viewport.width}x${viewport.height}.json`),JSON.stringify(hiddenWork,null,2),{flag:'wx'});
+     check(hiddenWork.homeScans===0&&hiddenWork.routeScans===0&&hiddenWork.styleReads===0&&hiddenWork.callbacks===0&&hiddenWork.visibleContexts===0,'hidden cached Home stops fallback discovery during 40 unrelated DOM batches');
+    }
     await page.evaluate(()=>{Object.defineProperty(document,'visibilityState',{value:'visible',configurable:true});document.dispatchEvent(new Event('visibilitychange'))});
     await page.waitForFunction(()=>document.querySelector('[data-ymcc-wallpaper-surface] img')?.naturalWidth>0,null,{timeout:3000});
     // A later legitimate route render must hand over rather than duplicate the
@@ -478,10 +685,124 @@ try{
     check(await page.evaluate(()=>startup.socket.sent.filter(m=>m.command==='wallpaper.context').every(m=>m.appId==='730'||m.appId==='570')&&document.querySelectorAll('[data-ymcc-wallpaper-surface]').length===1),'normal Home observes current holder with one owner, excluding previous/preload and outside scope');
     await page.evaluate(()=>startup.changeNativeSelection('730',true));
     await page.waitForFunction(()=>startup.socket.sent.filter(m=>m.command==='wallpaper.context').at(-1)?.appId==='730'&&document.querySelector('[data-ymcc-wallpaper-surface] img')?.naturalWidth>0,null,{timeout:3000});
+    // Churn a real hidden Home holder, replace it, then require the first
+    // visible request to carry the replacement's current (not previous) AppID.
+    await page.evaluate(()=>startup.changeNativeSelection('570',true));
+    await page.waitForFunction(()=>startup.socket.sent.filter(m=>m.command==='wallpaper.context').at(-1)?.appId==='570'&&document.querySelector('[data-ymcc-wallpaper-surface] img')?.naturalWidth>0,null,{timeout:3000});
+    await page.evaluate(()=>{Object.defineProperty(document,'visibilityState',{value:'hidden',configurable:true});document.dispatchEvent(new Event('visibilitychange'));});
+    await page.waitForFunction(()=>!document.querySelector('[data-ymcc-wallpaper-surface]'));
+    const hidden=await page.evaluate(async()=>{
+     const holder=document.querySelector('[data-ymcc-wallpaper-route] .native-home-images');
+     if(!holder)throw Error('existing Home holder required');
+     const query=Element.prototype.querySelector,style=window.getComputedStyle,before=startup.resources(),sent=startup.socket.sent.length;
+     let lookups=0,styleReads=0;
+     Element.prototype.querySelector=function(selector){if(selector==='.native-home-images'||selector==='.native-home')lookups++;return query.call(this,selector);};
+     window.getComputedStyle=function(...args){styleReads++;return style.apply(this,args);};
+     try{for(let n=0;n<40;n++){holder.classList.toggle('fixture-hidden-churn');await Promise.resolve();}}
+     finally{Element.prototype.querySelector=query;window.getComputedStyle=style;}
+     return{lookups,styleReads,callbacks:startup.resources().mutationCallbacks-before.mutationCallbacks,sends:startup.socket.sent.length-sent};
+    });
+    fs.writeFileSync(path.join(out,`HIDDEN-HOLDER-WORK-${scenario}-${viewport.width}x${viewport.height}.json`),JSON.stringify(hidden,null,2),{flag:'wx'});
+    check(hidden.callbacks===40&&hidden.lookups===0&&hidden.styleReads===0&&hidden.sends===0,'hidden holder does no selection DOM reads or sends during 40 mutation batches');
+    await page.evaluate(()=>{window.fixturePreviousHolder=document.querySelector('[data-ymcc-wallpaper-route] .native-home-images');startup.changeNativeSelection('730',true);});
+    await page.waitForFunction(()=>!window.fixturePreviousHolder.isConnected);
+    const firstVisible=await page.evaluate(()=>{const sent=startup.socket.sent.length;Object.defineProperty(document,'visibilityState',{value:'visible',configurable:true});document.dispatchEvent(new Event('visibilitychange'));return sent;});
+    await page.waitForFunction(()=>startup.socket.sent.filter(m=>m.command==='wallpaper.context').at(-1)?.appId==='730'&&document.querySelector('[data-ymcc-wallpaper-surface] img')?.naturalWidth>0,null,{timeout:3000});
+    check(await page.evaluate(sent=>{const requests=startup.socket.sent.slice(sent).filter(m=>m.command==='wallpaper.context'&&m.visible);return requests.length===1&&requests[0].appId==='730';},firstVisible),'unhide publishes only the latest selection once, reusing the existing session');
+     await page.evaluate(()=>startup.changeNativeSelection('570',true));
+     await page.waitForFunction(()=>startup.socket.sent.filter(m=>m.command==='wallpaper.context').at(-1)?.appId==='570');
+     await page.evaluate(()=>{const route=document.querySelector('[data-ymcc-wallpaper-route]');route.style.display='none';});
+     await page.waitForTimeout(35);
+     const cssHidden=await page.evaluate(async()=>{
+      const holder=document.querySelector('[data-ymcc-wallpaper-route] .native-home-images');
+      if(!holder||document.visibilityState==='hidden'||!document.hasFocus())throw Error('foreground document with hidden route required');
+      const query=Element.prototype.querySelector,style=window.getComputedStyle,before=startup.resources(),sent=startup.socket.sent.length;
+      let lookups=0,styleReads=0;
+      Element.prototype.querySelector=function(selector){if(selector==='.native-home-images'||selector==='.native-home')lookups++;return query.call(this,selector);};
+      window.getComputedStyle=function(...args){styleReads++;return style.apply(this,args);};
+      try{for(let n=0;n<40;n++){holder.classList.toggle('fixture-css-hidden-churn');await Promise.resolve();}}
+      finally{Element.prototype.querySelector=query;window.getComputedStyle=style;}
+      return{lookups,styleReads,callbacks:startup.resources().mutationCallbacks-before.mutationCallbacks,sends:startup.socket.sent.slice(sent).filter(m=>m.command==='wallpaper.context'&&m.visible).length};
+     });
+     fs.writeFileSync(path.join(out,`CSS-HIDDEN-WORK-${scenario}-${viewport.width}x${viewport.height}.json`),JSON.stringify(cssHidden,null,2),{flag:'wx'});
+     check(cssHidden.callbacks===40&&cssHidden.lookups===0&&cssHidden.sends===0,'CSS-hidden Home skips holder lookup and visible sends');
+     const beforeReplacement=await page.evaluate(()=>startup.socket.sent.length);
+     await page.evaluate(()=>{window.fixturePreviousHolder=document.querySelector('[data-ymcc-wallpaper-route] .native-home-images');startup.changeNativeSelection('730',true);});
+     await page.waitForFunction(()=>!window.fixturePreviousHolder.isConnected);
+     await page.evaluate(()=>{document.querySelector('[data-ymcc-wallpaper-route]').style.display='';window.dispatchEvent(new Event('focus'));});
+     await page.waitForFunction(()=>startup.socket.sent.filter(m=>m.command==='wallpaper.context').at(-1)?.appId==='730'&&document.querySelector('[data-ymcc-wallpaper-surface] img')?.naturalWidth>0,null,{timeout:3000});
+     check(await page.evaluate(sent=>{const requests=startup.socket.sent.slice(sent).filter(m=>m.command==='wallpaper.context'&&m.visible);return requests.length===1&&requests[0].appId==='730';},beforeReplacement),'visible Home uses its latest holder once after CSS hiding');
+   }
+   if(scenario==='shared-connected'){
+    const startupRequests=await page.evaluate(()=>startup.socket.sent.filter(m=>m.command==='wallpaper.context').map(({appId,contextSeq,visible,requestReady})=>({appId,contextSeq,visible,requestReady})));
+    fs.writeFileSync(path.join(out,`CORRELATED-READY-${viewport.width}x${viewport.height}.json`),JSON.stringify(startupRequests,null,2),{flag:'wx'});
+    check(startupRequests.length===1&&startupRequests[0].visible&&startupRequests[0].requestReady,'correlated ON gets the current wallpaper without asking again');
+    const explicit=await page.evaluate(()=>{
+     const socket=startup.socket,rows=()=>socket.sent.filter(m=>m.command==='wallpaper.context');const before=rows().length,{contextSeq,appId}=rows().at(-1);
+     socket.emit('message',{data:JSON.stringify({type:'wallpaper-ready',runId:'startup-proof',enabled:true,stateRevision:1,contextSeq,requestContext:true})});
+     return {sends:rows().length-before,appId,lastAppId:rows().at(-1).appId};
+    });
+    check(explicit.sends===1&&explicit.appId===explicit.lastAppId,'an explicit host request still sends the current context once');
+    const off=await page.evaluate(()=>{
+     const socket=startup.socket,emit=packet=>socket.emit('message',{data:JSON.stringify({runId:'startup-proof',enabled:false,foreground:false,stateRevision:2,...packet})});
+     socket.wallpaperEnabled=false;socket.nativeForeground=false;socket.stateRevision=2;socket.holdReplies=true;
+     ReactDOM.flushSync(()=>emit({type:'wallpaper-ready'}));
+     const cleared=!document.querySelector('[data-ymcc-wallpaper-surface] img');
+     const count=()=>socket.sent.filter(m=>m.command==='wallpaper.context').length;
+     const contexts=count(),original=React.createElement;let renders=0;
+     React.createElement=function(type,props,...children){if(type==='div'&&props?.['data-ymcc-wallpaper-surface'])renders++;return original.call(this,type,props,...children);};
+     try{
+      for(let i=0;i<6;i++){
+       const {contextSeq,appId}=socket.sent.filter(m=>m.command==='wallpaper.context').at(-1);
+       ReactDOM.flushSync(()=>emit({type:'wallpaper-ready',contextSeq}));
+       ReactDOM.flushSync(()=>emit({type:'wallpaper',contextSeq,appId,entry:null}));
+      }
+     }finally{React.createElement=original;}
+     return{cleared,renders,extraContexts:count()-contexts,stillOff:!document.querySelector('[data-ymcc-wallpaper-surface] img')};
+    });
+    fs.writeFileSync(path.join(out,`OFF-RECEIPTS-${viewport.width}x${viewport.height}.json`),JSON.stringify(off,null,2),{flag:'wx'});
+    check(off.cleared&&off.stillOff,'authoritative OFF removes wallpaper and repeated confirmations keep it off');
+    check(off.renders===0&&off.extraContexts===0,'duplicate OFF confirmations or empty frames do not rerender or resend context');
+    await page.evaluate(()=>{
+     const socket=startup.socket;socket.holdReplies=false;socket.wallpaperEnabled=true;socket.nativeForeground=true;socket.stateRevision=3;
+     socket.emit('message',{data:JSON.stringify({type:'wallpaper-ready',runId:'startup-proof',enabled:true,stateRevision:3})});
+    });
+    await page.waitForFunction(()=>document.querySelector('[data-ymcc-wallpaper-surface] img')?.naturalWidth>0,null,{timeout:3000});
+    check(await page.evaluate(()=>startup.sockets===1&&startup.timers.size===0),'new ON restores decoded wallpaper using the existing transport');
    }
    const state=await page.evaluate(()=>({connected:startup.client.snapshot().connected,sockets:startup.sockets,contexts:startup.socket.sent.filter(m=>m.command==='wallpaper.context'),surfaces:document.querySelectorAll('[data-ymcc-wallpaper-surface]').length,timers:startup.timers.size,logs:startup.logs}));
    const expectedSockets=scenario==='send-once-fails'?2:1;
     check(state.connected,'transport connected');check(state.sockets===expectedSockets,'wallpaper reuses the shared socket, reconnecting once after the injected send failure');check(state.contexts.at(-1)?.appId==='730'&&state.contexts.at(-1)?.visible,'selected cached game reaches host');check(state.surfaces===1,'one background surface');check(state.timers===0,'no retry polling after successful context');check(!state.logs.some(line=>/token|\/asset\/|http:|ws:/.test(line)),'diagnostics contain no credential or URL');check(state.logs.some(line=>line.includes('background-found')),'surface stage logged');
+   if(scenario==='shared-connected'){
+    const background=await page.evaluate(async()=>{
+     const route=document.querySelector('[data-ymcc-wallpaper-route]'),original=route.querySelector('.native-detail');
+     const parent=original.parentElement,after=original.nextSibling,slot=document.createElement('div'),replacement=document.createElement('div');
+     replacement.className=original.className;
+     const selector='[data-ymcc-wallpaper-surface] img',image=original.querySelector(selector);
+     const settle=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+     const sent= startup.socket.sent.length;
+     parent.append(slot);await settle();slot.append(original);await settle();
+     const samePortal=original.querySelector(selector)===image;
+     original.replaceWith(replacement);await settle();
+     const replaced=!!replacement.querySelector(selector)&&!original.querySelector(selector);
+     replacement.remove();slot.remove();parent.insertBefore(original,after);await settle();
+     original.remove();await settle();
+     const missing=!route.querySelector(selector);
+     const proto=window.MutationObserver.prototype,observe=proto.observe;
+     const waiting=()=>startup.logs.filter(line=>line.includes('"stage":"background-waiting"')).length;
+     const before=waiting();let observeCalls=0;
+     proto.observe=function(node,options){if(node===route&&options?.subtree===true)observeCalls++;return observe.call(this,node,options);};
+     try{for(let i=0;i<24;i++){const leaf=document.createElement('i');route.append(leaf);leaf.remove();await Promise.resolve();}}
+     finally{proto.observe=observe;}
+     const newWaitingLogs=waiting()-before;
+     parent.insertBefore(original,after);await settle();
+     return {samePortal,replaced,missing,observeCalls,newWaitingLogs,restored:!!original.querySelector(selector),sends:startup.socket.sent.length-sent};
+    });
+    fs.writeFileSync(path.join(out,`BACKGROUND-OWNERSHIP-${viewport.width}x${viewport.height}.json`),JSON.stringify(background,null,2),{flag:'wx'});
+    check(background.samePortal&&background.replaced,'moving the same background preserves its portal and watches its new parent for replacement');
+    check(background.missing&&background.restored&&background.sends===0,'missing then replaced background recovers without new mirror traffic');
+    check(background.observeCalls===0&&background.newWaitingLogs===0,'waiting for a missing background does not re-register or re-log on unrelated DOM churn');
+   }
    const sent=state.contexts.length;await page.locator('button').focus();await page.waitForTimeout(80);check(await page.evaluate(()=>startup.socket.sent.filter(m=>m.command==='wallpaper.context').length)===sent,'same selected game does not resend after success');
    await page.evaluate(()=>startup.socket.emit('message',{data:JSON.stringify({type:'wallpaper-ready',runId:'startup-proof',enabled:true,resumeGeneration:2})}));
    await page.waitForFunction(sent=>startup.socket.sent.filter(m=>m.command==='wallpaper.context').length>sent&&document.querySelector('[data-ymcc-wallpaper-surface] img')?.naturalWidth>0,sent,{timeout:3000});
@@ -516,14 +837,45 @@ try{
     results.push({viewport,scenario,sockets:state.sockets,contexts:sent,surfaces:state.surfaces,timers:state.timers});
     await page.evaluate(()=>{startup.unmount();startup.disposeGlobals();startup.client.dispose()});await page.close();continue;
    }
-   await page.evaluate(()=>startup.socket.emit('message',{data:JSON.stringify({type:'wallpaper-ready',runId:'foreign-run',enabled:true,resumeGeneration:9})}));
-   await page.waitForFunction(()=>!startup.client.snapshot().connected&&!document.querySelector('[data-ymcc-wallpaper-surface]'));
-   check(await page.evaluate(()=>startup.socket.sent.filter(m=>m.command==='wallpaper.context').length)===resumedCount,'foreign-session wake closes connection without replaying requests');
+   if(scenario==='shared-connected'){
+    const outage=await page.evaluate(()=>{
+     const {client,socket}=startup,original=client.sendWallpaper;let attempts=0;
+     // Keep the disconnect and the offline interaction in the same document
+     // task, before the existing retry timer can open a replacement socket.
+     ReactDOM.flushSync(()=>socket.emit('message',{data:JSON.stringify({type:'wallpaper-ready',runId:'foreign-run',enabled:true,resumeGeneration:9})}));
+     const disconnected=!client.snapshot().connected&&!document.querySelector('[data-ymcc-wallpaper-surface]');
+     const originalContexts=socket.sent.filter(m=>m.command==='wallpaper.context').length;
+     client.sendWallpaper=function(command,data){if(command==='wallpaper.context')attempts++;return original.call(this,command,data);};
+     const burst=()=>{const button=document.querySelector('button');
+      for(let i=0;i<24;i++)button.dispatchEvent(new FocusEvent('focusin',{bubbles:true}));};
+     try{
+      const before=socket.sent.length;burst();const first=attempts;
+      for(const id of ['570','1091500'])ReactDOM.flushSync(()=>startup.mount(id));
+      const afterSwitch=attempts;burst();
+      return {disconnected,originalContexts,first,afterSwitch,repeatedAfterSwitch:attempts-afterSwitch,wire:socket.sent.length-before,
+       sockets:startup.sockets,timers:startup.timers.size,images:document.querySelectorAll('[data-ymcc-wallpaper-surface] img').length};
+     }finally{client.sendWallpaper=original;}
+    });
+    fs.writeFileSync(path.join(out,`OFFLINE-FOCUS-${viewport.width}x${viewport.height}.json`),JSON.stringify(outage,null,2),{flag:'wx'});
+    check(outage.disconnected&&outage.originalContexts===resumedCount,'foreign-session wake closes connection without replaying requests');
+    check(outage.first===0&&outage.afterSwitch===0&&outage.repeatedAfterSwitch===0,'offline selection tracking does not attempt to send or rebuild wallpaper context');
+    check(outage.wire===0&&outage.sockets===1&&outage.timers===1&&outage.images===0,'offline focus retains only the shared reconnect timer and no media');
+    await page.waitForFunction(()=>startup.sockets===2,null,{timeout:3000});
+    await page.evaluate(()=>startup.socket.emit('open'));
+    await page.waitForFunction(()=>document.querySelector('[data-ymcc-wallpaper-surface] img')?.naturalWidth>0,null,{timeout:3000});
+    const restored=await page.evaluate(()=>({contexts:startup.socket.sent.filter(m=>m.command==='wallpaper.context').map(({appId,visible,requestReady})=>({appId,visible,requestReady})),timers:startup.timers.size}));
+    fs.writeFileSync(path.join(out,`OFFLINE-RESTORED-${viewport.width}x${viewport.height}.json`),JSON.stringify(restored,null,2),{flag:'wx'});
+    check(restored.contexts.length===1&&restored.contexts[0].appId==='1091500'&&restored.contexts[0].visible&&restored.contexts[0].requestReady&&restored.timers===0,'reconnect reports only the latest selected game and restores its wallpaper');
+   }else{
+    await page.evaluate(()=>startup.socket.emit('message',{data:JSON.stringify({type:'wallpaper-ready',runId:'foreign-run',enabled:true,resumeGeneration:9})}));
+    await page.waitForFunction(()=>!startup.client.snapshot().connected&&!document.querySelector('[data-ymcc-wallpaper-surface]'));
+    check(await page.evaluate(()=>startup.socket.sent.filter(m=>m.command==='wallpaper.context').length)===resumedCount,'foreign-session wake closes connection without replaying requests');
+   }
 
    results.push({viewport,scenario,sockets:state.sockets,contexts:sent,surfaces:state.surfaces,timers:state.timers});
    await page.evaluate(()=>{startup.unmount();startup.dispose();startup.disposeGlobals();startup.client.dispose()});await page.close();
   }
  }
- check(results.length===(onlyScenario?1:scenarios.length)*viewports.length,'all requested viewport/scenario pairs executed');check(errors.length===0,'no browser exceptions');fs.writeFileSync(out+'/wallpaper-startup-results.json',JSON.stringify({ok:true,checks,results,lifecycleResults,errors,testedSources,scenarioSelection:onlyScenario||'all',bindingWaitVariant,viewports,bootstrapConsumers,hudOnlyVariant,teardownVariant,hudTeardownVariant,hudStartupVariant,realSiblingStartup,sourceOverrides:{wallpaper:wallpaperSourceOverride,entry:entrySourceOverride},fixtureSha256:createHash('sha256').update(fs.readFileSync(new URL(import.meta.url))).digest('hex'),runtimeScripts:['react.js','react-dom.js'].map(name=>({name,sha256:createHash('sha256').update(fs.readFileSync(path.join(out,name))).digest('hex')})),browserVersion:browser.version(),bundleSha256:createHash('sha256').update(fs.readFileSync(out+'/wallpaper-startup-bundle.js')).digest('hex'),scope:'Production wallpaper consumer and MirrorClient with React18/Edge; deterministic transport/Steam route fixtures. No live Steam mutation.'},null,2));console.log('WALLPAPER_STARTUP_BROWSER_OK '+checks+' checks / '+results.length+' cases');
+ check(results.length===(onlyScenario?1:scenarios.length)*viewports.length,'all requested viewport/scenario pairs executed');check(errors.length===0,'no browser exceptions');fs.writeFileSync(out+'/wallpaper-startup-results.json',JSON.stringify({ok:true,checks,results,lifecycleResults,errors,testedSources,scenarioSelection:onlyScenario||'all',bindingWaitVariant,viewports,bootstrapConsumers,hudOnlyVariant,teardownVariant,hudTeardownVariant,hudStartupVariant,realSiblingStartup,documentRetirement,sourceOverrides:{wallpaper:wallpaperSourceOverride,entry:entrySourceOverride},fixtureSha256:createHash('sha256').update(fs.readFileSync(new URL(import.meta.url))).digest('hex'),runtimeScripts:['react.js','react-dom.js'].map(name=>({name,sha256:createHash('sha256').update(fs.readFileSync(path.join(out,name))).digest('hex')})),browserVersion:browser.version(),bundleSha256:createHash('sha256').update(fs.readFileSync(out+'/wallpaper-startup-bundle.js')).digest('hex'),scope:'Production wallpaper consumer and MirrorClient with React18/Edge; deterministic transport/Steam route fixtures. No live Steam mutation.'},null,2));console.log('WALLPAPER_STARTUP_BROWSER_OK '+checks+' checks / '+results.length+' cases');
 }finally{await browser.close()}
 

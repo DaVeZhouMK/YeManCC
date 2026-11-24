@@ -61,6 +61,7 @@ let identitySearchCancelled = false;
 let editSaveInFlight = false;
 const editorSaveTasks = new Map();
 const steamCommitTasks = new Map();
+const steamCommitReceipts = new WeakMap();
 function currentRootCardTask(task){return task&&(task.dataRoot===undefined||task.dataRoot===normalizedUiPath(snapshot.dataRoot))?task:null;}
 function activeCardOperation(game) {
   const key=typeof game==='string'?game:keyFor(game||{});
@@ -76,7 +77,7 @@ function renderEditorOperationState() {
   const save=$('#edit-save-content');if(save){save.disabled=saving||nativeEditorMissingPrimary(selectedActionGame)&&editDraft?.bucket===editDraft?.originalBucket;save.textContent=saving?'正在保存…':'保存内容';}
   const join=$('#edit-add-to-steam');if(join){join.disabled=Boolean(selectedActionGame.mediaOnly)||isNativeSteamGame(selectedActionGame)||!selectedActionGame.primaryExecutable||!key||['queued','running'].includes(steam?.phase);join.textContent=steam?.phase==='queued'?'排队加入中…':steam?.phase==='running'?'正在加入…':'加入 Steam';}
   decorateLibrarySteamButton(join);
-  const operation=activeCardOperation(key);if(operation){const badge=$('#edit-status');badge.textContent=operation.label;badge.className='badge '+(operation.phase==='failed'?'warning':'');badge.title=operation.label;}
+  const operation=activeCardOperation(key);if(operation){const badge=$('#edit-status');badge.textContent=operation.label;badge.className='badge '+(operation.phase==='failed'?'warning':'');badge.title=operation.error||operation.label;}
 }
 let cardOperationFrame=0,cardOperationPending=false,cardOperationEditorPending=false;
 function suspendCardOperationState(){
@@ -578,7 +579,14 @@ function workspaceBridgeResult(command, result) {
   const snapshotCommands = new Set(['state', 'scan', 'prepare', 'openLibrary', 'plan', 'commit', 'saveEditor', 'deleteFromSteam', 'refreshSteamArtwork']);
   const isSnapshot = isWorkspaceRecord(result) && ('library' in result || 'steamPlan' in result || 'config' in result);
   if (!isSnapshot && snapshotCommands.has(command)) throw new Error('游戏库没有返回有效快照；已保留当前数据。');
-  return isSnapshot ? normalizeWorkspaceSnapshot(result, snapshot) : result;
+  if (!isSnapshot) return result;
+  const next = normalizeWorkspaceSnapshot(result, snapshot);
+  if (command === 'commit') {
+    // Cached and deduplicated plan rows may be useful for display, but are not proof of this write.
+    const receipt = result.steamAddCompletion ?? (result.steamPlanSource === 'verified-steam-add-completion' ? result.steamPlan : null);
+    if (isWorkspaceRecord(receipt)) steamCommitReceipts.set(next, receipt);
+  }
+  return next;
 }
 
 function invoke(command, arguments_ = {}, timeoutMs = 0) {
@@ -1401,7 +1409,7 @@ function applyScrapeCardState(card, gameOrExecutable) {
   const overlay = card.querySelector('.game-card-scrape-overlay');
   if (overlay) {
     const label = overlay.querySelector('.game-card-scrape-label');
-    const text=operation?.label||(loading?'正在刮削':'等待刮削'),title=operation?.label||'';
+    const text=operation?.label||(loading?'正在刮削':'等待刮削'),title=operation?.error||operation?.label||'';
     if(label&&label.textContent!==text)label.textContent=text;
     if(overlay.title!==title)overlay.title=title;
     const terminal=operation?.phase==='failed'||operation?.phase==='completed';
@@ -3414,6 +3422,7 @@ async function applyArtworkCandidate(candidate, card, galleryContext) {
 async function searchArtwork(type) {
   artworkPathRequests.delete(['cover','long','wallpaper'].includes(type)?type:'cover');
   document.getElementById('artwork-video-quality-row')?.classList.add('hidden');
+  $('#artwork-video-title-form').classList.add('hidden');
   if (!selectedActionGame) { showNotice("请先打开一个游戏卡片的编辑页面。", true, libraryNotice); return; }
   const token = ++artworkTaskToken;
   downloadingCandidateUrl = '';
@@ -3628,6 +3637,55 @@ function closeEdit() {
 }
 async function refreshSteamPlan() { try { snapshot = await invoke('plan', selectedTargetArguments()); renderEntry(); renderLibrary(); } catch (error) { showError(error, libraryNotice); } }
 function steamAccountWriteWarning(result){return String(result?.steamAccountWriteWarning||result?.steamPlan?.accountReadWarning||'');}
+const steamAddLabels={added:'已加入 Steam',existing:'原已在 Steam',skipped:'本次未加入',partial:'部分完成',unknown:'结果未确认'};
+function describeSteamAdd(result, directories) {
+  const receipt=steamCommitReceipts.get(result), keys=new Set(directories.map(normalizedUiPath).filter(Boolean));
+  const accounts=receipt?.mode==='steam-library-add-commit-all-accounts' ? receipt.accountResults : receipt?[receipt]:[];
+  const warning=String(result?.steamAccountWriteWarning||receipt?.accountReadWarning||'');
+  const incomplete=Boolean(warning||receipt?.partialSteamAccounts||receipt?.displayAccountCompletionConfirmed===false);
+  const evidence=(Array.isArray(accounts)?accounts:[]).map(account=>{
+    if(account?.mode!=='steam-library-add-commit'||!Array.isArray(account.items)||
+      !(account.committed===true||account.committed===false&&account.reason==='nothing-ready-to-add'))return null;
+    const confirmed=new Map();
+    for(const item of account.items){
+      const key=normalizedUiPath(item?.gameDirectory);
+      if(!keys.has(key))continue;
+      if(account.committed===true&&item.status==='added-to-steam')confirmed.set(key,'added');
+      else if(item.status==='already-in-steam')confirmed.set(key,'existing');
+    }
+    return confirmed;
+  });
+  const outcomes=new Map();
+  for(const key of keys){
+    const states=evidence.map(account=>account?account.get(key)||'skipped':'unknown');
+    const present=states.some(state=>state==='added'||state==='existing');
+    const uncertain=incomplete||!states.length||states.includes('unknown');
+    outcomes.set(key, present ? uncertain||states.includes('skipped')?'partial':states.includes('added')?'added':'existing'
+      : uncertain?'unknown':'skipped');
+  }
+  return {outcomes,warning};
+}
+function presentSteamAdd(result, directories, dataRoot, gameName = '', singleTask = null) {
+  const {outcomes,warning}=describeSteamAdd(result,directories);
+  const counts={added:0,existing:0,skipped:0,partial:0,unknown:0};
+  for(const [key,outcome] of outcomes){
+    ++counts[outcome];
+    const task=steamCommitTasks.get(key);
+    const settled={phase:'completed',label:steamAddLabels[outcome],partialAccounts:outcome==='partial',error:''};
+    if(singleTask)Object.assign(singleTask,settled);
+    else if(!task?.awaitingReceipt)steamCommitTasks.set(key,{dataRoot,...settled});
+  }
+  let message;
+  if(gameName)message='“'+gameName+'”：'+steamAddLabels[outcomes.values().next().value||'unknown']+'。';
+  else{
+    const parts=[['added','新加入'],['existing','原已在 Steam'],['skipped','未加入'],['partial','部分完成'],['unknown','结果未确认']]
+      .filter(([key])=>counts[key]>0).map(([key,label])=>label+' '+counts[key]+' 项');
+    message=parts.length?'加入 Steam：'+parts.join('，')+'。':'加入 Steam 结果未确认。';
+  }
+  if(counts.unknown||!outcomes.size)message+='请刷新游戏库核对，勿直接重复加入。';
+  if(warning)message+='\n'+warning;
+  presentLibraryAction(()=>showSteamAddNotice(message,Boolean(warning||counts.skipped||counts.partial||counts.unknown||!outcomes.size),dataRoot), 'steam-commit-notice-presentation');
+}
 async function runBusy(command, title, detail, args = {}, success = '') {
   const context = captureSteamActionContext(), owner = { kind: 'command', context };
   const current = () => busyOwner === owner && steamActionContextCurrent(context);
@@ -3636,6 +3694,10 @@ async function runBusy(command, title, detail, args = {}, success = '') {
   clearNotice();setBusy(true, title, detail, owner);
   try {
     const result = await invoke(command, args);
+    if (command === 'commit' && current() && matches(result)) present(() => {
+      presentSteamAdd(result, args.selectedGameDirectories || [], context.dataRoot);
+      refreshCardOperationState();
+    });
     if (current() && matches(result)) present(() => {
       if (command === 'closeSteam') applySteamRuntimeState(result);
       else {
@@ -3643,11 +3705,9 @@ async function runBusy(command, title, detail, args = {}, success = '') {
         if (libraryRenderAllowed()) { renderEntry();if (!$('#library-view').classList.contains('hidden')) renderLibrary(); }
         else silentRenderPending = true;
       }
-      if (success) {
-        const warning = ['commit','deleteFromSteam','refreshSteamArtwork'].includes(command) ? steamAccountWriteWarning(result) : '';
-        const message = warning ? (command === 'commit' ? '加入 Steam 部分完成。' : success) + '\n' + warning : success;
-        if (command === 'commit') showSteamAddNotice(message, Boolean(warning), context.dataRoot);
-        else showNotice(message, Boolean(warning), $('#library-view').classList.contains('hidden') ? notice : libraryNotice);
+      if (success && command !== 'commit') {
+        const warning = ['deleteFromSteam','refreshSteamArtwork'].includes(command) ? steamAccountWriteWarning(result) : '';
+        showNotice(warning ? success + '\n' + warning : success, Boolean(warning), $('#library-view').classList.contains('hidden') ? notice : libraryNotice);
       }
     });
     return true;
@@ -3680,13 +3740,16 @@ async function startNonBlockingRefresh() {
   if (['starting', 'queued', 'running'].includes(manualRefreshProgress.phase) && (!manualRefreshOwner || steamActionContextCurrent(manualRefreshOwner))) return;
   const context = captureSteamActionContext();manualRefreshOwner = context;
   clearNotice();
-  manualRefreshProgress = { phase: 'starting', current: 0, total: 0, round: 1, roundLabel: '第一轮', roundCurrent: 0, roundTotal: 0 };
+  const starting = { phase: 'starting', current: 0, total: 0, round: 1, roundLabel: '第一轮', roundCurrent: 0, roundTotal: 0 };
+  manualRefreshProgress = starting;
   renderArtworkRefreshControl();
   const owner = { kind: 'scrape', context };
   setBusy(true, '正在启动手动刷新', '识别将在后台合并执行，页面保持可操作。', owner);
   try {
     const next = await invoke('prepare');
-    if (manualRefreshOwner !== context) return;
+    // Progress and completion can arrive while Host is still building the
+    // prepare reply. That reply must not roll back a newer progress event.
+    if (manualRefreshOwner !== context || manualRefreshProgress !== starting) return;
     if (!admitWorkspaceActionReply(context, next)) {
       if (steamActionContextCurrent(context)) throw new Error('刷新结果不属于当前游戏库，已保留当前列表。');
       return;
@@ -3700,7 +3763,7 @@ async function startNonBlockingRefresh() {
       showNotice('手动刷新已启动，完成后自动更新页面。', false, libraryNotice);
     }, 'manual-refresh-presentation');
   } catch (error) {
-    if (manualRefreshOwner !== context || !steamActionContextCurrent(context)) return;
+    if (manualRefreshOwner !== context || manualRefreshProgress !== starting || !steamActionContextCurrent(context)) return;
     manualRefreshProgress = { phase: 'failed', current: 0, total: 0, round: 1, roundLabel: '第一轮', roundCurrent: 0, roundTotal: 0 };
     presentLibraryAction(() => { renderArtworkRefreshControl();showError(error, libraryNotice); }, 'manual-refresh-error-presentation');
   } finally {
@@ -3814,8 +3877,7 @@ $('#steam-add-notice-close').addEventListener('click', closeSteamAddNotice);
 $('#steam-add-notice-confirm').addEventListener('click', closeSteamAddNotice);
 async function commitSelectedGames(target) {
   await runBusy('commit', '正在事务写入 Steam',
-    '逐账户备份、暂存、写入并重新解析 shortcuts.vdf。', target,
-    '已加入 Steam；快捷方式和图片已校验。需要时请手动启动 Steam。');
+    '逐账户备份、暂存、写入并重新解析 shortcuts.vdf。', target);
 }
 async function closeSteamOnly(expectedClient) {
   const steamClient = captureSteamClient({ steamClient: expectedClient });
@@ -3904,17 +3966,14 @@ async function joinEditedGameToSteam() {
     // The native FIFO performs admission again at execution time. A running
     // Steam instance is reported in the shared notice dialog; never silently closed.
     const next=await invoke('commit',target);
-    const accountWarning=steamAccountWriteWarning(next);
-    task.phase='completed';task.label=accountWarning?'部分完成':'已加入 Steam';task.partialAccounts=Boolean(accountWarning);
-    if(dataRoot===normalizedUiPath(snapshot.dataRoot)&&(typeof next?.dataRoot!=='string'||normalizedUiPath(next.dataRoot)===dataRoot)){
+    const matches=typeof next?.dataRoot!=='string'||normalizedUiPath(next.dataRoot)===dataRoot;
+    presentSteamAdd(matches?next:null,target.selectedGameDirectories,dataRoot,gameDisplayName(game),task);
+    if(dataRoot===normalizedUiPath(snapshot.dataRoot)&&matches){
       snapshot=next;
       // Rebase pending playback before any deferred library paint.
       syncOpenEditorMedia();
       renderCardOperationLibrary('steam-commit-card-presentation');
     }
-    const message=accountWarning?'“'+gameDisplayName(game)+'”的加入操作部分完成。\n'+accountWarning:
-      '“'+gameDisplayName(game)+'”已加入 Steam；快捷方式和图片已校验。';
-    showSteamAddNotice(message,Boolean(accountWarning),dataRoot);
     return true;
   }catch(error){task.phase='failed';task.label='加入失败';task.error=error?.message||String(error);showSteamAddNotice(task.error,true,dataRoot);return false;}
   finally{delete task.awaitingReceipt;refreshCardOperationState();}
@@ -4234,7 +4293,7 @@ window.chrome.webview.addEventListener('message', event => {
     scheduleCardOperationState();
   }
   if(message.event==='steam-commit-progress'){
-    const labels={queued:message.position>1?'排队加入 Steam（第 '+message.position+' 位）':'排队加入 Steam',running:'正在加入 Steam',completed:'已加入 Steam',partial:'部分完成',failed:'加入失败'};
+    const labels={queued:message.position>1?'排队加入 Steam（第 '+message.position+' 位）':'排队加入 Steam',running:'正在加入 Steam',completed:'处理完成',partial:'部分完成',failed:'加入失败'};
     for(const directory of Array.isArray(message.directories)?message.directories:[]){
       if(typeof directory!=='string')continue;
       const key=normalizedUiPath(directory);if(!key)continue;
@@ -4802,20 +4861,26 @@ function paintSharedWallpaperDownloadStatus(){
   retry.classList.toggle('hidden',!feedback.canSearch);
   if(!feedback.canSearch&&retryFocused)restoreWallpaperRetryFocus(retry);
 }
-async function searchSharedWallpaperVideos(owner,retryOrigin=null){
+async function searchSharedWallpaperVideos(owner,retryOrigin=null,manualQuery=null){
   const searchAppId=sharedWallpaperSearchAppId();
-  if(!validSteamAppIdInput(searchAppId)){
+  const consoleSearch=!searchAppId&&!isNativeSteamGame(selectedActionGame)&&!selectedActionGame?.mediaOnly&&!!owner.executable;
+  if(!consoleSearch&&!validSteamAppIdInput(searchAppId)){
     showNotice('请在当前编辑页填写有效的 Steam AppID 后搜索动态壁纸，无需先保存。',true,libraryNotice);
     focusWorkspaceElement($('#identity-steam-id'));return false;
   }
-  const anchor=owner.entry,detached=!anchor?.key||Number(anchor.appId||0)!==Number(searchAppId);
+  const anchor=owner.entry,detached=!consoleSearch&&(!anchor?.key||Number(anchor.appId||0)!==Number(searchAppId));
+  const searchTitle=consoleSearch?(manualQuery??(editDraft?.game===selectedActionGame?draftName()||gameDisplayName(selectedActionGame):gameDisplayName(selectedActionGame))).trim():'';
+  const localExecutable=consoleSearch?selectedActionGame.primaryExecutable:'';
   // A draft ID authorizes an AppID-only media choice. Never pass the local
   // EXE here: searching/selecting media must not save or verify its identity.
   if(detached)owner={...owner,target:{appId:Number(searchAppId),name:gameDisplayName(selectedActionGame),verified:true},entry:null};
-  const qualitySelect=document.getElementById('artwork-video-quality');qualitySelect.value=String([480,720,1080].includes(owner.entry?.selectedVideo?.preferredHeight)?owner.entry.selectedVideo.preferredHeight:720);document.getElementById('artwork-video-quality-row').classList.remove('hidden');const qualityDropdown=workspaceDropdownForSelect(qualitySelect);refreshWorkspaceDropdown(qualitySelect);qualitySelect.onchange=()=>{for(const item of document.querySelectorAll('[data-video-candidate] .artwork-candidate-meta'))item.textContent=qualitySelect.value+'p 优先';};
+  const qualitySelect=document.getElementById('artwork-video-quality');qualitySelect.value=String([480,720,1080].includes(owner.entry?.selectedVideo?.preferredHeight)?owner.entry.selectedVideo.preferredHeight:720);document.getElementById('artwork-video-quality-row').classList.toggle('hidden',consoleSearch);workspaceDropdownForSelect(qualitySelect);refreshWorkspaceDropdown(qualitySelect);qualitySelect.onchange=()=>{if(!consoleSearch)for(const item of document.querySelectorAll('[data-video-candidate] .artwork-candidate-meta'))item.textContent=qualitySelect.value+'p 优先';};
   const token=++artworkTaskToken,epoch=silentRefreshEpoch;downloadingCandidateUrl='';artworkTaskInFlight=true;artworkSearchSlot='wallpaper';artworkSearchType='dynamic';stopSharedWallpaperPreview();document.querySelector('#artwork-search-modal .eyebrow').textContent='视频候选';
   const modal=document.getElementById('artwork-search-modal'),list=document.getElementById('artwork-search-list');
-  document.getElementById('artwork-search-title').textContent='选择动态壁纸';document.getElementById('artwork-search-summary').textContent='正在读取 Steam 官方预告片…';
+  const titleForm=$('#artwork-video-title-form'),titleInput=$('#artwork-video-title-query');
+  titleForm.classList.toggle('hidden',!consoleSearch);
+  if(consoleSearch){titleInput.value=searchTitle;finishControllerTextInput(titleInput);}
+  document.getElementById('artwork-search-title').textContent='选择动态壁纸';document.getElementById('artwork-search-summary').textContent=consoleSearch?'正在查询非 Steam 素材…':'正在读取 Steam 官方预告片…';
   list.replaceChildren();list.dataset.artworkType='wallpaper';document.getElementById('artwork-search-empty').classList.add('hidden');modal.classList.remove('hidden');
   // Presentation stays owned by this gallery after a media revision advances;
   // native search/selection authorization still requires the captured revision.
@@ -4829,12 +4894,18 @@ async function searchSharedWallpaperVideos(owner,retryOrigin=null){
   const presenting=()=>modal.isConnected&&!silentRefreshClosed&&epoch===silentRefreshEpoch&&token===artworkTaskToken&&!modal.classList.contains('hidden')&&ownerPresent();
   const current=()=>presenting()&&ownerCurrent();
   const lease=beginArtworkSearchPresentation(presenting);
-  if(retryOrigin){
+  if(retryOrigin||consoleSearch){
     const editEpoch=editPresentationEpoch;
     lease.restoreFocus=()=>{if(editPresentationEpoch===editEpoch&&ownerPresent())restoreWallpaperRetryFocus(retryOrigin);};
-    requestArtworkSearchFocus($('#artwork-search-close'),lease);
+    requestArtworkSearchFocus(consoleSearch?titleInput:$('#artwork-search-close'),lease);
   }
-  const searchRetry=()=>{const retry=document.createElement('button');retry.type='button';retry.className='button';retry.dataset.videoSearchRetry='true';retry.textContent='重新搜索';retry.addEventListener('click',()=>{if(presenting()&&!sharedWallpaperBusy)void searchSharedWallpaperVideos(captureSharedWallpaperWrite(),retryOrigin);});return retry;};
+  const restartSearch=query=>{if(presenting()&&!sharedWallpaperBusy&&!artworkTaskInFlight)void searchSharedWallpaperVideos(captureSharedWallpaperWrite(),retryOrigin,query);};
+  titleForm.onsubmit=consoleSearch?event=>{
+    event.preventDefault();
+    const query=titleInput.value.trim();
+    if(query)restartSearch(query);
+  }:null;
+  const searchRetry=()=>{const retry=document.createElement('button');retry.type='button';retry.className='button';retry.dataset.videoSearchRetry='true';retry.textContent='重新搜索';retry.addEventListener('click',()=>restartSearch(consoleSearch?searchTitle:null));return retry;};
   const staleSearch=()=>queueArtworkSearchPresentation(lease,()=>{if(!presenting())return;document.getElementById('artwork-search-summary').textContent='壁纸设置已更新，请重新搜索后选择；当前壁纸保留。';document.getElementById('artwork-search-empty').classList.add('hidden');const retry=searchRetry();list.replaceChildren(retry);requestArtworkSearchFocus(retry,lease);});
   const searchError=error=>{if(!current()){staleSearch();return;}queueArtworkSearchPresentation(lease,()=>{if(!current()){staleSearch();return;}document.getElementById('artwork-search-summary').textContent='动态壁纸搜索未完成：'+String(error?.message||error);document.getElementById('artwork-search-empty').classList.add('hidden');const retry=searchRetry();retry.textContent='重试搜索';list.replaceChildren(retry);requestArtworkSearchFocus(retry,lease);});};
   const selectionError=error=>queueArtworkSearchPresentation(lease,()=>{
@@ -4852,8 +4923,17 @@ async function searchSharedWallpaperVideos(owner,retryOrigin=null){
       snapshot.gameMedia={...snapshot.gameMedia,entries:{...snapshot.gameMedia?.entries,[entry.key]:entry}};
       owner.entry=entry;
     }
-    const result=await invoke('mediaSearchVideos',owner.entry||owner.target);if(!current()){staleSearch();return false;}
+    const result=consoleSearch?await invoke('mediaSearchConsoleVideos',{executable:localExecutable,query:searchTitle}):await invoke('mediaSearchVideos',owner.entry||owner.target);
+    if(!current()){staleSearch();return false;}
     if(Number(result?.appId||0)!==Number(searchAppId))throw new Error('动态壁纸搜索返回了其他 Steam AppID，请重新搜索');
+    if(consoleSearch&&result?.candidates?.length){
+      const entry=result.entry,known=snapshot.gameMedia?.entries?.[entry?.key];
+      if(!entry?.key?.startsWith('exe-')||entry.key!==result.entryKey||Number(entry.appId||0)!==0||entry.deleted||
+          normalizedUiPath(entry.executable||'')!==owner.executable||Number(entry.bindingRevision)!==Number(result.bindingRevision)||
+          anchor?.key&&anchor.key!==entry.key||known&&(known.deleted||Number(known.bindingRevision)>Number(result.bindingRevision)))throw new Error('本地游戏的壁纸绑定已变化，请重新搜索');
+      snapshot.gameMedia={...snapshot.gameMedia,entries:{...snapshot.gameMedia?.entries,[entry.key]:entry}};
+      owner.target={...entry};applySharedWallpaperWrite(owner,entry);
+    }
     const entryKey=owner.entry?.key||selectedActionGame.gameMedia?.key;
     if(result?.entryKey&&entryKey&&result.entryKey!==entryKey)throw new Error('动态壁纸游戏绑定已变化，请重新搜索');
     const selectionCanSettle=revision=>{
@@ -4864,13 +4944,26 @@ async function searchSharedWallpaperVideos(owner,retryOrigin=null){
     if(!current()){staleSearch();return;}
     const candidates=Array.isArray(result?.candidates)?result.candidates:[];
     document.getElementById('artwork-search-summary').textContent=(result.query||'当前游戏')+' · '+candidates.length+' 个动态壁纸候选 · 选择后后台下载';
-    document.getElementById('artwork-search-empty').textContent=candidates.length?'':'该游戏暂无可用的官方预告片，可返回后指定本地视频。';document.getElementById('artwork-search-empty').classList.toggle('hidden',candidates.length!==0);
+    document.getElementById('artwork-search-empty').textContent=candidates.length?'':consoleSearch?'非 Steam 素材目录暂无匹配，可指定本地视频。':'该游戏暂无可用的官方预告片，可返回后指定本地视频。';document.getElementById('artwork-search-empty').classList.toggle('hidden',candidates.length!==0);
     for(const candidate of candidates){const card=document.createElement('button');card.type='button';card.className='artwork-candidate';card.dataset.videoCandidate=candidate.id;
       const preview=document.createElement('span');preview.className='artwork-candidate-preview';
-      if(candidate.previewUrl){const img=document.createElement('img');img.src=candidate.previewUrl;img.alt=candidate.title||'动态壁纸';img.loading='lazy';img.addEventListener('error',()=>{preview.textContent='Steam 官方预告片';},{once:true});preview.appendChild(img);}else preview.textContent='Steam 官方预告片';
-      const title=document.createElement('strong');title.className='artwork-candidate-title';title.textContent=candidate.title||'Steam 预告片';const meta=document.createElement('span');meta.className='artwork-candidate-meta';meta.textContent=qualitySelect.value+'p 优先';card.append(preview,title,meta);
+      const sourceLabel=consoleSearch?({'playstation-store':'PlayStation 官方预告片',nintendo:'任天堂官方视频',motionbgs:'MotionBGS'}[candidate.provider]||'视频候选'):'Steam 官方预告片';
+      if(candidate.previewUrl){const img=document.createElement('img');img.src=candidate.previewUrl;img.alt=candidate.title||'动态壁纸';img.loading='lazy';img.addEventListener('error',()=>{preview.textContent=sourceLabel;},{once:true});preview.appendChild(img);}else preview.textContent=sourceLabel;
+      const qualityLabel=()=>consoleSearch?sourceLabel+' · '+candidate.quality:qualitySelect.value+'p 优先';
+      const title=document.createElement('strong');title.className='artwork-candidate-title';title.textContent=candidate.title||sourceLabel;const meta=document.createElement('span');meta.className='artwork-candidate-meta';meta.textContent=qualityLabel();card.append(preview,title,meta);
       card.addEventListener('click',async()=>{if(!current()){staleSearch();return;}if(sharedWallpaperBusy)return;sharedWallpaperBusy=true;card.disabled=true;setSharedWallpaperDownloadRequest(owner,{phase:'submitting',token,assetId:owner.entry?.assets?.dynamic?.id});meta.textContent='正在加入下载队列…';
-        try{const target=owner.entry||owner.target;const received=await invoke('mediaSelectVideo',{...target,bindingRevision:result.bindingRevision,searchToken:result.searchToken,candidateId:candidate.id,preferredHeight:Number(qualitySelect.value)||720});const next=retainSharedWallpaperPreviews(owner,received);
+        try{const target=owner.entry||owner.target;
+          if(consoleSearch){
+            const progress=document.createElement('progress');progress.setAttribute('aria-label','动态壁纸下载');meta.textContent='正在下载 MP4…';card.appendChild(progress);
+            try{
+              const received=await invoke('mediaDownloadConsoleVideo',{executable:localExecutable,bindingRevision:result.bindingRevision,searchToken:result.searchToken,candidateId:candidate.id});
+              const canPresent=current();
+              if(settleSharedWallpaperWrite(owner,received,target))renderCardOperationLibrary('console-video-download-presentation');
+              if(canPresent){modal.classList.add('hidden');lease.restoreFocus?.();showNotice('动态壁纸已下载。',false,libraryNotice);}
+            }finally{progress.remove();}
+            return;
+          }
+          const received=await invoke('mediaSelectVideo',{...target,bindingRevision:result.bindingRevision,searchToken:result.searchToken,candidateId:candidate.id,preferredHeight:Number(qualitySelect.value)||720});const next=retainSharedWallpaperPreviews(owner,received);
           if(!next?.key||entryKey&&next.key!==entryKey||Number(next.appId||0)!==Number(target.appId||0)||!Number.isFinite(Number(next.bindingRevision))||Number(next.bindingRevision)<Number(result.bindingRevision||0))throw new Error('选择或下载请求未返回有效的游戏回执，请重试');
           // Back retires this gallery, not a submitted native write. Settle only
           // the captured media record; later bindings and removals take precedence.
@@ -4894,10 +4987,12 @@ async function searchSharedWallpaperVideos(owner,retryOrigin=null){
             if(refreshed)applySharedWallpaperWrite(owner,refreshed);renderCardOperationLibrary('video-selection-state-presentation');
           }
           catch(error){if(token===artworkTaskToken&&ownerCurrent())showNotice('动态壁纸选择请求已完成，下载状态刷新未完成：'+String(error?.message||error)+'；完成前保留当前壁纸。',true,libraryNotice);}
-        }catch(error){if(sharedWallpaperDownloadRequests.get(owner.key)?.token===token&&selectionCanSettle(result.bindingRevision))setSharedWallpaperDownloadRequest(owner,{phase:'error',token,error:String(error?.message||error)});selectionError(error);}finally{sharedWallpaperBusy=false;card.disabled=false;meta.textContent=qualitySelect.value+'p 优先';if(sharedWallpaperDownloadRequests.get(owner.key)?.phase==='submitting'&&sharedWallpaperDownloadRequests.get(owner.key)?.token===token)sharedWallpaperDownloadRequests.delete(owner.key);if(current()&&libraryRenderAllowed())card.focus();renderSharedWallpaperDownloadStatus();void flushSharedWallpaperPlayback();}
+        }catch(error){if(sharedWallpaperDownloadRequests.get(owner.key)?.token===token&&selectionCanSettle(result.bindingRevision))setSharedWallpaperDownloadRequest(owner,{phase:'error',token,error:String(error?.message||error)});selectionError(error);}finally{sharedWallpaperBusy=false;card.disabled=false;meta.textContent=qualityLabel();if(sharedWallpaperDownloadRequests.get(owner.key)?.phase==='submitting'&&sharedWallpaperDownloadRequests.get(owner.key)?.token===token)sharedWallpaperDownloadRequests.delete(owner.key);if(current()&&libraryRenderAllowed())card.focus();renderSharedWallpaperDownloadStatus();void flushSharedWallpaperPlayback();}
       });list.appendChild(card);
     }
-    requestArtworkSearchFocus(list.querySelector('button'),lease);});
+    const focusTarget=list.querySelector('button');
+    if(!consoleSearch||document.activeElement!==titleInput||titleInput.readOnly)requestArtworkSearchFocus(focusTarget,lease);
+    });
   }catch(error){searchError(error);return false;}
   finally{if(token===artworkTaskToken)artworkTaskInFlight=false;}
 }

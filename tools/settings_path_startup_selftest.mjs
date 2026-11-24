@@ -8,11 +8,14 @@ async function fixture(dir='G:\\fixture-override\\PowerControl'){
  const fx={dir,file:dir+'\\yeman-settings.json',calls:[],files:new Map(),locationHook:null,readFailure:false,writes:[],renames:[]};let receiver;
  const reply=(id,value,error)=>receiver({data:error?{id,error:String(error.message||error)}:{id,result:value}});
  const webview={addEventListener(type,fn){assert.equal(type,'message');receiver=fn},postMessage(message){fx.calls.push(message);queueMicrotask(async()=>{try{const{cmd,args,id}=message;let value;if(cmd==='settings.location')value=fx.locationHook?await fx.locationHook():{directory:fx.dir,file:fx.file,backup:fx.file+'.bak'};else if(cmd==='settings.read'||cmd==='settings.write'){if(key(args.path)!==key(fx.file))throw Error('Invalid unified settings path');if(cmd==='settings.read'){if(fx.readFailure)throw Error('fixture read I/O failure');const raw=fx.files.get(key(args.path));value={stamp:raw===undefined?'missing':raw,unchanged:raw!==undefined&&raw===args.stamp,content:raw??''}}else{const raw=args.content;fx.files.set(key(args.path),raw);fx.writes.push(args);value=args.baseline?{ok:true,content:raw}:true}}else if(cmd==='fs.rename'){const from=key(args.from??args.src),to=key(args.to??args.dst);if(!fx.files.has(from))throw Error('rename source missing');fx.files.set(to,fx.files.get(from));fx.files.delete(from);fx.renames.push(args);value=true}else if(cmd==='fs.exists')value=fx.files.has(key(args.path));else if(cmd==='fs.readTextFile'){if(!fx.files.has(key(args.path)))throw Error('missing fixture');value=fx.files.get(key(args.path))}else throw Error('Forbidden native request '+cmd);reply(id,value)}catch(e){reply(message.id,null,e)}})}};
- const module={exports:{}},context={module,exports:module.exports,console,setTimeout,clearTimeout,queueMicrotask,structuredClone,TextEncoder,TextDecoder,window:{chrome:{webview},dispatchEvent(){return true},addEventListener(){},removeEventListener(){}},CustomEvent:class{constructor(type,init){this.type=type;this.detail=init?.detail}},document:{},process:{env:{NODE_ENV:'production'}}};
+ fx.fullCopies=0;
+ const copy=value=>{if(value?.schemaVersion&&value.input&&value.tdp&&value.performanceSchedule)fx.fullCopies++;return structuredClone(value);};
+ const module={exports:{}},context={module,exports:module.exports,console,setTimeout,clearTimeout,queueMicrotask,structuredClone:copy,TextEncoder,TextDecoder,window:{chrome:{webview},dispatchEvent(){return true},addEventListener(){},removeEventListener(){}},CustomEvent:class{constructor(type,init){this.type=type;this.detail=init?.detail}},document:{},process:{env:{NODE_ENV:'production'}}};
  vm.runInNewContext(compiled.outputFiles[0].text,context,{filename:'actual-settings-ipc-startup.cjs'});
  const repo=module.exports.repo,initial=repo.normalizeSettings({tdp:{tdpMax:37},performanceSchedule:{enabled:false},input:{revision:12},future:{preserve:true}});fx.files.set(key(fx.file),JSON.stringify(initial));return{fx,repo,initial,Barrier:module.exports.StartupWorkBarrier};
 }
-const cases=[];async function check(name,fn){try{await fn();cases.push({name,ok:true});console.log('PASS '+name)}catch(e){cases.push({name,ok:false,error:e.message});console.log('FAIL '+name+': '+e.message)}}
+const selected=new Set();for(let i=2;i<process.argv.length;i+=2){const name=process.argv[i+1];assert(process.argv[i]==='--case'&&name&&!selected.has(name),'Use --case with a unique exact name');selected.add(name);}
+const cases=[];async function check(name,fn){if(selected.size&&!selected.has(name))return;try{await fn();cases.push({name,ok:true});console.log('PASS '+name)}catch(e){cases.push({name,ok:false,error:e.message});console.log('FAIL '+name+': '+e.message)}}
 const ticks=async()=>{for(let i=0;i<15;i++)await Promise.resolve()};
 await check('native override startup resolves real wire location before schedule readiness',async()=>{const f=await fixture();const barrier=new f.Barrier();await barrier.track(()=>f.repo.readSettingsSection('performanceSchedule'));assert.equal(await barrier.settle(),true);assert.equal(key(f.repo.SETTINGS_FILE),key(f.fx.file));assert.equal(f.fx.calls[0].cmd,'settings.location');assert.equal(f.fx.writes.length,0);assert(!f.fx.calls.some(c=>c.args.path?.startsWith('C:\\SOFT')))});
 await check('default installed directory still loads without rewriting healthy settings',async()=>{const f=await fixture('C:\\SOFT\\YeMan\\PowerControl');assert.equal((await f.repo.loadSettings()).tdp.tdpMax,37);assert.equal(f.fx.calls[0].cmd,'settings.location');assert.equal(f.fx.writes.length,0)});
@@ -20,7 +23,63 @@ await check('first queued save uses discovered directory, not submission-time de
 await check('initial shared CAS uses canonical directory before raw disk revision read',async()=>{const f=await fixture();const input=f.initial.input;const result=await f.repo.compareAndSwapInputSettings(input.revision,{...input,revision:input.revision+1});assert.equal(result.ok,true);assert(f.fx.calls.filter(c=>c.cmd==='fs.readTextFile').every(c=>key(c.args.path)===key(f.fx.file)))});
 await check('failed location discovery does not read/write defaults and can retry',async()=>{const f=await fixture();let n=0;f.fx.locationHook=()=>{if(++n===1)throw Error('location I/O unavailable');return{directory:f.fx.dir,file:f.fx.file}};await assert.rejects(f.repo.loadSettings(),/location I\/O/);assert(f.fx.calls.every(c=>c.cmd==='settings.location'));assert.equal((await f.repo.loadSettings()).tdp.tdpMax,37);assert.equal(n,2)});
 await check('malformed or mismatched native location blocks file access',async()=>{for(const value of [{directory:'relative',file:'relative\\yeman-settings.json'},{directory:'G:\\allowed',file:'G:\\other\\yeman-settings.json'}]){const f=await fixture();f.fx.locationHook=()=>value;await assert.rejects(f.repo.loadSettings(),/配置位置|settings location/i);assert(f.fx.calls.every(c=>c.cmd==='settings.location'))}});
-await check('coalesced cold readers share discovery but own independent snapshots',async()=>{const f=await fixture();const[a,b]=await Promise.all([f.repo.loadSettings(),f.repo.loadSettings()]);a.tdp.tdpMax=199;assert.equal(b.tdp.tdpMax,37);assert.equal(f.fx.calls.filter(c=>c.cmd==='settings.location').length,1)});
+await check('coalesced cold readers share discovery but own independent snapshots',async()=>{
+ const {fx,repo}=await fixture();
+ const [a,b]=await Promise.all([repo.loadSettings(),repo.loadSettings()]);a.tdp.tdpMax=199;assert.equal(b.tdp.tdpMax,37);assert.equal(fx.calls.filter(c=>c.cmd==='settings.location').length,1);
+ const measures=[];
+ for(const timing of ['overlap','after-settlement'])for(const validate of [false,true]){
+  const from=fx.calls.length,copies=fx.fullCopies;
+  const first=repo.loadSettings();if(timing==='after-settlement')await first;
+  const second=validate?repo.validateSettingsRead():repo.loadSettings();
+  const [snapshot,validation]=await Promise.all([first,second]);assert.equal(snapshot.tdp.tdpMax,37);
+  if(validate)assert.equal(validation,undefined);
+  const nativeReads=fx.calls.slice(from).filter(c=>c.cmd==='settings.read').length,fullCopies=fx.fullCopies-copies;
+  assert.equal(nativeReads,timing==='overlap'?1:2);assert.equal(fullCopies,validate?1:2);
+  measures.push({timing,validate,nativeReads,fullCopies});
+ }
+ assert.equal(fx.writes.length,0);console.log(JSON.stringify({settingsReadValidation:measures}));
+ const readsFrom=fx.calls.length,copiesFrom=fx.fullCopies;
+ const [displaySchedule,validation,rtss]=await Promise.all([
+  repo.loadSettings(),repo.validateSettingsRead(),repo.readSettingsSection('rtss'),
+ ]);
+ const input=await repo.readSettingsSection('input');
+ const displayReads={nativeReads:fx.calls.slice(readsFrom).filter(c=>c.cmd==='settings.read').length,fullCopies:fx.fullCopies-copiesFrom};
+ console.log(JSON.stringify({settingsSectionDisplayReads:displayReads}));
+ assert.equal(validation,undefined);
+ assert.deepEqual(rtss,displaySchedule.rtss);
+ assert.deepEqual(input,displaySchedule.input);
+ assert.equal(displayReads.nativeReads,2,'overlapping schedule/validation/RTSS share one native validation; later input is fresh');
+ assert.equal(displayReads.fullCopies,1,'only the explicit whole-document reader may copy all settings');
+ rtss.frameRates.ac.fps=42;
+ input.ownership.frontendIsolationEnabled=!displaySchedule.input.ownership.frontendIsolationEnabled;
+ const [rtssAgain,inputAgain]=await Promise.all([repo.readSettingsSection('rtss'),repo.readSettingsSection('input')]);
+ assert.deepEqual(rtssAgain,displaySchedule.rtss);
+ assert.deepEqual(inputAgain,displaySchedule.input);
+ const changed=structuredClone(displaySchedule);
+ changed.rtss.frameRates.ac.fps=rtss.frameRates.ac.fps;
+ fx.files.set(key(fx.file),JSON.stringify(changed));
+ assert.equal((await repo.readSettingsSection('rtss')).frameRates.ac.fps,42);
+ fx.readFailure=true;
+ const fallback=await repo.readSettingsSection('rtss');
+ assert.equal(repo.getSettingsRecoveryState().reason,'read-failed');
+ assert.equal(fallback.frameRates.ac.fps,42);
+ fallback.frameRates.ac.fps=51;
+ assert.equal((await repo.readSettingsSection('rtss')).frameRates.ac.fps,42);
+ fx.readFailure=false;
+ assert.equal(fx.writes.length,0);
+ const cold=await fixture();let discovers=0;
+ cold.fx.locationHook=()=>{if(++discovers===1)throw Error('fixture location unavailable');return {directory:cold.fx.dir,file:cold.fx.file};};
+ await assert.rejects(cold.repo.validateSettingsRead(),/fixture location unavailable/);assert(cold.fx.calls.every(c=>c.cmd==='settings.location'));
+ assert.equal(await cold.repo.validateSettingsRead(),undefined);assert.equal(key(cold.repo.SETTINGS_FILE),key(cold.fx.file));
+ const future=JSON.stringify({...cold.initial,schemaVersion:99});cold.fx.files.set(key(cold.fx.file),future);
+ await cold.repo.validateSettingsRead();assert.equal(cold.repo.getSettingsRecoveryState().reason,'unsupported');
+ assert.equal(cold.fx.files.get(key(cold.fx.file)),future);assert.equal(cold.fx.writes.length,0);
+ const switched=await fixture();let release;
+ switched.fx.locationHook=()=>new Promise(resolve=>{release=resolve;});
+ const pending=switched.repo.validateSettingsRead();await ticks();assert.equal(typeof release,'function');
+ switched.repo.setSettingsDirectory('Q:/manual-fixture');release({directory:switched.fx.dir,file:switched.fx.file});
+ await assert.rejects(pending);assert(switched.fx.calls.every(c=>c.cmd==='settings.location'));
+});
 await check('explicit directory switch cancels late initial discovery',async()=>{const f=await fixture();let release;const original={directory:f.fx.dir,file:f.fx.file};f.fx.locationHook=()=>new Promise(r=>{release=r});const p=f.repo.loadSettings();await ticks();assert.equal(typeof release,'function');f.repo.setSettingsDirectory('Q:\\manual-fixture');f.fx.dir='Q:\\manual-fixture';f.fx.file=f.fx.dir+'\\yeman-settings.json';f.fx.files.set(key(f.fx.file),JSON.stringify(f.initial));release(original);await assert.rejects(p,/目录已切换|旧请求已取消/);assert.equal((await f.repo.loadSettings()).tdp.tdpMax,37);assert.equal(key(f.repo.SETTINGS_FILE),key(f.fx.file))});
 await check('post-discovery file I/O failure never falls back to a different root',async()=>{const f=await fixture();f.fx.readFailure=true;await assert.rejects(f.repo.loadSettings(),/I\/O/);assert.equal(f.fx.writes.length,0);f.fx.readFailure=false;assert.equal((await f.repo.loadSettings()).tdp.tdpMax,37);assert.equal(f.fx.calls.filter(c=>c.cmd==='settings.location').length,1)});
 await check('initial discovery keeps queued module generation valid',async()=>{const f=await fixture();const generation=f.repo.getSettingsGeneration();await f.repo.saveSettingsSection('sleep',{keep:true},generation);assert.equal(f.repo.getSettingsGeneration(),generation);assert.equal(f.fx.writes.length,1)});
@@ -37,4 +96,5 @@ await check('genuine first-run absence can still initialize defaults automatical
 await check('compatible backup can restore protected and unknown data while archiving corrupt main',async()=>{const f=await fixture();f.fx.files.set(key(f.fx.file),'{broken-main');const raw=JSON.stringify(f.initial);f.fx.files.set(key(f.fx.file+'.bak'),raw);const loaded=await f.repo.loadSettings();assert.equal(loaded.tdp.tdpMax,37);assert.equal(loaded.input.revision,12);assert.equal(loaded.future.preserve,true);assert.equal(f.fx.writes.length,1);assert.equal(f.fx.renames.length,1);assert([...f.fx.files.values()].includes('{broken-main'));assert.equal(f.fx.files.get(key(f.fx.file+'.bak')),raw)});
 await check('unknown non-numeric or fractional schema is not silently downgraded',async()=>{for(const schemaVersion of ['future',1.5,-1,null,'1']){const f=await fixture();const raw=JSON.stringify({...f.initial,schemaVersion});f.fx.files.set(key(f.fx.file),raw);await assert.rejects(f.repo.loadSettings(),/配置版本/);assert.equal(f.fx.writes.length,0);assert.equal(f.fx.files.get(key(f.fx.file)),raw)}});
 await check('shared CAS refuses an unsupported root schema rather than bypassing startup guard',async()=>{const f=await fixture();const raw=JSON.stringify({...f.initial,schemaVersion:99});f.fx.files.set(key(f.fx.file),raw);await assert.rejects(f.repo.compareAndSwapInputSettings(f.initial.input.revision,f.initial.input),/配置版本 99/);assert.equal(f.fx.writes.length,0);assert.equal(f.fx.files.get(key(f.fx.file)),raw)});
+assert(cases.length>0&&[...selected].every(name=>cases.some(c=>c.name===name)),'Unknown settings startup case');
 const report={passed:cases.filter(c=>c.ok).length,failed:cases.filter(c=>!c.ok).length,cases,apiAndIpcMocked:false,nativeServicesMemoryOnly:true,realSettingsWritten:false,hardwareOperations:false};console.log(JSON.stringify(report,null,2));if(process.env.YMCC_STARTUP_PATH_REPORT)fs.writeFileSync(process.env.YMCC_STARTUP_PATH_REPORT,JSON.stringify(report,null,2)+'\n');if(report.failed)process.exitCode=1;

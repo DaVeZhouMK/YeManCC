@@ -12,7 +12,7 @@ export type { FanDeviceGateResult } from './fanHost/capabilityAdmission';
 import { setFanNavigationControl } from './fanFeature';
 import { captureBootPreferenceWrite, type BootPreferenceWrite, type BootPreferenceContext } from './bootModeGlobalPreferences';
 import { app as nativeApp, fs as nativeFs, http, proc as nativeProc, shell as nativeShell, powerLifecycle, type PowerLifecycleState, type FanActivitySnapshot, type FanManualWakeResult } from './api';
-import { hasRetiredSourceFanResources, hasSafeSourceFanRelease, resolveFanSnapshotGenerationValues, isNoPowerOperationReceipt, isColdUnopenedFanHost, isCompleteAdmissibleHcSession, hasBlockingFanTransition, hasFailedFanOperation, type FanSnapshotGenerationEvidence } from './fanSessionEvidence';
+import { hasRetiredSourceFanResources, hasSafeSourceFanRelease, resolveFanSnapshotGenerationValues, isNoPowerOperationReceipt, isColdUnopenedFanHost, isCompleteAdmissibleHcSession, hasBlockingFanTransition, hasFailedFanOperation, awaitsPublicFanResumeGrant, type FanSnapshotGenerationEvidence } from './fanSessionEvidence';
 import { ensureFanHostInstaller } from './fanHostInstallerRepair';
 import {
   createFanApiAdapter,
@@ -3282,7 +3282,7 @@ export class FanHostLifecycle {
     if (evidence.freshness === 'invalid') return 'terminal';
     const mismatchedGeneration = evidence.freshness === 'stale' || evidence.freshness === 'future';
     const phase = String(remote.resumePhase ?? state);
-    if (hasFailedFanOperation(remote)) return 'terminal';
+    if (hasFailedFanOperation(remote, this.powerGeneration)) return 'terminal';
     if (hasBlockingFanTransition(remote)) return 'waiting';
     if (mismatchedGeneration) return 'waiting';
     // FAN-933 §2.1(4)：唤醒后「新控制接入」的 rearm 比既有 apply 准入更严——必须看到
@@ -3849,7 +3849,7 @@ export class FanHostLifecycle {
     // never proves an active worker; those still need an explicit Host resume.
     const hostAlreadyResuming = !!probe && hostGeneration === generation
       && probe.unknownState !== true && probe.hcCloseCleanupPending !== true
-      && probe.state === 'Resuming' && probe.resumePhase === 'Resuming';
+      && ((probe.state === 'Resuming' && probe.resumePhase === 'Resuming') || awaitsPublicFanResumeGrant(probe, generation));
     if (!hostAlreadyResuming) {
       try {
         if (context.requestCurrent) await this.requireControlRequestCurrent(context);
@@ -4680,13 +4680,16 @@ export class FanHostLifecycle {
       const native = await this.readManualNativeWaitSnapshot(Math.max(1, Math.floor(Math.min(1000, budget))));
       this.assertAdmissionContextCurrent(context, 'manual-native-wait-probe');
       if (monotonicNowMs() >= deadline) throw new Error('FAN_MANUAL_NATIVE_WAIT_DEADLINE');
-      if (native && (native.generation !== context.generation || native.phase === 'suspending'
-          || (native.phase === 'ready' && native.hardwareWritesAllowed !== true))) {
-        throw new Error('FAN_MANUAL_WAKE_NOT_READY:changed-native-boundary');
+      if (native) {
+        if (native.generation !== context.generation || native.phase === 'suspending')
+          throw new Error('FAN_MANUAL_WAKE_NOT_READY:changed-native-boundary');
+        // A pending notification can leave this Fan generation in its last
+        // suspended phase until the common owner settles the notification.
+        if (native.notificationPending !== true) {
+          if (native.phase === 'ready' && native.hardwareWritesAllowed === true) return;
+          if (native.phase !== 'resuming') throw new Error('FAN_MANUAL_WAKE_NOT_READY:changed-native-boundary');
+        }
       }
-      if (native?.generation === context.generation && native.phase === 'ready' && native.hardwareWritesAllowed === true
-          && native.notificationPending !== true) return;
-      if (native && native.phase !== 'resuming') throw new Error('FAN_MANUAL_WAKE_NOT_READY:changed-native-boundary');
       interval = Math.min(RESUME_WAIT_MAX_INTERVAL_MS, interval * 2);
     }
   }
@@ -5011,7 +5014,7 @@ export class FanHostLifecycle {
       return { allowed: true, writeReady: false, reason: 'Fan Host 已握手，等待手动接管未绑定 HC 会话' };
     }
     const residentFault = reachable && (reachable.state === 'FaultLocked'
-      || reachable.state === 'ListenerFaultLocked' || reachable.unknownState === true || hasFailedFanOperation(reachable));
+      || reachable.state === 'ListenerFaultLocked' || reachable.unknownState === true || hasFailedFanOperation(reachable, this.powerGeneration));
     if (residentFault && !options.manualRecovery) {
       this.syncRemoteSessionState(reachable, reachableGenerationEvidence ?? undefined);
       throw new FanApiError('FAULT_LOCKED: 风扇宿主处于故障状态，请手动重新开启', 409, 'FAULT_LOCKED');
@@ -5084,7 +5087,8 @@ export class FanHostLifecycle {
     // A failed first handshake cannot become a permanent read-only resident shortcut.
     // An explicit retry reuses the original single-writer launcher/adoption and gate.
     const needsFreshHandshake = options.manualRecovery === true && !this.writeReady;
-    if (!needsFreshHandshake && (residentSessionFromOlderPowerCycle || interruptedOriginalOpen || retryUnopenedAfterRecoveryFailure)) {
+    if (!needsFreshHandshake && (residentSessionFromOlderPowerCycle || interruptedOriginalOpen || retryUnopenedAfterRecoveryFailure
+        || (reachable && awaitsPublicFanResumeGrant(reachable, currentGeneration)))) {
       await this.rearmAfterWakeForControlAdmission(
         options.reason ?? 'start-resident-session-stale', options.manualRecovery === true, options,
       );
@@ -5712,7 +5716,7 @@ export class FanHostLifecycle {
         this.assertAdmissionContextCurrent(context, 'manual-terminal-remote-probe');
         const remoteTerminal = remote !== null && (
           remote.state === 'FaultLocked' || remote.state === 'ListenerFaultLocked'
-          || remote.unknownState === true || hasFailedFanOperation(remote)
+          || remote.unknownState === true || hasFailedFanOperation(remote, context.generation)
           || (remote.state === 'Stopped' && hasRetiredFanResourceBoundary(remote)));
         if (remoteTerminal) {
           this.syncRemoteSessionState(remote);

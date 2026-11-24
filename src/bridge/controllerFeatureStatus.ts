@@ -31,12 +31,15 @@ export function normalizeOemInputUsage(raw: unknown): OemInputUsage | null {
       failed: requested && f.pending === false && f.lastOutcomeKnown === true && f.lastOutcomeOk === false },
   };
 }
-/** Existing OneX/AYA/AOKZOE/GPD edge receipt: model-interpreted input, never a physical-origin or held-state claim. */
+/** OEM edge receipt: model-interpreted input, never a physical-origin or held-state claim. */
 export function oneXOemObservationKeys(raw: unknown, usage?: OemKeysSnapshot | null): string[] {
-  if (!usage?.deviceClass || !usage.supported || (usage.familyId !== 'onexplayer' && usage.familyId !== 'ayanero' && usage.familyId !== 'aokzoe' && usage.familyId !== 'gpd') || !raw || typeof raw !== 'object') return [];
+  if (!usage?.deviceClass || !usage.supported || !raw || typeof raw !== 'object') return [];
+  const msi = usage.familyId === 'msi-claw';
+  if (!msi && usage.familyId !== 'onexplayer' && usage.familyId !== 'ayanero' && usage.familyId !== 'aokzoe' && usage.familyId !== 'gpd') return [];
   const value = raw as Record<string, unknown>;
   if (value.schemaVersion !== 1 || value.familyId !== usage.familyId || value.deviceClass !== usage.deviceClass || !Array.isArray(value.observedKeys)) return [];
-  const known = new Set(usage.keys.filter(key => key.captureImplemented !== false).map(key => key.keyId));
+  if (msi && value.route !== 'msi-dinput') return [];
+  const known = new Set(usage.keys.filter(key => key.captureImplemented !== false && (!msi || key.keyId === 'm1' || key.keyId === 'm2')).map(key => key.keyId));
   return [...new Set(value.observedKeys.filter((key): key is string => typeof key === 'string' && known.has(key)))];
 }
 export interface ControllerFeatureStatus {

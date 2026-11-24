@@ -691,7 +691,7 @@ async function runFsr(): Promise<void> {
       selectedGameName = fileNameFromPath(gamePath);
     }
     const uninstall = picked === 'uninstall';
-    const action = uninstall ? '卸载' : '安装';
+    const action = uninstall ? '卸载并还原' : '安装';
     const selectedBackend: OptiBackend | 'auto' = uninstall ? 'auto' : picked as OptiBackend;
     let antiCheatAcknowledged = false;
     if (!uninstall) {
@@ -882,7 +882,7 @@ onBeforeUnmount(() => {
 
     <div class="game-quick-actions" data-gp-group="game-quick-actions">
       <button type="button" class="quick-action quick-fsr" data-gp-game-row="actions-1" data-gp-row="1" data-gp-col="0" data-gp-game-control="fsr-import" :disabled="disabledForAction" @click="runFsr">
-        <AppIcon name="bolt" /><span><strong>FSR4.1/Xess-OPT自动导入</strong><small>FSR4 / XeSS 自动套用 · OPT 客户端</small></span>
+        <AppIcon name="bolt" /><span><strong>FSR4.1.2/XeSS-OPT自动导入</strong><small>FSR4 / XeSS 自动套用 · OPT 客户端</small></span>
       </button>
       <button type="button" class="quick-action quick-lossless" data-gp-game-row="actions-1" data-gp-row="1" data-gp-col="1" data-gp-game-control="lossless-scaling"
         :disabled="disabledForAction || !targetGame || losslessReading || losslessState?.pending || !losslessState?.controlAvailable" :aria-expanded="!!losslessMenuTarget" :aria-haspopup="losslessNext==='off' ? 'dialog' : undefined" @click="onLosslessClick">
@@ -924,16 +924,13 @@ onBeforeUnmount(() => {
             </div>
             <div class="quick-opti-anticheat-actions" role="group" aria-label="反作弊说明与还原">
               <button type="button" class="quick-opti-option-btn" :class="{ selected: fsrBackendChoice === 'help' }" :aria-pressed="fsrBackendChoice === 'help'" @click="fsrBackendChoice = 'help'">反作弊离线说明</button>
-              <button type="button" class="quick-opti-option-btn" :class="{ selected: fsrBackendChoice === 'uninstall' }" :aria-pressed="fsrBackendChoice === 'uninstall'" @click="fsrBackendChoice = 'uninstall'">还原</button>
-            </div>
-            <div class="quick-opti-maintenance">
               <button
                 type="button"
                 class="quick-opti-option-btn uninstall"
                 :class="{ selected: fsrBackendChoice === 'uninstall' }"
                 :aria-pressed="fsrBackendChoice === 'uninstall'"
                 @click="fsrBackendChoice = 'uninstall'"
-              >卸载并还原游戏文件</button>
+              >卸载并还原</button>
             </div>
           </template>
           <div class="quick-dialog-actions">
@@ -1007,8 +1004,6 @@ onBeforeUnmount(() => {
 .quick-dialog-actions button { min-width: 0; min-height: 3.14em; padding: .5em; font-size: 1em; border: 1px solid rgba(255,255,255,.08); border-radius: 7px; background: var(--bg-input); color: var(--text); cursor: pointer; }
 .quick-dialog-actions button:first-child { background: var(--accent); color: #07131d; font-weight: 700; }
 .quick-opti-anticheat-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7em; margin: .7em 0; }
-.quick-opti-maintenance { margin: .7em 0; }
-.quick-opti-maintenance .quick-opti-option-btn { width: 100%; }
 .quick-opti-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7em; margin: .7em 0; }
 .quick-opti-option-btn { min-width: 0; min-height: 3.14em; padding: .5em; border: 1px solid rgba(255,255,255,.1); border-radius: 7px; background: var(--bg-input); color: var(--text); font-size: 1em; font-weight: 700; cursor: pointer; }
 .quick-opti-option-btn:hover, .quick-opti-option-btn.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--bg-input)); color: var(--accent); }

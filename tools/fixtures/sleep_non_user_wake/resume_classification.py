@@ -27,40 +27,86 @@ def bind_shared_publication(c, p, f):
     assert 'g_recoveryPowerBoundary.revoke();' in revocation and 'g_sharedPowerRevocations.revoke();' in revocation
     assert 'void sleepPowerArmRedelivery(HWND)' in p, 'original redelivery endpoint missing'
     assert 'g_sharedPowerPublicationRevision.fetch_add(1,std::memory_order_acq_rel)' in actual
-    assert 'g_sharedPowerProjectionPending.exchange(true,std::memory_order_acq_rel)' in actual
-    assert 'PostMessageW(g_hwnd,kSharedPowerStateMessage,0,0)' in actual
+    assert 'g_sharedPowerProjectionPending.' in actual and 'PostMessageW(' in actual
     assert 'g_sharedPowerPublicationRevision' not in p
+    tagged = 'kSharedPowerProjectionPostReceipt' in actual
+    declarations = ('static std::mutex g_sharedPowerProjectionPostMutex;',
+                    'static bool g_sharedPowerProjectionPosted=false;',
+                    'static constexpr WPARAM kSharedPowerProjectionPostReceipt=1;')
+    if tagged:
+        for line in declarations:
+            assert source.count(line)==1, 'actual post receipt declaration missing: '+line
     ports = r'''
 #define YMCC_FIXTURE_ACTUAL_SHARED_PUBLICATION 1
+#include <latch>
+#include <thread>
 static std::atomic<uint64_t> g_sharedPowerPublicationRevision{0};
 static std::atomic<bool> g_sharedPowerProjectionPending{false};
-static unsigned classificationPublicationPosts=0,classificationBatteryNotices=0;
+static std::atomic<bool> g_sleepPowerRedeliveryArmed{false};
+static std::atomic<unsigned> classificationPublicationPosts{0},classificationBatteryNotices{0},classificationTimerAttempts{0};
+static bool classificationPostSucceeds=true,classificationTimerSucceeds=true;
+static WPARAM classificationPostReceipt=0;
+struct ClassificationPublicationInterleave {
+ std::atomic<bool> first{true};
+ const unsigned secondBattery;
+ std::latch postEntered{1},secondPublication{1},releasePost{1};
+};
+static ClassificationPublicationInterleave* classificationPublicationInterleave=nullptr;
 struct ClassificationMirrorPort {unsigned revocations=0;void revoke() noexcept {++revocations;}};
 static ClassificationMirrorPort g_recoveryPowerBoundary,g_sharedPowerRevocations;
 static void revokeSharedPowerMirrors() noexcept;
-namespace ymcc::batterycharge {void notifySystemPower(){++classificationBatteryNotices;}}
+namespace ymcc::batterycharge {void notifySystemPower(){
+ const auto notices=++classificationBatteryNotices;
+ auto* interleave=classificationPublicationInterleave;
+ if(interleave&&notices==interleave->secondBattery)interleave->secondPublication.count_down();
+}}
 static void sharedPowerProjectionConsumerFailed(const char* name){sgRecordFact("fixture-shared-publication-consumer-failed",{{"consumer",name?name:"unknown"}});}
-static BOOL classificationPublicationPostMessage(HWND window,UINT message,WPARAM,LPARAM){
- if(window!=g_hwnd||message!=kSharedPowerStateMessage)throw std::runtime_error("unadmitted-shared-publication-post");
- ++classificationPublicationPosts;return TRUE;
+static BOOL classificationPublicationPostMessage(HWND window,UINT message,WPARAM receipt,LPARAM value){
+ if(!window||window!=g_hwnd||message!=kSharedPowerStateMessage||value)throw std::runtime_error("unadmitted-shared-publication-post");
+ ++classificationPublicationPosts;
+ auto* interleave=classificationPublicationInterleave;
+ if(interleave&&interleave->first.exchange(false)){
+  interleave->postEntered.count_down();interleave->releasePost.wait();return FALSE;
+ }
+ if(!classificationPostSucceeds)return FALSE;
+ classificationPostReceipt=receipt;return TRUE;
 }
+static UINT_PTR classificationPublicationSetTimer(HWND window,UINT_PTR id,UINT interval,TIMERPROC callback){
+ if(!window||window!=g_hwnd||id!=kSleepPowerRedeliveryTimer||interval!=50||callback)throw std::runtime_error("unadmitted-shared-publication-timer");
+ ++classificationTimerAttempts;++notificationRedeliveryArms;
+ return classificationTimerSucceeds?id:0;
+}
+static void classificationConsumePublicationPost(WPARAM);
 static void publishSharedPowerLifecycle(const char*);
 '''
+    if tagged:
+        ports += '\n'+'\n'.join(declarations)+'\n'
     if 'if(ymcc::sleeppower::task::allowed())notifySharedMediaDownloadsPower();' in actual:
         ports += r'''
 // Media task ownership is outside this fixture. A wake projection cannot run it here.
 namespace ymcc::sleeppower::task {inline bool allowed() noexcept {return false;}}
 static void notifySharedMediaDownloadsPower(){throw std::logic_error("unselected media publication reached");}
 '''
-    wrapped = '\n#pragma push_macro("PostMessageW")\n#undef PostMessageW\n#define PostMessageW classificationPublicationPostMessage\n'+actual+'\n#pragma pop_macro("PostMessageW")\n'
+    arm=c['function']('sleepPowerArmRedelivery')
+    # Keep notification replay on its original port. The publication arm is
+    # separately bound to the production body and only its OS call is stubbed.
+    wrapped = '\n#define sleepPowerArmRedelivery classificationPublicationArmRedelivery\n'
+    wrapped += '#pragma push_macro("SetTimer")\n#undef SetTimer\n#define SetTimer classificationPublicationSetTimer\n'+arm+'\n#pragma pop_macro("SetTimer")\n'
+    wrapped += '\n#pragma push_macro("PostMessageW")\n#undef PostMessageW\n#define PostMessageW classificationPublicationPostMessage\n'+actual+'\n#pragma pop_macro("PostMessageW")\n'
+    wrapped += '#undef sleepPowerArmRedelivery\n'
+    if tagged:
+        wrapped+=c['function']('sleepPowerProjectionPostConsumed')+'\nstatic void classificationConsumePublicationPost(WPARAM receipt){sleepPowerProjectionPostConsumed(receipt);}\n'
+    else:
+        wrapped+='\nstatic void classificationConsumePublicationPost(WPARAM){}\n'
     wrapped = revocation+'\n'+wrapped
     binding = {'source':'native/main.cpp', 'actualPublisher':actual,
                'actualMirrorRevocation':revocation,
                'actualMirrorRevocationSha256':hashlib.sha256(revocation.encode()).hexdigest(),
                'mirrorTerminals':'two counted revoke endpoints; no registry, mapping, observers or cross-process execution',
-               'redeliveryTerminal':'reuse original notificationRedeliveryArms endpoint',
+               'redeliveryTerminal':'actual sleepPowerArmRedelivery with OS SetTimer port',
+               'actualRedeliveryArmSha256':hashlib.sha256(arm.encode()).hexdigest(),
                'actualPublisherSha256':hashlib.sha256(actual.encode()).hexdigest(),
-               'bodyRewritten':False, 'osPort':'PostMessageW macro only around the exact publisher',
+               'bodyRewritten':False, 'osPort':'PostMessageW and SetTimer macros around the exact publisher and timer arm',
                'batteryNotification':'counted endpoint only', 'projectedConsumersExecuted':False,
                'newPowerGenerationOrActionBudget':False}
     c['sharedPowerPublicationBinding'] = binding
@@ -193,9 +239,14 @@ static bool sgSleepTimeoutJoinEntry(int,ULONGLONG);
       'if(id==SG_RESUME_CLASSIFY_TIMER_ID){classificationTimerDue=0;return TRUE;}if(id==SG_SLEEP_TIMEOUT_TIMER_ID){timeoutTimerDue=0;return TRUE;}if(id==SG_MONITOR_ENTRY_FAILURE_TIMER_ID){monitorTimerDue=0;return TRUE;}')
     p=replace_function(p,'handlePowerResumeNotification','static void handlePowerResumeNotification(SgWork,const char*);')
     p=replace_function(p,'sgBeginModernStandbyIntent','static void sgBeginModernStandbyIntent();')
-    p=replace_function(p,'sgQueueWork','''struct SgWorkItem {SgWork kind;unsigned long long generation;};
+    p=replace_function(p,'sgQueueWork','''static SgWorkItem fixtureWorkReceipt(SgWork kind,ULONGLONG gen){
+ SgWorkItem item{kind,gen};if(kind==SgWork::WakeSuspend){
+  item.wakeSleepSequence=g_sleepPowerDispatch.observedSleepBoundarySequence();
+  item.wakeSuspendSerial=g_sharedPowerSuspendSerial.load();
+ }return item;
+}
 std::vector<SgWorkItem> actualWakeQueue;
-void sgQueueWork(SgWork w,ULONGLONG g,ULONGLONG=0){if(w==SgWork::Suspend){++suspendQueued;return;}actualWakeQueue.push_back({w,g});}''')
+void sgQueueWork(SgWork w,ULONGLONG g,ULONGLONG=0){if(w==SgWork::Suspend){++suspendQueued;return;}actualWakeQueue.push_back(fixtureWorkReceipt(w,g));}''')
     p+='''
 static bool sgPowerButtonSleepConfigured(){return sgPowerButtonSleepMode()!=SgSleepMode::Unknown;}
 void sgClearSleepTarget(){frozen=false;}
@@ -220,7 +271,7 @@ void publishPowerResumeReady(ULONGLONG g){if(g==generation){g_powerLifecycle=Pow
         assert abort.count(abort_stop)==1, 'actual abort no longer retires timeout'
         abort_classification='sgStopResumeClassificationWait("sleep-intent-canceled");'
         assert abort.count(abort_classification)==1, 'actual abort no longer retires classification'
-        p=replace_function(p,'sgAbortSleepIntent','void sgAbortSleepIntent(const char* reason, ULONGLONG){'+abort_classification+abort_stop+'++abortCount;sgStopSleepRetry();sgRealWake("resume_suspend",generation);g_powerLifecycle=PowerLifecycle::Ready;}')
+        p=replace_function(p,'sgAbortSleepIntent','void sgAbortSleepIntent(const char* reason, ULONGLONG){'+abort_classification+abort_stop+'++abortCount;sgStopSleepRetry();sgRealWake("resume_suspend",generation,nullptr);g_powerLifecycle=PowerLifecycle::Ready;}')
         p+='\n#define YMCC_TIMEOUT_OBSERVATION_ENABLE 1\n'
         p+=(Path(__file__).with_name('timeout_observation_ports.inc')).read_text(encoding='utf-8')
         if not getattr(c['args'],'resume_classification_sender_only',False):
@@ -240,6 +291,8 @@ static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* value,
         f+='\n'+parsers
         timeout='\n#define EvtQuery timeoutSourceQuery\n#define EvtNext timeoutSourceNext\n#define EvtRender timeoutSourceRender\n#define EvtClose timeoutSourceClose\n#pragma push_macro("PostMessageW")\n#undef PostMessageW\n#define PostMessageW timeoutSourcePost\n'+timeout+'\n#pragma pop_macro("PostMessageW")\n#undef EvtQuery\n#undef EvtNext\n#undef EvtRender\n#undef EvtClose\n'
     f+='\n'+common+'\n'+begin+'\n'+timeout+'\n'+native
+    if 'static void sgReportSleepDisplayRelight() noexcept;' in native:
+        f+='\n'+function('sgReportSleepDisplayRelight',noexcept=True)
     # Bind only the original cancellation statement and active-retry arm.
     # The remaining game/resource query-failure return is outside this leaf.
     if 'struct SgSleepTimeoutObservation {' in timeout:

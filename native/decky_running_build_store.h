@@ -7,6 +7,29 @@ struct State {
     std::wstring root,path,backup;std::string normalized;running::Build build;
     updateconfig::Image primary,secondary;Json history;
 };
+// This can only deny. Require both protected copies to already describe the
+// executing build, with no observation to publish and the requested slot spent.
+inline bool publishedSlotSpent(const updateconfig::Image& primary,const updateconfig::Image& backup,
+                               const running::Build& build,const std::string& exe,bool reopen){
+    if(primary.kind!=updateconfig::Kind::ready||backup.kind!=updateconfig::Kind::ready||primary.value!=backup.value)return false;
+    const auto& history=primary.value;
+    if(!history.is_object()||running::observe(history,build,exe)!=history)return false;
+    return !history.at("builds").at(build.id).at(reopen?"bpm":"page").is_null();
+}
+inline bool slotAlreadySpent(const std::wstring& exe,const std::string& version,bool reopen,const std::function<bool()>& current){
+    try{
+        if(!buildidentity::available||!current())return false;
+        store::Lease lease(exe);if(!lease.owned)return false;
+        const auto root=updaterecovery::directory();
+        const auto disk=updateconfig::read((std::filesystem::path(exe).parent_path()/L"native-build-identity.json").wstring(),4096);
+        if(!store::receiptImage(disk)||std::string(buildidentity::marker())!=std::string(buildidentity::prefix)+disk.value.at("nativeBuildId").get<std::string>())return false;
+        const running::Build build{disk.value.at("nativeBuildId").get<std::string>(),disk.value.at("nativeSha256").get<std::string>(),version};
+        const auto path=updaterecovery::pathFor(root,exe)+L".decky-running-builds.json";
+        const auto primary=store::protectedRead(root,path);
+        const auto backup=store::protectedRead(root,path+L".bak");
+        return publishedSlotSpent(primary,backup,build,updaterecovery::utf8(updaterecovery::normalized(exe)),reopen)&&current();
+    }catch(...){return false;}
+}
 // Optional stage points only to fixed literals; no allocation, logging or new IO.
 // The caller serializes after its settings guard is released. Existing predicates
 // and current() calls stay in their original order; diagnostics grant no authority.

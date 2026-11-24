@@ -6,6 +6,7 @@
 #include <functional>
 #include <fstream>
 #include <array>
+#include <optional>
 #include <set>
 #include <string>
 #include "json.hpp"
@@ -13,6 +14,24 @@
 #include "decky_sidebar_resource_cache.h"
 namespace ymcc::deckysetup {
 using Json = nlohmann::json;
+inline void applySteamRestartRequirement(Json& result) {
+    result["ready"]=false;
+    // A pending Steam restart cannot certify that our worker has stopped.
+    if(result["reason"]!="resource-worker-cleanup-incomplete")result["reason"]="steam-restart-required";
+}
+struct PrewarmOutcome {
+    std::string reason;
+    bool timedOut = false;
+};
+inline PrewarmOutcome settlePrewarm(const Json& environment, bool ownerCurrent, bool powerReady, bool budgetExpired) {
+    PrewarmOutcome result{environment.value("ready",false)?std::string{}:environment.value("reason",std::string("environment-check-failed"))};
+    // Revocation stops subsequent work; it does not prove the child was reaped.
+    if(result.reason=="resource-worker-cleanup-incomplete")return result;
+    if(!ownerCurrent)result.reason="preparation-cancelled";
+    else if(!powerReady)result.reason="preparation-deferred";
+    else result.timedOut=result.reason=="preparation-cancelled"&&budgetExpired;
+    return result;
+}
 // Official bytes only. Generated identity changes through the consumer upgrade tool.
 inline constexpr const char* loaderSha = ymcc::deckyidentity::sha256;
 inline std::string pathText(const std::filesystem::path& path) {
@@ -99,11 +118,16 @@ inline std::string migrateLegacyManagedReceipt(const std::filesystem::path& home
     if(!MoveFileExW(legacy.c_str(),destination.c_str(),MOVEFILE_WRITE_THROUGH))return "resource-receipt-migration-failed";
     return {};
 }
-inline std::string inspectManagedPackage(const std::filesystem::path& home,const Digest& digest,Json& result,const std::filesystem::path& bundledManifest={}) {
+inline std::string inspectManagedPackage(const std::filesystem::path& home,const Digest& digest,Json& result,const std::filesystem::path& bundledManifest={},bool* managedContractValidated=nullptr,std::optional<Json>* inspectedContract=nullptr) {
+    // Disengaged means inspection never reached the contract. An engaged null
+    // means it was absent or refused; neither authorizes cache maintenance.
+    if(inspectedContract)inspectedContract->emplace();
     Json manifest;const auto failure=readManagedContract(home,result,manifest,bundledManifest);
+    if(managedContractValidated)*managedContractValidated=failure.empty()&&!manifest.is_null();
     if(!failure.empty()||manifest.is_null())return failure;
+    const auto& contract=inspectedContract?inspectedContract->emplace(std::move(manifest)):manifest;
     try{
-        for(const auto& entry:manifest["files"]){
+        for(const auto& entry:contract.at("files")){
             const auto name=entry.at("path").get<std::string>();
             const auto target=home/ymcc::deckyresources::utf8Path(name);
             if(!safeManagedPath(target))return "resource-unsafe-path";
@@ -114,7 +138,12 @@ inline std::string inspectManagedPackage(const std::filesystem::path& home,const
         result["managedPackageVerified"]=true;return {};
     }catch(...){return "resource-package-invalid";}
 }
-inline Json inspect(const std::filesystem::path& steam, const std::filesystem::path& home, const Digest& digest,const std::filesystem::path& bundledManifest={}) {
+inline constexpr std::array<const char*,3> inspectSteps={"loader-digest","plugin-package","steam-debug-marker"};
+struct NoInspectNote { constexpr void operator()(const char*) const noexcept {} };
+template<class Note=NoInspectNote>
+inline Json inspect(const std::filesystem::path& steam, const std::filesystem::path& home, const Digest& digest,const std::filesystem::path& bundledManifest={},const Note& note={},bool* managedContractValidated=nullptr,std::optional<Json>* inspectedContract=nullptr) {
+    if(managedContractValidated)*managedContractValidated=false;
+    if(inspectedContract)inspectedContract->reset();
     Json result={{"ready",false},{"bundled",true},{"pythonRequired",false},{"nodeRequired",false},{"createdSteamDebugMarker",false},{"reason","steam-not-installed"}};
     result["steamDirectory"]=pathText(steam);
     result["loaderExpectedSha256"]=loaderSha;
@@ -129,6 +158,7 @@ inline Json inspect(const std::filesystem::path& steam, const std::filesystem::p
         if(!std::filesystem::is_regular_file(loader,ec)){result["reason"]="resource-missing";result["missingPath"]=pathText(loader);result["error"]=ec.value();return result;}
         // Reuse the existing one-time resource digest. This is the checked file,
         // not a claim that the mapped child image was atomically hashed later.
+        note(inspectSteps[0]);
         const auto observed=digest(loader.wstring());
         result["loaderObservedSha256"]=observed;
         result["loaderHashMatched"]=observed==loaderSha;
@@ -137,11 +167,13 @@ inline Json inspect(const std::filesystem::path& steam, const std::filesystem::p
         result["loaderVersion"]=ymcc::deckyidentity::version;
         result["loaderConsumerContract"]=ymcc::deckyidentity::consumerContract;
         result["loaderModified"]=ymcc::deckyidentity::modified;
+        note(inspectSteps[1]);
         for(const auto& name:{L"plugin.json",L"dist\\index.js"}) if(!std::filesystem::is_regular_file(home/L"plugins"/L"ymcc-sidebar"/name)){
             result["reason"]="plugin-missing";result["missingPath"]=pathText(home/L"plugins"/L"ymcc-sidebar"/name);return result;
         }
-        const auto packageReason=inspectManagedPackage(home,digest,result,bundledManifest);
+        const auto packageReason=inspectManagedPackage(home,digest,result,bundledManifest,managedContractValidated,inspectedContract);
         if(!packageReason.empty()){result["reason"]=packageReason;return result;}
+        note(inspectSteps[2]);
         const auto marker=steam/L".cef-enable-remote-debugging";
         const DWORD attributes=GetFileAttributesW(marker.c_str());
         if(attributes==INVALID_FILE_ATTRIBUTES){
@@ -153,7 +185,7 @@ inline Json inspect(const std::filesystem::path& steam, const std::filesystem::p
         result["ready"]=true;result["reason"]="ready";return result;
     } catch(...){result["reason"]="environment-check-failed";return result;}
 }
-inline Json prepare(const std::filesystem::path& steam, const std::filesystem::path& home, const Digest& digest, bool steamRunning, const std::function<bool()>& mayPrepare = {},const std::filesystem::path& bundledManifest={},const ymcc::deckyresources::Options& resourceOptions={}) {
+inline Json prepare(const std::filesystem::path& steam, const std::filesystem::path& home, const Digest& digest, bool steamRunning, const std::function<bool()>& mayPrepare = {},const std::filesystem::path& bundledManifest={},const ymcc::deckyresources::Options& resourceOptions={},const std::function<void(ULONGLONG)>& markerCreated={}) {
     if(mayPrepare&&!mayPrepare())return {{"ready",false},{"reason","preparation-cancelled"},{"createdSteamDebugMarker",false}};
     if(!resourceOptions.isolatedPreparation){
         const auto allowed=[&]{return (!mayPrepare||mayPrepare())&&(!resourceOptions.mayWrite||resourceOptions.mayWrite());};
@@ -177,8 +209,17 @@ inline Json prepare(const std::filesystem::path& steam, const std::filesystem::p
         }
     }
     const auto withMaintenance=[&](Json fresh){fresh.update(maintenance);return fresh;};
-    // Cancellation after a resource read cannot authorize a late marker write.
-    if(mayPrepare&&!mayPrepare()){result["ready"]=false;result["reason"]="preparation-cancelled";return result;}
+    const auto mustStopAfterRead=[&]{
+        const bool cancelled=mayPrepare&&!mayPrepare();
+        // Cancellation still vetoes writes. It cannot turn a failure to
+        // confirm owned cleanup into a clean cancellation or restart request.
+        if(resourceOptions.isolatedPreparation&&result["reason"]=="resource-worker-cleanup-incomplete"){
+            result["ready"]=false;return true;
+        }
+        if(cancelled){result["ready"]=false;result["reason"]="preparation-cancelled";}
+        return cancelled;
+    };
+    if(mustStopAfterRead())return result;
     if(result["reason"]!="steam-debug-missing")return result;
     // CREATE_NEW is atomic/idempotent and cannot overwrite an existing marker or user content.
     const auto marker=steam/L".cef-enable-remote-debugging";
@@ -191,8 +232,12 @@ inline Json prepare(const std::filesystem::path& steam, const std::filesystem::p
     // Final verification has the same owner as the initial read. In isolated
     // preparation it must stay in that worker; a newly created debug marker
     // cannot move resource hashing back onto the parent Runtime/UI thread.
-    CloseHandle(file);result=withMaintenance(readEnvironment());result["createdSteamDebugMarker"]=true;
-    if(mayPrepare&&!mayPrepare()){result["ready"]=false;result["reason"]="preparation-cancelled";return result;}
+    FILETIME createdThrough{};
+    if(markerCreated)GetSystemTimePreciseAsFileTime(&createdThrough);
+    CloseHandle(file);
+    if(markerCreated)markerCreated((ULONGLONG{createdThrough.dwHighDateTime}<<32)|createdThrough.dwLowDateTime);
+    result=withMaintenance(readEnvironment());result["createdSteamDebugMarker"]=true;
+    if(mustStopAfterRead())return result;
     if(steamRunning){result["ready"]=false;result["reason"]="steam-restart-required";}
     return result;
 }

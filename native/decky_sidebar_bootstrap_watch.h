@@ -146,15 +146,21 @@ public:
             // Same original socket/binding; console history remains ignored.
             // No readback, queue entry, recovery signal or commandFailure change.
             std::set<std::string> officialSocketObservations;
+            std::string lastValidatedSocketClose;
             const auto observeOfficialSocket=[&](const Json& packet){
                 try{
-                    const auto facts=ymcc::deckyhealth::officialSocketSignal(packet,activeContext,runId);
+                    const auto* raw=ymcc::deckyhealth::officialSocketPayload(packet,activeContext);
+                    if(!raw)return false;
+                    // Only an identical, validated payload from this watch may
+                    // skip parsing. Always recheck the current binding envelope.
+                    if(!lastValidatedSocketClose.empty()&&*raw==lastValidatedSocketClose)return true;
+                    const auto facts=ymcc::deckyhealth::officialSocketSignal(*raw,runId);
                     if(facts.is_null())return false;
-                    if(!diagnostic||officialSocketObservations.size()>=16)return true;
-                    const auto signature=facts.dump();
-                    if(!officialSocketObservations.insert(signature).second)return true;
-                    try{diagnostic(Json{{"bootstrapStage","official-socket-close"},{"contextPid",contextPid},
-                        {"contextGeneration",generation},{"runId",runId},{"officialSocketClose",facts}});}catch(...){}
+                    if(diagnostic&&officialSocketObservations.size()<16&&officialSocketObservations.insert(facts.dump()).second){
+                        try{diagnostic(Json{{"bootstrapStage","official-socket-close"},{"contextPid",contextPid},
+                            {"contextGeneration",generation},{"runId",runId},{"officialSocketClose",facts}});}catch(...){}
+                    }
+                    lastValidatedSocketClose=*raw;
                     return true;
                 }catch(...){return false;}
             };

@@ -144,6 +144,13 @@ export function same(a: GameSteamTarget, b: GameSteamTarget): boolean {
 export function unknown(game: GameSteamContext['game'], reason: string): GameSteamContext {
   return { schemaVersion: 1, game, steam: { status: 'unknown', processValidated: false, currentSource: false, reason } };
 }
+type AssociationFields = Pick<CachedSteamAssociation, 'appid' | 'gameId' | 'steamPid' | 'steamCreated' | 'processEpoch' | 'accountEpoch'>;
+function hasMatchingAssociation(steam: RecordValue, expected: GameSteamTarget): steam is RecordValue & AssociationFields {
+  return steam.status === 'cached-association' && uint32(steam.appid) && uint64(steam.gameId) &&
+    steam.gamePid === expected.pid && steam.gameCreated === expected.processCreated && steam.gamePath === expected.path &&
+    steam.gameIdentityGeneration === expected.identityGeneration && uint32(steam.steamPid) && steam.steamPid !== expected.pid &&
+    uint64(steam.steamCreated) && uint64(steam.processEpoch) && uint64(steam.accountEpoch) && gameIdMatches(steam.appid, steam.gameId);
+}
 export function decode(raw: unknown, expected: GameSteamTarget): GameSteamContext {
   const fallback = { ...expected, processValidated: false as const };
   if (!record(raw) || raw.schemaVersion !== 1 || !record(raw.game)) return unknown(fallback, 'invalid-game-response');
@@ -158,10 +165,7 @@ export function decode(raw: unknown, expected: GameSteamTarget): GameSteamContex
   if (steam.status === 'unknown' || steam.status === 'pending') {
     return { schemaVersion: 1, game, steam: { status: steam.status, processValidated: false, currentSource: false, ...reason } };
   }
-  if (steam.status !== 'cached-association' || !uint32(steam.appid) || !uint64(steam.gameId) ||
-      steam.gamePid !== expected.pid || steam.gameCreated !== expected.processCreated || steam.gamePath !== expected.path ||
-      steam.gameIdentityGeneration !== expected.identityGeneration || !uint32(steam.steamPid) || steam.steamPid === expected.pid || !uint64(steam.steamCreated) ||
-      !uint64(steam.processEpoch) || !uint64(steam.accountEpoch) || !gameIdMatches(steam.appid, steam.gameId)) return unknown(game, 'steam-association-mismatch');
+  if (!hasMatchingAssociation(steam, expected)) return unknown(game, 'steam-association-mismatch');
   return { schemaVersion: 1, game, steam: {
     status: 'cached-association', appid: steam.appid, gameId: steam.gameId,
     gamePid: expected.pid, gameCreated: expected.processCreated, gamePath: expected.path,
@@ -188,6 +192,8 @@ export function validGameSteamContext(value: unknown): value is GameSteamContext
   if (value.game.rulesEpoch !== undefined && !uint64(value.game.rulesEpoch) ||
       value.game.powerGeneration !== undefined && !uint64(value.game.powerGeneration)) return false;
   if (steam.status === 'unknown' || steam.status === 'pending') return true;
-  return decode(value, game).steam.status === 'cached-association' &&
-    (steam.processGroup === undefined || uint32(steam.appid) && uint64(steam.gameId) && !!parseGroup(steam.processGroup,game,steam.appid,steam.gameId));
+  // The wire check rejects an invalid group; decode instead supplies a fallback.
+  // Share the association check without constructing a throwaway decoded DTO.
+  return uint64(value.game.rulesEpoch) && uint64(value.game.powerGeneration) && hasMatchingAssociation(steam, game) &&
+    (steam.processGroup === undefined || !!parseGroup(steam.processGroup,game,steam.appid,steam.gameId));
 }

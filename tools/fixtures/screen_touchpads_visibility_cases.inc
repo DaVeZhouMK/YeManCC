@@ -72,11 +72,12 @@ struct Surface {
 };
 }
 namespace ymcc::customtouch {
-struct Item {std::string id;HWND window=nullptr,outline=nullptr;ymcc::screeninput::Surface surface;int kind=13;};
+struct Item {std::string id;HWND window=nullptr,outline=nullptr;ymcc::screeninput::Surface surface;int kind=13;bool wanted=true;};
 inline std::vector<std::shared_ptr<Item>> items;
 inline UINT64 refreshEpoch=0;
 inline unsigned draws=0;
 inline bool draw(Item&){++draws;return true;}
+inline bool itemWanted(const Item& item){return item.wanted;}
 inline bool visible(){for(const auto& item:items)if(visibilityfixture::visible(item->window))return true;return false;}
 }
 namespace ymcc::screenpads {
@@ -95,7 +96,15 @@ inline void recordNativeInputFailure(bool button,int index,const ymcc::screeninp
     if(const auto reenter=visibilityfixture::failureReentry){visibilityfixture::failureReentry=nullptr;reenter();}
 }
 inline std::atomic<HWND> owner{nullptr};inline bool initialized=true,inputTeardown=false;inline DWORD windowError=0,cursorError=0;
-inline struct {bool pending=false;} displayTransitionFence;
+inline struct {bool pending=false,idleSuspended=false;} displayTransitionFence;
+inline std::atomic<bool> presentationSuspended{false};
+inline struct {
+    bool hidden=false;
+    UINT64 revealSerial=0,revealPadEpoch=0,revealButtonEpoch=0;
+    std::array<DWORD,5> revealErrors{};
+    unsigned retryRevealMask=0;
+} autoHide;
+inline constexpr std::array<unsigned,5> autoHideOutlineBits={1,2,4,8,16};
 inline unsigned releaseCalls=0;inline bool heldTouch=false;
 inline bool onOwnerThread(HWND h){++visibilityfixture::ownerAdmissionReads;return h==owner.load();}
 inline bool sharedInputAllowed(){return visibilityfixture::inputAllowed;}
@@ -105,7 +114,12 @@ struct Visual{HWND window=nullptr;bool visible=false;};inline std::array<Visual,
 inline void hideContactVisual(Visual& v){v.visible=false;visibilityfixture::node(v.window).visible=false;}
 inline HWND cursorWindow=nullptr;inline bool cursorVisible=false;inline unsigned cursorStackRaises=0,cursorStackRaiseFailures=0;
 inline void cursorHideVisual(){cursorVisible=false;}
-struct Config{int transparency=80;};inline Config getConfig(){return {};}
+enum class Layout {Dual,Single};
+struct Config{int transparency=80;bool masterEnabled=true,enabled=true;Layout layout=Layout::Dual;};
+inline Config getConfig(){return {};}
+inline int surfaceMode(const Config&,int side){return side;}
+inline bool permitted(int){return true;}
+inline bool buttonPermitted(const Config&,int){return true;}
 inline unsigned artworkCalls=0;inline bool pictureLost=false;
 inline bool renderOutline(int,int,bool force){if(force){++artworkCalls;pictureLost=false;}return true;}
 inline bool renderButton(int,int,bool force){if(force){++artworkCalls;pictureLost=false;}return true;}
@@ -169,6 +183,7 @@ static void resetVisibilityFixture(){
  failureReceipts=0;failedButton=failedCustom=false;failedIndex=-1;windowError=cursorError=0;
  visibilityfixture::surfaceReentry=nullptr;visibilityfixture::showReentry=nullptr;displayTransitionFence.pending=false;
  visibilityfixture::failureReentry=nullptr;visibilityfixture::placeReentry=nullptr;
+ autoHide={};displayTransitionFence.idleSuspended=false;presentationSuspended=false;
  visibilityfixture::slotReads=visibilityfixture::surfaceChecks=0;
 }
 static void consumeVisibility(){if(ownerVisibilityQueued)consumeOwnerVisibility(ownerVisibilityEpoch);}
@@ -297,13 +312,28 @@ static int checkBurstAdmission(const wchar_t* reportPath){
  const auto currentTimer=timer.id;
  observe(EVENT_OBJECT_SHOW);
  check("same-root show keeps its explicit raise even with location work queued",ownerVisibilityRaiseRequested&&timer.id==currentTimer);
+ ownerAdmissionReads=controlVisibleReads=0;
+ const auto beforeTransitions=ownerVisibilityEvents;
+ const auto transitionPosts=posts;
+ for(int i=0;i<1000;++i)observe(i%2?EVENT_OBJECT_SHOW:EVENT_SYSTEM_MINIMIZEEND);
+ const auto transitionOwnerReads=ownerAdmissionReads,transitionVisibleReads=controlVisibleReads;
+ check("queued same-root transitions do not repeat owner or control visibility admission",
+   transitionOwnerReads==0&&transitionVisibleReads==0);
+ check("coalesced transitions retain event accounting and the original deadline",
+   ownerVisibilityEvents-beforeTransitions==1000&&posts==transitionPosts&&timer.id==currentTimer&&ownerVisibilityRaiseRequested);
+ const HWND changedTransition=handle(23);node(changedTransition).pid=3;foregroundRoot=changedTransition;
+ observe(EVENT_SYSTEM_FOREGROUND);
+ const auto nextDeadline=timer.id;
+ check("a queued transition does not swallow a different foreground root",
+   nextDeadline!=currentTimer&&ownerVisibilityRecheck.foreground==changedTransition);
  const HWND changedRoot=handle(22);node(changedRoot).pid=3;foregroundRoot=changedRoot;
  observe(EVENT_OBJECT_LOCATIONCHANGE);
- check("queued location for changed root admits a new burst",ownerVisibilityQueued&&timer.id!=currentTimer&&ownerVisibilityRecheck.foreground==changedRoot);
+ check("queued location for changed root admits a new burst",ownerVisibilityQueued&&timer.id!=nextDeadline&&ownerVisibilityRecheck.foreground==changedRoot);
  beginVisibility();stopOwnerVisibilityRechecks();observe(EVENT_OBJECT_REORDER);observe(EVENT_OBJECT_LOCATIONCHANGE);
  check("pending check without a timer can still start a burst",ownerVisibilityQueued&&timer.active&&ownerVisibilityRecheck.foreground==foreground);
  stopOwnerVisibility();
- const Json report={{"ok",ok},{"cases",cases},{"repeatedEvents",1000},{"sameBurstReads",{{"visible",repeated[0]},{"iconic",repeated[1]},{"pid",repeated[2]},{"ownerAdmission",ownerReads},{"controlVisible",controlReads}}},{"systemInputInjected",false}};
+ const Json report={{"ok",ok},{"cases",cases},{"repeatedEvents",1000},{"sameBurstReads",{{"visible",repeated[0]},{"iconic",repeated[1]},{"pid",repeated[2]},{"ownerAdmission",ownerReads},{"controlVisible",controlReads}}},
+   {"sameTransitionBurstReads",{{"ownerAdmission",transitionOwnerReads},{"controlVisible",transitionVisibleReads}}},{"systemInputInjected",false}};
  std::ofstream f(std::filesystem::path(reportPath),std::ios::binary);f<<report.dump(2);
  return ok&&f.good()?0:3;
 }
@@ -595,7 +625,7 @@ if(artworkOnly){
   if(!ok){stopOwnerVisibility();const Json r={{"ok",false},{"cases",cases},{"selector","--display-artwork"}};std::ofstream f(std::filesystem::path(argv[1]),std::ios::binary);f<<r.dump(2);return 3;}
 #endif
   for(int i=0;i<1000;++i){visibilityfixture::tick();consumeVisibility();}check("no-artwork-work-after-burst",artworkCalls==3&&!ownerVisibilityRecheck.timer);
-  beginVisibility();artworkCalls=0;visibilityfixture::node(outlines[0]).visible=false;for(int i=0;i<3;++i){visibilityfixture::tick();consumeVisibility();}
+  beginVisibility();artworkCalls=0;autoHide.hidden=true;visibilityfixture::node(outlines[0]).visible=false;for(int i=0;i<3;++i){visibilityfixture::tick();consumeVisibility();}
   check("auto-hidden-artwork-not-submitted-or-reshown",artworkCalls==2&&!visibilityfixture::node(outlines[0]).visible&&visibilityfixture::changes==0);
   beginVisibility();artworkCalls=0;visibilityfixture::displayReentry=[] {cancelOwnerVisibilityWork();};visibilityfixture::reenterDisplay=true;const auto beforeEpochChange=ownerVisibilityRaises;
   screenVisibilityObserved(nullptr,EVENT_OBJECT_SHOW,visibilityfixture::foreground,OBJID_WINDOW,CHILDID_SELF,0,0);consumeVisibility();
@@ -614,7 +644,7 @@ if(artworkOnly){
    queryCounts["artworkWindowVisibilityReads"]={reads[3],reads[5],reads[7],reads[9]};
    check("visible-pad-button-and-custom-artwork-each-checked-once",reads[3]==1&&reads[5]==1&&reads[7]==1&&reads[9]==1);
    check("single-visibility-read-preserves-all-artwork-submissions",artworkCalls==3&&ymcc::customtouch::draws==1&&releaseCalls==0);
-   visibilityfixture::node(custom->outline).visible=false;visibilityfixture::windowVisibleReads={};
+   custom->wanted=false;visibilityfixture::node(custom->outline).visible=false;visibilityfixture::windowVisibleReads={};
    restoreOwnerArtwork(ownerVisibilityEpoch,visibilityfixture::foreground);
    check("hidden-custom-artwork-stays-hidden-and-is-not-submitted",reads[9]==1&&ymcc::customtouch::draws==1&&!visibilityfixture::node(custom->outline).visible);
 #ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE

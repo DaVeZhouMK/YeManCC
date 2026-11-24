@@ -360,6 +360,16 @@ internal sealed partial class FanHostEngine
                 RetireResumeBusinessLocked("original-business-owner-retired");
         }
     }
+    // Called under the engine gate while deriving a read-only Host snapshot.
+    private bool ResumeAwaitingPublicGrant(HostState snapshot)
+    {
+        if (snapshot.PowerOperationStatus != "superseded" || snapshot.PowerOperationOutcome != "public-power-superseded" ||
+            snapshot.State != "AwaitingControl" || snapshot.PowerState != "On" ||
+            snapshot.UnknownState || snapshot.HcCloseCleanupPending || snapshot.CloseCalled) return false;
+        return acceptedResumeBusiness is { Phase: "AwaitingGrant" or "PendingHandoff", AttemptStatus: "superseded" } business &&
+            business.FanGeneration == snapshot.PowerOperationGeneration && business.Operation?.AttemptId == snapshot.PowerOperationAttempt &&
+            ResumeBusinessOwnerCurrentLocked(business) && BusinessDeadlineCurrent(business.FirstGrant.Request);
+    }
     private void RetireResumeBusinessLocked(string reason, bool newIntent = false)
     {
         if (newIntent) checked { resumeBusinessIntentRevision++; }

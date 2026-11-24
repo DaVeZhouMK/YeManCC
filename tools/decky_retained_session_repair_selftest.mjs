@@ -358,7 +358,7 @@ static const auto actualMainCleanupDispatch=[](const std::function<bool()>& befo
 }(std::function<bool()>{});
 namespace lifecycleServiceFixture {
 struct RuntimeState {bool enabled=true,steamKnown=true,steamRunning=true;DWORD pid=0;std::string phase="frontend-attached",reason="retained-frontend-connected";};
-struct RuntimePort {RuntimeState state;std::atomic<unsigned> connectionWakes{0};std::function<bool()> ownerWake;RuntimeState snapshot()const{return state;}bool ownsLiveProcess(HANDLE process)const{return process&&WaitForSingleObject(process,0)==WAIT_TIMEOUT;}bool requestConnectionCheck(){if(ownerWake&&!ownerWake())return false;++connectionWakes;return true;}bool requestLaunchAdmissionRefresh(bool retainedFrontendVerified=false,ymcc::deckysidebar::AdmissionRefreshReceipt* receipt=nullptr){if(receipt)*receipt={};return !state.pid&&!(retainedFrontendVerified&&state.phase=="frontend-attached"&&state.reason=="retained-frontend-connected");}};
+struct RuntimePort {RuntimeState state;std::atomic<unsigned> connectionWakes{0};std::function<bool()> ownerWake;RuntimeState snapshot()const{return state;}bool ownsLiveProcess(HANDLE process)const{return process&&WaitForSingleObject(process,0)==WAIT_TIMEOUT;}bool requestConnectionCheck(bool waitingForPublicationOnly=false){if(waitingForPublicationOnly||(ownerWake&&!ownerWake()))return false;++connectionWakes;return true;}bool requestLaunchAdmissionRefresh(bool retainedFrontendVerified=false,ymcc::deckysidebar::AdmissionRefreshReceipt* receipt=nullptr){if(receipt)*receipt={};return !state.pid&&!(retainedFrontendVerified&&state.phase=="frontend-attached"&&state.reason=="retained-frontend-connected");}};
 struct SessionPort {ymcc::steamsession::Session value;auto sessionSnapshot()const{return value;}auto identitySnapshot()const{return fixtureSteamIdentity(value);}bool requestIdentityRefresh(){return true;}};
 struct ModePort {Json value;ymcc::steamui::ModeObserver* actual=nullptr;mutable ymcc::steamsession::Session lastRequested;mutable std::function<void()> afterSnapshot;Json snapshot(const ymcc::steamsession::Session& session,ymcc::steamui::ModeCacheMiss* miss=nullptr,ymcc::steamui::ModeCacheTiming* timing=nullptr)const{lastRequested=session;if(miss)*miss={};if(timing)*timing={};auto result=actual?actual->snapshot(session,miss,timing):value;auto callback=afterSnapshot;afterSnapshot={};if(callback)callback();return result;}};
 static void deckySidebarAdmissionWakeDiagnostic(ymcc::deckysidebar::AdmissionRefreshReceipt){} // This fixture has no native log writer.
@@ -370,7 +370,8 @@ static std::atomic<bool> g_exitRequested{false};static std::atomic<PowerLifecycl
 static unsigned long long power=1;static auto currentPowerGeneration(){return power;}
 static ymcc::deckyupdate::Recovery g_deckyUpdateRecovery;
 static ymcc::deckyupdate::ManualBaseline g_deckyManualBaseline;
-struct BrokerPort {Json value={{"active",true},{"connected",true},{"runId",std::string(32,'c')},{"connection","1"}};ymcc::deckymirror::Broker* actual=nullptr;Json status()const{return actual?actual->status():value;}bool reply(const std::string& conn,const Json& message,const std::function<bool()>& owner={}){return actual&&actual->reply(conn,message,owner);}};
+struct BrokerPort {Json value={{"active",true},{"connected",true},{"runId",std::string(32,'c')},{"connection","1"}};ymcc::deckymirror::Broker* actual=nullptr;Json status()const{return actual?actual->status():value;}bool reply(const std::string& conn,const Json& message,const std::function<bool()>& owner={}){return actual&&actual->reply(conn,message,owner);}
+ std::optional<ULONGLONG> authenticatedPeerTick(){if(actual)return actual->authenticatedPeerTick();return value.value("active",false)&&value.value("connected",false)?std::optional<ULONGLONG>{1}:std::nullopt;}};
 struct MirrorCostPort{std::atomic<unsigned> replies{0};void reply(const Json&,ULONGLONG){++replies;}};static MirrorCostPort g_deckyCostContext;
 static BrokerPort g_deckyMirrorBroker;
 // Boot HUD ownership is outside this consumer. Refuse scoped writes; ordinary mirror replies have no borrowed boot owner.
@@ -1150,6 +1151,11 @@ ${exitLeaf}
       negativeRows.push_back({{"variant",denied},{"wireReplyReceived",true},{"readyUnchanged",true},{"privateDispatches",0}});
       f::g_deckySidebarRuntime.state.enabled=true;f::g_deckySidebarRuntime.state.pid=f::fixtureBackendPid;
     }
+    const auto displayRun=boot.at("runId");
+    const Json displaySnapshot={{"revision",revision},{"runId",displayRun},{"ready",true},{"provenance",{{"kind","ymcc-native"},{"pid",GetCurrentProcessId()}}}};
+    const Json display={{"type","snapshot"},{"runId",displayRun},{"displayOnly",true},{"snapshot",displaySnapshot}};
+    need(f::actualNativeMirrorReply({{"connection",firstConnection},{"message",display}}).get<bool>()&&Json::parse(first.readFrame())==display,"optional display did not cross the actual broker");
+    need(f::deckySidebarSameManagedReady(priorReady,f::g_deckyManagedReady)&&priorReady.finished==f::g_deckyManagedReady.finished&&f::privateResults.empty(),"optional display armed managed ready before any native business receipt");
     scenario=5;first.sendFrame(Json{{"command","snapshot"},{"runId",boot.at("runId")}}.dump());const auto nativeReply=Json::parse(first.readFrame());need(actualBrokerClient::waitUntil([&]{return requests.load()==6;},1000),"native producer did not complete current ready callback");
     need(nativeReply.at("snapshot").value("ready",false)&&f::g_deckyManagedReady.connection==firstConnection&&!f::g_deckyManagedReady.finished,"actual broker/native producer failed to queue current ready");
     const auto readyBeforeStale=f::g_deckyManagedReady;auto stale=Json{{"connection","not-current"},{"message",nativeReply}};need(!f::actualNativeMirrorReply(stale).get<bool>(),"native producer bypassed actual broker connection rejection");
@@ -1190,7 +1196,7 @@ ${exitLeaf}
       f::g_deckySidebarRuntime.state={};cycleDisk=f::privateMain.at("deckyContextCleanup");f::g_deckyAutomaticRepair.observe(sameHostRepair,cycle);need(cycleGentle==gentleAtReceipt,"expired late proof refunded original uncertain write without native inspection");third.close();
     }
     second.close();f::g_deckyMirrorBroker.actual=nullptr;actualBroker.stop();const auto stopped=actualBroker.status();need(!stopped.value("active",true)&&!stopped.value("connected",true),"actual joint broker did not stop");
-    need(queuedAll&&requests==(lateReadable?7u:9u)&&f::g_deckyCostContext.replies==costBefore+(lateReadable?7u:9u),"native producer did not consume declared actual authenticated replies");
+    need(queuedAll&&requests==(lateReadable?7u:9u)&&f::g_deckyCostContext.replies==costBefore+(lateReadable?8u:10u),"native producer did not consume declared actual authenticated replies");
     workerResults.push_back({{"kind","actual-broker-terminal-readback-native-ready"},{"terminalVariant",terminalVariant},{"requests",requests.load()},{"acceptedSnapshots",requests.load()},{"deniedReadyRows",negativeRows},{"staleConnectionAndRunRefused",true},{"realConnectionChanged",true},{"originalObservationExpired",expiredOriginal},{"lateReadonlyInspectionSucceeded",expiredOriginal&&lateReadable},{"lateAllowanceExhaustedWithoutRearming",!lateReadable},{"activeOriginalWindowUnchanged",!expiredOriginal},{"lateOriginalWriteNotRearmed",true},{"nativeReplies",f::privateResults},{"originalConfirmNotReplayed",true},{"nextGentleAllowedOnlyAfterNativeReadback",true},{"brokerStopped",true},{"scope","Actual loopback broker/handshake/native IPC producer/queue/child/selector. Snapshot business provider, Steam/account/mode/time/Runtime ownership are explicit ports; not installed/physical acceptance."}});
    }
 
@@ -1762,6 +1768,19 @@ ${exitLeaf}
  });
  check("actual native lifecycle service rejects late document account OFF and power replies without IO storms",[&]{
   namespace f=lifecycleServiceFixture;using namespace ymcc::deckyupdate;
+  auto parkedSession=session;parkedSession.created+=99;f::g_steamSettingsObserver.value=parkedSession;
+  f::g_steamModeObserver.value=initialMode;
+  f::g_steamModeObserver.value["mode"]="desktop";
+  f::g_deckySidebarRuntime.state={};f::g_deckySidebarRuntime.state.phase="waiting-manual-steam";
+  f::g_deckySidebarRuntime.state.reason="steam-bigpicture-required";
+  f::g_exitRequested=false;f::g_powerLifecycle=f::PowerLifecycle::Ready;f::g_deckyUpdateRecovery.userEnable(parkedSession);
+  f::fileReads=f::dispatches=0;unsigned parkedModeReads=0;
+  for(unsigned i=0;i<64;++i){
+   f::g_steamModeObserver.afterSnapshot=[&]{++parkedModeReads;};
+   f::deckySidebarServiceManagedLifecycle();f::g_steamModeObserver.afterSnapshot={};
+  }
+  workerResults.push_back({{"kind","desktop-managed-inspection-idle"},{"callbacks",64},{"cachedModeReads",parkedModeReads},
+   {"fileReads",f::fileReads},{"dispatches",f::dispatches}});
   for(unsigned n=0;n<6;++n){
    auto selected=session;selected.created+=100+n;f::g_steamSettingsObserver.value=selected;
    f::g_steamModeObserver.value=initialMode;auto& view=f::g_steamModeObserver.value;
@@ -1780,6 +1799,7 @@ ${exitLeaf}
    need(calls==1&&f::dispatches==1&&f::fileReads==reads,"healthy event storm repeated native inspection or disk IO");
   }
   f::beforeReply={};
+  need(parkedModeReads==0,"confirmed desktop repeated managed-inspection cache reads without a repairable state");
  });
  check("actual owned backend confirmation borrows bounded Runtime waits after an early ready receipt",[&]{
   namespace f=lifecycleServiceFixture;
@@ -2302,6 +2322,22 @@ ${exitLeaf}
    if(lateVariant==3){
     need(readyRequests==2&&oldWakes==2&&!f::g_deckyManagedReady.finished,"native-ready publication gap lost its one late proof wake");
    }else need(f::backendReads==6&&f::dispatches==0&&f::g_deckyManagedReady.finished&&f::deckySidebarConnectionRecoveryTimeout()==INFINITE,"probe initial proof did not naturally exhaust the original bounded window");
+   if(lateVariant==0){
+    // Existing owner wakes can continue without a new native-ready revision.
+    unsigned cachedModeReads=0;const auto revision=f::g_deckyManagedReady.expiredRevision;
+    for(unsigned i=0;i<32;++i){
+     f::g_steamModeObserver.afterSnapshot=[&]{++cachedModeReads;};
+     f::deckySidebarServiceManagedLifecycle();
+     f::g_steamModeObserver.afterSnapshot={};
+    }
+    const bool stillEligible=f::g_deckyManagedReady.finished&&f::g_deckyManagedReady.backendExpired&&f::g_deckyManagedReady.expiredRevision==revision;
+    const Json idle{{"kind","expired-initial-proof-idle"},{"ownerCallbacks",32},{"cachedModeReads",cachedModeReads},{"lateEligible",stillEligible},
+     {"nativeRequests",readyRequests.load()},{"backendReads",f::backendReads},{"dispatches",f::dispatches}};
+    workerResults.push_back(idle);std::cout<<"EXPIRED_MANAGED_PROOF "<<idle.dump()<<std::endl;
+    need(cachedModeReads==0&&stillEligible&&readyRequests==1&&f::backendReads==6&&f::dispatches==0&&
+     f::g_deckySidebarRuntime.connectionWakes==oldWakes&&f::deckySidebarConnectionRecoveryTimeout()==INFINITE,
+     "expired initial proof reread mode without a new authenticated native-ready revision");
+   }
    if(lateVariant>=7){
     f::backendReady=true;deliver();f::deckySidebarServiceManagedLifecycle();
     workerResults.push_back({{"kind","unconfirmed-backend-does-not-grant-late"},{"lateVariant",lateVariant},{"nativeRequests",readyRequests.load()},{"nativeWakes",f::g_deckySidebarRuntime.connectionWakes.load()},{"backendReads",f::backendReads},{"dispatches",f::dispatches},{"absenceCertified",f::backendAbsenceCertified}});
@@ -2357,6 +2393,25 @@ ${exitLeaf}
   const auto revoked=cleanupworker::dispatchShared(g_steamSettingsObserver,own,false,shared,held,initial,[]{return true;},5000,cleanupworker::lifecycleSchema);
   withdraw.join();need(withdrew.load()&&!revoked.value("ok",true)&&revoked.value("cleanupWorkerDestroyed",false)&&revoked.value("cleanupWorkerHandles",99u)==0&&revoked.value("cleanupWorkerProcesses",99u)==0,"shared publication withdrawal did not cancel and reclaim the actual lifecycle child");
   workerResults.push_back({{"kind","shared-lifecycle-revoked-after-entry"},{"actualPublicationUsed",true},{"result",revoked}});
+
+  for(const auto* row:{&result,static_cast<const Json*>(&inspectResult),&confirmed,&revoked}){
+   const auto logged=ymcc::deckydiag::record("managed-lifecycle",*row);
+   need(row->contains("cleanupWorkerTiming")&&logged.contains("cleanupWorkerTiming"),"actual lifecycle worker timing did not reach its original event");
+   const auto& timing=logged.at("cleanupWorkerTiming");
+   need(timing==row->at("cleanupWorkerTiming")&&timing.size()==3&&
+    timing.at("workMs").is_number_unsigned()&&timing.at("cleanupMs").is_number_unsigned()&&timing.at("childCpuMs").is_number_unsigned(),
+    "owned and reclaimed worker lost its typed elapsed/CPU measurements");
+  }
+  need(!cancelled.contains("cleanupWorkerTiming")&&!stopped.contains("cleanupWorkerTiming"),"pre-child refusal reported worker timing");
+  const Json poisoned={{"cleanupWorkerTiming",{{"workMs",17ull},{"cleanupMs","unknown"},{"childCpuMs",3600001ull},{"payload","private"}}}};
+  const auto filtered=ymcc::deckydiag::record("managed-lifecycle",poisoned);
+  need(!filtered.contains("cleanupWorkerTiming"),"incomplete phase pair passed managed timing filtering");
+  const Json partial={{"cleanupWorkerTiming",{{"workMs",17ull},{"cleanupMs",3ull},{"childCpuMs",3600001ull},{"payload","private"}}}};
+  const auto bounded=ymcc::deckydiag::record("managed-lifecycle",partial);
+  need(bounded.contains("cleanupWorkerTiming")&&bounded.at("cleanupWorkerTiming")==Json({{"workMs",17ull},{"cleanupMs",3ull}}),
+   "optional CPU was fabricated, out-of-range, or leaked a private field");
+  const auto other=ymcc::deckydiag::record("connection",confirmed);
+  need(!other.contains("cleanupWorkerTiming"),"private lifecycle timing escaped its original event");
 
  });
  for(const auto& name:selectedCases)if(std::find(declaredCases.begin(),declaredCases.end(),name)==declaredCases.end())cases.push_back({{"name",name},{"pass",false},{"error","unknown native case selection"}});

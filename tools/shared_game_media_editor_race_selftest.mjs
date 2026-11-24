@@ -58,6 +58,13 @@ const check=(ok,label)=>{checks++;if(!ok)throw Error(label);};
 
 async function reset(){await page.goto('http://127.0.0.1:13139/library/');await page.waitForFunction(()=>selectedActionGame?.gameMedia?.key==='steam-570');await page.evaluate(()=>{
 
+ window.fixtureSteamCommitResult=(state,keys)=>{
+  const result=structuredClone(state);
+  const plan={...result.steamPlan,mode:'steam-library-add-commit',schemaVersion:1,committed:true,accountId:'fixture'};
+  for(const item of plan.items)if(keys.includes(normalizedUiPath(item.gameDirectory)))item.status='added-to-steam';
+  result.steamPlan={...plan,mode:'steam-library-add-commit-all-accounts',allSteamAccounts:true,accountResults:[plan]};
+  result.steamPlanSource='verified-steam-add-completion';return result;
+ };
  const base=invoke;window.reverseIO={calls:[],finishPick:null};invoke=async(command,args={},timeoutMs=0)=>{
 
   reverseIO.calls.push({command,args:structuredClone(args)});
@@ -234,7 +241,7 @@ async function holdNativeSnapshotLane(){
 
   else for(const plan of state.steamPlan.items)if((args.selectedGameDirectories||[]).includes(normalizedUiPath(plan.gameDirectory)))plan.status='added-to-steam';
 
-  respond(item,structuredClone(state));
+  respond(item,item.message.command==='commit'?fixtureSteamCommitResult(state,args.selectedGameDirectories):structuredClone(state));
 
  };
 
@@ -1067,7 +1074,7 @@ try{
  async function beginCommitPresentationProbe(){
   await page.evaluate(()=>{steamAddNotices.length=0;closeSteamAddNotice();clearNotice();});
   await beginSavePresentationProbe();
-  await page.evaluate(()=>{const base=invoke;savePresentationProbe.commits=[];invoke=async(command,args={},timeoutMs=0)=>{if(command!=='commit')return base(command,args,timeoutMs);savePresentationProbe.commits.push(structuredClone(args));return new Promise(resolve=>savePresentationProbe.acceptCommit=()=>resolve(structuredClone(__LIBRARY_H5_FIXTURE__.snapshot)));};});
+  await page.evaluate(()=>{const base=invoke;savePresentationProbe.commits=[];invoke=async(command,args={},timeoutMs=0)=>{if(command!=='commit')return base(command,args,timeoutMs);savePresentationProbe.commits.push(structuredClone(args));return new Promise(resolve=>savePresentationProbe.acceptCommit=()=>resolve(workspaceBridgeResult('commit',fixtureSteamCommitResult(__LIBRARY_H5_FIXTURE__.snapshot,args.selectedGameDirectories))));};});
  }
  await run('inline Steam join is submitted despite its initial editor display failure',async()=>{
   await beginCommitPresentationProbe();
@@ -1084,7 +1091,7 @@ try{
   const partial=await page.evaluate(async()=>{const warning='另有 1 个 Steam 账户暂时无法读取，本次未处理这些账户，原始数据已保留。';__LIBRARY_H5_FIXTURE__.snapshot.steamPlan.accountReadWarning=warning;const joined=joinEditedGameToSteam();savePresentationProbe.acceptCommit();const ok=await joined;const task=steamCommitTasks.get(savePresentationProbe.key);return {ok,calls:savePresentationProbe.commits.length,phase:task?.phase,label:task?.label,partial:task?.partialAccounts,message:document.getElementById('steam-add-notice-message').textContent,title:document.getElementById('steam-add-notice-title').textContent};});saveMetrics.push({case:'partial-account-warning',partial});
   const batch=await page.evaluate(async()=>{const rows=[];for(const command of ['commit','refreshSteamArtwork','deleteFromSteam']){
    steamAddNotices.length=0;closeSteamAddNotice();clearNotice();const result=structuredClone(__LIBRARY_H5_FIXTURE__.snapshot);delete result.steamPlan.accountReadWarning;
-   const warning='另有 1 个 Steam 账户暂时无法读取';if(command==='commit')result.steamPlan.accountReadWarning=warning;else result.steamAccountWriteWarning=warning;
+   const warning='另有 1 个 Steam 账户暂时无法读取';result.steamAccountWriteWarning=warning;
    let calls=0;invoke=async()=>{calls++;return result;};const ok=await runBusy(command,'owned partial operation','',{},'处理完成');
    const message=command==='commit'?document.getElementById('steam-add-notice-message').textContent:toastNotice.textContent;
    const error=command==='commit'?document.getElementById('steam-add-notice-title').textContent.includes('未完成'):toastNotice.classList.contains('error');
@@ -1095,10 +1102,12 @@ try{
   const uncertain=await page.evaluate(async()=>{
    steamAddNotices.length=0;closeSteamAddNotice();clearNotice();
    const warning='当前账户结果未确认。请先刷新游戏库核对，勿直接重复加入。';
-   const result=structuredClone(__LIBRARY_H5_FIXTURE__.snapshot);delete result.steamPlan.accountReadWarning;
-   result.steamAccountWriteWarning=warning;result.steamAddCompletion={displayAccountCompletionConfirmed:false,accountResults:[{accountId:'history'}]};
-   let calls=0;invoke=async()=>{calls++;return result;};
    const key=savePresentationProbe.key;
+   const result=fixtureSteamCommitResult(__LIBRARY_H5_FIXTURE__.snapshot,[key]);
+   result.steamAddCompletion={...result.steamPlan,displayAccountCompletionConfirmed:false,partialSteamAccounts:true};
+   result.steamPlan=structuredClone(__LIBRARY_H5_FIXTURE__.snapshot.steamPlan);delete result.steamPlanSource;
+   result.steamAccountWriteWarning=warning;
+   let calls=0;invoke=async()=>{calls++;return workspaceBridgeResult('commit',result);};
    steamCommitTasks.set(key,{phase:'running',awaitingReceipt:true});
    reverseEmit({event:'steam-commit-progress',directories:[key],phase:'partial',error:warning});
    const keptWaiting=steamCommitTasks.get(key)?.phase==='running';
@@ -1174,9 +1183,9 @@ try{
  await run('rejected inline Steam request keeps its business failure through a drawing error',async()=>{
   await beginCommitPresentationProbe();
   const result=await page.evaluate(async()=>{const actual=invoke;invoke=async(command,args={},timeoutMs=0)=>{if(command!=='commit')return actual(command,args,timeoutMs);savePresentationProbe.commits.push(structuredClone(args));savePresentationProbe.throwEditor=true;throw Error('owned Steam admission rejected');};const ok=await joinEditedGameToSteam();const task=steamCommitTasks.get(savePresentationProbe.key);return {ok,calls:savePresentationProbe.commits.length,task:structuredClone(task),throws:savePresentationProbe.editorThrows,pending:cardOperationEditorPending,diagnostics:savePresentationProbe.diagnostics};});saveMetrics.push({case:'commit-business-rejection-display-failure',result});
-  check(!result.ok&&result.calls===1&&result.task?.phase==='failed'&&result.task.label.includes('owned Steam admission rejected')&&result.throws===1&&result.pending&&result.diagnostics.some(x=>x.message==='owned editor presentation unavailable'),'a drawing error concealed a real Steam rejection, replaced its failure reason or retried its write');
-  const recovered=await page.evaluate(()=>{refreshCardOperationState();return {calls:savePresentationProbe.commits.length,status:document.getElementById('edit-status').textContent,task:steamCommitTasks.get(savePresentationProbe.key)?.phase,pending:cardOperationEditorPending};});saveMetrics.at(-1).recovered=recovered;
-  check(recovered.calls===1&&recovered.task==='failed'&&recovered.status.includes('owned Steam admission rejected')&&!recovered.pending,'normal display recovery lost the rejected Steam reason or resubmitted its request');
+  check(!result.ok&&result.calls===1&&result.task?.phase==='failed'&&result.task.error.includes('owned Steam admission rejected')&&result.throws===1&&result.pending&&result.diagnostics.some(x=>x.message==='owned editor presentation unavailable'),'a drawing error concealed a real Steam rejection, replaced its failure reason or retried its write');
+  const recovered=await page.evaluate(()=>{refreshCardOperationState();const status=$('#edit-status');return {calls:savePresentationProbe.commits.length,status:status.textContent,detail:status.title,notice:$('#steam-add-notice-message').textContent,task:steamCommitTasks.get(savePresentationProbe.key)?.phase,pending:cardOperationEditorPending};});saveMetrics.at(-1).recovered=recovered;
+  check(recovered.calls===1&&recovered.task==='failed'&&recovered.status==='加入失败'&&[recovered.detail,recovered.notice].every(text=>text.includes('owned Steam admission rejected'))&&!recovered.pending,'normal display recovery lost the rejected Steam reason or resubmitted its request');
  });
 
 
@@ -2128,7 +2137,7 @@ try{
    const after=await page.evaluate(async()=>{
     const p=joinReceiptProbe,completed=p.phase==='completed',modal=$('#steam-add-notice-modal');
     if(completed)routeWorkspaceAction('back');
-    for(const {id} of p.requests)reverseEmit(completed?{kind:'response',id,ok:true,result:structuredClone(__LIBRARY_H5_FIXTURE__.snapshot)}:{kind:'response',id,ok:false,error:p.error});
+    for(const {id} of p.requests)reverseEmit(completed?{kind:'response',id,ok:true,result:fixtureSteamCommitResult(__LIBRARY_H5_FIXTURE__.snapshot,[p.key])}:{kind:'response',id,ok:false,error:p.error});
     const ok=await p.join,direct=await p.direct;
     await new Promise(requestAnimationFrame);
     const view={ok,direct,phase:steamCommitTasks.get(p.key)?.phase,editorClosed:$('#edit-modal').classList.contains('hidden'),notice:!modal.classList.contains('hidden'),message:$('#steam-add-notice-message').textContent,legacyToastUnchanged:toastNotice.textContent===p.toast,canRetry:!$('#edit-add-to-steam').disabled};
@@ -2224,6 +2233,47 @@ try{
   check(rows.slice(0,3).every(r=>r.writes.length===1&&(r.mode==='result first'?r.captured.join()===r.key&&r.afterFirst.add&&!r.afterFirst.notice:!r.afterFirst.add&&!r.afterFirst.remove&&r.afterFirst.notice)&&!r.afterSecond.notice&&!r.afterSecond.add&&!r.afterSecond.remove),'Back lost a result, changed a captured target or started an unconfirmed write');
   const accepted=rows.at(-1);
   check(accepted.ports===2&&accepted.pendingAdmission.waiting===1&&!accepted.pendingAdmission.notice&&accepted.working.busy&&!accepted.working.notice&&accepted.writes.length===2&&accepted.writes[1].join()===accepted.key&&accepted.afterFirst.notice&&accepted.afterSecond.notice,'accepted batch preflight let a result steal the busy surface or lost either completion');
+ });
+
+ await run('Steam add replies report only verified results for the requested cards',async()=>{
+  const rows=await page.evaluate(async()=>{
+   document.hasFocus=()=>true;
+   const a=selectedActionGame;reverseOpenOther();const b=selectedActionGame,keys=[a,b].map(keyFor),original=structuredClone(snapshot);
+   const bridge=window.chrome.webview,post=bridge.postMessage,rows=[];
+   const account=(accountId,committed,statuses)=>({schemaVersion:1,mode:'steam-library-add-commit',accountId,committed,
+    ...(committed?{}:{reason:'nothing-ready-to-add'}),...(statuses?{items:statuses.map((status,i)=>({gameDirectory:[a,b][i].gameDirectory,primaryExecutable:[a,b][i].primaryExecutable,status}))}:{})});
+   for(const [label,committed,statuses] of [
+    ['not ready',false,['requires-review','already-in-steam']],['already present',false,['already-in-steam']],
+    ['added',true,['added-to-steam']],['mixed batch',true,['added-to-steam','requires-review']],
+    ['another account missing',true,['added-to-steam']],['current account unknown',true,['added-to-steam']],
+    ['cache only',true,['added-to-steam']],['malformed receipt',true,null],
+   ]){
+    steamAddNotices.length=0;closeSteamAddNotice();steamCommitTasks.clear();snapshot=structuredClone(original);openEdit(a);
+    const batch=label==='mixed batch',unknown=label==='current account unknown';
+    const receipt=account(unknown?'other':'current',committed,statuses);
+    const completion={...receipt,mode:'steam-library-add-commit-all-accounts',allSteamAccounts:true,
+     accountResults:label==='another account missing'?[receipt,account('other',false,['requires-review'])]:[receipt]};
+    const next={...structuredClone(original),steamPlan:completion,steamPlanSource:'verified-steam-add-completion'};
+    if(unknown){next.steamPlan=original.steamPlan;next.steamPlanSource='cached';next.steamAddCompletion={...completion,displayAccountCompletionConfirmed:false,partialSteamAccounts:true};next.steamAccountWriteWarning='当前账户结果未确认。';}
+    if(label==='cache only')next.steamPlanSource='cached';
+    if(!statuses)snapshot.steamPlan=account('current',true,['added-to-steam']);
+    let request,count=0;const target=keys.slice(0,batch?2:1);
+    bridge.postMessage=function(message){if(message.command==='commit'){request=message;++count;}else post.call(bridge,message);};
+    try{
+     const work=batch?commitSelectedGames(selectedTargetArguments(target)):joinEditedGameToSteam();
+     for(const phase of ['running','completed'])reverseEmit({event:'steam-commit-progress',directories:target,phase});
+     const early=target.map(key=>steamCommitTasks.get(key)?.label);
+     if(!batch)closeEdit();
+     reverseEmit({kind:'response',id:request.id,ok:true,result:next});await work;
+     rows.push({label,early,badges:target.map(key=>steamCommitTasks.get(key)?.label),message:$('#steam-add-notice-message').textContent,
+      count,target:request.arguments.selectedGameDirectories,expectedTarget:target,closed:$('#edit-modal').classList.contains('hidden'),
+      keptPlan:!unknown||snapshot.steamPlan.items[0]?.status===original.steamPlan.items[0]?.status});
+    }finally{bridge.postMessage=post;}
+   }return rows;
+  });progressMetrics.push({case:'verified-steam-add-presentation',rows});
+  const expected=[['本次未加入'],['原已在 Steam'],['已加入 Steam'],['已加入 Steam','本次未加入'],['部分完成'],['部分完成'],['结果未确认'],['结果未确认']];
+  check(rows.every((r,i)=>r.badges.join('|')===expected[i].join('|')&&r.count===1&&r.target.join()===r.expectedTarget.join()&&r.early.every(label=>label!=='已加入 Steam')&&r.keptPlan),'Steam progress or receipt claimed an unproven write, lost its target or projected another account');
+  check(rows.every(r=>r.label==='mixed batch'||r.closed)&&rows[0].message.includes('本次未加入')&&rows[1].message.includes('原已在 Steam')&&rows[2].message.includes('已加入 Steam')&&rows[3].message.includes('新加入 1')&&rows[3].message.includes('未加入 1')&&rows[4].message.includes('部分完成')&&rows[5].message.includes('当前账户结果未确认')&&rows.slice(6).every(r=>r.message.includes('结果未确认')&&!r.message.includes('已加入 Steam')),'Steam add dialog did not distinguish confirmed, unchanged, partial and unknown results through Back');
  });
 
  await run('different editor cards submit distinct Steam requests while the first is pending',async()=>{

@@ -119,6 +119,12 @@ internal static class FanLiveResumeCases
                 C("old SDK ownership is retained rather than invented returned",first.Disposals==0&&Convert.ToBoolean(Value(business,"OpenReturned")));
             }
             C("accepted business waits after public revocation",View().GetProperty("phase").GetString()=="AwaitingGrant"&&Equals(Prop(state,"PowerOperationStatus"),"superseded"));
+            if(!early)
+            {
+                var waitingSnapshot=Call(engine,"SnapshotForRead")!;
+                C("current business wait is observable without admitting control",
+                    Prop(waitingSnapshot,"ResumeAwaitingPublicGrant") is true&&Prop(waitingSnapshot,"ControlAccepting") is false);
+            }
             var next=Scope(2,41,key);
             if(oweClose)device.BeforeOpen=()=>oldOwnerReturnedBeforeOpen=first.Disposals==1;
             if(revokeDuringReturn)device.AfterClose=next.Revoke;
@@ -135,6 +141,8 @@ internal static class FanLiveResumeCases
                 captured=Prop(state,"UnknownState")is false&&Equals(Prop(state,"State"),"Suspended")&&device.Closes==2;
                 C("new sleep closes the unwritten current session without false lock",captured);
             }
+            if(name is "resume-live-off-pending" or "resume-live-new-sleep-pending")
+                C("retired business no longer projects a wait",Prop(Call(engine,"SnapshotForRead")!,"ResumeAwaitingPublicGrant") is false);
             if(revokeBeforeDispatch)next.Revoke();
             reader=(Task)Call(server,"StartPowerWorkerForSelfTest")!;
             if(revokeBeforeDispatch)

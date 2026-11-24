@@ -154,6 +154,19 @@ int wmain(int argc, wchar_t** argv) {
         check(!fs::exists(fixture), "Fixture must be fresh");
         fs::create_directories(fixture);
         if(planNativeOnly){test("current native plans supplement empty OPT without reviving stale entries",[&]{planNativeOptiCatalog(fixture);});return 0;}
+        test("selected EXE reuses catalog without marking installed or merging a sibling EXE", [] {
+            auto chosen = manual(); chosen.explicitExecutable = true;
+            Memory m; auto ports = m.ports();
+            const auto first = oc::supplement({chosen}, ports);
+            check(first.added == 1 && m.games().size() == 1, "selected EXE did not create exactly one card");
+            check(!m.games().at(0).contains("IsOptiscalerInstalled"), "catalog-only request marked the game installed");
+            const auto added = *m.bytes;
+            check(oc::supplement({chosen}, ports).status == "idle" && m.bytes == added, "repeated selection was not idempotent");
+            chosen.executablePath = "D:\\Games\\Example\\Binaries\\Other.exe";
+            check(oc::supplement({chosen}, ports).skipped == 1 && m.bytes == added, "different EXE reused an ambiguous installation root");
+            m.running = true;
+            check(oc::supplement({chosen}, ports).status == "deferred" && m.bytes == added, "running OPT was modified");
+        });
         test("native Steam folder-only entry retains real app ID", [] {
             Memory m; auto p = m.ports(); auto row = manual(); row.executablePath.clear(); row.steamAppId = 123;
             const auto r = oc::supplement({row}, p);

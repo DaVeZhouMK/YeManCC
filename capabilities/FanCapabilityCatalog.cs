@@ -21,6 +21,21 @@ public static partial class FanCapabilityCatalog
     private static bool legacyDispatchInProgress;
     private static long ownershipGeneration;
 
+    // Fan-only DMI aliases omitted by the frozen HC factory. Linux oxpec.c at
+    // 493f34eacd779e6551e5405440008ea5488c22b0 groups these with F1 for fan
+    // mode, duty and automatic return. This is not a general device alias.
+    public static HcDeviceDescriptor? MatchLegacyFanFactoryAlias(string? manufacturer, string? product)
+    {
+        if (manufacturer?.Trim().ToUpperInvariant() is not ("ONE-NETBOOK" or "ONE-NETBOOK TECHNOLOGY CO., LTD."))
+            return null;
+        return product?.Trim().ToUpperInvariant() switch
+        {
+            "ONEXPLAYER F1 EVA-01" or "ONEXPLAYER F1 EVA-02" or "ONEXPLAYER F1 OLED" or "ONEXPLAYER F1L"
+                => HcDeviceCapabilityCatalog.Find("hc.device.OneXPlayerOneXFly"),
+            _ => null,
+        };
+    }
+
     public static FanCapabilityDescriptor ResolveAsusCurve(string factoryType)
     {
         var device = HcDeviceCapabilityCatalog.Find(factoryType) ??

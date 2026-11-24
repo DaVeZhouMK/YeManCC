@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { rtssIniValue, setRtssIniValue } from '@/bridge/rtssOverlay';
+import { readRtssSharedFlags, rtssIniValue, setRtssIniValue } from '@/bridge/rtssOverlay';
 
 const dir = 'C:\\TestRTSS';
 const cfg = `${dir}\\Plugins\\Client\\OverlayEditor.cfg`;
+const sharedConfig = `${dir}\\Profiles\\Config`;
+const baseShared = '[Plugins]\r\nOverlayEditor.dll=1\r\n[Shared]\r\nFlags=80000005\r\n[Other]\r\nFlags=FFFFFFFF\r\n';
+let shared = baseShared, failVisibility = false, skipVisibilityPersistence = false;
 let running = true;
 let rtssInstalled = false;
 let failPrepare = false, failLoad = false;
@@ -24,7 +27,7 @@ const documentEvents = new EventTarget();
 (globalThis as any).document = {visibilityState:'hidden',createElement:()=>({content:{}}),addEventListener:documentEvents.addEventListener.bind(documentEvents),removeEventListener:documentEvents.removeEventListener.bind(documentEvents)};
 (globalThis as any).setTimeout = (fn: (...args: any[]) => void, ms?: number, ...args: any[]) =>
   realSetTimeout(fn, ms === 15000 || ms === 6000 || ms === 10000 ? 40 : ms, ...args);
-let text = '[Settings]\r\nLayout=YeManOBS-W-1.ovl\r\nSMART=0\r\n[Other]\r\nLayout=untouched.ovl';
+let text = '[Settings]\r\nLayout=YeManOBS-W-1.ovl\r\nSMART=0\r\n[Other]\r\nLayout=untouched.ovl\r\n[OSD]\r\nEnableOSD=1';
 const calls: Array<{cmd: string; args: any}> = [];
 let handler: ((e: {data: unknown}) => void) | null = null;
 let active = 0, maxActive = 0;
@@ -34,7 +37,7 @@ let rtssOwnerWireContext:any;let rtssOwnerNativeWireChecks=0;
     addEventListener: (_type: string, fn: typeof handler) => { handler = fn; },
     postMessage: (message: any) => {
       calls.push({cmd: message.cmd, args: message.args});
-      if(rtssOwnerWireContext&&(['rtss.prepareOverlay','rtss.loadOverlay','rtss.reloadProfiles','fs.writeTextFileAtomic'].includes(message.cmd)||message.cmd==='shell.run'&&(message.args.program==='cmd'||message.args.program==='powershell.exe'&&message.args.args.includes('-File')))){
+      if(rtssOwnerWireContext&&(['rtss.prepareOverlay','rtss.loadOverlay','rtss.reloadProfiles','rtss.setOsdVisible','fs.writeTextFileAtomic'].includes(message.cmd)||message.cmd==='shell.run'&&(message.args.program==='cmd'||message.args.program==='powershell.exe'&&message.args.args.includes('-File')))){
         assert.deepEqual(message.args.bootContext,rtssOwnerWireContext,'Actual API must forward this request owner at '+message.cmd);rtssOwnerNativeWireChecks++;
       }
       if ((message.cmd === 'rtss.prepareOverlay' && dropPrepareReply) ||
@@ -47,6 +50,7 @@ let rtssOwnerWireContext:any;let rtssOwnerNativeWireChecks=0;
           case 'proc.identities': result = {known:true,processes:[],reason:'',error:0}; break;
           case 'fs.exists': result = rtssInstalled; break;
           case 'proc.running': result = {RTSS: running}; break;
+          case 'power.lifecycle': result = {known:true,phase:'ready',generation:1,inputReady:true,hardwareWritesAllowed:true,publicationRevision:1,observedNotificationSequence:0,notificationPending:false}; break;
           case 'rtss.prepareOverlay': result = {ok: !failPrepare, error: 'prepare-failed',
             ...(failPrepare ? {win32Error: 5, path: dir + '\\Plugins\\Client\\YMCCOverlayBridge.dll'} : {}),
             ...(compatibleLoadedBridge ? {bridgeState: 'loaded_compatible', bridgeMaintenanceDeferred: true} : {}), ...(prepareFailure ?? {})}; break;
@@ -57,11 +61,24 @@ let rtssOwnerWireContext:any;let rtssOwnerNativeWireChecks=0;
             result = {ok: !failLoad, error: 'load-unconfirmed', ...(loadFailure ?? {})};
             if (!failLoad) text = setRtssIniValue(text, 'Settings', 'Layout', message.args.layout);
             break;
+          case 'rtss.setOsdVisible':
+            if (!failVisibility && !skipVisibilityPersistence) {
+              const flags = (((readRtssSharedFlags(shared) ?? 0) & ~1) | Number(message.args.visible)) >>> 0;
+              shared = setRtssIniValue(shared, 'Shared', 'Flags', flags.toString(16).toUpperCase().padStart(8, '0'));
+            }
+            result = {ok: !failVisibility, error:'visibility-unconfirmed'};
+            break;
           case 'fs.readTextFile':
+            if (message.args.path === sharedConfig) { result = shared; break; }
             if (message.args.path !== cfg && message.args.path !== dir+'\\Profiles\\Global') { handler!({data:{id:message.id,error:'unexpected RTSS config path'}});return; }
             if (requireWindowsConfigRead && message.args.textEncoding !== 'windows-config') { handler!({data:{id:message.id,error:'NATIVE_RESPONSE_SERIALIZATION_FAILED'}});return; }
             result = text; break;
           case 'fs.writeTextFileAtomic':
+            if (message.args.path === sharedConfig) {
+              assert.equal(message.args.expectedContent, shared);
+              if (!rejectWrite && !ignoreWrite) shared = message.args.content;
+              result = !rejectWrite; break;
+            }
             if (message.args.path !== cfg && message.args.path !== dir+'\\Profiles\\Global') { handler!({data:{id:message.id,error:'unexpected RTSS config path'}});return; }
             if (staleWrite || configDisappears) { handler!({data:{id:message.id,error:staleWrite?'CONFIG_TEXT_CHANGED':'CONFIG_TEXT_SOURCE_MISSING'}});return; }
             if (!rejectWrite && !ignoreWrite) text = message.args.content; result = !rejectWrite; if(atomicReplyHook){const hook=atomicReplyHook;atomicReplyHook=null;await hook();} break;
@@ -174,7 +191,7 @@ async function main() {
     const output=process.env.YEMAN_RTSS_AWAIT_TEST_OUT;if(!output)throw Error('OWNED_TEST_OUTPUT_REQUIRED');mkdirSync(output,{recursive:true});writeFileSync(output+'/rtss-results.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({suite:result.suite,option:result.option,passed:result.passed,failed:result.failed}));if(result.failed)process.exitCode=1;return;
   }
 
-  const {setOverlayLayout, readOverlayLayout, readRtssZoom, setRtssZoom, setPowerControlDir, ensureRtssOverlayInstalled} = await import('@/bridge/yeman');
+  const {setOverlayLayout, readOverlayLayout, readRtssZoom, setRtssZoom, setPowerControlDir, ensureRtssOverlayInstalled, monitorOn} = await import('@/bridge/yeman');
   setPowerControlDir('C:\\TestYMCC\\PowerControl');
   assert.equal(await ensureRtssOverlayInstalled(), false, 'optional RTSS absence must not fail YMCC startup');
   assert(!calls.some(c => c.cmd === 'rtss.prepareOverlay'), 'no filesystem provisioning when RTSS is not installed');
@@ -247,16 +264,97 @@ async function main() {
 
   running = false;
   const loads = calls.filter(c => c.cmd === 'rtss.loadOverlay').length;
+  shared=baseShared;
+  const coldStart=calls.length;
   assert.deepEqual(await setOverlayLayout('off'), {mode: 'saved'});
+  assert.equal(readRtssSharedFlags(shared),0x80000004);
+  assert.equal(rtssIniValue(shared,'Other','Flags'),'FFFFFFFF');
+  assert(!calls.slice(coldStart).some(c=>c.cmd==='rtss.setOsdVisible'||c.cmd==='rtss.reloadProfiles'));
   assert.equal(calls.filter(c => c.cmd === 'rtss.loadOverlay').length, loads);
   assert.equal(rtssIniValue(text, 'Settings', 'Layout'), 'Empty.ovl');
+  assert.equal(rtssIniValue(text, 'OSD', 'EnableOSD'), '0');
   assert.equal(rtssIniValue(text, 'Other', 'Layout'), 'untouched.ovl');
-  assert.equal(calls.find(c => c.cmd === 'fs.writeTextFileAtomic')?.args.path, cfg);
+  assert(calls.some(c => c.cmd === 'fs.writeTextFileAtomic' && c.args.path === cfg));
   assert(!calls.some(c => /triggerOverlayHotkey|shell.hidden|shell.execute/.test(c.cmd)), 'never restart/inject keys');
   const operationCases: Array<{name:string;ok:boolean;error?:string}> = [];
   const operationCase=async(name:string,run:()=>Promise<void>)=>{try{await run();operationCases.push({name,ok:true});}catch(error){operationCases.push({name,ok:false,error:String(error)});}finally{prepareFailure=null;loadFailure=null;failPrepare=false;failLoad=false;requireWindowsConfigRead=false;rejectWrite=false;staleWrite=false;configDisappears=false;ignoreWrite=false;failReload=false;reloadWritesBack=false;omitZoomOnReload=false;blockReload=null;}};
+  await operationCase('RTSS output closes real OSD before template cleanup and reopens only after target ACK',async()=>{
+    running=true;text='[Settings]\r\nLayout=YeManOBS-W-1.ovl\r\n[OSD]\r\nEnableOSD=1\r\nZoomRatio=5\r\n[Framerate]\r\nLimit=120\r\n[Hooking]\r\nEnableHooking=1\r\n';
+    shared=baseShared;
+    const start=calls.length;
+    await setOverlayLayout('off');
+    const close=calls.slice(start).map(c=>c.cmd);
+    assert(close.indexOf('fs.writeTextFileAtomic')>=0);
+    assert(close.indexOf('rtss.reloadProfiles')>close.indexOf('fs.writeTextFileAtomic'));
+    assert(close.indexOf('rtss.loadOverlay')>close.indexOf('rtss.reloadProfiles'));
+    assert(close.indexOf('rtss.setOsdVisible')>close.indexOf('rtss.reloadProfiles'));
+    assert(close.indexOf('rtss.loadOverlay')>close.indexOf('rtss.setOsdVisible'));
+    assert.equal(readRtssSharedFlags(shared),0x80000004);
+    assert(!calls.slice(start).some(c=>c.cmd==='fs.writeTextFileAtomic'&&c.args.path===sharedConfig));
+    assert.equal(rtssIniValue(text,'OSD','EnableOSD'),'0');
+    assert.equal(rtssIniValue(text,'OSD','ZoomRatio'),'5');
+    assert.equal(await monitorOn(),false);
+    const next=calls.length;
+    await setOverlayLayout('J',4);
+    const open=calls.slice(next);
+    assert.deepEqual(open.filter(c=>c.cmd==='rtss.loadOverlay').map(c=>c.args.layout),['YeManOBS-JJ-1.ovl']);
+    assert(open.findIndex(c=>c.cmd==='fs.writeTextFileAtomic')>open.findIndex(c=>c.cmd==='rtss.loadOverlay'));
+    assert.equal(open.filter(c=>c.cmd==='rtss.reloadProfiles').length,1);
+    assert(open.findIndex(c=>c.cmd==='rtss.setOsdVisible')>open.findIndex(c=>c.cmd==='rtss.reloadProfiles'));
+    assert.equal(readRtssSharedFlags(shared),0x80000005);
+    assert.equal(rtssIniValue(text,'OSD','EnableOSD'),'1');
+    assert.equal(rtssIniValue(text,'OSD','ZoomRatio'),'4');
+    assert.equal(rtssIniValue(text,'Framerate','Limit'),'120');
+    assert.equal(rtssIniValue(text,'Hooking','EnableHooking'),'1');
+    assert.equal(await monitorOn(),true);
+  });
+  await operationCase('both OSD gates admit visibility; load failure never opens either gate',async()=>{
+    running=true;text='[Settings]\r\nLayout=YeManOBS-W-1.ovl\r\n[OSD]\r\nEnableOSD=0\r\n';shared=baseShared;
+    assert.equal(await monitorOn(),false);
+    text=setRtssIniValue(text,'OSD','EnableOSD','1');shared=setRtssIniValue(shared,'Shared','Flags','80000004');
+    assert.equal(await monitorOn(),false);
+    text=setRtssIniValue(text,'OSD','EnableOSD','0');failLoad=true;
+    const start=calls.length;
+    await assert.rejects(setOverlayLayout('J'),/load-unconfirmed/);
+    assert(!calls.slice(start).some(c=>c.cmd==='rtss.setOsdVisible'||c.cmd==='rtss.reloadProfiles'));
+    assert.equal(readRtssSharedFlags(shared),0x80000004);
+  });
+  await operationCase('visibility failure or missing Config readback cannot count as live OFF success',async()=>{
+    running=true;text='[Settings]\r\nLayout=YeManOBS-W-1.ovl\r\n[OSD]\r\nEnableOSD=1\r\n';shared=baseShared;
+    try {
+      failVisibility=true;
+      await assert.rejects(setOverlayLayout('off'),/visibility-unconfirmed/);
+      assert.equal(rtssIniValue(text,'OSD','EnableOSD'),'0');
+      failVisibility=false;skipVisibilityPersistence=true;
+      await assert.rejects(setOverlayLayout('off'),/显示开关保存读回未确认/);
+    } finally { failVisibility=false;skipVisibilityPersistence=false; }
+  });
+  await operationCase('Global reload failure does not prevent live visibility OFF',async()=>{
+    running=true;text='[Settings]\r\nLayout=YeManOBS-W-1.ovl\r\n[OSD]\r\nEnableOSD=1\r\n';shared=baseShared;failReload=true;
+    await assert.rejects(setOverlayLayout('off'),/reload-unconfirmed/);
+    assert.equal(readRtssSharedFlags(shared),0x80000004);
+  });
+  await operationCase('retired intent after profile ACK cannot enable the shared visibility bit',async()=>{
+    running=true;text='[Settings]\r\nLayout=Empty.ovl\r\n[OSD]\r\nEnableOSD=0\r\n';shared=setRtssIniValue(baseShared,'Shared','Flags','80000004');
+    let current=true;
+    rtssOwnerReplyHook=async cmd=>{if(cmd==='rtss.reloadProfiles')current=false;};
+    const start=calls.length;
+    try { await assert.rejects(setOverlayLayout('L',undefined,async()=>current),/RTSS_OUTPUT_REQUEST_EXPIRED/); }
+    finally { rtssOwnerReplyHook=null; }
+    assert(!calls.slice(start).some(c=>c.cmd==='rtss.setOsdVisible'));
+    assert.equal(readRtssSharedFlags(shared),0x80000004);
+  });
+  await operationCase('OSD OFF takes effect even when the old template cannot be cleared',async()=>{
+    running=true;text='[Settings]\r\nLayout=YeManOBS-W-1.ovl\r\n[OSD]\r\nEnableOSD=1\r\n';failPrepare=true;
+    shared=baseShared;
+    await assert.rejects(setOverlayLayout('off'),/prepare-failed/);
+    assert.equal(readRtssSharedFlags(shared),0x80000004);
+    assert.equal(rtssIniValue(text,'Settings','Layout'),'YeManOBS-W-1.ovl');
+    assert.equal(rtssIniValue(text,'OSD','EnableOSD'),'0');
+    assert.equal(await monitorOn(),false);
+  });
   await operationCase('native load failure preserves diagnostic code path and OS error without writing selection',async()=>{
-    running=true;text='[Settings]\r\nLayout=Empty.ovl\r\n';const before=text,start=calls.length;
+    running=true;text='[Settings]\r\nLayout=Empty.ovl\r\n[OSD]\r\nEnableOSD=0\r\n';const before=text,start=calls.length;
     failLoad=true;loadFailure={error:'config preparation failed',errorCode:'RTSS_CONFIG_READ_FAILED',win32Error:32,path:cfg};
     let message='';try{await setOverlayLayout('W');assert.fail('expected load failure');}catch(error){message=String(error);}
     assert(message.includes('config preparation failed'));assert(message.includes('RTSS_CONFIG_READ_FAILED'));assert(message.includes('Win32 32'));assert(message.includes(cfg));assert.equal(text,before);assert.equal(calls.slice(start).filter(c=>c.cmd==='rtss.loadOverlay').length,1);assert(!calls.slice(start).some(c=>c.cmd==='fs.writeTextFileAtomic'||c.cmd==='rtss.reloadProfiles'));

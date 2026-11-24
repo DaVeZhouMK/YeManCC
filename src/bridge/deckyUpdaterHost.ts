@@ -17,15 +17,18 @@ export function startDeckyUpdaterHost(allowed:()=>boolean){
     check:()=>checkForUpdate(APP_VERSION),download:()=>prepareUpdate(),install:()=>downloadAndInstall(),
     validateInstall:async()=>{
       const initial=getSharedPowerLifecycle();let current=isSharedPowerLifecycleAdmitted(initial);
+      const sameScope=(state:ReturnType<typeof getSharedPowerLifecycle>)=>isSharedPowerLifecycleAdmitted(state)&&
+        state?.generation===initial?.generation&&state?.observedNotificationSequence===initial?.observedNotificationSequence&&state?.suspendSerial===initial?.suspendSerial;
       // Retire this explicit request on any intervening denial, even if the
       // same generation returns Ready before an awaited read completes.
-      const stop=onSharedPowerLifecycle(state=>{if(!isSharedPowerLifecycleAdmitted(state)||state.generation!==initial?.generation||state.observedNotificationSequence!==initial?.observedNotificationSequence)current=false;},{observeNotificationSequence:true});
-      const assertPower=()=>{const state=getSharedPowerLifecycle();if(!current||!isSharedPowerLifecycleAdmitted(state)||state?.generation!==initial?.generation||state?.observedNotificationSequence!==initial?.observedNotificationSequence)throw Error('正在恢复电源状态，请恢复完成后重新确认安装。');};
+      const stop=onSharedPowerLifecycle(state=>{if(!sameScope(state))current=false;},{observeNotificationSequence:true,observeSuspendSerial:true});
+      const changedBeforeInstall=()=>Error('正在恢复电源状态，请恢复完成后重新确认安装。');
+      const assertPower=()=>{if(!current||!sameScope(getSharedPowerLifecycle()))throw changedBeforeInstall();};
       try{
         assertPower();const game=await refreshGameStatusStrict();assertPower();
         const power=await powerLifecycle.get(3000);assertPower();
         if(game||getPolicyGame())throw Error('游戏运行中，请退出游戏后安装。');
-        if(!isSharedPowerLifecycleAdmitted(power)||power.generation!==initial?.generation||power.observedNotificationSequence!==initial?.observedNotificationSequence)throw Error('正在恢复电源状态，请恢复完成后重新确认安装。');
+        if(!sameScope(power))throw changedBeforeInstall();
         if(disposed||!allowed()||!isPolicyGameInitialized())throw Error('YMCC 状态已改变，请重新确认安装。');
         // The service rechecks this captured scope after its final await.
         return assertPower;

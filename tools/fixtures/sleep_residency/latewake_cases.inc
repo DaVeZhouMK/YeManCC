@@ -42,9 +42,7 @@ static void replayCase(const json& c){
     for(unsigned i=0;i<8;++i){s0WakeMessage(2,c.at("reason").get<int>());sgEvaluateExternalDeviceWake();}
     requireSend();check(g_sgAutomaticSleepBudget.requests()==1&&!timers.count(retryTimerId),"duplicates share accepted in-flight request without another timer or budget");
 }
-} // namespace sleep_timeout_fixture
 static unsigned lateWakeNativeTests(const json& payload){
-    using namespace sleep_timeout_fixture;
     const auto initial=sleepEvidenceChecks;lateScenarios=json::array();
     check(payload.at("schemaVersion")==1&&payload.at("realPowerApiCallsAllowed")==false,"late-wake payload denies real power calls");
 #ifdef YMCC_SLEEP_LATE_WAKE_MONITOR_MUTATION
@@ -93,3 +91,5 @@ static unsigned lateWakeNativeTests(const json& payload){
 
     return sleepEvidenceChecks-initial;
 }
+} // namespace sleep_timeout_fixture
+using sleep_timeout_fixture::lateWakeNativeTests;
