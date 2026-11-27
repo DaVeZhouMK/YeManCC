@@ -113,6 +113,9 @@ static bool onDesktop(DWORD thread,const std::wstring& expected){
  const auto desk=GetThreadDesktop(thread);wchar_t name[256]{};DWORD used=0;
  return desk&&GetUserObjectInformationW(desk,UOI_NAME,name,sizeof(name),&used)&&expected==name;
 }
+#ifdef YMCC_TEST_REAL_ROOT_EXIT
+#include YMCC_TEST_REAL_ROOT_EXIT_HEADER
+#endif
 static int worker(const std::filesystem::path& web,const std::filesystem::path& out,HANDLE jobHandle,const std::wstring& desktopName){
  Json report={{"status","FAIL"},{"cases",Json::array()},{"actualWebView2Controllers",true},{"controllerTestDouble",false},{"environmentForwardingObserver",true},{"syntheticLocalRendererHandshake",true},{"actualProductRendererVue",false},{"privateDesktop",true},{"desktopSwitched",false},{"normalYmccStarted",false},{"deviceIo",false},{"sleep",false},{"manualSleepAcceptanceReady",false}};
  bool initialized=false;OwnHandle job{jobHandle};std::vector<std::pair<UINT32,OwnHandle>> browsers;ComPtr<ICoreWebView2Environment> realEnvironment;ComPtr<ForwardEnvironment> forwarding;auto probe=std::make_shared<Probe>();unsigned checks=0;std::string error,browserAdmissionError;Json events=Json::array();
@@ -129,9 +132,9 @@ static int worker(const std::filesystem::path& web,const std::filesystem::path& 
   need(SUCCEEDED(options->put_ExclusiveUserDataFolderAccess(TRUE)),"Exclusive WebView profile unavailable");
   bool complete=false;HRESULT environmentResult=E_PENDING;const auto profile=out/L"owned-webview-profile";need(std::filesystem::create_directory(profile),"Fresh own browser profile required");const auto requested=CreateCoreWebView2EnvironmentWithOptions(runtime.c_str(),profile.c_str(),options.Get(),Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>([&](HRESULT hr,ICoreWebView2Environment* value)->HRESULT{environmentResult=hr;realEnvironment=value;complete=true;return S_OK;}).Get());
   need(SUCCEEDED(requested)&&until([&]{return complete;},20000)&&SUCCEEDED(environmentResult)&&realEnvironment,"Actual explicit WebView2 environment creation failed");forwarding=Make<ForwardEnvironment>(realEnvironment.Get(),probe);
-  auto configure=[&](Carrier& carrier){Config config;config.noticeOnly=true;config.serve=[&,owned=&carrier](ICoreWebView2* view){
+  const auto admit=[&](ICoreWebView2* view,HWND parent){
    try{
-    const auto parent=CarrierTestAccess::window(*owned);DWORD parentPid=0;
+    DWORD parentPid=0;
     const auto thread=parent?GetWindowThreadProcessId(parent,&parentPid):0;
     need(thread&&parentPid==GetCurrentProcessId()&&onDesktop(thread,desktopName),"Actual controller parent is not on the private desktop");
     UINT32 pid=0;need(SUCCEEDED(view->get_BrowserProcessId(&pid))&&pid,"Actual browser PID unavailable");
@@ -149,9 +152,28 @@ static int worker(const std::filesystem::path& web,const std::filesystem::path& 
     }else need(WaitForSingleObject(existing->second.value,0)==WAIT_TIMEOUT,"Actual browser exited before controller admission");
     ComPtr<ICoreWebView2_3> resource;return SUCCEEDED(view->QueryInterface(IID_PPV_ARGS(&resource)))&&SUCCEEDED(resource->SetVirtualHostNameToFolderMapping(L"app.localhost",web.c_str(),COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS));
    }catch(const std::exception& e){browserAdmissionError=e.what();return false;}
-  };config.notify=[&](const std::string& event,const Json& value){events.push_back({{"event",event},{"data",value}});};carrier.initialize(forwarding.Get(),std::move(config));};
+  };
+  auto configure=[&](Carrier& carrier){Config config;config.noticeOnly=true;config.serve=[&,owned=&carrier](ICoreWebView2* view){return admit(view,CarrierTestAccess::window(*owned));};
+   config.notify=[&](const std::string& event,const Json& value){events.push_back({{"event",event},{"data",value}});};carrier.initialize(forwarding.Get(),std::move(config));};
   auto create=[&](Carrier& carrier,const std::string& nonce){auto lease=carrier.reserveNotice(nonce)["leaseId"].get<unsigned long long>();auto result=carrier.create(0,0,nonce,true,lease);result["leaseId"]=lease;return result;};
   auto ready=[&](Carrier& carrier){const bool readyOrError=until([&]{return !browserAdmissionError.empty()||carrier.status().value("ready",false);},12000);need(browserAdmissionError.empty(),browserAdmissionError.c_str());return readyOrError;};
+#ifdef YMCC_TEST_REAL_ROOT_EXIT
+  {
+   Carrier carrier;configure(carrier);const auto owner=create(carrier,"actual-root-exit-monitor-owner");
+   check("real notice is ready before main browser exit testing",ready(carrier));
+   need(probe->completions.size()==1&&probe->completed==1&&probe->completions[0]->realController,"Expected one real notice controller");
+   const auto completion=probe->completions[0];
+   // Observe the notice controller via forwarding; the main visual host uses
+   // the same actual environment without altering the notice-only counters.
+   noticeRootDestroy::runReal(carrier,realEnvironment.Get(),check,admit,report);
+   check("original root destroy closes the real notice controller exactly once",completion->actualCloseCalls==1&&closed(completion)&&CarrierTestAccess::empty(carrier));
+   bool rejected=false;
+   try{carrier.create(0,0,owner["nonce"].get<std::string>(),true,owner["leaseId"].get<unsigned long long>());}
+   catch(const std::exception& e){rejected=std::string_view(e.what()).find("lease retired or replaced")!=std::string_view::npos;}
+   completion->controller.Reset();
+   check("stale lease is rejected and the closed composition reference is released",rejected&&completion->forwardingControllersDestroyed==1&&probe->started==1);
+  }
+#else
   auto retire=[&](Carrier& carrier,const Json& owner){const auto result=carrier.retireNotice(owner["leaseId"].get<unsigned long long>(),owner["nonce"].get<std::string>());return result.value("leaseRetired",false)&&result.value("resourcesDestroyed",false)&&result.value("ownedOnly",false);};
   {
    Carrier carrier;configure(carrier);auto owner=create(carrier,"actual-webview-ready-owner-0001");check("actual composition controller and inert local renderer become ready",ready(carrier));auto completion=probe->completions.back();need(completion->realController,"No actual composition controller");
@@ -170,7 +192,9 @@ static int worker(const std::filesystem::path& web,const std::filesystem::path& 
    Carrier carrier;configure(carrier);probe->holdNext=true;auto old=create(carrier,"actual-webview-old-owner-0005");auto oldCompletion=probe->completions.back();need(until([&]{return oldCompletion->realController&&oldCompletion->heldHandler;},12000),"Old real callback not held");need(retire(carrier,old),"Old native lease not retired");auto current=create(carrier,"actual-webview-current-owner-0006");need(ready(carrier),"New actual owner did not become ready");auto currentCompletion=probe->completions.back();const auto currentWindow=CarrierTestAccess::window(carrier);releaseHeld(oldCompletion);check("late real old callback closes only old controller and preserves new owner",oldCompletion->closedAfterForward&&!closed(currentCompletion)&&CarrierTestAccess::window(carrier)==currentWindow&&carrier.status().value("ready",false));check("new current actual controller retires independently",retire(carrier,current)&&closed(currentCompletion));carrier.shutdown();oldCompletion->controller.Reset();currentCompletion->controller.Reset();
   }
   for(unsigned i=0;i<3;i++){Carrier carrier;configure(carrier);const auto nonce="actual-webview-repeat-owner-000"+std::to_string(i);auto owner=create(carrier,nonce);need(ready(carrier),"Repeated actual owner not ready");auto completion=probe->completions.back();auto weak=CarrierTestAccess::state(carrier);check(("repeat actual controller lifecycle "+std::to_string(i)).c_str(),retire(carrier,owner)&&weak.expired()&&closed(completion));carrier.shutdown();completion->controller.Reset();}
-  check("all nine real completion callbacks forwarded and references released",probe->started==9&&probe->completed==9&&std::all_of(probe->completions.begin(),probe->completions.end(),[](const auto& c){return c->realController&&c->forwarded&&c->actualCloseCalls==1&&SUCCEEDED(c->actualCloseResult)&&c->forwardingControllersDestroyed==1&&!c->controller&&!c->heldComposition&&!c->heldHandler;}));check("all production native event hooks and owners released",CarrierTestAccess::hooks()==0&&CarrierTestAccess::owners()==0);
+  check("all nine real completion callbacks forwarded and references released",probe->started==9&&probe->completed==9&&std::all_of(probe->completions.begin(),probe->completions.end(),[](const auto& c){return c->realController&&c->forwarded&&c->actualCloseCalls==1&&SUCCEEDED(c->actualCloseResult)&&c->forwardingControllersDestroyed==1&&!c->controller&&!c->heldComposition&&!c->heldHandler;}));
+#endif
+  check("all production native event hooks and owners released",CarrierTestAccess::hooks()==0&&CarrierTestAccess::owners()==0);
   forwarding.Reset();realEnvironment.Reset();check("own explicit browser exits naturally before owned Job cleanup",!browsers.empty()&&until([&]{return std::all_of(browsers.begin(),browsers.end(),[](const auto& row){return WaitForSingleObject(row.second.value,0)==WAIT_OBJECT_0;});},15000));report["browserNaturalExitBeforeJobClose"]=true;report["status"]="PASS";
  }catch(const std::exception& failure){error=failure.what();report["error"]=error;report["win32Error"]=GetLastError();}
  for(auto& c:probe->completions){if(c->controller)c->controller->Close();c->heldHandler.Reset();c->heldComposition.Reset();c->controller.Reset();}forwarding.Reset();realEnvironment.Reset();if(initialized)CoUninitialize();browsers.clear();job.reset();report["startedActualCompositionControllers"]=probe->started;report["completedActualCompositionControllers"]=probe->completed;report["actualControllerCloseObservations"]=Json::array();for(const auto& c:probe->completions)report["actualControllerCloseObservations"].push_back({{"realController",c->realController},{"actualCloseCalls",c->actualCloseCalls},{"actualCloseResult",(long)c->actualCloseResult},{"forwardingControllersDestroyed",c->forwardingControllersDestroyed},{"postCloseGetterResult",(long)c->afterForwardGetCore}});report["checks"]=checks;report["events"]=events;report["remainingNativeHooks"]=CarrierTestAccess::hooks();report["remainingNativeOwners"]=CarrierTestAccess::owners();std::ofstream saved(out/L"real-webview-result.json",std::ios::binary);saved<<report.dump(2)<<'\n';std::cout<<Json{{"status",report["status"]},{"checks",checks},{"actualControllers",probe->completed},{"error",error}}.dump()<<'\n';return report["status"]=="PASS"&&saved.good()?0:2;

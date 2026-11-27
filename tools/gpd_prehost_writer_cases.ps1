@@ -4,7 +4,7 @@ function Get-GpdPreHostWriterSelection {
     $text=[IO.File]::ReadAllText($HeaderPath)
     $start=$text.IndexOf('    if(preHostWriterCase){',[StringComparison]::Ordinal)
     if($start -lt 0){throw 'GPD pre-Host fixture is not integrated in this source'}
-    $end=$text.IndexOf('        g_gpdPreHostFixtureTick=0;',$start,[StringComparison]::Ordinal)
+    $end=$text.IndexOf("`n        g_gpdPreHostFixtureTick=0;",$start,[StringComparison]::Ordinal)
     if($end -lt 0){throw 'GPD pre-Host fixture boundary is missing'}
     $body=$text.Substring($start,$end-$start)
     $allowedMatch=[regex]::Match($body,'allowed=\{(?<items>.*?)\};','Singleline')
@@ -13,13 +13,21 @@ function Get-GpdPreHostWriterSelection {
     if(!$Selection -or ($Selection.Count -eq 1 -and [string]::IsNullOrWhiteSpace($Selection[0]))){throw 'Empty GPD pre-Host selection'}
     if($Selection.Count -eq 1 -and $Selection[0] -ceq 'all'){$Selection=$allowed}
     $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-    foreach($item in $Selection){if($allowed -cnotcontains $item -or !$seen.Add($item)){throw ('Unknown or duplicate GPD pre-Host selection: '+$item)}}
+    foreach($item in $Selection){if(($allowed -cnotcontains $item -and $item -cne 'win5-return-exit2') -or !$seen.Add($item)){throw ('Unknown or duplicate GPD pre-Host selection: '+$item)}}
     $positive=@([regex]::Matches($body,'"(GPD (?:prehost|firstqueue) [^"\r\n]+)"')|ForEach-Object{$_.Groups[1].Value}|Where-Object{
         $_ -cnotin @('GPD prehost live writer refuses settle and inverse and new ticket','GPD prehost old inverse still blocks at130s','GPD prehost rejection retains original return for ')
     })
     if(!$positive.Count){throw 'GPD pre-Host original assertion names are missing'}
     $expected=[ordered]@{}
     foreach($item in $Selection){
+        if($item -ceq 'win5-return-exit2'){
+            $fieldNames=@([regex]::Matches($body,'"(Win5 prehost [^"\r\n]+)"')|ForEach-Object{$_.Groups[1].Value})
+            if($fieldNames.Count -ne 17){throw 'Win5 directed assertion inventory changed'}
+            $perRequest=@($fieldNames[6..7])+@($fieldNames[11..12])
+            $expected[$item]=@($positive[0])+@($fieldNames[0..5])+$perRequest+$perRequest+
+                @($fieldNames[6..12])+@($fieldNames[13..16])
+            continue
+        }
         $names=@($positive|Where-Object{
             ($_ -cnotlike 'GPD prehost live-off *' -or $item -ceq 'off') -and
             ($_ -cnotlike 'GPD prehost live-cancel *' -or $item -ceq 'live') -and

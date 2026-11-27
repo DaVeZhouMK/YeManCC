@@ -46,7 +46,7 @@ try{
  const template=controllerFixture.preamble+fs.readFileSync(path.join(templateRoot,'native.cpp'),'utf8');
  const generated=template.replace('// @@SNAPSHOT_TYPE@@',snapshot.code).replace('// @@FUNCTIONS@@',blocks.map(b=>b.code).join('\n\n')).replace('// @@PRODUCER@@',producer(main));
  const oldGenerated=template.replace('// @@SNAPSHOT_TYPE@@',snapshot.code).replace('// @@FUNCTIONS@@',blocks.filter(b=>b.symbol!=='inputCaptureDsuFrameCurrent').map(b=>b.code).join('\n\n')).replace('// @@PRODUCER@@',producer(before));
- const files=['sleep_power_state.h','touch_haptic_dispatch.h','dsu_protocol.h','dsu_frame.h','dsu_server.h','windows_motion_submission.h','legion_motion_source.h','legion_motion_message_clock.h','input_frame_submission.h','virtual_output_status.h','hc_model_motion_catalog.h','hc_legacy_motion_catalog.h','msi_motion_capabilities.h'];
+ const files=['sleep_power_state.h','sleep_power_observation.h','sleep_power_revocation.h','input_host_shared_power.h','touch_haptic_dispatch.h','dsu_protocol.h','dsu_frame.h','dsu_server.h','windows_motion_submission.h','legion_motion_source.h','legion_motion_message_clock.h','input_frame_submission.h','virtual_output_status.h','hc_model_motion_catalog.h','hc_legacy_motion_catalog.h','msi_motion_capabilities.h'];
  const allInputs=[runner,...['Oracle.cs','native.cpp','README.md'].map(n=>path.join(templateRoot,n)),...files.map(n=>path.join(repo,'native',n)),path.join(repo,'native/dsu_server.cpp'),path.join(repo,'deps/json/json.hpp')];result.inputs=allInputs.map(p=>({path:p,sha256:sha(fs.readFileSync(p))}));
  const vcvars=path.join(process.env['ProgramFiles(x86)'],'Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat');const cmd=path.join(out,'environment.cmd');fs.writeFileSync(cmd,calibrationToolchainPreamble(vcvars)+'set\r\n');
  const prep=need(run(process.env.ComSpec,['/d','/c',cmd],'environment.log'),'MSVC setup'),env={...process.env};for(const row of prep.split(/\r?\n/)){const i=row.indexOf('=');if(i>0){const key=row.slice(0,i),existing=Object.keys(env).find(k=>k.toLowerCase()===key.toLowerCase());env[existing||key]=row.slice(i+1);}}
@@ -71,7 +71,7 @@ try{
    ['wrong-motion-offset',generated,once(originalHeader,'putFloat(out.data()+76,-a.ax)','putFloat(out.data()+72,-a.ax)'),null,null],
    ['wrong-yaw-sign',generated,null,once(originalFrame,'a.gy=-a.gz;','a.gy=a.gz;'),null],
    ['bypass-model-matrix',once(generated,'static_cast<float>(mgx)','static_cast<float>(gx)'),null,null,null],
-   ['bypass-windows-binding',once(generated,'ymcc::windows_motion::current(frame.source.windows)','true'),null,null,null],
+   ['bypass-windows-binding',once(generated,'ymcc::windows_motion::currentForOutput(frame.source.windows)','true'),null,null,null],
   ];
   for(const [name,code,header,frame,runtime]of variants){
    const dir=path.join(out,'mutations',name);fs.mkdirSync(dir,{recursive:true});for(const f of files)fs.copyFileSync(path.join(repo,'native',f),path.join(dir,f));

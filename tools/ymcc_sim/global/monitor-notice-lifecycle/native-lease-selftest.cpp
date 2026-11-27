@@ -5,6 +5,7 @@
 #include <vector>
 #include <fstream>
 #include <iostream>
+#include <string_view>
 namespace probe {
 std::vector<HWND> owned;std::map<HWND,unsigned> deny;std::map<std::pair<HWND,UINT_PTR>,unsigned> timerTicks;unsigned destroyed=0,rejected=0,ticks=0;
 BOOL WINAPI destroy(HWND window){if(!window)return FALSE;if(std::find(owned.begin(),owned.end(),window)==owned.end()){++rejected;SetLastError(ERROR_ACCESS_DENIED);return FALSE;}if(deny[window]){--deny[window];SetLastError(ERROR_ACCESS_DENIED);return FALSE;}const BOOL result=::DestroyWindow(window);if(result)++destroyed;return result;}
@@ -70,10 +71,71 @@ static void pump(DWORD ms){const auto end=GetTickCount64()+ms;while(GetTickCount
 // process still has its original 15s budget; a missing timer keeps the original failure.
 static void pumpUntilOwnTimer(const std::pair<HWND,HWND>& windows,DWORD budgetMs){const auto before=CarrierTestAccess::deliveredTimers(windows);const auto end=GetTickCount64()+budgetMs;do{pump(1);}while(CarrierTestAccess::deliveredTimers(windows)==before&&GetTickCount64()<end);}
 static Json fixtureResources(){unsigned windows=0;for(HWND h:probe::owned)if(IsWindow(h))++windows;return {{"liveOwnedWindowEntries",windows},{"controllerLive",controllerLive},{"controllerDestroyed",controllerDestroyed},{"allTimerTicks",probe::ticks}};}
-int wmain(int argc,wchar_t** argv){if(argc!=2)return 10;Json cases=Json::array(),timerDiagnostics=Json::array();bool all=true;WNDCLASSW cls{};cls.lpfnWndProc=privateProc;cls.hInstance=GetModuleHandleW(nullptr);cls.lpszClassName=L"YMCC_Notice_Owned_Lease_Test";if(!RegisterClassW(&cls))return 11;
+#ifdef YMCC_TEST_ROOT_DESTROY_DISPATCH
+#include "notice-root-destroy-fixture.h"
+#endif
+int wmain(int argc,wchar_t** argv){
+#if defined(YMCC_TEST_ROOT_EXIT_INTENT)
+ if(argc!=3||std::wstring_view(argv[2])!=L"--shutdown-intent")return 10;
+#elif defined(YMCC_TEST_ROOT_DESTROY_DISPATCH)
+ const bool dispatchScope=argc==3&&std::wstring_view(argv[2])==L"--shutdown-dispatch";
+ if(!dispatchScope)return 10;
+#else
+ const bool shutdownScope=argc==3&&std::wstring_view(argv[2])==L"--shutdown";
+ if(argc!=2&&!shutdownScope)return 10;
+#endif
+ Json cases=Json::array(),timerDiagnostics=Json::array();bool all=true;WNDCLASSW cls{};cls.lpfnWndProc=privateProc;cls.hInstance=GetModuleHandleW(nullptr);cls.lpszClassName=L"YMCC_Notice_Owned_Lease_Test";if(!RegisterClassW(&cls))return 11;
  auto test=[&](const char* id,auto action){const auto before=GetTickCount64();const auto resourcesBefore=fixtureResources();try{action();cases.push_back({{"id",id},{"passed",true},{"durationMs",GetTickCount64()-before},{"resourcesBefore",resourcesBefore},{"resourcesAfter",fixtureResources()}});}catch(const std::exception& error){all=false;cases.push_back({{"id",id},{"passed",false},{"error",error.what()},{"durationMs",GetTickCount64()-before},{"resourcesBefore",resourcesBefore},{"resourcesAfter",fixtureResources()}});}};
  auto setup=[](Carrier& c){Config config;config.noticeOnly=true;c.initialize(nullptr,std::move(config));};
  const std::string a="owned-notice-lease-aaaaaaaa",b="owned-notice-lease-bbbbbbbb";
+#ifdef YMCC_TEST_ROOT_DESTROY_DISPATCH
+ noticeRootDestroy::registerClass();
+#ifdef YMCC_TEST_ROOT_EXIT_INTENT
+ test("resident-close-preserves-notice-explicit-exit-retires-after-ready",[&]{noticeRootDestroy::run(true,false,a);});
+#else
+ test("wm-destroy-normal-retires-active-notice",[&]{noticeRootDestroy::run(true,false,a);});
+ test("wm-destroy-unexpected-retires-active-notice",[&]{noticeRootDestroy::run(false,false,b);});
+ test("wm-destroy-omitted-call-leaves-active-notice",[&]{noticeRootDestroy::run(true,true,a);});
+#endif
+#else
+ if(shutdownScope){
+  test("native-shutdown-destroys-active-owned-notice-before-destructor",[&]{
+   Carrier c;setup(c);
+   const auto lease=c.reserveNotice(a)["leaseId"].get<unsigned long long>();
+   const auto windows=CarrierTestAccess::attach(c,lease,a);
+   const auto before=CarrierTestAccess::deliveredTimers(windows), closes=controllerClosed;
+   const auto destroyed=probe::destroyed;
+   pumpUntilOwnTimer(windows,500);
+   need(CarrierTestAccess::deliveredTimers(windows)>before&&controllerLive==1&&
+     IsWindow(windows.first)&&IsWindow(windows.second),"Shutdown fixture requires active owned resources");
+   c.shutdown();
+   need(!IsWindow(windows.first)&&!IsWindow(windows.second)&&!controllerLive&&
+     !CarrierTestAccess::retained(c)&&controllerClosed==closes+1&&probe::destroyed==destroyed+2,
+     "Shutdown did not synchronously return its owned resources");
+   bool retired=false;
+   try{c.create(0,0,a,true,lease);}catch(const std::exception& e){
+    retired=std::string_view(e.what()).find("lease retired or replaced")!=std::string_view::npos;
+   }
+   need(retired&&CarrierTestAccess::retired(c)&&!CarrierTestAccess::retained(c),"Shutdown did not fence the old create lease");
+   const auto after=CarrierTestAccess::deliveredTimers(windows);
+   c.shutdown();pump(30);
+   need(CarrierTestAccess::deliveredTimers(windows)==after&&controllerClosed==closes+1&&probe::destroyed==destroyed+2,
+     "Late timer or repeat shutdown re-entered the retired owner");
+  });
+  test("omitting-native-shutdown-leaves-active-notice-until-fixture-rescue",[&]{
+   Carrier c;setup(c);
+   const auto lease=c.reserveNotice(b)["leaseId"].get<unsigned long long>();
+   const auto windows=CarrierTestAccess::attach(c,lease,b);
+   const auto closes=controllerClosed;
+   // Observe the omission before the harness calls shutdown or the destructor runs.
+   need(IsWindow(windows.first)&&IsWindow(windows.second)&&controllerLive==1&&
+     CarrierTestAccess::retained(c)&&!CarrierTestAccess::retired(c)&&controllerClosed==closes,
+     "Missing-shutdown control did not leave its active resources observable");
+   c.shutdown();
+   need(!IsWindow(windows.first)&&!IsWindow(windows.second)&&!controllerLive&&
+     !CarrierTestAccess::retained(c),"Fixture rescue did not return its owned resources");
+  });
+ }else{
  test("retirement-before-create-revokes-native-admission-without-a-window",[&]{Carrier c;setup(c);auto reservation=c.reserveNotice(a);const auto lease=reservation["leaseId"].get<unsigned long long>();auto result=c.retireNotice(lease,a);need(result["leaseRetired"]&&result["resourcesDestroyed"],"Reservation retirement not acknowledged");bool rejected=false;try{c.create(0,0,a,true,lease);}catch(const std::exception& e){rejected=std::string(e.what()).find("lease retired or replaced")!=std::string::npos;}need(rejected&&!CarrierTestAccess::retained(c),"Late retired create regained native admission");});
  test("exact-native-retirement-destroys-two-owned-windows-timers-and-controller-reference",[&]{Carrier c;setup(c);auto lease=c.reserveNotice(a)["leaseId"].get<unsigned long long>();auto windows=CarrierTestAccess::attach(c,lease,a);const auto armedAt=GetTickCount64();Json observation={{"mode","bounded-own-timer-delivery"},{"waitBudgetMs",500},{"afterAttach",CarrierTestAccess::timers(windows)}};pumpUntilOwnTimer(windows,500);observation["afterBoundedPump"]=CarrierTestAccess::timers(windows);observation["waitElapsedMs"]=GetTickCount64()-armedAt;timerDiagnostics.push_back(observation);need(probe::ticks>0&&controllerLive==1,"Own HWND timers/controller were not active");auto result=c.retireNotice(lease,a);need(result["resourcesDestroyed"]&&result["ownedOnly"],"Retirement not confirmed");need(!IsWindow(windows.first)&&!IsWindow(windows.second)&&!controllerLive&&!CarrierTestAccess::retained(c),"Own native resources remain");const auto ticks=probe::ticks;pump(30);need(probe::ticks==ticks,"Destroyed native timer fired again");});
  test("foreign-nonce-and-future-generation-cannot-destroy-owned-resources",[&]{Carrier c;setup(c);auto lease=c.reserveNotice(a)["leaseId"].get<unsigned long long>();auto windows=CarrierTestAccess::attach(c,lease,a);need(!c.retireNotice(lease,b)["leaseRetired"].get<bool>(),"Foreign nonce admitted");need(!c.retireNotice(lease+1,a)["leaseRetired"].get<bool>(),"Future generation admitted");need(IsWindow(windows.first)&&IsWindow(windows.second),"Unmatched request destroyed windows");need(c.retireNotice(lease,a)["resourcesDestroyed"],"Exact cleanup failed");});
@@ -84,5 +146,17 @@ int wmain(int argc,wchar_t** argv){if(argc!=2)return 10;Json cases=Json::array()
  test("controller-close-error-still-releases-owned-com-reference-and-windows",[&]{Carrier c;setup(c);auto lease=c.reserveNotice(a)["leaseId"].get<unsigned long long>();auto windows=CarrierTestAccess::attach(c,lease,a,E_FAIL);need(c.retireNotice(lease,a)["resourcesDestroyed"],"Retirement failed with HRESULT error");need(!controllerLive&&!IsWindow(windows.first)&&!IsWindow(windows.second),"Owned ABI test controller or HWND retained");});
  test("repeated-retirement-is-idempotent-and-native-generation-never-wraps",[&]{Carrier c;setup(c);auto lease=c.reserveNotice(a)["leaseId"].get<unsigned long long>();for(int i=0;i<5;i++)need(c.retireNotice(lease,a)["resourcesDestroyed"],"Repeated retirement changed result");CarrierTestAccess::forceGeneration(c,9007199254740991ULL);bool refused=false;try{c.reserveNotice(b);}catch(...){refused=true;}need(refused,"JSON-safe generation wrapped");});
  test("exact-main-reserve-create-retire-handlers-enforce-native-lease-and-request-shape",[&]{registerExactNoticeHandlers();auto reserved=nativeHandlers.at("monitorNotice.reserve")({{"nonce",a}});const auto lease=reserved["leaseId"].get<unsigned long long>();need(nativeHandlers.at("monitorNotice.retire")({{"leaseId",lease},{"nonce",a}})["resourcesDestroyed"],"Exact main retirement handler failed");bool retired=false,shape=false;try{nativeHandlers.at("monitorNotice.create")({{"leaseId",lease},{"nonce",a}});}catch(const std::exception& e){retired=std::string(e.what()).find("lease retired or replaced")!=std::string::npos;}try{nativeHandlers.at("monitorNotice.retire")({{"hudId",1},{"nonce",a}});}catch(...){shape=true;}need(retired&&shape,"Exact main request admission was bypassed");});
- unsigned remaining=0;for(HWND h:probe::owned)if(IsWindow(h))++remaining;need(!controllerLive,"Controller reference remained at final audit");Json report={{"status",all&&remaining==0?"PASS":"FAIL"},{"cases",cases},{"timerDiagnostics",timerDiagnostics},{"counts",{{"cases",cases.size()},{"passed",std::count_if(cases.begin(),cases.end(),[](const auto& c){return c["passed"].template get<bool>();})}}},{"remainingOwnedWindows",remaining},{"controllerLive",controllerLive},{"controllerDestroyed",controllerDestroyed},{"controllerCloseCalls",controllerClosed},{"actualDestroyWindowSuccesses",probe::destroyed},{"unownedDestroyAttempts",probe::rejected},{"hiddenOwnWindowsOnly",true},{"productionCarrierExecuted",true},{"controllerAbiTestDouble",true},{"realWebView2ControllerExecuted",false},{"deviceIo",false},{"normalYmccStarted",false},{"operatingSystemSleep",false},{"manualSleepAcceptanceReady",false}};std::ofstream file(argv[1]);file<<report.dump(2)<<'\n';for(HWND h:probe::owned)if(IsWindow(h))::DestroyWindow(h);return report["status"]=="PASS"?0:2;
+ }
+#endif
+ unsigned remaining=0;for(HWND h:probe::owned)if(IsWindow(h))++remaining;need(!controllerLive,"Controller reference remained at final audit");Json report={{"status",all&&remaining==0?"PASS":"FAIL"},{"cases",cases},{"timerDiagnostics",timerDiagnostics},{"counts",{{"cases",cases.size()},{"passed",std::count_if(cases.begin(),cases.end(),[](const auto& c){return c["passed"].template get<bool>();})}}},{"remainingOwnedWindows",remaining},{"controllerLive",controllerLive},{"controllerDestroyed",controllerDestroyed},{"controllerCloseCalls",controllerClosed},{"actualDestroyWindowSuccesses",probe::destroyed},{"unownedDestroyAttempts",probe::rejected},{"hiddenOwnWindowsOnly",true},{"productionCarrierExecuted",true},{"controllerAbiTestDouble",true},{"realWebView2ControllerExecuted",false},{"deviceIo",false},{"normalYmccStarted",false},{"operatingSystemSleep",false},{"manualSleepAcceptanceReady",false}};
+#ifdef YMCC_TEST_ROOT_DESTROY_DISPATCH
+ report["rootDestroyDeliveries"]=noticeRootDestroy::rootDestroyDeliveries;
+ report["ownedRootWindowsRemaining"]=noticeRootDestroy::ownedRoots;
+ if(noticeRootDestroy::ownedRoots!=0)report["status"]="FAIL";
+#ifdef YMCC_TEST_ROOT_EXIT_INTENT
+ report["intentStages"]=noticeRootDestroy::intentStages;
+ report["appExitIpc"]=noticeRootDestroy::appExitIpc;
+#endif
+#endif
+ std::ofstream file(argv[1]);file<<report.dump(2)<<'\n';for(HWND h:probe::owned)if(IsWindow(h))::DestroyWindow(h);return report["status"]=="PASS"?0:2;
 }

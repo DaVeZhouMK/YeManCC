@@ -67,12 +67,14 @@ static bool psEndpointFaultCurrentLocked(const View& view) {
     const auto& fault=g_inputHostPsEndpointFault;
     return fault.requestId && fault.requestId==view.requestId && view.persona=="dualsense-edge" &&
         fault.hostEpoch==g_inputHostEpoch && fault.power==currentPowerGeneration() &&
+        fault.suspendSerial==g_sharedPowerSuspendSerial.load(std::memory_order_acquire) &&
         fault.targetRevision==g_psEndpointOwnership.revision();
 }
 static void clearPsEndpointFaultLocked(std::uint64_t request,std::uint64_t host,
-        std::uint64_t power,std::uint64_t revision) {
+        std::uint64_t power,std::uint64_t revision,std::uint64_t suspendSerial) {
     const auto& fault=g_inputHostPsEndpointFault;
-    if(fault.requestId==request && fault.hostEpoch==host && fault.power==power && fault.targetRevision==revision)
+    if(fault.requestId==request && fault.hostEpoch==host && fault.power==power &&
+            fault.targetRevision==revision && fault.suspendSerial==suspendSerial)
         g_inputHostPsEndpointFault={};
 }
 

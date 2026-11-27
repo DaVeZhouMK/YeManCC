@@ -20,17 +20,28 @@ async function main(){
   finally{held.resolve();await start.catch(()=>{});await pending.catch(()=>{});await life.close().catch(()=>{});}
  });
  for(const action of ['off','close','new-power'] as const)await check('ordinary startup manual wait retires after '+action,async()=>{
-  const host=new NoIoHost(),held=gate<void>();let launches=0;
+  const host=new NoIoHost(),held=gate<void>(),stopped:number[]=[];let launches=0;
+  const firstPid=101011,nextPid=101017;
   const life=new FanHostLifecycle({enabled:true,adapter:host,heartbeatIntervalMs:60000,readNativeActivity:async()=>null,
    readNativePowerState:async()=>({generation:6,phase:'ready',resumeReady:true,hardwareWritesAllowed:true,inputReady:true,hibernateAvailable:true}),
-   launcher:{async start(){launches++;held.entered();await held.pending;return {pid:101011,executable:'fixture-only.exe'};},async stop(){}}});
+   launcher:{async start(){
+    launches++;
+    if(action==='close'&&launches>1){
+     assert.equal(launches,2);assert.deepEqual(stopped,[firstPid]);assert.equal(host.closed,true);
+     // New process: preserve the call ledger, not the old peer's Close receipt.
+     Object.assign(host,new NoIoHost(),{calls:host.calls,stateName:'Stopped'});
+     return {pid:nextPid,executable:'fixture-only.exe'};
+    }
+    held.entered();await held.pending;return {pid:firstPid,executable:'fixture-only.exe'};
+   },async stop(process){stopped.push(process.pid);}}});
   life.setPowerGeneration(6);life.observePowerBoundary('resume-ready',6);const start=life.start();const startup=start.then(value=>({value,error:null as unknown}),error=>({value:null,error}));await held.ready;
   const pending=life.apply(curve),outcome=pending.then(()=>({ok:true,error:''}),e=>({ok:false,error:String(e)}));let newer:Promise<unknown>=Promise.resolve();
   try{
    if(action==='off')newer=life.disable();else if(action==='close')newer=life.close();else{life.setPowerGeneration(7);life.observePowerBoundary('suspending',7);}
    held.resolve();const started=await startup;if(action==='new-power')assert.equal(started.error,null);else assert(started.error instanceof Error&&started.error.message==='FAN_CONTROL_INTENT_SUPERSEDED:startup-read','OFF/Close must retire its interrupted startup explicitly');await newer;assert.equal((await outcome).ok,false);assert(!host.calls.includes('enable'));assert.equal(life.hasControlIntent,action==='new-power','new sleep retains the current user intent; OFF/Close cancels it');assert.equal(launches,1);
-   if(action==='close'){assert.equal(life.processId,null);assert.equal(life.state,'stopped');}
+   if(action==='close'){assert.equal(life.processId,null);assert.equal(life.state,'stopped');assert.deepEqual(stopped,[firstPid]);}
    if(action!=='new-power'){await life.apply(curve);assert.equal(host.calls.filter(c=>c==='enable').length,1);}
+   if(action==='close'){assert.equal(life.processId,nextPid);assert(!host.calls.includes('resume'),'a new peer cannot return a resume receipt for the closed owner');}
   }finally{held.resolve();await start.catch(()=>{});await pending.catch(()=>{});await newer.catch(()=>{});await life.close().catch(()=>{});}
  });
  for(const action of ['curve','preset'] as const)await check('newest manual '+action+' alone continues the ordinary startup',async()=>{

@@ -26,13 +26,17 @@ export interface FanMirrorDeps {
   save: (nodes: readonly FanNode[], preset: FanPreset) => Promise<void>;
   updateActive: (active: boolean) => void;
   updateDuty: (duty: number) => void;
-  power: () => Promise<PowerLifecycleState>;
+  power: (signal?: AbortSignal) => Promise<PowerLifecycleState>;
   featureAllowed: () => boolean;
   uiBusy: () => boolean;
   display: (state: FanMirrorDisplay) => void;
   observeCapability?: (allowed:boolean) => Promise<void>;
 }
-export interface MirrorMutationContext { generation: number; checkpoint: () => void; }
+export interface MirrorMutationContext {
+  generation: number;
+  checkpoint: () => void;
+  readPower?: (load: (signal: AbortSignal) => Promise<PowerLifecycleState>) => Promise<PowerLifecycleState>;
+}
 export interface MirrorActionResult { saved: boolean; applied: boolean; pending?: boolean; notice: string; }
 type StagedFanPreset = { preset: FanPreset; nodes: FanNode[]; ready: Promise<void>; ownerRevision?: number };
 const presetNames = new Set<FanPreset>(['soft','balanced','aggressive']);
@@ -52,7 +56,7 @@ export function createFanMirrorActions(deps: FanMirrorDeps) {
   };
   const guardControlContext = (context: MirrorMutationContext): MirrorMutationContext => {
     const cancellation = deps.owner.controlCancellationRevision;
-    return { generation: context.generation, checkpoint: () => {
+    return { ...context, checkpoint: () => {
       synchronizeOwnerCancellation();
       context.checkpoint();
       if (cancellation !== deps.owner.controlCancellationRevision) throw Error('FAN_MIRROR_INTENT_CANCELED');
@@ -64,7 +68,7 @@ export function createFanMirrorActions(deps: FanMirrorDeps) {
     && deps.owner.state === 'ready' && !deps.owner.recoveryActive && !deps.owner.recoveryNeedsAttention;
   const requirePower = async (context: MirrorMutationContext) => {
     context.checkpoint();
-    const power = await deps.power();
+    const power = await (context.readPower ? context.readPower(signal => deps.power(signal)) : deps.power());
     context.checkpoint();
     if (deps.uiBusy()) throw new Error('FAN_MIRROR_BUSY');
     // Shared generation fences the mirror packet. The original Fan owner checks

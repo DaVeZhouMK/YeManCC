@@ -6,6 +6,7 @@
 #include <winhttp.h>
 #include <atomic>
 #include <iostream>
+#include <memory>
 #include <thread>
 #include <utility>
 #include "http_request_deadline.h"
@@ -58,7 +59,24 @@ std::string fanErrorCodeFromBody(const std::string& s){auto p=json::parse(s,null
 std::string fanRequestId(const char*){return "fixture-request";}
 template<class...Args>void fanHostNoteAuthRejected(Args&&...){++authRejected;}
 template<class...Args>void fanHostNoteRequestHeaderFailed(Args&&...){++headerFailed;}
+std::atomic<std::uint64_t> g_fanWritePowerRevision{1};
+bool fanResumeActivityRevision(std::uint64_t&){return false;}
+bool fanManualActivityRevision(std::uint64_t&){return false;}
+#include "KeepaliveAdmissionExtract.inc"
+struct FixtureWriteGrant {
+ std::string header="inert-transport-fixture";
+ bool current() const{return true;}
+ bool receiptCurrent() const{return current();}
+};
+std::shared_ptr<FixtureWriteGrant> fanWritePowerPrepare(const FanHttpPowerAdmission& power,const std::string&,const std::string&){
+ return power.current()?std::make_shared<FixtureWriteGrant>():nullptr;
+}
 #include "KeepaliveExtract.inc"
+bool fanLeaseKeepalivePostHeartbeat(const std::string& requested,std::string* renewed,DWORD* status,std::string* error){
+ FanHttpPowerAdmission power;
+ (void)power.captureCurrent();
+ return fanLeaseKeepalivePostHeartbeat(requested,renewed,status,error,power);
+}
 int main(int argc,char** argv){
  if(argc!=3)return 9;fixturePort=static_cast<INTERNET_PORT>(std::stoi(argv[1]));fixtureCase=argv[2];
  const auto began=GetTickCount64();std::thread cancel;

@@ -69,6 +69,8 @@ struct ConnectionHealth { bool required=false,connected=false; std::string reaso
     std::optional<ULONGLONG> authenticatedPeerAgeMs; // Diagnostics only, not Steam UI proof.
     std::optional<bool> sidebarVerifiedDuringBackendOutage; // Diagnostic only; not a business-ready receipt.
     std::optional<ULONGLONG> sharedModeObservationAgeMs; // Age of the publication consumed, not of the first positive proof.
+    ULONGLONG healthyReadDue=0; // Existing idle deadline, anchored to a reused shared publication.
+    ULONGLONG powerGeneration=0; // Presentation scope only.
 };
 // Calibrated from the 2026-11-03 archive review, not 30-second retry counts.
 // 189 completed rebinds <=5128ms, with none in (7s,90s]; retain the native
@@ -104,14 +106,20 @@ public:
         if(!health.identity.empty()&&identity_!=health.identity){active_=false;waiting_=Action::none;identity_=health.identity;}
         paused_=health.paused;
         if(paused_){
-            const auto next=health.pausedReadDue>now?(std::min)(health.pausedReadDue,now+intervalMs):now+evidenceIntervalMs;
+            // No automatic step remains in this episode. Event-driven checks
+            // still run, but an uncertain read must not speed up the idle timer.
+            const auto next=waiting_==Action::exhausted?now+intervalMs:
+                health.pausedReadDue>now?(std::min)(health.pausedReadDue,now+intervalMs):now+evidenceIntervalMs;
             if(!check_||now>=check_||check_>next)check_=next;
             return Action::none;
         }
         if(!health.required||health.connected){
             const auto action=active_?(health.connected?Action::recovered:Action::stopped):Action::none;
             active_=false;waiting_=Action::none;due_=commandRetryAt_=0;
-            if(action!=Action::none||!check_||now>=check_)check_=now+intervalMs;
+            if(action!=Action::none||!check_||now>=check_){
+                check_=health.required&&health.connected&&health.healthyReadDue>now?
+                    (std::min)(health.healthyReadDue,now+intervalMs):now+intervalMs;
+            }
             return action;
         }
         if(!active_){
@@ -203,6 +211,7 @@ public:
         return !next||now>=next?0:static_cast<DWORD>(next-now);
     }
     DWORD remaining(ULONGLONG now)const{return due_&&now<due_?static_cast<DWORD>(due_-now):0;}
+    bool exhausted()const{return waiting_==Action::exhausted;}
     DWORD stageBudget()const{return active_&&waiting_!=Action::exhausted?budget():0;}
     const std::string& trigger()const{return trigger_;}
     unsigned attempts()const{return attempts_;}

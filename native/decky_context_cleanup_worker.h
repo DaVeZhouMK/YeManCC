@@ -231,7 +231,17 @@ inline Json dispatch(const steamsession::Session& steam,bool fromUi,const std::s
     }catch(...){/* Optional observation cannot alter the recovery outcome. */}
     result["cleanupWorkerReplyReceived"]=replyReceived;
     result["cleanupWorkerDestroyed"]=destroyed;result["cleanupWorkerHandles"]=snapshot.handles;result["cleanupWorkerProcesses"]=snapshot.jobActiveProcesses;
-    if(!destroyed){result["ok"]=false;result["reason"]="decky-cleanup-worker-cleanup-incomplete";result["uncertain"]=true;}
+    // Only the parent can attest to teardown. Discard the child-supplied field.
+    result.erase("cleanupWorkerReturn");
+    if(!destroyed){
+        result["ok"]=false;result["reason"]="decky-cleanup-worker-cleanup-incomplete";result["uncertain"]=true;
+        if(!lifecycle)try{
+            result["cleanupWorkerReturn"]={{"replyReceived",replyReceived},
+                {"ownerReturned",stopped.fullyDestroyed},{"readerReturned",readStopped},
+                {"ownerHandles",snapshot.handles},{"ownerPendingIo",snapshot.pendingIo},
+                {"jobActiveProcesses",snapshot.jobActiveProcesses},{"ownerStopError",stopped.error}};
+        }catch(...){/* Optional facts must not alter the unconfirmed result. */}
+    }
     return result;
 }
 // Normal product callers use the sole Steam publisher. The optional lease on

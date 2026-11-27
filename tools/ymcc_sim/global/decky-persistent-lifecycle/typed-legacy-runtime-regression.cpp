@@ -59,7 +59,7 @@ inline Config typed(const std::shared_ptr<Client>& client,const Context& context
     Config config;config.executable=L"NEVER-LAUNCH.exe";config.home=L"NO-WRITE";config.ownedBinding=client;
     config.launchAdmission=[] {return LaunchAdmission{true,{},false,{},true};};
     const auto cef=worker::number(context.lease.at("pid"));
-    config.bindingPlan=[client,cef,&plans](BindingMode mode,std::uint64_t generation) {
+    config.bindingPlan=[client,cef,&plans](BindingMode mode,std::uint64_t generation,const auto&) {
         ++plans;need(mode==BindingMode::retained,"retained-only-owned-protocol-plan");
         auto request=makeRequest(generation);request["bootstrap"]["fixtureContextPid"]=cef;
         request["requireFreshContext"]=false;request["retainedFrontendOnly"]=true;
@@ -164,8 +164,8 @@ inline void handoff() {
     auto client=std::make_shared<Client>();Runtime runtime;std::atomic<unsigned> starts{0};std::atomic<bool> freshToken{false};
     std::uint64_t oldEpoch=0,newEpoch=0;Json requests=Json::array();
     auto config=typed(client,context,starts);auto plan=config.bindingPlan;
-    config.bindingPlan=[&](BindingMode mode,std::uint64_t generation) {
-        auto result=plan(mode,generation);const auto current=client->snapshot();
+    config.bindingPlan=[&](BindingMode mode,std::uint64_t generation,const auto& intentCurrent) {
+        auto result=plan(mode,generation,intentCurrent);const auto current=client->snapshot();
         requests.push_back({{"generation",generation},{"id",result.request.at("id")},{"epoch",current.epoch},{"enabled",current.enabled},{"canceled",current.canceled}});
         if(starts==2){newEpoch=current.epoch;freshToken=current.enabled&&!current.canceled&&newEpoch>oldEpoch;SetEvent(newBeginning.value);SetEvent(newPreflight.value);}
         return result;

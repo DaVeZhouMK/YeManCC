@@ -716,6 +716,10 @@ static bool inputHostStart() {
         appendNativeLifecycleLog("input-host-start-blocked", {{"reason","input-module-update-pending"},{"newHostCreated",false}});
         return false;
     }
+    if (ymcc::hidHideInstalledVersion::repairPending()) {
+        appendNativeLifecycleLog("input-host-start-blocked", {{"reason","hidhide-maintenance-pending"},{"newHostCreated",false}});
+        return false;
+    }
     msiControllerVisibilityObserverStart();
     // GP-PREREQ-4: keep preparation diagnostics without rejecting a target attempt.
     if (g_gamepadDriverSetup.warnsTargets()) {

@@ -264,6 +264,7 @@ inline void runOwnerResumeCheck(UINT_PTR id) {
         // A short successful episode cannot reset the escalation stage. The
         // second actual repair in this power scope rebuilds our resources even
         // when the two failures arrived in separate episodes. At most once.
+#ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE
         if(ownerFaultBudget.repairs==kOwnerResumeMaxRepairs&&!ownerFaultBudget.channelResets){
             if(!rebuildOwnedInputResources(sourceCurrent)){
                 if(!retainAfterReplacement()){
@@ -275,7 +276,9 @@ inline void runOwnerResumeCheck(UINT_PTR id) {
             if(!nativePadInputRuntime.useFreshInputChannel()){
                 if(current()){r.lastError=windowError?windowError:(DWORD)nativePadInputRuntime.error;finishOwnerResumeRecovery("channel-reset-failed");}return;
             }
-        }else if(ownerFaultBudget.repairs>=2&&!ownerFaultBudget.runtimeRebuilds) {
+        }else
+#endif
+        if(ownerFaultBudget.repairs>=2&&!ownerFaultBudget.runtimeRebuilds) {
             ++r.runtimeRebuilds;++ownerFaultBudget.runtimeRebuilds;
             if(!rebuildOwnedInputResources(sourceCurrent)) {
                 if(!retainAfterReplacement()){r.lastError=windowError?windowError:ERROR_NOT_READY;finishOwnerResumeRecovery("release-failed");}

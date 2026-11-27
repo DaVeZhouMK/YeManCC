@@ -14,7 +14,7 @@ using nlohmann::json;
 static unsigned long long fixtureGeneration = 10;
 static std::uint64_t fixtureSerial = 0, fixtureSequence = 0;
 static std::atomic<bool> g_exitRequested{false};
-static bool power = true, fixtureTaskEnabled = true, closeBeforeSubmit = false;
+static bool fixtureAdmitted = true, fixtureTaskEnabled = true, closeBeforeSubmit = false;
 static bool fixtureTaskReadable = true, closeDuringTaskRead = false;
 static bool blockInsideSubmit = false, runResult = true;
 static bool fixtureReadable = true, advanceOnProcessRead = false, advanceOnRun = false;
@@ -22,8 +22,8 @@ static bool advanceOnTaskRead = false, advanceBeforeRun = false, notifyOnProcess
 static unsigned calls = 0;
 static std::optional<bool> fixtureRunning = false;
 static fspath::path g_updateAccelPath;
-static auto currentPowerGeneration() { return fixtureGeneration; }
-static auto hardwareWriteAllowed() { return power; }
+[[maybe_unused]] static auto currentPowerGeneration() { return fixtureGeneration; }
+[[maybe_unused]] static auto hardwareWriteAllowed() { return fixtureAdmitted; }
 static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* result, std::uint32_t) noexcept {
     using namespace ymcc::sleeppower;
     *result = {};
@@ -31,7 +31,7 @@ static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* result
     result->generation = fixtureGeneration;
     result->suspendSerial = fixtureSerial;
     result->observedNotificationSequence = fixtureSequence;
-    result->flags = kKnown | (power ? kHardwareAllowed : kNotificationPending);
+    result->flags = kKnown | (fixtureAdmitted ? kHardwareAllowed : kNotificationPending);
     return 1;
 }
 static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& captured) noexcept {
@@ -39,13 +39,13 @@ static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& c
 }
 static void appendNativeLifecycleLog(const char*, const json&) {}
 static auto readUpdateAccelRunning(int) {
-    if (closeBeforeSubmit) power = false;
+    if (closeBeforeSubmit) fixtureAdmitted = false;
     if (advanceOnProcessRead) ++fixtureSerial;
     if (notifyOnProcessRead) ++fixtureSequence;
     return fixtureRunning;
 }
 static bool networkAccelerationWakeTaskEnabled(bool& result) {
-    if (closeDuringTaskRead) power = false;
+    if (closeDuringTaskRead) fixtureAdmitted = false;
     if (advanceOnTaskRead) ++fixtureSerial;
     result = fixtureTaskEnabled;
     return fixtureTaskReadable;
@@ -94,7 +94,7 @@ static void reset() {
 #else
     g_networkAccelerationWakeChecked={9,0};
 #endif
-    power=true; fixtureTaskEnabled=true; closeBeforeSubmit=false; blockInsideSubmit=false;
+    fixtureAdmitted=true; fixtureTaskEnabled=true; closeBeforeSubmit=false; blockInsideSubmit=false;
     fixtureTaskReadable=true; closeDuringTaskRead=false;
     fixtureReadable=true; advanceOnProcessRead=false; advanceOnRun=false;
     advanceOnTaskRead=false; advanceBeforeRun=false; notifyOnProcessRead=false;
@@ -117,12 +117,12 @@ int main(int argc, char** argv) {
         g_updateAccelPath=argv[1];
         for (int block=0; block<3; ++block) {
             reset();
-            if (block==0) power=false;
+            if (block==0) fixtureAdmitted=false;
             if (block==1) closeBeforeSubmit=true;
             if (block==2) blockInsideSubmit=true;
             expect("power-deferred-before-launch",0);
             check(checkedGeneration()==9,"same generation retained");
-            power=true;closeBeforeSubmit=false;blockInsideSubmit=false;
+            fixtureAdmitted=true;closeBeforeSubmit=false;blockInsideSubmit=false;
             expect("launch-request-accepted",1);
             expect("already-checked",1);
         }
@@ -130,18 +130,27 @@ int main(int argc, char** argv) {
             reset(); closeDuringTaskRead=true; fixtureTaskReadable=readable; fixtureTaskEnabled=false;
             expect("power-deferred-before-launch",0);
             check(checkedGeneration()==9,"revoked task read does not consume generation");
-            power=true; closeDuringTaskRead=false; fixtureTaskReadable=true; fixtureTaskEnabled=true;
+            fixtureAdmitted=true; closeDuringTaskRead=false; fixtureTaskReadable=true; fixtureTaskEnabled=true;
             expect("launch-request-accepted",1); expect("already-checked",1);
         }
         for (std::optional<bool> running : {std::optional<bool>{}, std::optional<bool>{true}}) {
             reset(); closeBeforeSubmit=true; fixtureRunning=running;
             expect("power-deferred-before-launch",0);
             check(checkedGeneration()==9,"revoked process read does not consume generation");
-            power=true; closeBeforeSubmit=false; fixtureRunning=false;
+            fixtureAdmitted=true; closeBeforeSubmit=false; fixtureRunning=false;
             expect("launch-request-accepted",1); expect("already-checked",1);
         }
         reset(); runResult=false; expect("launch-request-failed",1); expect("already-checked",1);
-        reset(); fixtureRunning=std::nullopt; expect("process-state-unavailable",0); expect("already-checked",0);
+        for (const bool taskRead : {false, true}) {
+            reset(); fixtureTaskReadable=!taskRead;
+            if (!taskRead) fixtureRunning=std::nullopt;
+            const auto initial=wake(10,0);
+            check(initial["reason"]==(taskRead ? "startup-state-unavailable" : "process-state-unavailable") &&
+                initial["generation"]==10 && initial["suspendSerial"]==0 && initial["ok"]==false &&
+                initial["submitted"]==false && calls==0,"unavailable read never called Run");
+            fixtureTaskReadable=true; fixtureRunning=false;
+            expect("launch-request-accepted",1); expect("already-checked",1);
+        }
         reset(); fixtureRunning=true; expect("already-running",0); expect("already-checked",0);
         reset(); fixtureTaskEnabled=false; expect("startup-disabled",0); expect("already-checked",0);
         reset(); fixtureGeneration=11; expect("stale-or-suspended",0); expect("launch-request-accepted",1,11);
@@ -163,7 +172,7 @@ int main(int argc, char** argv) {
         reset(); advanceOnRun=true; runResult=false; expect("launch-request-failed",1);
         advanceOnRun=false; runResult=true; expect("stale-or-suspended",1);
         expect("launch-request-accepted",2,10,1);
-        std::cout << "network acceleration native decision: 20 cases passed\n";
+        std::cout << "network acceleration native decision: 21 cases passed\n";
         return 0;
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n'; return 1;

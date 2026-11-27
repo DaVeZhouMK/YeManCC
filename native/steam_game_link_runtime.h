@@ -410,7 +410,7 @@ static void publish(const std::shared_ptr<Control>& c,json value,bool logChange)
     const bool contactConnected=value.contains("contactConnected")&&value["contactConnected"].is_boolean()&&value["contactConnected"].get<bool>();
     const bool transportConnected=value.contains("transportConnected")&&value["transportConnected"].is_boolean()&&value["transportConnected"].get<bool>();
     value.update(base());value["contactConnected"]=contactConnected;value["transportConnected"]=transportConnected;value["observedAtTick"]=GetTickCount64();
-    json logged;bool logPrepared=false;
+    json logged;bool logPrepared=false,captureSelected=false;
     {std::lock_guard<std::mutex> lock(c->snapshotMx);
         try{value["startupLaunchCapture"]=startupCaptureValue(c->startupCaptureDiagnostic);}catch(...){}
         const bool previousContactConnected=flag(c->snapshot,"contactConnected");
@@ -427,10 +427,14 @@ static void publish(const std::shared_ptr<Control>& c,json value,bool logChange)
         auto& captureDiagnostic=c->startupCaptureDiagnostic;
         if(captureDiagnostic.logPending&&captureDiagnostic.diagnosticReportsRemaining){
             if(!logPrepared)try{logged=ymcc::steamlink::logpolicy::compact(value);logPrepared=true;}catch(...){}
-            if(logPrepared){captureDiagnostic.logPending=false;--captureDiagnostic.diagnosticReportsRemaining;}
+            if(logPrepared){captureDiagnostic.logPending=false;--captureDiagnostic.diagnosticReportsRemaining;captureSelected=true;}
         }
         c->snapshot=std::move(value);c->snapshot["history"]=json::array();}
-    if(logPrepared)try{appendNativeLifecycleLog("steam-game-link-state",std::move(logged));}catch(...){}
+    if(logPrepared){
+        // Preserve the original receipt even if optional provenance cannot be added.
+        try{logged.emplace("publicationCauseV1",(logChange?1u:0u)|(captureSelected?2u:0u));}catch(...){}
+        try{appendNativeLifecycleLog("steam-game-link-state",std::move(logged));}catch(...){}
+    }
 }
 static CandidateStatus sharedCandidate(const Game& original,json& receipt) {
     NativeDetectedGame found;

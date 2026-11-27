@@ -94,6 +94,9 @@ const session = ['HostSession',...(mandatoryPower?['BindPowerParent','NeedsComma
 if(mandatoryPower){session.push(extract('CommandPowerCurrent',source,'field'));session.push(extract('CommandHardwareCurrent',source,'field'));}
 const closeFields=[...text.matchAll(/^        private (?:readonly )?[^\n]*\b_closeRefresh\w*[^\n]*;/gm)].map(m=>{receipt.push({name:'CloseRefresh field',file:source,sha256:sha(m[0])});return m[0];}).join('\n');
 const closeSupport=text.includes('private bool HasCloseRefreshPending(')?['HasCloseRefreshPending','TryCancelCloseRefresh'].map(n=>extract(n)).join('\n'):'private bool HasCloseRefreshPending()=>false;';
+if(mandatoryPower&&text.includes('internal Task? CloseRefreshPowerCompletion(')){
+ session.push(extract('CloseRefreshPowerCompletion'),extract('ReapCompletedCloseRefreshPower'));
+}
 const closeMethods=options.closeRefresh?['HandleCloseRefreshBegin','HandleCloseRefreshPoll'].map(n=>extract(n)).join('\n'):'private string HandleCloseRefreshBegin(CommandEnvelope e){Fixture.Events.Add(e.Command);return Ack(e,"fake-cycle-begin");}\nprivate string HandleCloseRefreshPoll(CommandEnvelope e){Fixture.Events.Add(e.Command);return Ack(e,"fake-cycle-poll");}';
 let fake = `using System.Diagnostics; ${mandatoryPower?'using YeManCC.SharedSleepPower; ':''}using System.Security.Cryptography; using System.Text; using System.Text.Json; using System.Threading; using YeManInputHost.Diagnostics;
 internal sealed class HMProfile { public string Id=""; public bool RequiresUsbipBackend; public ushort VendorId=0x28de,Pid=0x1205; public ushort ProductId=>Pid; }

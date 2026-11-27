@@ -9,7 +9,7 @@ import { onSharedPowerLifecycle, requestSharedPowerLifecycleReconcile, isSharedP
 
 const RECOVERY_POLICY=Object.freeze({
  maxAttempts:3,retryDelaysMs:Object.freeze([250,1000]),readyTimeoutMs:10000,
- resetOn:Object.freeze(['current-owner-ready','explicit-enable','new-committed-power-generation']),
+ resetOn:Object.freeze(['current-owner-ready','explicit-enable','new-committed-power-scope']),
  explicitFeedbackMayAdvanceScheduledAttempt:true,
 });
 let diagnosticHostSerial=0;
@@ -23,9 +23,10 @@ export function startMonitorNoticeHost(){
  let attempts=0,retryTimer:ReturnType<typeof setTimeout>|null=null,retryRevision=0;
  let readyTimer:ReturnType<typeof setTimeout>|null=null,readyRevision=0;
  let powerHeld=true,powerGeneration:number|null=null,committedGeneration=-1,probeOwner=false;
- let powerSuspendSerial:number|undefined;
+ let powerSuspendSerial:number|undefined,committedSuspendSerial:number|undefined,powerNotificationSequence:number|undefined;
  let statusRequest:AbortController|null=null;
  let ambiguousCreate=false,ambiguousLease=0,carrierBlocked=false,lastRetiredLease=0;
+ let committedScope=0,retirementDebt:{owner:NoticeOwner;attemptedScope:number}|null=null;
  const retiring=new Map<number,Promise<boolean>>(),createRequests=new Map<number,AbortController>();
  let retirements=0,retirementFailures=0,fallbackRetirements=0,lastRetirement:Retirement|null=null;
  const theme=()=>document.documentElement.dataset.theme;
@@ -51,19 +52,28 @@ export function startMonitorNoticeHost(){
  function hide(){if(own)void invoke('monitorNotice.hide',{hudId:own.id,nonce:own.nonce,seq:sequence},{timeoutMs:2000}).catch(()=>{});}
  function cancelRecovery(){++retryRevision;if(retryTimer!==null){clearTimeout(retryTimer);note('retry-cancelled');}retryTimer=null;}
  function cancelReadyWait(){++readyRevision;if(readyTimer!==null){clearTimeout(readyTimer);note('ready-wait-cancelled');}readyTimer=null;}
- function closeNative(owner:NoticeOwner|null):Promise<boolean>{
+ function resumeRetirement(){
+  const debt=retirementDebt;
+  if(!debt||retiring.size||debt.attemptedScope>=committedScope||ended||!ready||preferences?.popupEnabled!==true||powerHeld||carrierBlocked)return;
+  void closeNative(debt.owner,true);
+ }
+ function closeNative(owner:NoticeOwner|null,resuming=false):Promise<boolean>{
   if(!owner||!Number.isSafeInteger(owner.leaseId)||owner.leaseId<1)return Promise.resolve(owner===null);
+  if(owner.leaseId<=lastRetiredLease)return Promise.resolve(true);
   const existing=retiring.get(owner.leaseId);if(existing)return existing;
+  // A late create completion cannot renew the budget for an uncertain lease.
+  if(!resuming&&retirementDebt?.owner.leaseId===owner.leaseId)return Promise.resolve(false);
+  const attemptedScope=committedScope;
   let finish:(value:boolean)=>void=()=>{};
   const pending=new Promise<boolean>(resolve=>{finish=resolve;});retiring.set(owner.leaseId,pending);
   void (async()=>{
-   let confirmed=false,fallback=owner.id<1;const started=diagnosticNow();note('close-start',owner);
+   let confirmed=false,fallback=resuming||owner.id<1;const started=diagnosticNow();note(resuming?'retire-resumed':'close-start',owner);
    try{
-    if(owner.id>0){let reason='none';const start=diagnosticNow();
+    if(!resuming&&owner.id>0){let reason='none';const start=diagnosticNow();
      const result=await invoke<boolean>('monitorNotice.close',{hudId:owner.id,nonce:owner.nonce},{timeoutMs:2000}).catch(error=>{reason=errorKind(error);return false;});
      fallback=!result;note('close-result',owner,{ok:result===true,reason,elapsedMs:elapsed(start),timeoutMs:2000});}
     if(fallback)fallbackRetirements++;
-    for(let attempt=0;attempt<2&&!confirmed;attempt++){
+    for(let attempt=0;attempt<(resuming?1:2)&&!confirmed;attempt++){
      let reason='none';const start=diagnosticNow();
      const result=await invoke<Retirement & {obsolete?:boolean}>('monitorNotice.retire',{leaseId:owner.leaseId,nonce:owner.nonce},{timeoutMs:2000}).catch(error=>{reason=errorKind(error);return null;});
      note('retire-result',owner,{retireAttempt:attempt+1,fallback,reason,elapsedMs:elapsed(start),timeoutMs:2000,
@@ -74,12 +84,20 @@ export function startMonitorNoticeHost(){
     if(confirmed){
      lastRetiredLease=Math.max(lastRetiredLease,owner.leaseId);
      if(ambiguousLease<=lastRetiredLease){ambiguousCreate=false;ambiguousLease=0;}
+     if(retirementDebt&&retirementDebt.owner.leaseId<=lastRetiredLease)retirementDebt=null;
      createRequests.get(owner.leaseId)?.abort();
-    }else{retirementFailures++;ambiguousCreate=true;ambiguousLease=owner.leaseId;}
+    }else{
+     retirementFailures++;
+     if(owner.leaseId>lastRetiredLease&&owner.leaseId>=ambiguousLease){
+      ambiguousCreate=true;ambiguousLease=owner.leaseId;retirementDebt={owner,attemptedScope};
+     }
+    }
    }finally{
     retiring.delete(owner.leaseId);finish(confirmed);
     note(confirmed?'retire-confirmed':'retire-unconfirmed',owner,{fallback,elapsedMs:elapsed(started)});
     if(confirmed&&!own&&desired())scheduleRecovery();
+    // Ready can commit while this lease still waits for its original IPCs.
+    resumeRetirement();
    }
   })();
   return pending;
@@ -163,7 +181,9 @@ export function startMonitorNoticeHost(){
    // An IPC timeout does not cancel native create. Keep its uncertainty visible
    // and do not multiply surfaces while that operation lacks a native receipt.
    if(phase==='create'&&!(error instanceof IpcRemoteError)&&leaseId>lastRetiredLease){ambiguousCreate=true;ambiguousLease=leaseId;}
-   if(ticket===epoch){const old=own;own=null;earlyReady=null;cancelReadyWait();closeNative(old);retryNeeded=!ambiguousCreate;}
+   // A power transition retires the request, but the posted create still owns its lease.
+   const ownsCreate=phase==='create'&&own?.leaseId===leaseId&&own.nonce===nonce;
+   if(ticket===epoch||ownsCreate){const old=own;own=null;earlyReady=null;cancelReadyWait();closeNative(old);retryNeeded=!ambiguousCreate;}
   }finally{
    if(!statusAbort.signal.aborted){
     if(statusRequest===statusAbort)statusRequest=null;
@@ -216,22 +236,33 @@ export function startMonitorNoticeHost(){
   if(powerHeld)return;
   powerHeld=true;++epoch;note('power-held');cancelRecovery();cancelReadyWait();prepareAgain=false;retireStatus();state.clear();
  }
- function resumePower(generation:number){
+ function resumePower(generation:number,suspendSerial:number|undefined){
   const newGeneration=generation!==committedGeneration,wasHeld=powerHeld;
+  const newScope=newGeneration||(suspendSerial!==undefined&&committedSuspendSerial!==undefined&&suspendSerial>committedSuspendSerial);
   powerGeneration=generation;committedGeneration=generation;
-  if(!newGeneration&&!wasHeld)return;
+  if(newGeneration||suspendSerial!==undefined)committedSuspendSerial=suspendSerial;
+  if(!newScope&&!wasHeld)return;
+  if(newScope){attempts=0;++committedScope;}
   powerHeld=false;note('power-committed');state.clear();cancelRecovery();cancelReadyWait();
+  resumeRetirement();
   if(!desired())return;
-  if(newGeneration)attempts=0;probeOwner=true;if(opening)prepareAgain=true;else void prepare();
+  probeOwner=true;if(opening)prepareAgain=true;else void prepare();
  }
  const offPower=onSharedPowerLifecycle(snapshot=>{
   if(ended)return;
   const suspendChanged=snapshot.suspendSerial!==powerSuspendSerial;
+  const notificationChanged=snapshot.observedNotificationSequence!==powerNotificationSequence;
   powerSuspendSerial=snapshot.suspendSerial;
+  powerNotificationSequence=snapshot.observedNotificationSequence;
   // Ready can arrive without a separate hold publication.
   if(suspendChanged||powerGeneration!==null&&snapshot.generation!==powerGeneration)holdPower(snapshot.generation);
-  if(isSharedPowerLifecycleAdmitted(snapshot))resumePower(snapshot.generation);else holdPower(snapshot.generation);
- },{observeSuspendSerial:true});
+  if(!isSharedPowerLifecycleAdmitted(snapshot)){holdPower(snapshot.generation);return;}
+  // A new notification makes an in-flight read stale even if admission stayed Ready.
+  const replaceStatus=notificationChanged&&statusRequest!==null;
+  if(replaceStatus)retireStatus();
+  resumePower(snapshot.generation,snapshot.suspendSerial);
+  if(replaceStatus)void prepare();
+ },{observeSuspendSerial:true,observeNotificationSequence:true});
  requestSharedPowerLifecycleReconcile('monitor-notice-host');
  const onTheme=()=>{const value=state.inspect().current;if(value)void send(value);};
  window.addEventListener('theme:changed',onTheme);window.addEventListener('ui-settings:changed',onTheme);

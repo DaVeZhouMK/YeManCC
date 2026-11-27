@@ -17,6 +17,14 @@ let heldWidthReply:(()=>void)|undefined;
 const editorWidthFixture={owner:'',events:[] as {owner:string;enabled:boolean;ok:boolean}[],waiting:false,holdConsumed:false,releaseReply(){heldWidthReply?.();heldWidthReply=undefined;}};
 if(nativeWidthSeed)(window as any).__editorWidthFixture=editorWidthFixture;
 const handlers=new Map<string,Set<Function>>(),files=new Map<string,string>();
+const gyroTelemetryConsumers=new Set<object>();
+export function setGyroTelemetryInterest(consumer:object,interested:boolean):void {
+ const before=gyroTelemetryConsumers.size>0;
+ if(interested)gyroTelemetryConsumers.add(consumer);
+ else gyroTelemetryConsumers.delete(consumer);
+ const after=gyroTelemetryConsumers.size>0;
+ if(before!==after)emitNativeEvent('gyro.telemetry.interest',{interested:after});
+}
 const gyroPresetFixture={armed:false,conflictNext:false,holdNext:false,pending:false,writes:[] as any[],releases:[] as (()=>void)[],last:null as any,release(){this.releases.shift()?.();}};
 (window as any).__gyroPresetFixture=gyroPresetFixture;
 let stamp=1;
@@ -143,6 +151,7 @@ export function on(event:string,cb:Function){
 }
 export function emitNativeEvent(event:string,data:any={}){if(event==='gamepad.state')lastGamepadState=data;if(event==='input.shortcutRuntime'&&virtualStartFixture)virtualStartShortcutRuntime=data;for(const cb of handlers.get(event)||[])cb(data);}
 export class IpcRemoteError extends Error {}
+export class IpcPostError extends Error {}
 const updateCacheFixture={clears:0,hold:false,release:null as null|(()=>void),next:{ok:true,busy:false,bytesFreed:4096,message:'更新缓存已清理'}};
 (window as any).__updateCacheFixture=updateCacheFixture;
 // Explicit charging transport port for the real settings route; no hardware or alternate policy.

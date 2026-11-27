@@ -48,6 +48,8 @@ static struct {
  std::mutex mutex;json state;
  bool requestRefresh(const Session&,bool=true){return true;}
  bool requestDeckyHealthRefresh(const Session& session){return requestRefresh(session,false);}
+ // This fixture supplies no accepted publication ID; reuse is tested with the real observer.
+ bool canReuseDeckyHealthPublication(const Session&,std::uint64_t)const{return false;}
  bool requestAdmissionRefresh(const Session& session,bool (*satisfied)(const Session&,const json&,bool)){return satisfied(session,current(),false)||requestRefresh(session);}
  void set(json value){std::lock_guard lock(mutex);state=std::move(value);}
  json current(){std::lock_guard lock(mutex);return state;}
@@ -65,7 +67,10 @@ static struct {
  bool requestLaunchAdmissionRefresh(bool=false,ymcc::deckysidebar::AdmissionRefreshReceipt* = nullptr){++consumerWakes;return true;}
 } g_deckySidebarRuntime;
 static struct {ymcc::steamcss::Runtime* actual=nullptr;void observeMode(const Session& s,const ymcc::steamcss::ModeSample& m,bool stable=false){if(actual)actual->observeMode(s,m,stable);}} g_steamCssGuard;
-static void deckySidebarDiagnostic(const char*,const json&,bool=false){}
+static std::atomic<unsigned> clientVerificationDiagnostics{0};
+static void deckySidebarDiagnostic(const char* event,const json& detail,bool=false){
+ if(std::string_view(event)=="steam-mode-signal"&&detail.value("publicationTrigger",std::string{})=="client-verification")++clientVerificationDiagnostics;
+}
 static struct {bool connected=false;std::optional<ULONGLONG> authenticatedPeerTick(unsigned long long* revision=nullptr){if(revision)*revision=connected?1:0;return connected?std::optional<ULONGLONG>{GetTickCount64()}:std::nullopt;}} g_deckyMirrorBroker;
 static void deckySidebarPost(const char*,const json&){}
 static void deckySidebarSessionDiagnostic(const Session&,const char*){}
@@ -124,7 +129,7 @@ static void signal(const Session& s,const char* mode,const char* epoch="document
  g_steamModeObserver.set(state);
  // The shared observer publishes Big Picture to CSS before Decky delivery.
  if(state.at("mode")=="bigpicture")productionCssBigPicture(s,state,{},stable);
- if(!stable&&state.at("known")==true)productionModeChanged(s,state);
+ if(!stable&&state.at("known")==true)productionModeChanged(s,state,"mode");
 }
 int main(int argc,char** argv){try{
  if(argc!=2)throw std::runtime_error("isolated artifact directory required");
@@ -146,12 +151,14 @@ int main(int argc,char** argv){try{
   const auto firstProof=wallpaperOwner.observe(facts,wallpaperOwner.ticket());
   auto health=g_steamModeObserver.current();
   const auto before=wallpaperWakeSignals;
+  const auto beforeDiagnostics=clientVerificationDiagnostics.load();
   const auto activeTicket=wallpaperOwner.ticket();
-  health["deckyClientVerified"]=false;productionModeChanged(old,health);
-  health["deckyClientVerified"]=true;productionModeChanged(old,health);
+  health["deckyClientVerified"]=false;productionModeChanged(old,health,"client-verification");
+  health["deckyClientVerified"]=true;productionModeChanged(old,health,"client-verification");
   const auto sameProof=wallpaperOwner.observe(facts,wallpaperOwner.ticket());
   check(wallpaperWakeSignals==before+2&&wallpaperOwner.ticket()==activeTicket&&sameProof==firstProof&&sameProof.value("current",false),
       "Decky health-only change wakes the wallpaper reader without invalidating the live lease");
+  check(clientVerificationDiagnostics==beforeDiagnostics+2,"Decky health-only publications retain their reason at the diagnostic port");
   ++facts.suspendSerial;
   const auto nextSuspendProof=wallpaperOwner.observe(facts,activeTicket);
   const auto nextSuspendTicket=wallpaperOwner.ticket();

@@ -2,6 +2,7 @@
 // entry name differs; counts/status/exact occurrence admission belongs to the current oracle.
 import {LIFECYCLE_VERSION,verifyR3ProtectedPs,verifyR3BoundaryPs} from './r3-contract.mjs';
 import {LEGACY_SPEC} from './r3-reviewed-contract.mjs';
+import {terminal29PsSuspendReport} from './r3-current105-ordered-observation.mjs';
 const need=(ok,code)=>{if(!ok)throw Error(code);};
 const PS_CASE='ROG/full-coordinator-real-managed-pipe/';
 export function verifySwitchVerification(test,options={}){
@@ -165,10 +166,26 @@ for(let i=9;i<13;++i){if(options.cancellationRollback)continue;const test=r.case
 need(test.name==='ROG/full-coordinator-real-managed-pipe/'+kind+'-during-ps-probe/dualsense-edge'&&test.controlledFamily==='ROG'&&test.requestedPersona==='dualsense-edge','CANCELLATION_CASE_MISSING');
 need(c?.kind===kind&&c.callbackExecuted&&!c.directRecreateReturned&&c.recreateCommandsAdded===0&&c.processesAdded===0&&!c.markedRebuilt&&!c.rearmRequested,'CANCELLED_QUERY_REBUILT_OR_REARMED');
 need(child.status==='OBSERVED'&&child.failure===null&&child.nativeObservedProcessExit&&child.nativeObservedExitCode===0&&child.creates===1&&child.finalCleanupOk&&!child.hasController&&!child.hasContext&&child.pipeLoopReturned,'CANCELLED_QUERY_DID_NOT_RELEASE_INITIAL_TARGET');
-need(test.frameInputChain?.length===9&&child.events.filter(v=>v==='frame').length===6&&!test.afterStop.quarantined&&!test.afterStop.prepared,'CANCELLATION_SENT_EXTRA_INPUT_OR_RETAINED_TARGET');
-if(kind==='generation')need(c.probeCalls===2&&c.newerRequestPreserved&&c.newerRequestCompleted,'OLD_QUERY_CLEARED_NEWER_REQUEST');else need(c.probeCalls===1&&c.frameCommandsAdded===0&&c.normalFrameResult?.hostSubmission!=='frame-accepted','CANCELLED_FRAME_REACHED_HOST');
+const suspendScope=kind==='power'&&terminal29PsSuspendReport(r,options);
+need(test.frameInputChain?.length===9&&child.events.filter(v=>v==='frame').length===(suspendScope?7:6)&&!test.afterStop.quarantined&&!test.afterStop.prepared,'CANCELLATION_SENT_EXTRA_INPUT_OR_RETAINED_TARGET');
+const powerPause=kind==='power'&&options.psPowerPauseContinuation===true&&!suspendScope;
+if(kind==='generation')need(c.probeCalls===2&&c.newerRequestPreserved&&c.newerRequestCompleted,'OLD_QUERY_CLEARED_NEWER_REQUEST');else need(c.probeCalls===(powerPause?2:1)&&c.frameCommandsAdded===0&&c.normalFrameResult?.hostSubmission!=='frame-accepted','CANCELLED_FRAME_REACHED_HOST');
 if(kind==='off')need(c.actualSettingsOffDuringQuery&&!c.effectiveTargetEnabled&&c.unboundCommandsAdded===0&&c.unboundFrameAfterOff?.sourceContextReason==='virtual-target-disabled'&&c.normalFrameResult?.sourceContextReason==='virtual-target-disabled','ACTUAL_OFF_WAS_BYPASSED');
-need(test.nativeEvents.some(e=>e.event==='ps-wake-rearm-deferred'&&e.detail.reason==='admission-changed-during-probe'&&e.detail.probeComplete&&e.detail.retryDelayMs===0),'QUERY_CANCEL_EVIDENCE_MISSING');
+if(powerPause){
+ const paused=test.nativeEvents.findIndex(e=>e.event==='ps-wake-rearm-deferred'&&e.detail.reason==='admission-paused-during-probe'&&e.detail.generation===c.generation&&e.detail.probeComplete&&e.detail.retryDelayMs===250&&e.detail.queryRequestId===c.requestIdBefore&&e.detail.currentRequestId===c.requestIdAfter);
+ const reused=test.nativeEvents.findIndex(e=>e.event==='ps-wake-rearm-reused-existing'&&e.detail.generation===c.generation&&e.detail.prepareTarget===false);
+ need(paused>=0&&reused>paused&&c.requestIdBefore===c.requestIdAfter&&c.effectiveTargetEnabled,'PS_POWER_PAUSE_MUST_RESUME_CURRENT_REQUEST');
+}else need(test.nativeEvents.some(e=>e.event==='ps-wake-rearm-deferred'&&e.detail.reason==='admission-changed-during-probe'&&e.detail.probeComplete&&e.detail.retryDelayMs===0),'QUERY_CANCEL_EVIDENCE_MISSING');
+if(suspendScope){
+ const p=test.psWakeSameGenerationSuccessor;
+ need(Number.isSafeInteger(p?.suspendSerial)&&p.suspendSerial>0&&p.queries===2&&p.sameArmTick===true&&p.transientNoticeDelivered===true&&
+  p.resumedFrame?.hostSubmission==='frame-accepted'&&p.resumedFrame.focusIsolationSemanticNeutral===false&&
+  c.requestIdBefore===c.requestIdAfter&&c.effectiveTargetEnabled,'PS_SUSPEND_MUST_RESUME_THROUGH_RETAINED_HOST');
+ const retired=test.nativeEvents.findIndex(e=>e.event==='ps-wake-rearm-deferred'&&e.detail.reason==='admission-changed-during-probe'&&e.detail.generation===c.generation&&e.detail.suspendSerial<p.suspendSerial&&e.detail.probeComplete&&e.detail.retryDelayMs===0);
+ const paused=test.nativeEvents.findIndex(e=>e.event==='ps-wake-rearm-deferred'&&e.detail.reason==='admission-paused-during-probe'&&e.detail.generation===c.generation&&e.detail.suspendSerial===p.suspendSerial&&e.detail.probeComplete&&e.detail.retryDelayMs===250);
+ const reused=test.nativeEvents.findIndex(e=>e.event==='ps-wake-rearm-reused-existing'&&e.detail.generation===c.generation&&e.detail.prepareTarget===false);
+ need(retired>=0&&paused>retired&&reused>paused,'PS_SUSPEND_REQUIRES_RETIRE_THEN_PAUSE_THEN_REUSE');
+}
 if(kind!=='generation')need(test.nativeEvents.some(e=>e.event==='recreate-target-result'&&e.detail.phase==='not-attempted'&&e.detail.failKind===(kind==='off'?'virtual-target-disabled':kind==='exit'?'exit-fence':'power-not-admitted')),'DIRECT_CANCEL_EVIDENCE_MISSING');
 }
 for(let i=13;i<16;++i){if(options.cancellationRollback&&i!==15)continue;const test=r.cases[i],child=test.managedReceipt,q=test.psWakeCancellation,kind=['persona','reentry','refresh'][i-13];
@@ -192,5 +209,5 @@ if(kind==='refresh'){
 }
 }
 verifyTargetBinding(r.cases[16],options);verifyLateOwnership(r.cases[17],options);verifyLineageReceipt(r.cases[18]);verifyR3ProtectedPs(r.cases[19]);for(const row of r.cases.filter(c=>['natural-return','expired-queued-task','new-same-persona-ticket','unprotected-task-new-ticket'].some(kind=>c.name==='PS-WAKE/protected-boundary/'+kind)))verifyR3BoundaryPs(row);verifyReader(r.cases.find(row=>row.name==='PS-WAKE/read-only-endpoint-enumeration'),options);
-if(options.managedInputContract==='current105-terminal26-sdk-lifetime-compact-v1')verifyTerminal26ReturnGroups(r);
+if(options.managedInputContract==='current105-terminal26-sdk-lifetime-compact-v1'||options.managedInputContract==='current105-terminal29-shared-input-power-v1')verifyTerminal26ReturnGroups(r);
 }

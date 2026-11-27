@@ -35,6 +35,9 @@ static std::string W2U(const std::wstring& s){return std::string(s.begin(),s.end
 static std::wstring U2W(const std::string& s){return std::wstring(s.begin(),s.end());}
 static std::wstring POWER_CONTROL_DIR=L"memory";
 static std::vector<json> logs;
+static unsigned long long fixtureVendorLogDeliveryEpoch = 0;
+static bool fixtureVendorDetail = false;
+static bool domainLogEnabled(const char*) { return fixtureVendorDetail; }
 static bool queueDiagnosticThrows = false;
 static bool queueScmThrows = false;
 static bool queueDiagnosticClobbersError = false;

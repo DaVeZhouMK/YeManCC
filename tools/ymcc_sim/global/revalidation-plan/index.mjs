@@ -221,7 +221,15 @@ export function createRevalidationPlan(receiptFiles, {
     };
   });
   const reusable = rows.filter(row => row.status === 'PASS');
-  const pending = rows.filter(row => row.status !== 'PASS')
+  const prerequisites = new Map((audit.registeredScope.prerequisites ?? []).map(({ id, reason }) => [id, reason]));
+  const auditReruns = new Set(audit.needsRerun);
+  // Only a prerequisite-only refusal can wait for a new audit instead of a
+  // rerun. Keep known failures, missing runs and independent drift in batches.
+  const needsPrerequisites = blocked ? [] : rows
+    .filter(row => row.status === 'STALE_REGISTRATION' && prerequisites.has(row.id) && !auditReruns.has(row.id))
+    .map(({ id, owner, status }) => ({ id, owner, status, reason: prerequisites.get(id) }));
+  const deferred = new Set(needsPrerequisites.map(row => row.id));
+  const pending = rows.filter(row => row.status !== 'PASS' && !deferred.has(row.id))
     .sort((a, b) => priority(a.status) - priority(b.status) || a.id.localeCompare(b.id));
   const sourceStates = new Map([...afterRecorded.sources, ...afterSources].map(row => [row.path.replaceAll('\\', '/'), row]));
   const artifactStates = new Map([...afterRecorded.artifacts, ...afterRegistryArtifacts].map(row => [row.path, row]));
@@ -278,6 +286,9 @@ export function createRevalidationPlan(receiptFiles, {
   const covered = batches.flatMap(batch => batch.testIds);
   if (covered.length !== new Set(covered).size || !same(distinct(covered), distinct(pending.map(row => row.id))))
     throw Error('REVALIDATION_PLAN_LOST_OR_DUPLICATED_TEST');
+  const accounted = [...covered, ...deferred, ...reusable.map(row => row.id)];
+  if (accounted.length !== rows.length || !same(distinct(accounted), distinct(rows.map(row => row.id))))
+    throw Error('REVALIDATION_PLAN_LOST_OR_DUPLICATED_TEST');
   const hotspots = new Map();
   for (const row of pending) for (const change of row.reasons.changes) {
     const key = `${change.role}:${change.path}`;
@@ -290,13 +301,14 @@ export function createRevalidationPlan(receiptFiles, {
     fullProductAcceptance: false, physicalHardwareAcceptance: false,
     selection: { profile, domains, tests, ids: selected.map(row => row.id) },
     summary: { selected: rows.length, reusableAtAudit: reusable.length, needsRerun: pending.length,
+      needsPrerequisites: needsPrerequisites.length,
       assignedNeedsRerun: pending.filter(row => row.owner !== null).length,
       unassignedNeedsRerun: pending.filter(row => row.owner === null).length, batches: batches.length },
     sourceAudit: { generatedAt: audit.generatedAt, status: audit.status, sourceRuns: audit.sourceRuns },
     registryFingerprint: digest(reviewed), sourceSnapshotFingerprint: digest(afterSources),
     diagnostics: [...audit.diagnostics, ...planDiagnostics],
     reusableAtAudit: reusable.map(row => ({ id: row.id, status: row.status, scope: row.scope })),
-    needsRerun: pending.map(({ group, ...row }) => row), batches,
+    needsRerun: pending.map(({ group, ...row }) => row), needsPrerequisites, batches,
     changedInputHotspots: [...hotspots.values()].sort((a, b) => b.testIds.length - a.testIds.length || String(a.path).localeCompare(String(b.path))),
     outsideSelection: audit.cases.filter(row => !selected.some(adapter => adapter.id === row.id)).map(row => ({ id: row.id, status: row.status })),
     acceptanceMeaning: 'Only scheduling of current registered tests. No tests execute and no PASS is produced by this plan. Assignments never remove revalidation obligations. Re-audit after changes and verify the final candidate separately.',

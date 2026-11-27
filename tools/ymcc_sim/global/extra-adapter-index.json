@@ -1881,7 +1881,7 @@
   "sources": [
     {
       "path": "tools/fixtures/input_coordinator_lifecycle/msi_return_observation.mjs",
-      "sha256": "d60b68785dff29138d96c26ec65fc55b690909079f8abbf7018f0893e8828f08",
+      "sha256": "a56fa69bca6cfba05a8ffd43c050aaa89ce56c82c35bd6eea1304ec89026c61d",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -9284,7 +9284,7 @@
     },
     {
       "path": "tools/fan_host_lifecycle_selftest.ts",
-      "sha256": "1cefa4beee1915941b235745ec9b986b15f54d528dceeb80e30e7cce43743108",
+      "sha256": "71e1a1b4b88d1b16fa738f607d3ad3a9c8e75fe54c7297ff7c6e9ab1abe55d11",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -10143,11 +10143,11 @@
     },
     {
       "path": "tools/fixtures/input_host_exit_completion_gates/fixture.cpp.in",
-      "sha256": "e7652de4c2476f067c26fb27c567dcea6aeb6a22e2afea0f1aecea3dbedcd497"
+      "sha256": "33d0c62b01d71d7a23d7f289e8efd54cc9181a07721ca01db79afb0ae67f80b2"
     },
     {
       "path": "tools/fixtures/input_host_exit_completion_gates/source-contract.json",
-      "sha256": "80be63de65f10e30632fada17b946ff58aa63845427dc05ac4cf904344b05480",
+      "sha256": "620ddc21688d6caf68cc9c6871031d1eee233fa416e21b74c793d2f6bfca125e",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -10161,12 +10161,12 @@
     },
     {
       "path": "tools/fixtures/input_host_native_exit_parent/README.md",
-      "sha256": "e58e67adb2c54d2e310cde7f92177b1d6fa049f6f333c90dce351152de63b08e",
+      "sha256": "7191da63dac97f04a411669d76e1a0042d1057b44b20bbb025419c5a572c84c3",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/fixtures/input_host_native_exit_parent/suite.cpp.in",
-      "sha256": "e65cfefb73761624e0ec7c5705ce748f63c603d82ba29de0c21a42d4d9668d61"
+      "sha256": "49fc98a5431e9495b43dbfef6f027dc54ed7ac1aaef9805dfc65ae745faf305c"
     },
     {
       "path": "tools/fixtures/input_host_process_retirement/environment.hpp",
@@ -10704,7 +10704,7 @@
     },
     {
       "path": "tools/input_host_exit_completion_gates_selftest.py",
-      "sha256": "e9b464d8940b36941ac02c35f07fb598524039f190640ff81b153255fe006d35"
+      "sha256": "3bdec34c1f50f31360098bce7ae7f228717b2765183e1e87ee0e9bf8348d4cfa"
     },
     {
       "path": "tools/input_host_exit_retirement_selftest.py",
@@ -10717,11 +10717,11 @@
     },
     {
       "path": "tools/input_host_native_exit_parent_selftest.py",
-      "sha256": "59f0fc8fcd3ae5d44c49a28f138bf70a4de68ced992aaa638fc18ffaf1d0e48e"
+      "sha256": "f8c6eaabc5e13a04c8008f7e726cdc9246e01846b4f13d32d30a38b2688ce3f7"
     },
     {
       "path": "tools/input_host_process_retirement_selftest.py",
-      "sha256": "60ed001619f2fd75641b8798c88c1dfa59fd8fd782422fa89f3bd7bbff09a2cd"
+      "sha256": "76fdf74d9b3d2bc0ca91b217abefcf5a1e591461ba6f5f91eac95b84bcc95e24"
     },
     {
       "path": "tools/input_host_recovery_health_selftest.mjs",
@@ -11262,7 +11262,7 @@
     },
     {
       "path": "tools/steam_appearance_automatic_refresh_selftest.ps1",
-      "sha256": "043fb349fab6dc4697b8b1fafab84a337b7e3991c3f49cf4ead970c24b4a8881",
+      "sha256": "c90267764e141367900d04f5df9b14bf20aaaa34fa5f4d1da40663f15250549e",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11272,7 +11272,7 @@
     },
     {
       "path": "tools/steam_appearance_draft_selftest.mjs",
-      "sha256": "f0dce9b90ae43fd8e92c93e197da33ece1234cdf420264ab1d2ceb1df30cbcda",
+      "sha256": "24e8877210e240b37011935d3f4ea75a79c77a02eb4cbce373ab778540370eda",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11287,12 +11287,12 @@
     },
     {
       "path": "tools/steam_appearance_render_plan_selftest.ps1",
-      "sha256": "2db971166801fe6822e4ee2d698651ceb7eb19236eecf6274020c36d42447a37",
+      "sha256": "f84ac6184925e2e8aaa28b1a94db5261ac070f2bb8a2aadc188d73105efd1946",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/steam_appearance_use_service_selftest.mjs",
-      "sha256": "52c94686f33d918ef39e6e5b38074cdfb2e6767d8a6e82a442284d31a6a54b66",
+      "sha256": "9e73e9a56c5fab9aac309371529b088d2bff2597c22a0c5df4aec720fb6172d6",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11367,7 +11367,7 @@
     },
     {
       "path": "tools/steam_launch_admission_selftest.mjs",
-      "sha256": "0310b512eafc0692db5acb9a9410774a8d5fd673010073580688c515213ac7c4",
+      "sha256": "cc278770e6be571564a2ea422a4cdfc28c783ee0c6e8e05834a6addad7f3b4a1",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11749,7 +11749,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/consumer/fan-global/run.mjs",
-      "sha256": "9483d0ea4562be93d58a5b329e2e325b5e9c12bc9be09c4056c9df6f468fadec",
+      "sha256": "ca2663204eef985d9dce23c2a5fb5d77d1390084af356569a01e446e9c817fce",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12093,7 +12093,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-foreground-latency/adapter.mjs",
-      "sha256": "a93d099449320f8582e0509c73aab778de30d7cbc684c0eae4e3e42bd2ee790b",
+      "sha256": "34ec0a44a8e6f5b84f30857df5ad12c4d7fd02640d31cb1e2b7612bfc53c3cd2",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12153,12 +12153,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/controller-host-exit/receipts.mjs",
-      "sha256": "097c7bac6bc4d01377e93d1d2e39a74a1a9fdbb5af3cf0e20a37e4539c5cae46",
+      "sha256": "afab1fce6d4973af5bf06b74ce7dc8206de0c98392e86bdf7f1c748c57cf11f2",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/controller-host-exit/receipts.test.mjs",
-      "sha256": "bd7b0d6d897b37e5de8cfdec36eb4271d5155bcc30df37876f816fdf3102db1e",
+      "sha256": "4944dfb4a2ad0ae1d81dc1815b92ae240ef1525480fa9f66dbf20427f58737c2",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13367,7 +13367,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/fan-close-observation-refusal-consumer/boundary.json",
-      "sha256": "0099f5004a15ee047a1f7a703b3bf8c579c8666e84e5cf11d96e88dfeae3902d",
+      "sha256": "cb41eb32481184d123e5dc3b55ef86541cab1f11825184156bf208b4aa58e514",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13377,12 +13377,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/fan-close-observation-refusal-consumer/contract.test.mjs",
-      "sha256": "8193f0123acdc47992e3262c1ab29b6adcf2124722b4c6de108e753f6a4d7321",
+      "sha256": "1b651de49b89313925efa5d77547403e0cc5628abd35cb31f7aef6cb8ae61031",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/fan-close-observation-refusal-consumer/run.mjs",
-      "sha256": "ba25f23eb50d1a6c6ea2c900ab4923df95fdc19db87f400c32aea615b5b92be0",
+      "sha256": "519fd5d1137ea2c6622c09e0e15234884592399c30a9c95cd66cf150ca1bb852",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13637,7 +13637,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/fan-global-adapter.mjs",
-      "sha256": "4118274a337ea7392d7e9821927383e1acc61f69602b0764d2ad8011c261ffdb",
+      "sha256": "c0c818dcc28f943585c394043262a6319fe6f5a96dc7a02afd1a5fa336bc0de8",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -14592,7 +14592,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/marker-ownership-consumer/run.mjs",
-      "sha256": "aa790a8bf1e998c9437c1890facffa04d1158af847869ee3f956194e6ff7519f",
+      "sha256": "82f61a80dffb95c75b2c4e4dcbdbd1106954f0235b63d75b74fdbf6a3069b4b6",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -14602,7 +14602,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/marker-ownership-consumer/spec.json",
-      "sha256": "befe74afdc46a6af98398f4a8b0036a6dce520ba9ef02580b90c680351c7ed58",
+      "sha256": "9b24d4b6ad645d89f394b1017094e417840b3e9b69342af0efe1610f42e6880d",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16042,7 +16042,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-directory-resume-consumer/runner.test.mjs",
-      "sha256": "c87257131470d16a2e5d62a10b08a8585119ffed145c9cc765ba6a34db857fa8",
+      "sha256": "0b2841e241240a2ea1fd185bb4d426cefdf0ff932b90a0093c24908df57f9921",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16082,16 +16082,16 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/fixture.cpp.in",
-      "sha256": "e60c8fc36239a8ec4579e93d082f32974376543d59a2a942e4012c2a2335ec8a"
+      "sha256": "c96cb9c94985233bf77e37cc805c77be36dcb4e519e3eea6a87e4ba364cb00bd"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/run.mjs",
-      "sha256": "df77b91b0c8fd45dac77b5cda7afb66e3718531e146cc511f0a2bdc4b34f2f5c",
+      "sha256": "1b3c1105995ef64a838349616a43506d7bc337ee5ace595db835665adefa2f82",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/runner.test.mjs",
-      "sha256": "685d9f3175b464cac574641d0e597f64111699f9d08e7ca536a997b36b493189",
+      "sha256": "d5597c698ea71d8dd951a2844cce1bffc9491056008b527bb42dc6e1459e4314",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16101,7 +16101,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/spec.json",
-      "sha256": "79c7bfa16be6055f89e593ae486c76cb82bb41d7c571b02d9c54723f40fd13b2",
+      "sha256": "506969998a01c0489609ca21b6ead8acf2d13d77d6de90bf67e24165efb5514a",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16116,7 +16116,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
-      "sha256": "779ff93cecb5cb0bdcf5fb9a8c93c6bb2448e82449b1d1b8034d3f467a4fbbd4",
+      "sha256": "ab1288f62685aff264b3c45bed45dfbae1a328c63be2a8a72efd136e32444435",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16135,7 +16135,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context.mjs",
-      "sha256": "f28f1ec3964b5e67e93fd9162b24c55bcf79defb8d83d3b9d2558d07f1315ef7",
+      "sha256": "7690c82796ee3735aecf3696d0308796d194bf9baab3f6d8e36427afb2fca1fb",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16150,7 +16150,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/run.mjs",
-      "sha256": "5590bd09bcd2999702bad4133b95e7f40c150346f2cf360adf4c7781e9aa15df",
+      "sha256": "77f0574574bef945322cd0b3eb11e201da2e63c748878e6cc339f8ad928a9d76",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16184,7 +16184,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
-      "sha256": "b7365fb4e818949aa69ba8782f307fca2d15862e857e13ed179a8a6682b9ccd3",
+      "sha256": "0f19c8b8ef30a1d8abdf9cc0b07e0aec5c095e207ab99ee7a5052e6e4a612d41",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16199,12 +16199,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
-      "sha256": "7c471feea5b1fcf505c5c496ffcf9c26550856a78575adcdff1143d2e22a523f",
+      "sha256": "33d425042dbc4e94db53d4e68c3c3614b5fede3ad8757577c8cb57dbfa89737d",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/runner.test.mjs",
-      "sha256": "6437d98eab5600df4ba7fad32e966e2e0aae5a1f80610e6d057adeccfbe29af3",
+      "sha256": "4a83b9f25de2a65cb6f5519b40243f2b180123fb5d338a2e0ac028751f2e34a2",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16218,8 +16218,24 @@
       "contentNormalization": "utf8-lf"
     },
     {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/shared-leaf-successor.json",
+      "sha256": "97d329455766589a30e2e9500952a2416fa566fff8ada78c0a16f06dcafd7f15"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/shared-leaf-successor.mjs",
+      "sha256": "9d79ccfbee58333276a8d3c177dc8c349459832038a35753f8c12943f8f74c7b"
+    },
+    {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/sitecustomize.py",
       "sha256": "f1e3ce0c8f4a798be007e1dfcd84ca42102114212c2d4222a9ca223e988afbf8"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/source-continuity.json",
+      "sha256": "e3db532ff0ca537adbe759b052a268e9fa3eafc650c6f0843643e7d961b64c82"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/source-continuity.mjs",
+      "sha256": "a07ca3f6ac5a7f9c85b4fdbb8a98363559dd8dd03aa4eb5ed4bf725d543a2a0d"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/spec.json",
@@ -16243,7 +16259,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/README.md",
-      "sha256": "60176400fabdd7cba23c915d1cfd28e8d5a5c7bd67fa9683127ef66b905e59ef",
+      "sha256": "b88cf898b13b4ece7fcac4c8941784ee434f832a4f9e1ad4fc5887b9b57c656e",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16287,7 +16303,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/spec.json",
-      "sha256": "2d91d9fc8c45430c75e1e5d4a4f94354a0f7ddf3afdc66fb7dba84d5a714c5ce",
+      "sha256": "a7515e87d1dc96ad307d416a5cb9fa6f9f798833e71c3dfe84fa37f72379e3a2",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16297,7 +16313,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/worker.mjs",
-      "sha256": "d808abfce071614be85bfe5048b6ca8b817ad85b7b1df850f9296761f3aa3a4e",
+      "sha256": "8cb6743d3c9b22f793893fed77fe55a558fb6a440029e70d42f74af29d0b11bf",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16403,16 +16419,16 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-session-marker-file-consumer/fixture.cpp.in",
-      "sha256": "e62aaa8509309d6c8d4a04db1abc4f35e027d085ae955db39b1be866bfc1e7ac"
+      "sha256": "ae7e3904fe8bef83ecae642fd496d7408851a825ec6d0b7d47175e49cf50bb94"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-session-marker-file-consumer/run.mjs",
-      "sha256": "85f89fdc4df1404add228b29aac591a62581550bbe69fcad2338a888e48ff4f6",
+      "sha256": "b9e3c55a422e62bbc92f82861f14a379f0e155b695544e687b4b911de11958d7",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-session-marker-file-consumer/runner.test.mjs",
-      "sha256": "ff4edfc5053aa13ffe09eaa2ffafc521bbacec40ef66db740658452829943209",
+      "sha256": "0199f7d7a1b8c3e7ba69319970d60454b09b4d697f45bdacd5dddae1348097bb",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16422,7 +16438,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-session-marker-file-consumer/spec.json",
-      "sha256": "c591ed20f2e5d39176d98934e7ff9fd24d96840221151f946c72e9f3c0b1cce7",
+      "sha256": "451df8529f32852e110a3b04a00546e1b5faee516e68f0ee1678e4178f72385b",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16446,7 +16462,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/run.mjs",
-      "sha256": "fbe5a89a0f4069e62f146b490f447a642c047b2d987d3ce3bfcad82c6a2b27b8",
+      "sha256": "c80c6e9db048fdf5e5910f6bb5a2809a0629a84f791d3d4a8081e2fc1d43f46c",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16456,7 +16472,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/spec.json",
-      "sha256": "00e8db23e295996b1161836dac42c691807da481f770206cd3ccc0ac19ea2836",
+      "sha256": "9a1db33cc4d3d023a04e8d4206297e6a34d8e2530b7cd1be7aa524779c3ca674",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16485,17 +16501,17 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-startup-exit-consumer/run.mjs",
-      "sha256": "495b84e4974855ae9ef5529c1d365960c2f1b75dee33656a4e6e81cefb854c35",
+      "sha256": "ecc85152e3f40afc517b60aa78ba725edd056c03011aa975c05bf4f99b78d8e3",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-startup-exit-consumer/runner.test.mjs",
-      "sha256": "9742c0061fcd6b6976c0cd2e6ca7ec8bfd0544a85aae82416c906a125ebdbeee",
+      "sha256": "1ac119bc08b122c9af004865f566df569ac64a27b8cfa31373ff823c28bc636d",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-startup-exit-consumer/spec.json",
-      "sha256": "c07976e8b9dadba46808e5f01276f2166b7540745cb08d8e7ffc209d654f710a",
+      "sha256": "bc815cb2655c9d67d1ee652b0aa5be86019a8d9236a575c1a3864132817b1dcb",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16520,7 +16536,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/steam-appearance-draft-consumer/README.md",
-      "sha256": "962ca0e07e57b503ebda0ce49a0d7eaba21226007a1fe130c68a2bdc1e7ea62d",
+      "sha256": "518f8ae184bee6c4654b669b28d7319de7a285267a85490f2d2a7b9b4529d68e",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16535,7 +16551,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/steam-appearance-draft-consumer/contract.test.mjs",
-      "sha256": "1e7eb27bf0bd5f191243728b5ae2c71bf6daaf1f1149ed240873890535ca99e2",
+      "sha256": "742b1dfe4ac1572f22f61adfd117c9bcf663f3457f9d997deb6bd350eac11397",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -16554,7 +16570,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/steam-appearance-draft-consumer/spec.json",
-      "sha256": "47d9c638aa1524a19734782c82376efc0468b800e1e230e3414cf962bd0f24a7",
+      "sha256": "f879089e92c69da745fa8a5da7cabb8ec5838682b3a2e46a91bf2c04b97b9780",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -17231,22 +17247,22 @@
     {
       "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-artifact-adapter.mjs",
       "contentNormalization": "utf8-lf",
-      "sha256": "2bd78b9cb46fcec797073190d2fff5ffc8ea5db2f64b7a5fd268f305e9f05179"
+      "sha256": "2048223b9d5398f1328b7ee361d5fabb72db3e8c553e133f1d8652025be57431"
     },
     {
       "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-artifact-inputs.mjs",
       "contentNormalization": "utf8-lf",
-      "sha256": "2f2ab0e208027dad6ebd426631c7248acd96eb89165e9d9d247c644af779d5a8"
+      "sha256": "ce27645a9f2da81ea8c277b61c730faa0a80b4d52de6bc30b68c2b9cd2a070f5"
     },
     {
       "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-artifact-prerequisites.json",
       "contentNormalization": "utf8-lf",
-      "sha256": "47fb1174d24cf912361b2cb8e7aeddf396699d6d8da83e6d554133cf297aa936"
+      "sha256": "913ad73ea7d4e9df78c2dffdead7a7072e698a5aed909eb6405c0c1b358c17d6"
     },
     {
       "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-artifact-run.mjs",
       "contentNormalization": "utf8-lf",
-      "sha256": "8eee54a29780dd065678f6c6263a3ad3bd1ebdf3dcb0e197ee01bc10a3a3501a"
+      "sha256": "f0c068557f829cc570dda9aba94547962b31eeb38c1d134654c526e9bdb92ad1"
     },
     {
       "path": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-artifact-reference.mjs",

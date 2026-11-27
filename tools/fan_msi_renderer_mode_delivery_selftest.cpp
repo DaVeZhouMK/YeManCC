@@ -14,16 +14,25 @@ std::atomic<ULONGLONG> g_fanLeaseKeepaliveLastRenewTick{0},g_fanMsiModeRevision{
 std::atomic<unsigned long long> g_fanMsiModePowerGeneration{0},g_fanKeepaliveRendererEpoch{1};
 std::mutex g_fanLeaseKeepaliveMx;std::string g_fanLeaseId="fixture-lease-0001";
 unsigned long long g_fanKeepaliveRendererEpochSnapshot=1,sharedGeneration=7,fanGeneration=7;
+unsigned long long g_fanKeepaliveLogLeaseSequence=0;
 ULONGLONG g_fanKeepaliveRendererGraceUntil=0,fixtureClock=100000;constexpr ULONGLONG FAN_LEASE_RENDERER_GRACE_MS=90000;constexpr DWORD FAN_LEASE_KEEPALIVE_INTERVAL_MS=5000;
 HANDLE g_fanLeaseKeepaliveWake=nullptr;bool mayWrite=true;unsigned rendererPosts=0,nativePosts=0,ensureCalls=0,wakeCalls=0,checks=0;DWORD lastStatus=0;
 bool modelLeaseExpiry=false,modelExpired=false;ULONGLONG modelExpiresAt=0;unsigned controlReceipts=0;std::vector<ULONGLONG> renewalTimes;
 std::vector<json> logs;std::vector<unsigned long long> receivedRevisions;std::vector<std::string> failures,wireBodies;std::string lastWireBody;
 struct DisplayEpoch{std::atomic<ULONGLONG> value{1};ULONGLONG epoch()const{return value.load();}ULONGLONG invalidate(){return value.fetch_add(1)+1;}}g_monitorFanDisplay;
-ULONGLONG GetTickCount64(){return fixtureClock;}
+std::function<void()> clockHook;
+ULONGLONG GetTickCount64(){if(clockHook){auto hook=std::move(clockHook);clockHook={};hook();}return fixtureClock;}
 unsigned long long currentPowerGeneration(){return sharedGeneration;}
 unsigned long long currentFanPowerGeneration(){return fanGeneration;}
 bool fanHostPowerMayWrite(){return mayWrite;}
 bool fanLeaseKeepaliveMayRun(){return mayWrite&&!g_exitRequested&&!g_fanLeaseKeepaliveStop&&!g_fanSleepCleanupInFlight;}
+struct FanHttpPowerAdmission {
+ unsigned long long generation=0;
+ bool captureCurrent(){generation=currentFanPowerGeneration();return current();}
+ bool current()const{return generation==currentFanPowerGeneration()&&mayWrite;}
+};
+void fanWritePowerCancel(){}
+void traceLogTry(const char*){}
 bool isFanLeaseIdValid(const std::string& s){return ymcc::fan_response::leaseIdValid(s);}
 std::string ascii_lower(std::string s){for(char& c:s)if(c>='A'&&c<='Z')c=static_cast<char>(c-'A'+'a');return s;}
 void appendFanLifecycleLog(const char* name,const json& data){logs.push_back(json{{"event",name},{"details",data}});}
@@ -35,6 +44,9 @@ struct FixtureArmLock {std::mutex& target;explicit FixtureArmLock(std::mutex& va
 static void fanLeaseKeepaliveDisarm(const char* reason,const std::string* expectedLease=nullptr);
 #include "ArmExtract.inc"
 #include "DisarmExtract.inc"
+#ifdef FIXTURE_BOUND_RECEIPT
+static void fanLeaseKeepaliveDisarm(const char* reason,const std::string* expectedLease){fanLeaseKeepaliveDisarm(reason,expectedLease,0,nullptr);}
+#endif
 #include "NoteExtract.inc"
 #include "ModeExtract.inc"
 unsigned metadataParseCalls=0,metadataDumpCalls=0,canonicalBuildCalls=0;bool throwMetadataParse=false,throwMetadataDump=false,throwCanonicalBuild=false;std::function<void()> metadataDumpHook;
@@ -60,7 +72,7 @@ DWORD serve(const std::string& body,const json& headers,bool target=true,const s
  return 200;
 }
 struct FakeTransport{std::string body;void send(const std::string& value){body=value;}};
-bool fanLeaseKeepalivePostHeartbeat(const std::string& leaseId,std::string* renewed,DWORD* status,std::string* code){
+bool fanLeaseKeepalivePostHeartbeat(const std::string& leaseId,std::string* renewed,DWORD* status,std::string* code,const FanHttpPowerAdmission& = {}){
  ++nativePosts;FakeTransport transport;
  #include "NativePayloadExtract.inc"
  *status=serve(transport.body,json{{"X-YeMan-Fan-Session","fixture-authorized-session"}});*code=*status==200?"":"LEASE_INVALID";*renewed=*status==200?leaseId:std::string{};return *status==200;
@@ -71,6 +83,11 @@ json headers(){return json{{"Content-Type","application/json"},{"X-YeMan-Fan-Ses
 std::string validBody(){return json{{"leaseId",g_fanLeaseId}}.dump();}
 void renderer(std::string body,const json& hdrs=headers(),bool monitorFanRequest=true,const std::string& method="POST",const std::string& monitorFanPath="/api/heartbeat",std::optional<ULONGLONG> epoch=std::nullopt){
  const auto monitorFanEpoch=epoch.value_or(g_monitorFanDisplay.epoch());FakeRequest request{hdrs,monitorFanRequest,method,monitorFanPath};
+ // This fixture meters metadata and the receiver's lease clock; the public
+ // mutation gate is exercised by the separate HTTP admission fixture.
+ [[maybe_unused]] bool fanPowerMutation=false;
+ [[maybe_unused]] FanHttpPowerAdmission fanPowerAdmission;
+ [[maybe_unused]] const auto* fanWriteGrant=&fanPowerAdmission;
  #include "RendererSendExtract.inc"
  if(lastStatus==200)fanLeaseKeepaliveArm(g_fanLeaseId,"/api/heartbeat",monitorFanEpoch);
 }
@@ -80,7 +97,18 @@ int main(int argc,char** argv){
  if(argc!=2)return 9;const std::string scenario=argv[1];
  try{
   fanLeaseKeepaliveArm(g_fanLeaseId,"/api/acquire-control");
-  if(scenario=="lease-clock-ownership"){
+  if(scenario=="renderer-expiry-rearm"){
+    const auto lease=g_fanLeaseId;
+    const auto originalDisplayEpoch=g_monitorFanDisplay.epoch();
+    g_fanKeepaliveRendererEpoch=2;
+    fixtureClock=g_fanKeepaliveRendererGraceUntil;
+    clockHook=[&](){fanLeaseKeepaliveArm(lease,"/api/heartbeat",originalDisplayEpoch);};
+    fanLeaseKeepaliveTick();
+    expect(g_fanLeaseKeepaliveArmed&&g_fanLeaseId==lease&&nativePosts==0,"old expiry overtook actual renderer rearm");
+    expect(g_fanKeepaliveRendererGraceUntil==fixtureClock+FAN_LEASE_RENDERER_GRACE_MS&&g_monitorFanDisplay.epoch()==originalDisplayEpoch,"old expiry changed the new grace or display epoch");
+    fixtureClock+=FAN_LEASE_KEEPALIVE_INTERVAL_MS;fanLeaseKeepaliveTick();
+    expect(g_fanLeaseKeepaliveArmed&&nativePosts==1,"actual renderer rearm did not preserve the next native renewal");
+  }else if(scenario=="lease-clock-ownership"){
     const auto oldLease=g_fanLeaseId;
     armUnlockHook=[](){fixtureClock+=1000;fanLeaseKeepaliveDisarm("fixture-owner-switch");fanLeaseKeepaliveArm("new-current-lease","/api/acquire-control",g_monitorFanDisplay.epoch());fixtureClock+=500;};
     fixtureClock+=1000;fanLeaseKeepaliveArm(oldLease,"/api/heartbeat",g_monitorFanDisplay.epoch());

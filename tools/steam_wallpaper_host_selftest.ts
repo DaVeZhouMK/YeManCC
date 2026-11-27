@@ -97,11 +97,11 @@ const settingsAt=appStartup.indexOf('  await loadUiSettings();');
 const settingsEnd=appStartup.indexOf('  backgroundOpacity.value =',settingsAt);
 const tailStatement=appStartup.split('\n').find(line=>line.includes('deckyMirrorHost?.ready();')&&line.includes('monitorHudHost?.ready();'));
 assert.ok(settingsAt>=0&&settingsEnd>settingsAt&&tailStatement,'shipping App readiness boundaries changed');
-const runShippingReady=new Function('env','return (async()=>{const {loadUiSettings,steamWallpaperHost,deckyMirrorHost,monitorHudHost,startUpdatePredownload,aiFanMockActive,aiCpuIsolated}=env;let updatePredownloadHost;'+appStartup.slice(settingsAt,settingsEnd)+'await env.tail;'+tailStatement+'})()') as (env:any)=>Promise<void>;
+const runShippingReady=new Function('env','return (async()=>{const {loadUiSettings,steamWallpaperHost,deckyMirrorHost,monitorHudHost,startBackgroundUpdate,aiFanMockActive,aiCpuIsolated}=env;'+appStartup.slice(settingsAt,settingsEnd)+'await env.tail;'+tailStatement+'})()') as (env:any)=>Promise<void>;
 const deferred=()=>{let resolve!:(value?:unknown)=>void,reject!:(error:Error)=>void;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
 for(const mode of ['normal','user-off','fan-isolated','cpu-isolated','settings-failed','stopped-before-settings'])await run('App wallpaper readiness follows persisted settings without waiting for unrelated tail: '+mode,async()=>{
  const f=fixture({startReady:false}),settings=deferred(),tail=deferred();let controls=0,hud=0,updates=0;if(mode==='user-off')f.enable(false);f.context();
- const completion=runShippingReady({loadUiSettings:()=>settings.promise,tail:tail.promise,steamWallpaperHost:f.host,deckyMirrorHost:{ready:()=>controls++},monitorHudHost:{ready:()=>hud++},startUpdatePredownload:()=>{updates++;return{};},aiFanMockActive:mode==='fan-isolated',aiCpuIsolated:mode==='cpu-isolated'});
+ const completion=runShippingReady({loadUiSettings:()=>settings.promise,tail:tail.promise,steamWallpaperHost:f.host,deckyMirrorHost:{ready:()=>controls++},monitorHudHost:{ready:()=>hud++},startBackgroundUpdate:()=>{updates++;},aiFanMockActive:mode==='fan-isolated',aiCpuIsolated:mode==='cpu-isolated'});
  const handled=completion.then(()=>({ok:true}),error=>({ok:false,error}));
  try{await settle();same(f.frames.some(frame=>frame.type==='wallpaper-ready'&&frame.enabled),false,'unloaded settings cannot authorize wallpaper');same(controls+hud+updates,0,'other hosts retain original tail gate');
   if(mode==='settings-failed'){settings.reject(Error('inert settings IO failure'));same((await handled).ok,false,'settings error remains an initialization failure');same(f.frames.some(frame=>frame.type==='wallpaper-ready'&&frame.enabled),false,'failed settings never allow default-on playback');return;}
@@ -131,7 +131,7 @@ await run('cached output is immediate and identical completion is not sent twice
   same(admitted.current(),false,'real disconnect still revokes wallpaper demand');
  }finally{f.host.stop();}
 });
-await run('unrelated asset notifications do not resolve or publish current game',async()=>{const f=fixture();f.context();await settle();const count=f.calls.length;f.change('asset','steam-99');f.change('retry');await settle();same(f.calls.length,count,'no native/owner calls for unrelated changes');f.host.stop();});
+await run('unrelated asset notifications do not resolve or publish current game',async()=>{const f=fixture();try{f.setEntry(pairedEntry());f.context();await settle();same(f.output().at(-1).entry.assetId,'asset-570','complete pair is displayed');const count=f.calls.length;f.change('asset','steam-99');await settle();same(f.calls.length,count,'unrelated key does not refresh the selected pair');f.change('retry');await settle();same(f.calls.length,count,'a background retry does not refresh the complete pair');}finally{f.host.stop();}});
 await run('shortcut EXE cache is displayed and missing pair uses shared identification queue',async()=>{const f=fixture();f.context('4131894616');await settle();same(f.output()[0].entry.assetId,'asset-570','same cached output reused');same(f.calls.find(c=>c.command==='ensure').target.appId,0,'unknown shortcut keeps file identity');same(f.calls.find(c=>c.command==='ensure').target.executable,'G:/Games/local.exe','exact file passed to shared queue');same(f.calls.find(c=>c.command==='ensure').target.catalogSource,'steam-shortcut','active selection retains added-Steam source');same(f.calls.find(c=>c.command==='ensure').target.steamAccount,'17','active selection retains current account');same(f.calls.find(c=>c.command==='ensure').target.shortcutAppId,'4131894616','active selection retains shortcut ID');same(f.calls.filter(c=>c.command==='gameMedia.identify').length,0,'render host performs no competing identity lookup');f.setEntry(entry(570,2));f.change('asset','steam-570');await settle();same(f.calls.filter(c=>c.command==='gameMedia.shortcut').length,1,'same context reuses active-account resolution');same(f.output().at(-1).entry.revision,'2','selected cache revision republished');f.context('4131894616',2);await settle();same(f.calls.filter(c=>c.command==='gameMedia.shortcut').length,2,'new context rechecks account mapping');f.host.stop();});
 await run('confirmed file alias reuses a warm canonical asset on the selected shortcut',async()=>{let current:any={key:'exe-old',bindingRevision:0,status:'missing',ready:false};const f=fixture({lookup:async()=>current,ensure:async()=>current});f.context('4131894616');await settle();same(f.output().at(-1).entry,null,'selected unresolved file has no output');current=entry(570,3);f.change('asset','exe-old');await settle();same(f.output().at(-1).entry.assetId,'asset-570','targeted previous-key notification reuses cached canonical output');same(f.calls.filter(c=>c.command==='gameMedia.shortcut').length,1,'no extra current-account scan for the alias publication');f.host.stop();});
 await run('hidden route clears media without identity or preparation work',async()=>{const f=fixture();f.context('4131894616',1,false);await settle();same(f.output().at(-1).entry,null,'paused output');same(f.calls.some(c=>['lookup','ensure','gameMedia.shortcut'].includes(c.command)),false,'no hidden media reads');f.host.stop();});
@@ -197,6 +197,25 @@ await run('playback failure requires the exact delivered revision and selection'
   same(image.timers.size,0,'image failure starts no retry');
  }finally{image.host.stop();}
 });
+ await run('slow derivative handoff is a single scoped lookup and does not change the next selection',async()=>{
+  const original=pairedEntry(),reduced:GameMediaEntry={...original,asset:{...original.asset!,id:'derived-720p30',reducedPlayback:true},url:'http://fixture/derived-720p30'};
+  const f=fixture({lookup:async target=>target.wallpaperPlaybackFallback?original:reduced});
+  const recovery={contextSeq:1,appId:'570',assetId:reduced.asset!.id,bindingRevision:original.bindingRevision,status:'playback-interrupted'};
+  const lookups=()=>f.calls.filter(c=>c.command==='lookup');
+  try{
+   f.context();await settle();
+   same(f.output().at(-1).entry.recoverOriginal,true,'current host advertises original recovery only for the delivered derivative');
+   f.status({...recovery,contextSeq:0});f.status({...recovery,bindingRevision:0});await settle();
+   same(lookups().length,1,'stale startup timeout cannot trigger a read');
+   f.status(recovery);f.status(recovery);await settle();
+   same(lookups().length,2,'one immediate fallback read for the exact bound derivative');
+   same(lookups().at(-1)?.target.wallpaperPlaybackFallback,{assetId:reduced.asset!.id,bindingRevision:original.bindingRevision},'bypass is scoped to the exact cached derivative');
+   same([f.output().at(-1).contextSeq,f.output().at(-1).entry.assetId],[1,original.asset!.id],'original returns without changing the selection');
+   same([f.failures.length,f.calls.filter(c=>c.command==='ensure').length,f.timers.size],[0,0,0],'no cache invalidation, preparation, or new host timer');
+   f.context('570',2);await settle();
+   same([f.output().at(-1).contextSeq,f.output().at(-1).entry.assetId],[2,reduced.asset!.id],'reselection prefers the verified derivative again');
+  }finally{f.host.stop();}
+ });
 await run('appearance changes update same asset without duplicate ready announcement',async()=>{
  const gate=deferred();let hold=false,asset=pairedEntry(570,1);
  const f=fixture({lookup:async()=>hold?gate.promise as Promise<GameMediaEntry>:asset});
@@ -321,7 +340,7 @@ await run('saved OFF survives committed wake without media or enable requests',a
  const f=fixture();f.context();await settle();f.enable(false);f.change('settings');await settle();const count=f.calls.length;f.resume(2);f.resume(3);await settle();same(f.calls.length,count,'OFF wake has no IPC or media work');same(f.frames.filter(c=>c.type==='wallpaper-ready').at(-1).enabled,false,'OFF cannot be overridden by recovery');f.host.stop();
 });
 await run('resume fences pre-sleep asynchronous completion and new connection still requires current context',async()=>{
- let finish!:(entry:GameMediaEntry)=>void;let reads=0;const pending=new Promise<GameMediaEntry>(resolve=>finish=resolve);const f=fixture({lookup:async()=>++reads===1?pending:entry(570,2),ensure:async()=>entry(570,2)});f.context();await settle();f.resume(2);await settle();same(reads,1,'no second read before fresh post-wake visibility');f.context('570',2);await settle();finish(entry(570,1));await settle();same(f.output().at(-1).entry.revision,'2','old pre-sleep revision cannot overwrite wake output');f.connect();const before=f.output().length;f.resume(3);await settle();same(f.output().length,before,'new peer cannot reuse another connection selection');f.context('1091500',1);await settle();same(f.output().at(-1).appId,'1091500','new authenticated peer selection restores playback');f.host.stop();
+ let finish!:(entry:GameMediaEntry)=>void;let reads=0;const pending=new Promise<GameMediaEntry>(resolve=>finish=resolve);const f=fixture({lookup:async()=>++reads===1?pending:entry(570,2),ensure:async()=>entry(570,2)});f.context();await settle();f.resume(2);await settle();same(reads,1,'no second read before fresh post-wake visibility');f.context('570',2);await settle();finish(entry(570,1));await settle();same(f.output().at(-1).entry.revision,'2','old pre-sleep revision cannot overwrite wake output');f.connect({...f.peer,connectionRevision:2});const before=f.output().length;f.resume(3);await settle();same(f.output().length,before,'new peer cannot reuse another connection selection');f.context('1091500',1);await settle();same(f.output().at(-1).appId,'1091500','new authenticated peer selection restores playback');f.host.stop();
 });
 
 await run('actual IPC committed power event reaches production host and is detached on teardown',async()=>{
@@ -381,6 +400,39 @@ await run('coalesced same-generation suspend scope revokes wallpaper over public
   same(f.calls.length,stable,'repeated and old facts cause no playback replay');
   same(ordinary,normal,'ordinary subscribers do not replay on suspend-scope metadata');
  }finally{f.host.stop();offObserved();offOrdinary();nested();(globalThis as any).window=previous;}
+});
+
+await run('coalesced notification retires in-flight wallpaper without replaying healthy playback',async()=>{
+ for(const held of ['foreground','cache'] as const){
+  const previous=(globalThis as any).window;(globalThis as any).window=new EventTarget();
+  let read=0,lookup=0,releaseForeground!:(value:unknown)=>void,releaseCache!:(value:GameMediaEntry)=>void;
+  const f=fixture({nativePower:true,
+   foregroundRead:async()=>++read===1&&held==='foreground'?new Promise(resolve=>releaseForeground=resolve):nativeProof(),
+   lookup:async()=>++lookup===1&&held==='cache'?new Promise(resolve=>releaseCache=resolve):pairedEntry(570,2)});
+  const publish=(sequence:number,revision:number)=>{
+   const value={phase:'ready',generation:9,known:true,hardwareWritesAllowed:true,notificationPending:false,
+    suspendSerial:1,observedNotificationSequence:sequence,publicationRevision:revision};
+   (globalThis as any).__F2_SHARED_POWER_CURRENT__=value;
+   window.dispatchEvent(new CustomEvent('ipc:power.lifecycleChanged',{detail:value}));
+  };
+  try{
+   publish(21,1);await settle();f.context('570',1);await settle();
+   same([read,lookup],held==='foreground'?[1,0]:[1,1],'original visible context owns one held read');
+   // A revision-only duplicate must not retire a read that still owns its scope.
+   const before=f.calls.length;publish(21,2);await settle();same(f.calls.length,before,'revision-only publication is inert');
+   publish(22,2);await settle();
+   if(held==='foreground')releaseForeground(nativeProof());else releaseCache(pairedEntry(570,1));
+   await settle();
+   same(f.output().filter(packet=>packet.entry!==null).length,0,'retired reply cannot publish an old frame');
+   same([read,lookup],held==='foreground'?[1,0]:[1,1],'scope change alone requests visibility without IO');
+   same(f.frames.filter(x=>x.type==='wallpaper-ready'&&x.requestContext).length,2,'current scope asks for fresh visibility');
+   f.context('570',1);await settle();same(read,1,'old context cannot restart the retired request');
+   f.context('570',2);await settle();same([read,lookup],held==='foreground'?[2,1]:[2,2],'fresh context performs one current read');
+   same(f.output().at(-1).entry.revision,'2','only the fresh frame returns');
+   const healthy=f.calls.length;publish(23,3);await settle();
+   same(f.calls.length,healthy,'a settled healthy frame is not replayed by scope metadata alone');
+  }finally{f.host.stop();(globalThis as any).window=previous;}
+ }
 });
 
 await run('actual S0 IPC Ready restores wallpaper only after fresh visibility and current generation',async()=>{

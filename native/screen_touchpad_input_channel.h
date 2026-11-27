@@ -11,6 +11,12 @@ enum class Phase { Down, Move, Up, Cancel };
 struct Event { int surface=0;UINT32 id=0;POINTER_INPUT_TYPE type=PT_POINTER;Phase phase=Phase::Cancel;float x=0,y=0;bool cancelled=false;DWORD sourceTime=0;bool timeKnown=false; };
 using Sink=void (*)(HWND,const Event&,void*);
 inline constexpr UINT kChannelInputMessage=WM_APP+521;
+inline void applyOwnedVisualSize(const winrt::Windows::UI::Composition::SpriteVisual& visual,SIZE size,SIZE& applied,bool force=false) {
+    if(!force&&size.cx==applied.cx&&size.cy==applied.cy)return;
+    applied={}; // An unsuccessful setter must not make a later sync look current.
+    visual.Size({(float)size.cx,(float)size.cy});
+    applied=size;
+}
 class InputChannel {
     using Controller=winrt::Windows::UI::Core::CoreIndependentInputSourceController;
     using Source=winrt::Windows::UI::Core::CoreIndependentInputSource;
@@ -28,6 +34,7 @@ public:
         Controller controller{nullptr};Source source{nullptr};std::array<winrt::event_token,4> tokens{};
         winrt::Windows::UI::Composition::Desktop::DesktopWindowTarget desktopTarget{nullptr};
         winrt::Windows::UI::Composition::SpriteVisual ownedVisual{nullptr};
+        SIZE ownedVisualSize{};
         void fence() noexcept {
             admitted.store(false,std::memory_order_release);std::lock_guard<std::mutex> lock(mutex);++epoch;head=count=0;posted=overflow=false;
         }
@@ -286,7 +293,9 @@ public:
                     input->attachStage.store("attach-owned-desktop-target",std::memory_order_relaxed);
                     winrt::check_hresult(interop->CreateDesktopWindowTarget(input->target,TRUE,(ABI::Windows::UI::Composition::Desktop::IDesktopWindowTarget**)winrt::put_abi(input->desktopTarget)));
                     input->attachStage.store("attach-owned-visual",std::memory_order_relaxed);
-                    input->ownedVisual=state->compositor.CreateSpriteVisual();input->ownedVisual.Size({(float)rect.right,(float)rect.bottom});input->ownedVisual.Brush(state->compositor.CreateColorBrush({0,0,0,0}));
+                    input->ownedVisual=state->compositor.CreateSpriteVisual();
+                    applyOwnedVisualSize(input->ownedVisual,{rect.right,rect.bottom},input->ownedVisualSize,true);
+                    input->ownedVisual.Brush(state->compositor.CreateColorBrush({0,0,0,0}));
                     input->attachStage.store("attach-owned-target-root",std::memory_order_relaxed);
                     input->desktopTarget.Root(input->ownedVisual);bindingVisual=input->ownedVisual;
                 }
@@ -316,9 +325,9 @@ public:
         }
         return false;
     }
-    bool sync(const std::shared_ptr<Input>& input,HRESULT& error,SIZE size={}) noexcept {
-        bool completed=false;const bool synced=invoke([input,size]{if(!input||!input->ready.load()||!input->source)winrt::throw_hresult(RO_E_CLOSED);
-            if(input->ownedVisual&&size.cx>0&&size.cy>0)input->ownedVisual.Size({(float)size.cx,(float)size.cy});
+    bool sync(const std::shared_ptr<Input>& input,HRESULT& error,SIZE size={},bool forceSize=false) noexcept {
+        bool completed=false;const bool synced=invoke([input,size,forceSize]{if(!input||!input->ready.load()||!input->source)winrt::throw_hresult(RO_E_CLOSED);
+            if(input->ownedVisual&&size.cx>0&&size.cy>0)applyOwnedVisualSize(input->ownedVisual,size,input->ownedVisualSize,forceSize);
             auto dispatcher=input->source.Dispatcher();dispatcher.ProcessEvents(winrt::Windows::UI::Core::CoreProcessEventsOption::ProcessAllIfPresent);
             input->admitted.store(true,std::memory_order_release);
         },error,&completed);

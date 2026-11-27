@@ -21,6 +21,8 @@ static ULONGLONG tick=1;
 static int openHandles=0, closedHandles=0;
 static std::string W2U(const std::wstring& s) { return {s.begin(),s.end()}; }
 static void appendNativeLifecycleLog(const char*,json j){logs.push_back(std::move(j));}
+static bool detailEnabled=false;
+static bool domainLogEnabled(const char*){return detailEnabled;}
 static bool oemVendorStackIntentCurrent(unsigned long long){return current;}
 static HANDLE fakeSnapshot(DWORD,DWORD){if(snapshotFail){SetLastError(ERROR_ACCESS_DENIED);return INVALID_HANDLE_VALUE;}++openHandles;return reinterpret_cast<HANDLE>(1);}
 static BOOL fakeEntry(PROCESSENTRY32W* e){if(cursor>=processes.size()){SetLastError(enumError);return FALSE;}e->th32ProcessID=static_cast<DWORD>(cursor+10);wcscpy_s(e->szExeFile,processes[cursor].name.c_str());return TRUE;}
@@ -92,5 +94,18 @@ int main(){
  reset(); enumError = ERROR_ACCESS_DENIED; oemVendorProcessesStop(names, 29);
  check(logs.back()["enumerationComplete"] == false && logs.back()["operationOk"] == false,
        "incomplete enumeration is not absence evidence");
+ reset(); OemVendorWakeReadback wake{7,true};
+ check(oemVendorProcessesStop(names,30,&wake)&&wake.noProcessMatches&&logs.empty()&&openHandles==closedHandles,
+       "quiet wake repeat closes its snapshot and skips JSON with detail off");
+ detailEnabled=true; oemVendorProcessesStop(names,31,&wake); detailEnabled=false;
+ check(logs.size()==1&&logs[0]["wakeGuardQuietRepeat"]==true&&logs[0]["wakeGuardGeneration"]==7,
+       "quiet wake observation has explicit detail marker when enabled");
+ reset(); processes={process(L"MSI Center M.exe")};
+ check(oemVendorProcessesStop(names,32,&wake)&&!wake.noProcessMatches&&logs.size()==2&&
+       !logs.back().contains("wakeGuardQuietRepeat")&&logs.back()["matchedInSnapshot"]==1,
+       "matched process and confirmed termination remain resident");
+ reset(); enumError=ERROR_ACCESS_DENIED;wake.noProcessMatches=false;
+ check(!oemVendorProcessesStop(names,33,&wake)&&!wake.noProcessMatches&&!logs.back().contains("wakeGuardQuietRepeat"),
+       "failed enumeration remains resident during a repeating guard");
  std::cout<<"cases="<<cases<<" failures="<<failed<<" hardwareCalls=0 RESULT="<<(failed?"FAIL":"PASS")<<"\n";return failed?1:0;
 }

@@ -157,11 +157,11 @@ static ymcc::targetReturn::pnpAbsence::Result fixturePsProfileAbsence(){
 
 static void fixturePsReadConfig(std::vector<std::wstring> paths,DWORD end=ERROR_NO_MORE_ITEMS){fixturePsProfileScenario="absent";fixturePsPaths=std::move(paths);fixturePsDetachedRoot.clear();fixturePsDetachedRootResult=CR_NO_SUCH_DEVNODE;fixturePsOpenFails=false;fixturePsEndError=end;fixturePsSizeFailure=fixturePsDetailFailure=fixturePsParentFailure=fixturePsIdFailure=-1;fixturePsParentCycle=fixturePsDepthLimit=false;}
 // Per-case real private Host precondition; never borrow a previous case's pin.
-static void fullPipeBeginReadonlyPsOwner();
+static void fullPipeBeginReadonlyPsOwner(const char* fault,bool expectOwnership);
 static void fullPipeEndReadonlyPsOwner();
 struct FullPipeReadonlyPsOwner {
  bool active=true;
- FullPipeReadonlyPsOwner(){try{fullPipeBeginReadonlyPsOwner();}catch(...){active=false;try{fullPipeEndReadonlyPsOwner();}catch(...){}throw;}}
+ FullPipeReadonlyPsOwner(){try{fullPipeBeginReadonlyPsOwner("none",true);}catch(...){active=false;try{fullPipeEndReadonlyPsOwner();}catch(...){}throw;}}
  void close(){if(active){active=false;fullPipeEndReadonlyPsOwner();}}
  ~FullPipeReadonlyPsOwner(){if(active){try{close();}catch(...){}}}
 };

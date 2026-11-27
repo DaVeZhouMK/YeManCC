@@ -3,6 +3,11 @@
   "kind": "CURRENT26_FIXED_CPP_ARTIFACT_SOFTWARE_V1",
   "status": "BOUND",
   "scope": "FIXED_CPP_ARTIFACT_SOFTWARE_ONLY",
+  "historicalArchive": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\vfixpipe26-archive\\manifest.json",
+    "bytes": 22085,
+    "sha256": "9b71c1fdc8867ac5fcb3adae9538799704b3492c349021eaf53eeac294cc5790"
+  },
   "workspaceRoot": "G:/YeManCC-Work/Testing/YMCC/Workspace/R105CP-20261117A",
   "authorizedBuildRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\R105CP-20261117A\\Build\\Validation\\CurrentCoordinatorTerminal22",
   "sourceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\R105CP-20261117A\\Mainline\\YeManCC-source\\YeManCC",

@@ -94,6 +94,45 @@ test('newly registered cases without receipts cannot disappear', t => {
   assert(plan.needsRerun.every(row => row.status === 'NOT_RUN'));
   assert.deepEqual(plan.batches.flatMap(row => row.testIds).sort(), ['fan.two', 'lighting.three']);
 });
+test('registration prerequisite alone is tracked without assigning a rerun batch or claiming reuse', t => {
+  const f = fixture(t, ['fan.one']), reason = 'EXACT_PREPARED_ROOT_REQUIRED';
+  const artifact = path.join(f.root, 'prepared.exe');
+  fs.writeFileSync(artifact, 'recorded private fixture');
+  const file = f.write('original', [{ ...f.passed('fan.one'), candidateArtifacts: [{ path: artifact, sha256: sha('recorded private fixture') }] }]);
+  Object.assign(f.adapters[0], { blockedReason: reason, artifactInputs: [] });
+  const { plan, audit } = f.plan([file], { assignments: [{ owner: 'peer', tests: ['fan.one'] }] });
+  assert.equal(audit.registeredScope.complete, false); assert.equal(plan.executedTests, 0);
+  assert.equal(plan.summary.reusableAtAudit, 0); assert.equal(plan.summary.needsRerun, 0);
+  assert.equal(plan.summary.needsPrerequisites, 1); assert.deepEqual(plan.batches, []);
+  assert.deepEqual(plan.needsPrerequisites, [{ id: 'fan.one', owner: 'peer', status: 'STALE_REGISTRATION', reason }]);
+});
+test('registration prerequisite does not erase latest failures, source drift, or unrun cases', t => {
+  const f = fixture(t, ['fan.deferred', 'fan.failed', 'fan.changed', 'fan.unrun']);
+  const file = f.write('original', [f.passed('fan.deferred'), { id: 'fan.failed', status: 'FAIL' }, f.passed('fan.changed')]);
+  for (const adapter of f.adapters) adapter.blockedReason = 'EXACT_PREPARED_ROOT_REQUIRED';
+  fs.writeFileSync(path.join(f.repoRoot, 'fan.changed.mjs'), 'changed original entry');
+  const { plan, audit } = f.plan([file]);
+  assert.equal(audit.status, 'FAIL'); assert.equal(plan.summary.reusableAtAudit, 0);
+  assert.deepEqual(plan.needsPrerequisites.map(row => row.id), ['fan.deferred']);
+  assert.deepEqual(plan.needsRerun.map(row => [row.id, row.status]), [['fan.failed', 'FAIL'], ['fan.unrun', 'NOT_RUN'], ['fan.changed', 'STALE_SOURCE']]);
+  assert.deepEqual(plan.batches.flatMap(row => row.testIds), ['fan.failed', 'fan.unrun', 'fan.changed']);
+});
+test('registration prerequisite restoration re-audits original artifacts before reuse or scheduling', t => {
+  const f = fixture(t, ['fan.one']);
+  const artifact = path.join(f.root, 'prepared.exe');
+  fs.writeFileSync(artifact, 'recorded private fixture');
+  const file = f.write('original', [{ ...f.passed('fan.one'), candidateArtifacts: [{ path: artifact, sha256: sha('recorded private fixture') }] }]);
+  Object.assign(f.adapters[0], { blockedReason: 'EXACT_PREPARED_ROOT_REQUIRED', artifactInputs: [] });
+  assert.deepEqual(f.plan([file]).plan.batches, []);
+  delete f.adapters[0].blockedReason;
+  f.adapters[0].artifactInputs = [artifact];
+  const reuse = f.plan([file]).plan;
+  assert.equal(reuse.summary.reusableAtAudit, 1); assert.equal(reuse.summary.needsPrerequisites, 0);
+  f.adapters[0].artifactInputs = [];
+  const rerun = f.plan([file]).plan;
+  assert.equal(rerun.summary.reusableAtAudit, 0); assert.equal(rerun.summary.needsPrerequisites, 0);
+  assert.deepEqual(rerun.batches.flatMap(row => row.testIds), ['fan.one']);
+});
 test('registration changes require execution of the new source closure', t => {
   const f = fixture(t), file = f.write('initial');
   fs.writeFileSync(path.join(f.repoRoot, 'new.cs'), 'new dependency');
@@ -258,24 +297,26 @@ test('a candidate changed after its audit cannot remain in the reuse list', t =>
   const f = fixture(t), candidate = path.join(f.root, 'late-candidate.dll'); fs.writeFileSync(candidate, 'approved');
   f.adapters.find(row => row.id === 'fan.one').artifactInputs = [candidate];
   const file = f.write('candidate-run', [{ ...f.passed('fan.one'), candidateArtifacts: [{ path: candidate, sha256: sha('approved') }] }]);
-  const originalRead = fs.readFileSync;
-  let reads = 0;
-  fs.readFileSync = function (target, ...args) {
-    const bytes = originalRead.call(this, target, ...args);
-    // The registry snapshot and recorded-input snapshot read before the audit.
-    if (target === candidate && ++reads === 3) {
-      assert.equal(sha(bytes), sha('approved'));
+  const originalStat = fs.statSync;
+  let auditStats = 0, injected = false;
+  fs.statSync = function (target, options) {
+    const observed = originalStat.apply(this, arguments);
+    // Return the audit's final observation, then expose the mutation to the planner.
+    if (target === candidate && options?.bigint === true && ++auditStats === 2) {
+      assert.equal(sha(fs.readFileSync(candidate)), sha('approved'));
       fs.writeFileSync(candidate, 'changed-after-audit');
+      injected = true;
     }
-    return bytes;
+    return observed;
   };
   try {
     const { plan, audit } = f.plan([file], { tests: ['fan.one'] });
+    assert(injected, 'candidate changed after the audit collected its final stat');
     assert.equal(audit.cases[0].status, 'PASS');
     assert.equal(plan.status, 'BLOCKED'); assert.equal(plan.summary.reusableAtAudit, 0);
     assert.equal(plan.needsRerun[0].status, 'NEEDS_REAUDIT');
     assert(plan.diagnostics.some(row => row.code === 'RECORDED_INPUT_CHANGED_DURING_PLANNING'));
-  } finally { fs.readFileSync = originalRead; }
+  } finally { fs.statSync = originalStat; }
 });
 
 test('saved batch preflight detects changed source before starting another test', t => {
@@ -480,8 +521,11 @@ function withGrowthAfterStat(file, size, run) {
     if (target !== file) return originalStat.call(this, target, ...args);
     fs.truncateSync(file, size);
     const observed = originalStat.call(this, target, ...args);
-    assert.equal(observed.size, size);
+    const observedSize = args[0]?.bigint === true ? BigInt(size) : size;
+    const grownSize = args[0]?.bigint === true ? 1n : 1;
+    assert.equal(observed.size, observedSize);
     fs.appendFileSync(file, ' ');
+    assert.equal(originalStat.call(this, target, ...args).size, observedSize + grownSize);
     grows++;
     return observed;
   };

@@ -20,7 +20,7 @@ def main():
  receipt={'pass':False,'snapshotCompiled':False,'currentTreeAccepted':False,'hardwareAccepted':False,'fullLifecycleAccepted':False,'status':'PREPARING','startedAt':datetime.datetime.now().astimezone().isoformat()}
  try:
   names=[]
-  for folder in ['native','capabilities','deps/webview2/build/native/include','deps/adlx-sdk']:
+  for folder in ['native','capabilities','deps/webview2/build/native/include']:
    names.extend(str(p.relative_to(ROOT)).replace('\\','/') for p in (ROOT/folder).rglob('*') if p.is_file() and p.suffix.lower() in ('.h','.hpp','.cpp','.inc','.inl','.tpp','.idl','.rc'))
   names=sorted(set([*names,'deps/json/json.hpp','native/build_native.bat',AUTH,SELF]))
   original={n:(ROOT/n).read_bytes() for n in names};hashes={n:sha(b) for n,b in original.items()};snapshot=out/'source'

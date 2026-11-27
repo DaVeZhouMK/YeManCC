@@ -259,10 +259,17 @@ runs:
         'background-ready without the private notification: pending',
         'background-ready without the private notification: stale'
       )
+      $requiredColdStartup = @(
+        'background-ready public startup with no prior Host: authorized',
+        'background-ready public startup with no prior Host: off-after-claim'
+      )
       if ($backgroundWake.ok -ne $true -or $backgroundWake.hardwareCalls -ne 0 -or
           @($requiredBoundaries | Where-Object { $boundaryFacts -cnotcontains $_ }).Count -ne 0 -or
           @($requiredProjectedWake | Where-Object { $backgroundPassedNames -cnotcontains $_ }).Count -ne 0) {
         throw 'Fan release check did not cover one-shot wake, coordinator IPC failures and the projection without a private notification.'
+      }
+      if (@($requiredColdStartup | Where-Object { $backgroundPassedNames -cnotcontains $_ }).Count -ne 0) {
+        throw 'Fan release check did not cover startup without a Host and cancellation after the claim.'
       }
   - name: Generate version sources and type check
     if: ${{ inputs.check-only != 'true' }}

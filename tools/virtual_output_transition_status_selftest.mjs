@@ -214,6 +214,7 @@ static std::string inputHostBoundPersonaValue(){return mockBound;}
 static json externalControllerPrioritySnapshot(){return json::object();}
 enum class YmccFamily {Unknown,ValveSteamDeck};
 static struct {bool resolved=false;YmccFamily family=YmccFamily::Unknown;} g_machineIdentity;
+namespace ymcc::hidHideInstalledVersion { static bool tooOld() noexcept { return false; } }
 ${machineBlock}
 ${machineRejection}
 ${getPersona}

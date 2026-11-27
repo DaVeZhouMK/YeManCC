@@ -8,21 +8,23 @@ import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/t
 import {extract} from './fixtures/msi_owned_return_retired_io/source-binding.mjs';
 import {runNativeVisibilityCold,validateColdEmptyTailSelection} from './fixtures/native_visibility_cold/run.mjs';
 import {resolvePreHostToolchain,preHostChildEnvironment} from './ymcc_sim/global/controller-foreground-latency/prehost-toolchain.mjs';
-import {collectPreHostOutputProvenance} from './ymcc_sim/global/controller-foreground-latency/prehost-output-provenance.mjs';
+import {assertPreHostBatchSelection,collectPreHostOutputProvenance} from './ymcc_sim/global/controller-foreground-latency/prehost-output-provenance.mjs';
 import {snapshotPreHostInputs,verifyPreHostInputs} from './ymcc_sim/global/controller-foreground-latency/prehost-input-provenance.mjs';
 
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const args=process.argv.slice(2);
 const directed=args.includes('--native-visibility');
 const handoffOnly=args.includes('--handoff-cycle');
-const preHostOnly=args.includes('--prehost-writer');
+const win5Only=args.includes('--win5-return-exit2');
+const preHostOnly=args.includes('--prehost-writer')||win5Only;
 const coldIndex=args.indexOf('--cold-visibility');
 const coldOnly=coldIndex>=0;
 const coldSelection=coldOnly?validateColdEmptyTailSelection(args[coldIndex+1]):null;
 assert(Number(directed)+Number(handoffOnly)+Number(preHostOnly)+Number(coldOnly)<=1,'Choose one directed foreground-shield scope');
-for(let n=0;n<args.length;++n){if(args[n]==='--cold-visibility'){validateColdEmptyTailSelection(args[++n]);continue;}if(args[n]==='--output'){assert(args[++n],'Output path required');continue;}assert(['--native-visibility','--handoff-cycle','--prehost-writer'].includes(args[n]),'Unknown foreground-shield option');}
+if(win5Only)assert(args.length===3&&args[0]==='--output'&&args[1]&&!args[1].startsWith('--')&&args[2]==='--win5-return-exit2','Win5 selection requires its own explicit output and no other scope');
+for(let n=0;n<args.length;++n){if(args[n]==='--cold-visibility'){validateColdEmptyTailSelection(args[++n]);continue;}if(args[n]==='--output'){assert(args[++n],'Output path required');continue;}assert(['--native-visibility','--handoff-cycle','--prehost-writer','--win5-return-exit2'].includes(args[n]),'Unknown foreground-shield option');}
 assert(preHostOnly||process.env.YMCC_GPD_PREHOST_WRITER_CASE===undefined,
-    'Inherited YMCC_GPD_PREHOST_WRITER_CASE requires an explicit --prehost-writer scope');
+    'Inherited YMCC_GPD_PREHOST_WRITER_CASE requires an explicit pre-Host scope');
 const preHostToolchain=preHostOnly?resolvePreHostToolchain(repo):null;
 if(preHostToolchain)assert.equal(path.resolve(process.execPath).toLowerCase(),path.resolve(preHostToolchain.node).toLowerCase(),'Explicit pre-Host scope requires its declared Node engine');
 const outputIndex=args.indexOf('--output');
@@ -109,7 +111,7 @@ const workspace=fs.mkdtempSync(path.join(workspaceParent,'S30-'));
 const preHostEnvironment=preHostOnly?preHostChildEnvironment(preHostToolchain,path.join(workspace,'prehost-environment'),repo):null;
 if(preHostEnvironment)for(const name of ['TEMP','TMP','USERPROFILE','APPDATA','LOCALAPPDATA','YEMAN_POWER_CONTROL_DIR'])fs.mkdirSync(preHostEnvironment[name],{recursive:true});
 const result={schema:1,passed:false,status:'started',identities,configurations:[],hardwareAccess:false,
-    selection:preHostOnly?'prehost-writer':handoffOnly?'handoff-cycle':directed?'native-visibility':'default',
+    selection:win5Only?'win5-return-exit2':preHostOnly?'prehost-writer':handoffOnly?'handoff-cycle':directed?'native-visibility':'default',
     productMainExecuted:false,realSteamOrSleep:false,fullPersistentAcceptance:false,workspace,
     lifecycleComponent:{featureId:'controller.virtual-input',parentAdapterId:'controller.signal-evidence',
         persistence:'persistent',role:'foreground-visibility-component'},
@@ -127,7 +129,7 @@ function execute(label,command,argumentsList,cwd,timeout,environment){
 const positive=path.join(workspace,preHostOnly?'Unoptimized':'Release');
 const preHostInputBefore=preHostOnly?snapshotPreHostInputs(repo):null;
 if(preHostInputBefore){fs.writeFileSync(path.join(output,'prehost-inputs.before.json'),JSON.stringify(preHostInputBefore,null,2)+'\n',{flag:'wx'});result.inputSnapshotBefore={path:path.join(output,'prehost-inputs.before.json'),sha256:hash(fs.readFileSync(path.join(output,'prehost-inputs.before.json'))),inputCount:preHostInputBefore.inputCount,elapsedMs:preHostInputBefore.elapsedMs};save();}
-const build=execute(preHostOnly?'Unoptimized-build':'Release-build',preHostOnly?preHostToolchain.powershell:'pwsh',['-NoProfile','-File',path.join(repo,'tools/verify-msi-foreground-isolation.ps1'),'-OutputRoot',positive,...(preHostOnly?['-CaseFilter','Priority','-PreHostWriterSelection','all','-BuildProfile','Unoptimized','-DeadlineEpochMs',String(Date.now()+240000)]:handoffOnly?['-CaseFilter','NativeHandoff']:directed?['-CaseFilter','NativeVisibility']:[])],repo,240000,preHostEnvironment);
+const build=execute(preHostOnly?'Unoptimized-build':'Release-build',preHostOnly?preHostToolchain.powershell:'pwsh',['-NoProfile','-File',path.join(repo,'tools/verify-msi-foreground-isolation.ps1'),'-OutputRoot',positive,...(preHostOnly?['-CaseFilter','Priority','-PreHostWriterSelection',win5Only?'win5-return-exit2':'all','-BuildProfile','Unoptimized','-DeadlineEpochMs',String(Date.now()+240000)]:handoffOnly?['-CaseFilter','NativeHandoff']:directed?['-CaseFilter','NativeVisibility']:[])],repo,240000,preHostEnvironment);
 assert.equal(build.status,0,'Actual production TU: '+path.join(output,'Release-build.log'));
 const compilerInputs=new Map();
 for(const name of ['regression','dsu','steam-recovery']){
@@ -161,11 +163,8 @@ if(preHostOnly){
     const block=header.slice(header.indexOf('    if(preHostWriterCase){'));
     const allowed=block.match(/allowed=\{([\s\S]*?)\};/);
     assert(allowed,'Original pre-Host selection registration');
-    const selections=[...allowed[1].matchAll(/"([^"]+)"/g)].map(row=>row[1]);
-    assert(batch.passed,'Actual pre-Host batch must pass');
-    assert.deepEqual(batch.selectedCases,selections);
-    assert.deepEqual(batch.cases.map(row=>row.selection),selections);
-    assert.deepEqual(batch.notRun,[]);
+    const selections=win5Only?['win5-return-exit2']:[...allowed[1].matchAll(/"([^"]+)"/g)].map(row=>row[1]);
+    assertPreHostBatchSelection(batch,selections,win5Only);
     for(const row of batch.cases){
         const text=fs.readFileSync(path.join(batchRoot,row.selection,'stdout.raw'),'utf8');
         const passed=[...text.matchAll(/^PASS native-only: (.+)$/gm)].map(match=>match[1].trim());
@@ -187,7 +186,7 @@ if(preHostOnly){
         externalToolClosureAccepted:compiledSources.externalToolClosureAccepted,scope:'Actual compiled repository dependencies and original precompile snapshot pins; not a cache or global execution proof'};
     const outputProvenanceStarted=Date.now();
     const outputProvenance=collectPreHostOutputProvenance(workspaceParent,workspace,positive,
-        JSON.parse(fs.readFileSync(path.join(positive,'compiled-snapshot-hashes.json'),'utf8').replace(/^\uFEFF/,'')),batch,selections,{requireBuildDetails:true});
+        JSON.parse(fs.readFileSync(path.join(positive,'compiled-snapshot-hashes.json'),'utf8').replace(/^\uFEFF/,'')),batch,selections,{requireBuildDetails:true,directedWin5:win5Only});
     const outputProvenanceFile=path.join(output,'prehost-output-provenance.json');
     fs.writeFileSync(outputProvenanceFile,JSON.stringify(outputProvenance,null,2)+'\n',{flag:'wx'});
     result.outputProvenance={path:outputProvenanceFile,sha256:hash(fs.readFileSync(outputProvenanceFile)),

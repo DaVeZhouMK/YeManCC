@@ -16,6 +16,7 @@ internal sealed record Snapshot(int Schema,bool Ok,bool Supported,bool BatteryPr
     public string? CapabilityOrigin {get;init;}
     public bool? CapabilityDeclaredByFrozenHc {get;init;}
     public string? CapabilityCatalogSha256 {get;init;}
+    internal bool NoChargeRouteForGet {get;init;}
 }
 internal class Store(string directory,Func<bool>? requestCurrent=null)
 {
@@ -291,27 +292,47 @@ internal sealed class Controller
     }
     public Snapshot Read()
     {
-        lock(gate)
-        {
-            try
-            {
-                EnsureJournal();RequireAvailable();using var p=OpenOwnedProvider();var read=p.Read();
-                if(p.CanReadLimit&&!conflict)verification=read.Limit is null?"unknown":"readback";
-                if(active&&expectedRaw!=read.Raw){active=false;conflict=true;warning="充电状态被其他程序修改，软件限充已暂停";verification="conflict";revision++;}
-                return State(true,!conflict,read);
-            }
-            catch(Exception e){TraceLog.Error("controller-read-error",e);return State(false,false,null,e.Message);}
-        }
+        lock(gate)return ReadLocked(out _);
     }
-    public Snapshot Apply(string fence,int target)
+    internal Snapshot ReadForGet()
+    {
+        lock(gate)return ReadLocked(out _,reportThroughGetResult:true);
+    }
+    Snapshot ReadLocked(out bool transportReadFailed,bool reportThroughGetResult=false)
+    {
+        transportReadFailed=false;
+        try
+        {
+            EnsureJournal();
+            // The host logs this expected admission result with the get receipt.
+            if(reportThroughGetResult&&route is null)
+            {
+                RequireRequestCurrent();
+                return State(false,false,null,Policy.Unavailable(identity)) with {NoChargeRouteForGet=true};
+            }
+            RequireAvailable();
+            transportReadFailed=true;
+            using var p=OpenOwnedProvider();var read=p.Read();
+            transportReadFailed=false;
+            if(p.CanReadLimit&&!conflict)verification=read.Limit is null?"unknown":"readback";
+            if(active&&expectedRaw!=read.Raw){active=false;conflict=true;warning="充电状态被其他程序修改，软件限充已暂停";verification="conflict";revision++;}
+            return State(true,!conflict,read);
+        }
+        catch(Exception e){TraceLog.Error("controller-read-error",e);return State(false,false,null,e.Message);}
+    }
+    public Snapshot Apply(string fence,int target)=>Apply(fence,target,out _);
+    Snapshot Apply(string fence,int target,out bool transportReadFailed)
     {
         lock(gate)
         {
             Reading? before=null;
+            transportReadFailed=false;
             try
             {
                 EnsureJournal();RequireAvailable();if(route is null||!Policy.ValueAllowed(route,target))return State(false,false,null,"此机型不支持所选充电档位");
+                transportReadFailed=true;
                 using var p=OpenOwnedProvider();var observed=p.Read();
+                transportReadFailed=false;
                 RequireAvailable(); // A slow read cannot admit persistence in a later public power generation.
                 before=observed; // Keep preflight rejection separate from an uncertain submitted write.
                 if(fence!=Fence(before))return State(false,!conflict,before,"充电状态已更新，请确认当前值后重新应用");
@@ -446,29 +467,39 @@ internal sealed class Controller
     public void RecoverSoftware(){lock(gate){if(!invalidStore&&recovery is {Software:true})StartSaved();}}
     public void StartSaved()
     {
-        lock(gate)
+        lock(gate)_=StartSavedLocked();
+    }
+    bool StartSavedLocked()
+    {
+        bool retryTransportOpen=false;
+        try
         {
-            try
+            EnsureJournal();RequireAvailable();
+            if(invalidStore||active)return false;
+            bool restoring=recovery is {Software:true};
+            if(restoring){RestoreOwned();conflict=false;}
+            else if(recovery is not null){conflict=true;warning="上次充电设置结果未确认，请重新读取并确认";return false;}
+            if(conflict||preference?.Managed!=true)return false;
+            var s=ReadLocked(out var transportReadFailed);
+            if(!s.Supported)return !restoring&&transportReadFailed;
+            // A valid transport with an unknown value allows an explicit user
+            // setting, but cannot authorize unattended startup/resume replay.
+            retryTransportOpen=!restoring;
+            using(var p=OpenOwnedProvider())
             {
-                EnsureJournal();RequireAvailable();
-                if(invalidStore)return;
-                if(active)return; // duplicate startup requests must not restore a running policy
-                if(recovery is {Software:true}){RestoreOwned();conflict=false;}
-                else if(recovery is not null){conflict=true;warning="上次充电设置结果未确认，请重新读取并确认";return;}
-                if(conflict||preference?.Managed!=true)return;
-                var s=Read();if(!s.Supported)return;
-                // A valid transport with an unknown value allows an explicit user
-                // setting, but cannot authorize unattended startup/resume replay.
-                using(var p=OpenOwnedProvider())if(p.CanReadLimit&&s.CurrentLimit is null)
+                retryTransportOpen=false;
+                if(p.CanReadLimit&&s.CurrentLimit is null)
                 {
                     warning="当前充电上限未知，未自动恢复；请手动选择档位后应用";
                     if(route?.RouteId=="msi-claw-cg3em-ap")TraceLog.Write("saved-charge-restore-skipped",new {route.RouteId,s.RequestedLimit,s.Verification,reason="current-limit-unknown",writeAttempted=false},true);
-                    return;
+                    return false;
                 }
-                _=Apply(s.Fence,preference.Target);
             }
-            catch(Exception e){warning=e.Message;}
+            _=Apply(s.Fence,preference.Target,out var applyReadFailed);
+            return !restoring&&applyReadFailed;
         }
+        catch(Exception e){warning=e.Message;}
+        return retryTransportOpen;
     }
     public void Suspend()
     {
@@ -490,13 +521,15 @@ internal sealed class Controller
             // an active policy owns a normal journal, not pending cleanup work.
             resumeCleanupPending=false;
             int beforeStart=revision;
-            StartSaved();
-            // A retired preflight did not start the saved policy. Keep its
-            // original budget only when no new ownership or action was taken.
-            resumeAdmissionDeferred=resumeCleanupAttempts<MaxResumeCleanupAttempts&&revision==beforeStart&&
+            bool retryRead=StartSavedLocked();
+            // A failed read without an owned journal can wait for the next maintenance tick.
+            // A revoked admission instead continues on the next public Ready.
+            bool canRetryPreflight=resumeCleanupAttempts<MaxResumeCleanupAttempts&&revision==beforeStart&&
                 !active&&!invalidStore&&!conflict&&recovery is null&&providerCleanupDebt.Count==0&&
-                preference?.Managed==true&&!ready();
-            resumeCleanupPending=resumeAdmissionDeferred||providerCleanupDebt.Count!=0||(!active&&recovery is {Software:true});
+                preference?.Managed==true;
+            resumeAdmissionDeferred=canRetryPreflight&&!ready();
+            resumeCleanupPending=resumeAdmissionDeferred||(canRetryPreflight&&retryRead)||
+                providerCleanupDebt.Count!=0||(!active&&recovery is {Software:true});
         }
         catch(Exception error){resumeCleanupPending=true;warning=error.Message;}
     }

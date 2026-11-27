@@ -1,4 +1,5 @@
 import { invoke } from './ipc';
+import type { SharedPowerWriteScope } from './powerLifecycleState';
 
 /**
  * Per-process CPU policy.  This is deliberately separate from the global
@@ -43,9 +44,9 @@ export interface AppliedGameCorePolicy {
   error?: string;
 }
 
-export async function detectGameCorePolicy(): Promise<GameCorePolicyCapabilities | null> {
+export async function detectGameCorePolicy(signal?: AbortSignal): Promise<GameCorePolicyCapabilities | null> {
   try {
-    const raw = await invoke<Partial<GameCorePolicyCapabilities>>('game.corePolicy.detect');
+    const raw = await invoke<Partial<GameCorePolicyCapabilities>>('game.corePolicy.detect', undefined, { signal });
     if (!raw || typeof raw !== 'object') return null;
     const classes = Array.isArray(raw.efficiencyClasses)
       ? raw.efficiencyClasses.map(Number).filter(Number.isFinite)
@@ -68,19 +69,45 @@ export async function detectGameCorePolicy(): Promise<GameCorePolicyCapabilities
   }
 }
 
+// Both foreground and resident owners share the same submitted write. An
+// explicit edit may try again; an automatic reconciliation needs a receipt or
+// a different desired policy to proceed.
+let writePending = false;
+let uncertainIntent: string | undefined;
+const CORE_POLICY_RECEIPT_TIMEOUT_MS = 10_000;
+
+async function writeCorePolicy<T>(command: string, args: object, intent: string, automatic: boolean, busy: T): Promise<T> {
+  if (writePending) return busy;
+  if (automatic && uncertainIntent === intent) throw new Error('游戏 CPU 设置回执未确认');
+  writePending = true;
+  uncertainIntent = undefined;
+  try {
+    return await invoke<T>(command, args, { timeoutMs: CORE_POLICY_RECEIPT_TIMEOUT_MS });
+  } catch (error) {
+    uncertainIntent = intent;
+    throw error;
+  } finally {
+    writePending = false;
+  }
+}
+
 export async function applyGameCorePolicy(
   target: GameCorePolicyTarget,
   mode: GameCorePolicyMode,
   hyperThreadMode: GameHyperThreadMode,
+  powerScope: SharedPowerWriteScope,
+  automatic = false,
 ): Promise<AppliedGameCorePolicy> {
-  return invoke<AppliedGameCorePolicy>('game.corePolicy.apply', {
+  return writeCorePolicy<AppliedGameCorePolicy>('game.corePolicy.apply', {
     ...target,
     mode,
     hyperThreadMode,
-  });
+    powerScope,
+  }, JSON.stringify([target.pid, target.processCreated, mode, hyperThreadMode]), automatic,
+  { ok: false, applied: false, mode, hyperThreadMode, cpuSetCount: 0, affinityMask: '', efficiencyClasses: [] });
 }
 
-export async function clearGameCorePolicy(target?: GameCorePolicyTarget): Promise<boolean> {
-  const result = await invoke<{ ok?: boolean }>('game.corePolicy.clear', target ?? {});
+export async function clearGameCorePolicy(powerScope: SharedPowerWriteScope, target?: GameCorePolicyTarget, automatic = false): Promise<boolean> {
+  const result = await writeCorePolicy<{ ok?: boolean }>('game.corePolicy.clear', { ...target, powerScope }, 'clear', automatic, { ok: false });
   return result?.ok === true;
 }

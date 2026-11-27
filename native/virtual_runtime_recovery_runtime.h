@@ -59,10 +59,11 @@ static void retire(const char* reason) noexcept {
 static bool operationalTerminal(const ymcc::VirtualStartProtection::View& view) noexcept {
     return !view.locked && (view.phase=="success" || view.phase=="failure" || view.phase=="expired");
 }
-static const char* stale(bool includeHost=true) {
+enum class PowerScope { Original, CurrentReturn };
+static const char* stale(bool includeHost=true,PowerScope scope=PowerScope::Original) {
     if(inputHostExitFenceRaised() || g_exitRequested.load(std::memory_order_acquire) ||
         g_inputCaptureStop.load(std::memory_order_acquire))return "exit-or-capture-stop";
-    if(currentPowerGeneration()!=state.power ||
+    if((scope==PowerScope::Original && currentPowerGeneration()!=state.power) ||
         g_inputHostPowerAdmissionRevoked.load(std::memory_order_acquire) ||
         g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready)return "power-retired";
     // Snapshot publication is frequent (including identical values and ACKs).

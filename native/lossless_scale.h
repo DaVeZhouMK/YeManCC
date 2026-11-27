@@ -75,12 +75,13 @@ public:
     DWORD openError()const{return openError_;}
 };
 // Explicit failure reset only; no process-name sweep, child-tree kill or retry.
-inline ScaleFailureReset terminateFailedLossless(const Identity& expected){
+inline ScaleFailureReset terminateFailedLossless(const Identity& expected,const std::function<bool()>& current={}){
     ScaleFailureReset r;r.requested=true;
     if(!expected.pid||expected.pid==4||expected.pid==GetCurrentProcessId()){r.reason="failure-reset-identity-rejected";return r;}
     ScaleProcess victim;
     if(!victim.open(expected,true,PROCESS_TERMINATE)){r.error=victim.openError();r.closed=r.error==ERROR_INVALID_PARAMETER;r.reason=r.closed?"failure-reset-already-exited":"failure-reset-identity-unconfirmed";return r;}
     if(!victim.alive()){r.closed=true;r.reason="failure-reset-already-exited";return r;}
+    if(current&&!current()){r.reason="failure-reset-context-changed";return r;}
     r.attempted=true;
     if(!TerminateProcess(victim.handle(),1)){r.error=GetLastError();r.reason="failure-reset-terminate-denied";return r;}
     r.terminated=true;r.closed=WaitForSingleObject(victim.handle(),800)==WAIT_OBJECT_0;
@@ -145,11 +146,13 @@ public:
         if(current&&!current())return {};
         s.profileMatches=scaleProfileMatches(s.status,title);s.paused=scalePaused(s.status);return s;
     }
-    ScaleInvoke invoke(HWND window,ScaleButton expected){
+    ScaleInvoke invoke(HWND window,ScaleButton expected,const std::function<bool()>& current){
+        if(!current())return {};
         auto button=control(window,L"ScaleButton");if(!button||scaleButtonState(name(button.Get()))!=expected)return {};
         Ptr<IUIAutomationInvokePattern> pattern;
         if(FAILED(button->GetCurrentPatternAs(UIA_InvokePatternId,IID_PPV_ARGS(&pattern))))return {};
         BOOL focus=TRUE;if(FAILED(ui2_->get_AutoSetFocus(&focus))||focus)return {};
+        if(!current())return {};
         return {true,SUCCEEDED(pattern->Invoke())};
     }
 };
@@ -288,16 +291,16 @@ public:
         const auto h=scaleMainWindow(request_.ls.pid);if(!h)return {};
         const auto current=automation_.observe(h,request_.profileTitle);
         if(!current.readable||current.state!=ScaleButton::On||!current.profileMatches)return {};
-        return automation_.invoke(h,ScaleButton::On);
+        return automation_.invoke(h,ScaleButton::On,[this]{return ready();});
     }
     ScaleInvoke invokeOnce(){
         if(!ready()||!valid()||!foregroundMatches())return {};
         const auto h=scaleMainWindow(request_.ls.pid);if(!h)return {};
-        return automation_.invoke(h,ScaleButton::Off);
+        return automation_.invoke(h,ScaleButton::Off,[this]{return ready();});
     }
     bool cancelPending(){
         if(!ready()||!valid())return false;const auto h=scaleMainWindow(request_.ls.pid);
-        return h&&automation_.invoke(h,ScaleButton::Countdown).accepted;
+        return h&&automation_.invoke(h,ScaleButton::Countdown,[this]{return ready();}).accepted;
     }
 };
 inline ScaleSnapshot observeScaling(const Identity& ls,bool& available,const std::function<bool()>& current={}){

@@ -1,0 +1,803 @@
+{
+  "schemaVersion": 1,
+  "kind": "EXACT_TERMINAL29_SHARED_POWER_SOFTWARE_RUNTIME_EXPECTATIONS",
+  "managedInputContract": "current105-terminal29-shared-input-power-v1",
+  "scope": "Actual qualified positive original118 and exact child29 bindings only; other native polarities/lifecycle16/public product and physical remain unqualified.",
+  "reviewedNativeRaw": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Workspace\\SharedSleepCoordinator29-Native-20261115\\r2\\runtime\\fixture-result.json",
+    "bytes": 74810459,
+    "sha256": "01f1351a0d186af2caf8282fa06a2befff995822b956e36e419678c5facb138a"
+  },
+  "sourceOrder": {
+    "kind": "STATIC_SOURCE_PROJECTION_NOT_NATIVE_EXECUTION",
+    "preTargetReturnBodyBoundary": 102,
+    "occurrences": [
+      {
+        "sourceOrdinal": 1,
+        "nameOccurrence": 1,
+        "occurrenceId": "1:1:full-coordinator-real-managed-pipe/none",
+        "name": "full-coordinator-real-managed-pipe/none"
+      },
+      {
+        "sourceOrdinal": 2,
+        "nameOccurrence": 1,
+        "occurrenceId": "2:1:full-coordinator-real-managed-pipe/controller-dispose-once",
+        "name": "full-coordinator-real-managed-pipe/controller-dispose-once"
+      },
+      {
+        "sourceOrdinal": 3,
+        "nameOccurrence": 1,
+        "occurrenceId": "3:1:full-coordinator-real-managed-pipe/context-dispose-once",
+        "name": "full-coordinator-real-managed-pipe/context-dispose-once"
+      },
+      {
+        "sourceOrdinal": 4,
+        "nameOccurrence": 1,
+        "occurrenceId": "4:1:ROG/full-coordinator-real-managed-pipe/none",
+        "name": "ROG/full-coordinator-real-managed-pipe/none"
+      },
+      {
+        "sourceOrdinal": 5,
+        "nameOccurrence": 1,
+        "occurrenceId": "5:1:GPD/full-coordinator-real-managed-pipe/none",
+        "name": "GPD/full-coordinator-real-managed-pipe/none"
+      },
+      {
+        "sourceOrdinal": 6,
+        "nameOccurrence": 1,
+        "occurrenceId": "6:1:full-coordinator-real-managed-pipe/recreate-owned-ids-rotate",
+        "name": "full-coordinator-real-managed-pipe/recreate-owned-ids-rotate"
+      },
+      {
+        "sourceOrdinal": 7,
+        "nameOccurrence": 1,
+        "occurrenceId": "7:1:full-coordinator-real-managed-pipe/recreate-owned-ids-foreign",
+        "name": "full-coordinator-real-managed-pipe/recreate-owned-ids-foreign"
+      },
+      {
+        "sourceOrdinal": 8,
+        "nameOccurrence": 1,
+        "occurrenceId": "8:1:full-coordinator-real-managed-pipe/recreate-owned-ids-unbound-ack",
+        "name": "full-coordinator-real-managed-pipe/recreate-owned-ids-unbound-ack"
+      },
+      {
+        "sourceOrdinal": 9,
+        "nameOccurrence": 1,
+        "occurrenceId": "9:1:ROG/full-coordinator-real-managed-pipe/none/dualsense-edge",
+        "name": "ROG/full-coordinator-real-managed-pipe/none/dualsense-edge"
+      },
+      {
+        "sourceOrdinal": 10,
+        "nameOccurrence": 1,
+        "occurrenceId": "10:1:ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+        "name": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge"
+      },
+      {
+        "sourceOrdinal": 11,
+        "nameOccurrence": 1,
+        "occurrenceId": "11:1:ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+        "name": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge"
+      },
+      {
+        "sourceOrdinal": 12,
+        "nameOccurrence": 1,
+        "occurrenceId": "12:1:ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+        "name": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge"
+      },
+      {
+        "sourceOrdinal": 13,
+        "nameOccurrence": 1,
+        "occurrenceId": "13:1:ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+        "name": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge"
+      },
+      {
+        "sourceOrdinal": 14,
+        "nameOccurrence": 1,
+        "occurrenceId": "14:1:ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+        "name": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge"
+      },
+      {
+        "sourceOrdinal": 15,
+        "nameOccurrence": 1,
+        "occurrenceId": "15:1:ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge",
+        "name": "ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge"
+      },
+      {
+        "sourceOrdinal": 16,
+        "nameOccurrence": 1,
+        "occurrenceId": "16:1:ROG/full-coordinator-real-managed-pipe/refresh-during-ps-probe/dualsense-edge",
+        "name": "ROG/full-coordinator-real-managed-pipe/refresh-during-ps-probe/dualsense-edge"
+      },
+      {
+        "sourceOrdinal": 17,
+        "nameOccurrence": 1,
+        "occurrenceId": "17:1:ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge",
+        "name": "ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge"
+      },
+      {
+        "sourceOrdinal": 18,
+        "nameOccurrence": 1,
+        "occurrenceId": "18:1:ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge",
+        "name": "ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge"
+      },
+      {
+        "sourceOrdinal": 19,
+        "nameOccurrence": 1,
+        "occurrenceId": "19:1:VERIFICATION/current-source-lineage-real-managed-pipe",
+        "name": "VERIFICATION/current-source-lineage-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 20,
+        "nameOccurrence": 1,
+        "occurrenceId": "20:1:PS-WAKE/central-protection-same-power-real-managed-pipe",
+        "name": "PS-WAKE/central-protection-same-power-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 21,
+        "nameOccurrence": 1,
+        "occurrenceId": "21:1:PS-WAKE/protected-boundary/natural-return",
+        "name": "PS-WAKE/protected-boundary/natural-return"
+      },
+      {
+        "sourceOrdinal": 22,
+        "nameOccurrence": 1,
+        "occurrenceId": "22:1:PS-WAKE/protected-boundary/expired-queued-task",
+        "name": "PS-WAKE/protected-boundary/expired-queued-task"
+      },
+      {
+        "sourceOrdinal": 23,
+        "nameOccurrence": 1,
+        "occurrenceId": "23:1:PS-WAKE/protected-boundary/new-same-persona-ticket",
+        "name": "PS-WAKE/protected-boundary/new-same-persona-ticket"
+      },
+      {
+        "sourceOrdinal": 24,
+        "nameOccurrence": 1,
+        "occurrenceId": "24:1:PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "name": "PS-WAKE/protected-boundary/unprotected-task-new-ticket"
+      },
+      {
+        "sourceOrdinal": 25,
+        "nameOccurrence": 1,
+        "occurrenceId": "25:1:RECEIPT/receipt-owned-replay-real-managed-pipe",
+        "name": "RECEIPT/receipt-owned-replay-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 26,
+        "nameOccurrence": 1,
+        "occurrenceId": "26:1:RECEIPT/receipt-untrusted-asset-real-managed-pipe",
+        "name": "RECEIPT/receipt-untrusted-asset-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 27,
+        "nameOccurrence": 1,
+        "occurrenceId": "27:1:RECEIPT/receipt-untrusted-identity-real-managed-pipe",
+        "name": "RECEIPT/receipt-untrusted-identity-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 28,
+        "nameOccurrence": 1,
+        "occurrenceId": "28:1:WAKE/MSI/wake-old-generation-real-managed-pipe",
+        "name": "WAKE/MSI/wake-old-generation-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 29,
+        "nameOccurrence": 1,
+        "occurrenceId": "29:1:WAKE/MSI/wake-power-not-ready-real-managed-pipe",
+        "name": "WAKE/MSI/wake-power-not-ready-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 30,
+        "nameOccurrence": 1,
+        "occurrenceId": "30:1:WAKE/MSI/wake-new-player-real-managed-pipe",
+        "name": "WAKE/MSI/wake-new-player-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 31,
+        "nameOccurrence": 1,
+        "occurrenceId": "31:1:WAKE/MSI/wake-duplicate-arm-real-managed-pipe",
+        "name": "WAKE/MSI/wake-duplicate-arm-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 32,
+        "nameOccurrence": 1,
+        "occurrenceId": "32:1:WAKE/MSI/wake-power-during-hide-real-managed-pipe",
+        "name": "WAKE/MSI/wake-power-during-hide-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 33,
+        "nameOccurrence": 1,
+        "occurrenceId": "33:1:WAKE/MSI/wake-inspection-pending-real-managed-pipe",
+        "name": "WAKE/MSI/wake-inspection-pending-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 34,
+        "nameOccurrence": 1,
+        "occurrenceId": "34:1:WAKE/MSI/wake-player-expired-real-managed-pipe",
+        "name": "WAKE/MSI/wake-player-expired-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 35,
+        "nameOccurrence": 1,
+        "occurrenceId": "35:1:WAKE/ROG/wake-old-generation-real-managed-pipe",
+        "name": "WAKE/ROG/wake-old-generation-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 36,
+        "nameOccurrence": 1,
+        "occurrenceId": "36:1:WAKE/ROG/wake-power-not-ready-real-managed-pipe",
+        "name": "WAKE/ROG/wake-power-not-ready-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 37,
+        "nameOccurrence": 1,
+        "occurrenceId": "37:1:WAKE/ROG/wake-new-player-real-managed-pipe",
+        "name": "WAKE/ROG/wake-new-player-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 38,
+        "nameOccurrence": 1,
+        "occurrenceId": "38:1:WAKE/ROG/wake-duplicate-arm-real-managed-pipe",
+        "name": "WAKE/ROG/wake-duplicate-arm-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 39,
+        "nameOccurrence": 1,
+        "occurrenceId": "39:1:WAKE/ROG/wake-power-during-hide-real-managed-pipe",
+        "name": "WAKE/ROG/wake-power-during-hide-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 40,
+        "nameOccurrence": 1,
+        "occurrenceId": "40:1:WAKE/ROG/wake-inspection-pending-real-managed-pipe",
+        "name": "WAKE/ROG/wake-inspection-pending-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 41,
+        "nameOccurrence": 1,
+        "occurrenceId": "41:1:WAKE/ROG/wake-player-expired-real-managed-pipe",
+        "name": "WAKE/ROG/wake-player-expired-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 42,
+        "nameOccurrence": 1,
+        "occurrenceId": "42:1:WAKE/GPD/wake-old-generation-real-managed-pipe",
+        "name": "WAKE/GPD/wake-old-generation-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 43,
+        "nameOccurrence": 1,
+        "occurrenceId": "43:1:WAKE/GPD/wake-power-not-ready-real-managed-pipe",
+        "name": "WAKE/GPD/wake-power-not-ready-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 44,
+        "nameOccurrence": 1,
+        "occurrenceId": "44:1:WAKE/GPD/wake-new-player-real-managed-pipe",
+        "name": "WAKE/GPD/wake-new-player-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 45,
+        "nameOccurrence": 1,
+        "occurrenceId": "45:1:WAKE/GPD/wake-duplicate-arm-real-managed-pipe",
+        "name": "WAKE/GPD/wake-duplicate-arm-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 46,
+        "nameOccurrence": 1,
+        "occurrenceId": "46:1:WAKE/GPD/wake-power-during-hide-real-managed-pipe",
+        "name": "WAKE/GPD/wake-power-during-hide-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 47,
+        "nameOccurrence": 1,
+        "occurrenceId": "47:1:WAKE/GPD/wake-inspection-pending-real-managed-pipe",
+        "name": "WAKE/GPD/wake-inspection-pending-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 48,
+        "nameOccurrence": 1,
+        "occurrenceId": "48:1:WAKE/GPD/wake-player-expired-real-managed-pipe",
+        "name": "WAKE/GPD/wake-player-expired-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 49,
+        "nameOccurrence": 1,
+        "occurrenceId": "49:1:WAKE/PC/wake-pc-recreate-real-managed-pipe",
+        "name": "WAKE/PC/wake-pc-recreate-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 50,
+        "nameOccurrence": 1,
+        "occurrenceId": "50:1:WAKE/PC/wake-pc-retry-transient-real-managed-pipe",
+        "name": "WAKE/PC/wake-pc-retry-transient-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 51,
+        "nameOccurrence": 1,
+        "occurrenceId": "51:1:WAKE/PC/wake-pc-retry-exhausted-real-managed-pipe",
+        "name": "WAKE/PC/wake-pc-retry-exhausted-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 52,
+        "nameOccurrence": 1,
+        "occurrenceId": "52:1:WAKE/PC/wake-pc-retry-deadline-real-managed-pipe",
+        "name": "WAKE/PC/wake-pc-retry-deadline-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 53,
+        "nameOccurrence": 1,
+        "occurrenceId": "53:1:WAKE/PC/wake-pc-retry-source-timeout-real-managed-pipe",
+        "name": "WAKE/PC/wake-pc-retry-source-timeout-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 54,
+        "nameOccurrence": 1,
+        "occurrenceId": "54:1:PIPE-BUDGET/PC/pipe-budget-write-remaining-real-managed-pipe",
+        "name": "PIPE-BUDGET/PC/pipe-budget-write-remaining-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 55,
+        "nameOccurrence": 1,
+        "occurrenceId": "55:1:PIPE-BUDGET/PC/pipe-budget-write-expiry-real-managed-pipe",
+        "name": "PIPE-BUDGET/PC/pipe-budget-write-expiry-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 56,
+        "nameOccurrence": 1,
+        "occurrenceId": "56:1:PIPE-BUDGET/PC/pipe-budget-connect-remaining-real-managed-pipe",
+        "name": "PIPE-BUDGET/PC/pipe-budget-connect-remaining-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 57,
+        "nameOccurrence": 1,
+        "occurrenceId": "57:1:PIPE-BUDGET/PC/pipe-budget-connect-expiry-real-managed-pipe",
+        "name": "PIPE-BUDGET/PC/pipe-budget-connect-expiry-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 58,
+        "nameOccurrence": 1,
+        "occurrenceId": "58:1:PS-WAKE/protected-boundary/release-budget-long",
+        "name": "PS-WAKE/protected-boundary/release-budget-long"
+      },
+      {
+        "sourceOrdinal": 59,
+        "nameOccurrence": 1,
+        "occurrenceId": "59:1:PS-WAKE/protected-boundary/release-budget-operation",
+        "name": "PS-WAKE/protected-boundary/release-budget-operation"
+      },
+      {
+        "sourceOrdinal": 60,
+        "nameOccurrence": 1,
+        "occurrenceId": "60:1:PS-WAKE/protected-boundary/release-budget-near-deadline",
+        "name": "PS-WAKE/protected-boundary/release-budget-near-deadline"
+      },
+      {
+        "sourceOrdinal": 61,
+        "nameOccurrence": 1,
+        "occurrenceId": "61:1:PIPE-BUDGET/MSI/pipe-budget-write-remaining-real-managed-pipe",
+        "name": "PIPE-BUDGET/MSI/pipe-budget-write-remaining-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 62,
+        "nameOccurrence": 1,
+        "occurrenceId": "62:1:PIPE-BUDGET/ROG/pipe-budget-write-remaining-real-managed-pipe",
+        "name": "PIPE-BUDGET/ROG/pipe-budget-write-remaining-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 63,
+        "nameOccurrence": 1,
+        "occurrenceId": "63:1:PIPE-BUDGET/GPD/pipe-budget-write-remaining-real-managed-pipe",
+        "name": "PIPE-BUDGET/GPD/pipe-budget-write-remaining-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 64,
+        "nameOccurrence": 1,
+        "occurrenceId": "64:1:INITIAL-PIPE-BUDGET/MSI/remaining-real-managed-pipe",
+        "name": "INITIAL-PIPE-BUDGET/MSI/remaining-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 65,
+        "nameOccurrence": 1,
+        "occurrenceId": "65:1:INITIAL-PIPE-BUDGET/ROG/remaining-real-managed-pipe",
+        "name": "INITIAL-PIPE-BUDGET/ROG/remaining-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 66,
+        "nameOccurrence": 1,
+        "occurrenceId": "66:1:INITIAL-PIPE-BUDGET/GPD/remaining-real-managed-pipe",
+        "name": "INITIAL-PIPE-BUDGET/GPD/remaining-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 67,
+        "nameOccurrence": 1,
+        "occurrenceId": "67:1:INITIAL-PIPE-BUDGET/PC/remaining-real-managed-pipe",
+        "name": "INITIAL-PIPE-BUDGET/PC/remaining-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 68,
+        "nameOccurrence": 1,
+        "occurrenceId": "68:1:INITIAL-PIPE-BUDGET/PC/expiry-real-managed-pipe",
+        "name": "INITIAL-PIPE-BUDGET/PC/expiry-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 69,
+        "nameOccurrence": 2,
+        "occurrenceId": "69:2:INITIAL-PIPE-BUDGET/PC/remaining-real-managed-pipe",
+        "name": "INITIAL-PIPE-BUDGET/PC/remaining-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 70,
+        "nameOccurrence": 1,
+        "occurrenceId": "70:1:INITIAL-PIPE-BUDGET/PC/expired-before-entry-real-managed-pipe",
+        "name": "INITIAL-PIPE-BUDGET/PC/expired-before-entry-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 71,
+        "nameOccurrence": 1,
+        "occurrenceId": "71:1:INITIAL-QUEUED-AUTHORITY/PC/expired-request-new-persona/initial-target-admission",
+        "name": "INITIAL-QUEUED-AUTHORITY/PC/expired-request-new-persona/initial-target-admission"
+      },
+      {
+        "sourceOrdinal": 72,
+        "nameOccurrence": 1,
+        "occurrenceId": "72:1:INITIAL-QUEUED-AUTHORITY/PC/expired-request-new-persona/persona-transition",
+        "name": "INITIAL-QUEUED-AUTHORITY/PC/expired-request-new-persona/persona-transition"
+      },
+      {
+        "sourceOrdinal": 73,
+        "nameOccurrence": 1,
+        "occurrenceId": "73:1:INITIAL-QUEUED-AUTHORITY/PC/power-generation-changed/initial-target-admission",
+        "name": "INITIAL-QUEUED-AUTHORITY/PC/power-generation-changed/initial-target-admission"
+      },
+      {
+        "sourceOrdinal": 74,
+        "nameOccurrence": 1,
+        "occurrenceId": "74:1:WAKE/MSI/wake-dead-host-real-managed-pipe",
+        "name": "WAKE/MSI/wake-dead-host-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 75,
+        "nameOccurrence": 1,
+        "occurrenceId": "75:1:WAKE/ROG/wake-dead-host-real-managed-pipe",
+        "name": "WAKE/ROG/wake-dead-host-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 76,
+        "nameOccurrence": 1,
+        "occurrenceId": "76:1:WAKE/GPD/wake-dead-host-real-managed-pipe",
+        "name": "WAKE/GPD/wake-dead-host-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 77,
+        "nameOccurrence": 1,
+        "occurrenceId": "77:1:WAKE/PC/wake-dead-host-real-managed-pipe",
+        "name": "WAKE/PC/wake-dead-host-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 78,
+        "nameOccurrence": 1,
+        "occurrenceId": "78:1:WAKE/PC/wake-dead-host-not-ready-real-managed-pipe",
+        "name": "WAKE/PC/wake-dead-host-not-ready-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 79,
+        "nameOccurrence": 1,
+        "occurrenceId": "79:1:WAKE/PC/wake-dead-host-new-player-real-managed-pipe",
+        "name": "WAKE/PC/wake-dead-host-new-player-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 80,
+        "nameOccurrence": 1,
+        "occurrenceId": "80:1:WAKE/PC/wake-dead-host-new-power-real-managed-pipe",
+        "name": "WAKE/PC/wake-dead-host-new-power-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 81,
+        "nameOccurrence": 1,
+        "occurrenceId": "81:1:WAKE/PC/wake-dead-host-expired-real-managed-pipe",
+        "name": "WAKE/PC/wake-dead-host-expired-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 82,
+        "nameOccurrence": 1,
+        "occurrenceId": "82:1:WAKE/PC/wake-dead-host-start-budget-real-managed-pipe",
+        "name": "WAKE/PC/wake-dead-host-start-budget-real-managed-pipe"
+      },
+      {
+        "sourceOrdinal": 83,
+        "nameOccurrence": 1,
+        "occurrenceId": "83:1:PS-WAKE/read-only-endpoint-enumeration",
+        "name": "PS-WAKE/read-only-endpoint-enumeration"
+      },
+      {
+        "sourceOrdinal": 84,
+        "nameOccurrence": 1,
+        "occurrenceId": "84:1:PREPARE-ACK-LOSS/PC/actual-owned-target-held-cleanup",
+        "name": "PREPARE-ACK-LOSS/PC/actual-owned-target-held-cleanup"
+      },
+      {
+        "sourceOrdinal": 85,
+        "nameOccurrence": 1,
+        "occurrenceId": "85:1:PREPARE-ACK-LOSS/ROG/actual-owned-target-held-cleanup",
+        "name": "PREPARE-ACK-LOSS/ROG/actual-owned-target-held-cleanup"
+      },
+      {
+        "sourceOrdinal": 86,
+        "nameOccurrence": 1,
+        "occurrenceId": "86:1:PREPARE-ACK-LOSS/ROG/explicit-OFF-while-owned-target-held",
+        "name": "PREPARE-ACK-LOSS/ROG/explicit-OFF-while-owned-target-held"
+      },
+      {
+        "sourceOrdinal": 87,
+        "nameOccurrence": 1,
+        "occurrenceId": "87:1:PREPARE-ACK-LOSS/ROG/app-exit-sweep-while-owned-target-held",
+        "name": "PREPARE-ACK-LOSS/ROG/app-exit-sweep-while-owned-target-held"
+      },
+      {
+        "sourceOrdinal": 88,
+        "nameOccurrence": 1,
+        "occurrenceId": "88:1:PREPARE-ACK-LOSS/PC/unknown-owned-root-negative-proof",
+        "name": "PREPARE-ACK-LOSS/PC/unknown-owned-root-negative-proof"
+      },
+      {
+        "sourceOrdinal": 89,
+        "nameOccurrence": 1,
+        "occurrenceId": "89:1:PS-RETURN/ROG/owned-HID-present/xinput-mask-0",
+        "name": "PS-RETURN/ROG/owned-HID-present/xinput-mask-0"
+      },
+      {
+        "sourceOrdinal": 90,
+        "nameOccurrence": 1,
+        "occurrenceId": "90:1:PS-RETURN/ROG/owned-HID-unknown/xinput-mask-0",
+        "name": "PS-RETURN/ROG/owned-HID-unknown/xinput-mask-0"
+      },
+      {
+        "sourceOrdinal": 91,
+        "nameOccurrence": 1,
+        "occurrenceId": "91:1:PS-RETURN/ROG/owned-HID-absent/xinput-mask-0",
+        "name": "PS-RETURN/ROG/owned-HID-absent/xinput-mask-0"
+      },
+      {
+        "sourceOrdinal": 92,
+        "nameOccurrence": 1,
+        "occurrenceId": "92:1:PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+        "name": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0"
+      },
+      {
+        "sourceOrdinal": 93,
+        "nameOccurrence": 1,
+        "occurrenceId": "93:1:PS-RETURN/ROG/owned-HID-present/xinput-mask-1",
+        "name": "PS-RETURN/ROG/owned-HID-present/xinput-mask-1"
+      },
+      {
+        "sourceOrdinal": 94,
+        "nameOccurrence": 1,
+        "occurrenceId": "94:1:PS-RETURN/ROG/owned-HID-unknown/xinput-mask-1",
+        "name": "PS-RETURN/ROG/owned-HID-unknown/xinput-mask-1"
+      },
+      {
+        "sourceOrdinal": 95,
+        "nameOccurrence": 1,
+        "occurrenceId": "95:1:PS-RETURN/ROG/owned-HID-absent/xinput-mask-1",
+        "name": "PS-RETURN/ROG/owned-HID-absent/xinput-mask-1"
+      },
+      {
+        "sourceOrdinal": 96,
+        "nameOccurrence": 1,
+        "occurrenceId": "96:1:PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+        "name": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1"
+      },
+      {
+        "sourceOrdinal": 97,
+        "nameOccurrence": 1,
+        "occurrenceId": "97:1:PS-RETURN/ROG/owned-HID-absent/xinput-mask-0/durable-store-blocked-once",
+        "name": "PS-RETURN/ROG/owned-HID-absent/xinput-mask-0/durable-store-blocked-once"
+      },
+      {
+        "sourceOrdinal": 98,
+        "nameOccurrence": 1,
+        "occurrenceId": "98:1:PS-RETURN/ROG/owned-HID-absent/xinput-mask-0/root-without-HID-present",
+        "name": "PS-RETURN/ROG/owned-HID-absent/xinput-mask-0/root-without-HID-present"
+      },
+      {
+        "sourceOrdinal": 99,
+        "nameOccurrence": 1,
+        "occurrenceId": "99:1:PS-RETURN/ROG/owned-HID-absent/xinput-mask-0/root-query-unknown",
+        "name": "PS-RETURN/ROG/owned-HID-absent/xinput-mask-0/root-query-unknown"
+      },
+      {
+        "sourceOrdinal": 100,
+        "nameOccurrence": 1,
+        "occurrenceId": "100:1:PS-RETURN/ROG/owned-HID-absent/xinput-mask-0/root-nonpresent-record",
+        "name": "PS-RETURN/ROG/owned-HID-absent/xinput-mask-0/root-nonpresent-record"
+      },
+      {
+        "sourceOrdinal": 101,
+        "nameOccurrence": 1,
+        "occurrenceId": "101:1:OFF-LIFECYCLE/ROG-returned-with-StartBlocked",
+        "name": "OFF-LIFECYCLE/ROG-returned-with-StartBlocked"
+      },
+      {
+        "sourceOrdinal": 102,
+        "nameOccurrence": 1,
+        "occurrenceId": "102:1:OFF-LIFECYCLE/expired-OFF-after-expired-new-ON",
+        "name": "OFF-LIFECYCLE/expired-OFF-after-expired-new-ON"
+      },
+      {
+        "sourceOrdinal": 103,
+        "nameOccurrence": 1,
+        "occurrenceId": "103:1:TARGET-RETURN/PC/source-free-normal-complete-stop",
+        "name": "TARGET-RETURN/PC/source-free-normal-complete-stop"
+      },
+      {
+        "sourceOrdinal": 104,
+        "nameOccurrence": 1,
+        "occurrenceId": "104:1:TARGET-RETURN/PC/retained-old-pin-exact-current-settlement",
+        "name": "TARGET-RETURN/PC/retained-old-pin-exact-current-settlement"
+      },
+      {
+        "sourceOrdinal": 105,
+        "nameOccurrence": 1,
+        "occurrenceId": "105:1:TARGET-RETURN/PC/corrupt-file",
+        "name": "TARGET-RETURN/PC/corrupt-file"
+      },
+      {
+        "sourceOrdinal": 106,
+        "nameOccurrence": 1,
+        "occurrenceId": "106:1:TARGET-RETURN/PC/exclusive-owner-conflict",
+        "name": "TARGET-RETURN/PC/exclusive-owner-conflict"
+      },
+      {
+        "sourceOrdinal": 107,
+        "nameOccurrence": 1,
+        "occurrenceId": "107:1:TARGET-RETURN/PC/source-free-normal-complete-stop/commit-denial-transient",
+        "name": "TARGET-RETURN/PC/source-free-normal-complete-stop/commit-denial-transient"
+      },
+      {
+        "sourceOrdinal": 108,
+        "nameOccurrence": 1,
+        "occurrenceId": "108:1:TARGET-RETURN/PC/source-free-normal-complete-stop/commit-denial-persistent",
+        "name": "TARGET-RETURN/PC/source-free-normal-complete-stop/commit-denial-persistent"
+      },
+      {
+        "sourceOrdinal": 109,
+        "nameOccurrence": 1,
+        "occurrenceId": "109:1:TARGET-RETURN/PC/source-free-normal-complete-stop/commit-denial-transient/io-deadline",
+        "name": "TARGET-RETURN/PC/source-free-normal-complete-stop/commit-denial-transient/io-deadline"
+      },
+      {
+        "sourceOrdinal": 110,
+        "nameOccurrence": 1,
+        "occurrenceId": "110:1:TARGET-RETURN/PC/source-free-normal-complete-stop/commit-denial-transient/io-power",
+        "name": "TARGET-RETURN/PC/source-free-normal-complete-stop/commit-denial-transient/io-power"
+      },
+      {
+        "sourceOrdinal": 111,
+        "nameOccurrence": 1,
+        "occurrenceId": "111:1:TARGET-RETURN/PC/source-free-normal-complete-stop/commit-denial-transient/recording",
+        "name": "TARGET-RETURN/PC/source-free-normal-complete-stop/commit-denial-transient/recording"
+      },
+      {
+        "sourceOrdinal": 112,
+        "nameOccurrence": 1,
+        "occurrenceId": "112:1:TARGET-RETURN/PC/source-free-normal-complete-stop/commit-denial-transient/external-priority",
+        "name": "TARGET-RETURN/PC/source-free-normal-complete-stop/commit-denial-transient/external-priority"
+      },
+      {
+        "sourceOrdinal": 113,
+        "nameOccurrence": 1,
+        "occurrenceId": "113:1:TARGET-RETURN/PC/source-free-normal-complete-stop/commit-denial-transient/native-lease",
+        "name": "TARGET-RETURN/PC/source-free-normal-complete-stop/commit-denial-transient/native-lease"
+      },
+      {
+        "sourceOrdinal": 114,
+        "nameOccurrence": 1,
+        "occurrenceId": "114:1:TARGET-RETURN/PC/source-free-normal-complete-stop/commit-denial-persistent/post-io-recording",
+        "name": "TARGET-RETURN/PC/source-free-normal-complete-stop/commit-denial-persistent/post-io-recording"
+      },
+      {
+        "sourceOrdinal": 115,
+        "nameOccurrence": 1,
+        "occurrenceId": "115:1:TARGET-RETURN/PC/live-recreate-predecessor-commit-denied",
+        "name": "TARGET-RETURN/PC/live-recreate-predecessor-commit-denied"
+      },
+      {
+        "sourceOrdinal": 116,
+        "nameOccurrence": 1,
+        "occurrenceId": "116:1:TARGET-RETURN/PC/unrelated-physical-history-retained",
+        "name": "TARGET-RETURN/PC/unrelated-physical-history-retained"
+      },
+      {
+        "sourceOrdinal": 117,
+        "nameOccurrence": 2,
+        "occurrenceId": "117:2:PREPARE-ACK-LOSS/PC/actual-owned-target-held-cleanup",
+        "name": "PREPARE-ACK-LOSS/PC/actual-owned-target-held-cleanup"
+      },
+      {
+        "sourceOrdinal": 118,
+        "nameOccurrence": 1,
+        "occurrenceId": "118:1:OFF-LIFECYCLE/MSI-return-unproven",
+        "name": "OFF-LIFECYCLE/MSI-return-unproven"
+      }
+    ]
+  },
+  "expectations": {
+    "positive": {
+      "managedInputContract": "current105-terminal29-shared-input-power-v1",
+      "mutation": null,
+      "expectedExit": 0,
+      "expectedStatus": "PASS",
+      "cases": 118,
+      "uniqueNames": 116,
+      "checks": 7274,
+      "expectedOwnedChildren": 124,
+      "traceIdentitySha256": "b3ecc578c17baff0c8faf9c21922bedda9989bc4de8954239520b7b23b8ad5ea",
+      "exactFailures": [],
+      "requiredOriginalPassingInstances": [],
+      "countsOrigin": "Complete fixed-source native118 natural exit0 with124 exact PID/startupNonce children. Original unresolved MSI negative is last; no debt reset.",
+      "boundaries": {
+        "pre": {
+          "ordinal": 102,
+          "checks": 6656,
+          "lastCaseName": "OFF-LIFECYCLE/expired-OFF-after-expired-new-ON",
+          "msiModeDebt": false
+        },
+        "post": {
+          "ordinal": 118,
+          "checks": 7274,
+          "lastCaseName": "OFF-LIFECYCLE/MSI-return-unproven",
+          "msiModeDebt": true
+        }
+      }
+    }
+  },
+  "unqualifiedRoles": [
+    "cancellation",
+    "psOwnership",
+    "psBinding",
+    "bypassAdmission",
+    "recoveryInheritance",
+    "switchReturn",
+    "switchOwner"
+  ],
+  "publicRuntimeAccepted": false,
+  "sourceApprovalGranted": false,
+  "physicalAccepted": false,
+  "baselineRuntimeContract": {
+    "relative": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-runtime-expectations.json",
+    "bytes": 29819,
+    "sha256": "42a59c8226fb5852cd7d19b57fd9b1036cfe26d4e1482f84252df993f5325842"
+  },
+  "sourcePreparation": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SharedSleepLifecycle-20261112\\all-consumers\\native-input-remote-binding\\COORDINATOR29-PREPARATION-WORKSPACE.json",
+    "bytes": 25779,
+    "sha256": "a9c6de220ea3c67fe3a737171cdc13f9ee27d54c428e6a121ad652805b2de96c"
+  },
+  "fullSourceManifest": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SharedSleepLifecycle-20261112\\all-consumers\\native-input-remote-binding\\coordinator29-repository-r2\\Mainline\\YeManCC-source\\YeManCC-terminal22-f26d3084-2c6b-4147-9042-cf595ec041a6\\.ymcc-source-snapshot\\manifest.json",
+    "bytes": 2239805,
+    "sha256": "a306919593b6d09e1a636a0f5e71b56a391e2ca0c9fa677a5a9ce60c54cf27e5"
+  },
+  "runtimeProcess": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SharedSleepLifecycle-20261112\\all-consumers\\native-input-remote-binding\\coordinator29-full-runtime-owned-r1\\PROCESS.json",
+    "bytes": 1364492,
+    "sha256": "4936a547b794290429b31aaa089eba3b88097d170924fbcd82616d90b63a976f"
+  },
+  "nativeBuild": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SharedSleepLifecycle-20261112\\all-consumers\\native-input-remote-binding\\coordinator29-short-native-owned-r2\\RESULT.json",
+    "bytes": 373237,
+    "sha256": "f888c140655c9c7a0d37f15c9774ca3b87196a68e4f80f2dd86021e098e6a4ca"
+  },
+  "sharedPowerContract": {
+    "relative": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-managed-input-contract.mjs",
+    "bytes": 11369,
+    "sha256": "47cc4e6a8873a0dc68ec38a5a39daa07c17ac995eaef07b03fe93e7e08d3c51f"
+  },
+  "fixtureSourceProfile": {
+    "relative": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal29-compile-source-profile.json",
+    "bytes": 41893,
+    "sha256": "878a3ef52a6351c31a03a7383d2287167a0166d3b6f3be4175535e40e1b5e163"
+  },
+  "qualificationDerivedByExecution": true
+}

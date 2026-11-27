@@ -254,7 +254,12 @@ struct SensorJournalOperations {
     SensorState state(const std::wstring&group){return readSensor(group);}
     void set(const std::wstring&group,SensorState value){writeSensor(group,value);}
 };
-inline void validateIniBackups(const std::wstring&destination){for(const auto* suffix:{L".ymcc-original.bak",L".ymcc-last.bak"})if(const auto bytes=readBytes(destination+suffix,262144,true))(void)entries(decodeIni(*bytes));}
+inline std::optional<std::string> validateIniBackups(const std::wstring&destination){
+    if(const auto original=readBytes(destination+L".ymcc-original.bak",262144,true))(void)entries(decodeIni(*original));
+    auto last=readBytes(destination+L".ymcc-last.bak",262144,true);
+    if(last)(void)entries(decodeIni(*last));
+    return last;
+}
 inline std::string applySensorBudget(const std::wstring&exe,const std::wstring&destination){SensorJournalOperations ops(destination);ops.executable=exe;return sensorJournalBudget(ops);}
 
 struct Operations {
@@ -290,12 +295,14 @@ struct Operations {
     }
     void configure(const std::wstring&,const Request&request){
         assertStopped();
-        validateIniBackups(destination);
+        const auto lastBackup=validateIniBackups(destination);
         const auto previous=readBytes(destination,262144,true);
         const auto plan=planned(request,previous);
         if(previous){
             writeAtomic(destination+L".ymcc-original.bak",*previous,true);
-            writeAtomic(destination+L".ymcc-last.bak",*previous);
+            const auto lastPath=destination+L".ymcc-last.bak";
+            // Planning can outlive the validated backup snapshot. Check the live file before skipping the write.
+            if(lastBackup!=previous||readBytes(lastPath,262144,true)!=previous)writeAtomic(lastPath,*previous);
         }
         assertStopped();
         bool commitAttempted=false;

@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "screen.standalone-actions",
+  "caseFilter": "menu-composition/base-registration",
+  "game": "Death Stranding 2: On the Beach",
+  "exe": "DS2.exe",
+  "fieldDate": "2026-11-27",
+  "recordedTimezone": "Asia/Hong_Kong",
+  "profiles": {
+    "win5": {
+      "originalAppId": 3457258208,
+      "originalGameId64": "14848810937221120000",
+      "registeredAppId": 3280350,
+      "registeredGameId64": "3280350",
+      "gamePid": 12884,
+      "gameCreated": "134402437432201923",
+      "steamPid": 10668,
+      "hostPid": 8848,
+      "browserId": 3604487,
+      "fieldObserved": {
+        "status": "PRE_FIX_REJECTED",
+        "channel": "screen-standalone-special",
+        "requestIds": [5, 6, 7, 8, 9],
+        "reason": "steam-menu-game-overlay-not-unique",
+        "hostRejectionStage": "registration",
+        "gameMenuDispatched": false,
+        "postFixPhysicalResult": "NOT_RUN"
+      },
+      "replayExpectedMenuStates": [2, 0]
+    },
+    "local": {
+      "originalAppId": 3549052345,
+      "originalGameId64": "15243063753600663552",
+      "registeredAppId": 3280350,
+      "registeredGameId64": "3280350",
+      "gamePid": 49584,
+      "gameCreated": "134402469614655587",
+      "steamPid": 57620,
+      "hostPid": 55116,
+      "browserId": 458758,
+      "fieldObserved": {
+        "status": "PASS_LOCAL_GAME_OVERLAY_SHORTCUT",
+        "channel": "shortcut-frontend-button",
+        "times": ["17:57:12.834", "17:57:13.980", "17:57:14.625"],
+        "route": "steam-proven-game-overlay",
+        "response": "menu-state-confirmed",
+        "hostRegistrationFact": "CanonicalFullIdReportedBaseBoundToHeldGame",
+        "menuStates": [2, 0, 2],
+        "userConfirmedOpen": true,
+        "touchEntryResult": "NOT_RUN",
+        "physicalMenuNavigationResult": "NOT_PROVEN",
+        "separateFirstFrontendEvent": "input.frontendButton delivery failed; Steam menu dispatch still confirmed"
+      },
+      "replayExpectedMenuStates": [2, 0, 2]
+    }
+  },
+  "provenance": {
+    "evidenceDirectory": "Win5Ds2Qam-20261127",
+    "win5ArchiveSha256": "f6d1c99066097091e391d290f685e761af2abe2f149af19b0c1148d1a5e3131f",
+    "win5NativeMember": "native-lifecycle.log",
+    "win5NativeLines": [546, 548, 550, 552, 554, 556],
+    "localNativeExcerpt": {
+      "name": "LOCAL-DS2-1757-NATIVE-SELECTED.jsonl",
+      "sourceLines": [1539, 1546, 1547, 1552, 1559, 1563],
+      "bytes": 35578,
+      "sha256": "11f9c394cec827f738c0d0fecb67c92c5e2d21ed56536841e33f3c371cb90c1a"
+    },
+    "localSteamExcerpt": {
+      "name": "LOCAL-DS2-1757-STEAM-SELECTED.log",
+      "sourceLines": [6409, 6412],
+      "bytes": 233,
+      "sha256": "16290827cddedee8b4b010b7e671904f3273e0c06f01796c510ce4a71934ed72"
+    }
+  }
+}

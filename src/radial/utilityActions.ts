@@ -5,23 +5,24 @@ import type { PowerLifecycleState } from '@/bridge/api';
 import { UTILITY_OPTIONS, emptyRadialUtilities, type RadialUtilityGroup, type RadialUtilityState, type RadialUtilityIntent } from './utilities';
 export interface RadialUtilityDeps {
  monitor:{read:()=>Promise<MonitorOutputPreferences>;save:(template:HudTemplateId,revision:number,admit:(current:MonitorOutputPreferences)=>boolean)=>Promise<void>;busy:()=>boolean};
- steam:{read:(force:boolean)=>Promise<SteamUiState>;launch:(admit:()=>boolean)=>Promise<void>;launchPending:()=>boolean;switchMode:(state:SteamUiState)=>Promise<void>;shutdown:(state:SteamUiState)=>Promise<void>};
- power:()=>Promise<PowerLifecycleState>;alive:()=>boolean;nextRevision:()=>string;now:()=>number;
+ steam:{read:(force:boolean,signal?:AbortSignal)=>Promise<SteamUiState>;launch:(admit:()=>boolean)=>Promise<void>;launchPending:()=>boolean;switchMode:(state:SteamUiState)=>Promise<void>;shutdown:(state:SteamUiState)=>Promise<void>};
+ power:(signal?:AbortSignal)=>Promise<PowerLifecycleState>;alive:()=>boolean;nextRevision:()=>string;now:()=>number;
 }
 type SteamPending={kind:'launch'|'mode'|'shutdown';target:'running'|'bigpicture'|'stopped';pid:number;birth:string};
+type ReadUtilityObservation = <T>(load:(signal?:AbortSignal)=>Promise<T>)=>Promise<T>;
 export function createRadialUtilityActions(deps:RadialUtilityDeps){
  let stopped=false,executing=false,pending:SteamPending|null=null,steamNotice='',observedSource='',exitConfirmed=false;
  const frames=emptyRadialUtilities(),fingerprints:Record<RadialUtilityGroup,string>={'monitor.templates':'','steam.controls':''};
  const checkpoint=(context:()=>void)=>{context();if(stopped||!deps.alive())throw Error('轮盘操作会话已结束');};
  function update(group:RadialUtilityGroup,source:string,value:Omit<RadialUtilityState,'sourceRevision'>){const next=JSON.stringify([source,value]);if(next!==fingerprints[group]){fingerprints[group]=next;frames[group]={...value,sourceRevision:deps.nextRevision()};}return {...frames[group],choices:frames[group].choices.map(choice=>({...choice}))};}
- async function read(group:RadialUtilityGroup,context:()=>void=()=>{},force=false){
+ async function read(group:RadialUtilityGroup,context:()=>void=()=>{},force=false,observe:ReadUtilityObservation=load=>load()){
   checkpoint(context);
   if(group==='monitor.templates'){
-   const preferences=normalizeMonitorOutput(await deps.monitor.read());checkpoint(context);const source=JSON.stringify(preferences),busy=deps.monitor.busy();
+   const preferences=normalizeMonitorOutput(await observe(deps.monitor.read));checkpoint(context);const source=JSON.stringify(preferences),busy=deps.monitor.busy();
    const value=update(group,source,{available:true,busy,pending:false,selected:preferences.ymccTemplate??'B',notice:busy?'监控正在切换输出，请稍后选择':`已选择模板 ${preferences.ymccTemplate??'B'}${preferences.enabled?'':' · 监控仍关闭'}`,
     choices:UTILITY_OPTIONS[group].map(choice=>({...choice,enabled:!busy}))});return {frame:value,preferences,source};
   }
-  const state=await deps.steam.read(force);checkpoint(context);
+  const state=await observe(signal=>deps.steam.read(force,signal));checkpoint(context);
   const stateSource=JSON.stringify([state.known,state.running,state.mode,state.pid,state.birth]);
   if(stateSource!==observedSource){observedSource=stateSource;steamNotice='';exitConfirmed=false;}
   if(pending){
@@ -41,32 +42,33 @@ export function createRadialUtilityActions(deps:RadialUtilityDeps){
   return {frame:update(group,JSON.stringify([state.known,state.running,state.mode,state.pid,state.birth]),{available:known,busy,pending:!!pending||launchWaiting&&!exitConfirmed,selected,notice,choices}),steam:state,source:JSON.stringify(state)};
  }
  return {
-  async read(group:RadialUtilityGroup,context?:()=>void,force=false){return (await read(group,context,force)).frame;},
+  async read(group:RadialUtilityGroup,context?:()=>void,force=false,observe?:ReadUtilityObservation){return (await read(group,context,force,observe)).frame;},
   resetSession(){pending=null;steamNotice='';observedSource='';exitConfirmed=false;},
-  async apply(group:RadialUtilityGroup,intent:RadialUtilityIntent,context:MirrorMutationContext){
+  async apply(group:RadialUtilityGroup,intent:RadialUtilityIntent,context:MirrorMutationContext&{checkAdmission?:()=>void;observe?:ReadUtilityObservation}){
    if(executing)throw Error('菜单操作正在处理中');executing=true;
    try{
     if(!intent||typeof intent.choice!=='string'||typeof intent.sourceRevision!=='string')throw Error('菜单选项请求无效');
-    const current=await read(group,context.checkpoint,group==='steam.controls');
+    const current=await read(group,context.checkpoint,group==='steam.controls',context.observe);
     if(!current.frame.available||current.frame.busy)throw Error(current.frame.notice);
     if(!intent.sourceRevision||intent.sourceRevision!==current.frame.sourceRevision)throw Error('状态或模板已变化，请重新选择');
     if(!current.frame.choices.some(choice=>choice.value===intent.choice&&choice.enabled))throw Error('当前菜单选项不可用');
-    const power=await deps.power();checkpoint(context.checkpoint);if(power.generation!==context.generation||power.phase!=='ready'||!power.inputReady)throw Error('电源或输入状态已变化');
+    context.checkAdmission?.();
+    const power=await (context.readPower?context.readPower(signal=>deps.power(signal)):deps.power());checkpoint(context.checkpoint);context.checkAdmission?.();if(power.generation!==context.generation||power.phase!=='ready'||!power.inputReady)throw Error('电源或输入状态已变化');
     if(group==='monitor.templates'){
      const preferences=current.preferences!,template=intent.choice as HudTemplateId;
      if(preferences.ymccTemplate===template)return {saved:false,applied:false,pending:false,notice:`当前已选择模板 ${template}`,frame:current.frame,proof:'unchanged'};
      const revision=Math.max(deps.now(),(preferences.ymccTemplateRevision??0)+1);if(!Number.isSafeInteger(revision)||revision<1)throw Error('监控模板版本无效');
-     await deps.monitor.save(template,revision,saved=>{try{checkpoint(context.checkpoint);return !deps.monitor.busy()&&JSON.stringify(normalizeMonitorOutput(saved))===current.source;}catch{return false;}});
-     const refreshed=await read(group,context.checkpoint);const retained=refreshed.preferences!.ymccTemplate===template&&refreshed.preferences!.ymccTemplateRevision===revision;
+     await deps.monitor.save(template,revision,saved=>{try{checkpoint(context.checkpoint);context.checkAdmission?.();return !deps.monitor.busy()&&JSON.stringify(normalizeMonitorOutput(saved))===current.source;}catch{return false;}});
+     const refreshed=await read(group,context.checkpoint,false,context.observe);const retained=refreshed.preferences!.ymccTemplate===template&&refreshed.preferences!.ymccTemplateRevision===revision;
      return {saved:true,applied:false,pending:false,notice:retained?`模板 ${template} 已保存${refreshed.preferences!.enabled?'':'，监控仍关闭'}`:'模板选择已提交；之后的修改由原监控流程保留',frame:refreshed.frame,proof:retained?'settings-commit':'superseded'};
     }
     const state=current.steam!;
     if(intent.choice==='bigpicture'&&state.running&&state.mode==='bigpicture')return {saved:false,applied:true,pending:false,notice:'Steam 当前已为大屏',frame:current.frame,proof:'observed-state'};
     if(intent.choice==='stop'){await deps.steam.shutdown(state);checkpoint(context.checkpoint);pending={kind:'shutdown',target:'stopped',pid:state.pid,birth:state.birth};}
-    else if(!state.running){await deps.steam.launch(()=>{try{checkpoint(context.checkpoint);return true;}catch{return false;}});checkpoint(context.checkpoint);pending={kind:'launch',target:intent.choice==='bigpicture'?'bigpicture':'running',pid:0,birth:'0'};}
+    else if(!state.running){await deps.steam.launch(()=>{try{checkpoint(context.checkpoint);context.checkAdmission?.();return true;}catch{return false;}});checkpoint(context.checkpoint);pending={kind:'launch',target:intent.choice==='bigpicture'?'bigpicture':'running',pid:0,birth:'0'};}
     else {await deps.steam.switchMode(state);checkpoint(context.checkpoint);pending={kind:'mode',target:'bigpicture',pid:state.pid,birth:state.birth};}
     checkpoint(context.checkpoint);
-    let refreshed:RadialUtilityState;try{refreshed=(await read(group,context.checkpoint)).frame;}catch(error){checkpoint(context.checkpoint);refreshed={...current.frame,pending:true,busy:true,notice:'请求已提交；Steam 状态读取尚未确认',choices:current.frame.choices.map(choice=>({...choice,enabled:false}))};}
+    let refreshed:RadialUtilityState;try{refreshed=(await read(group,context.checkpoint,false,context.observe)).frame;}catch(error){checkpoint(context.checkpoint);context.checkAdmission?.();refreshed={...current.frame,pending:true,busy:true,notice:'请求已提交；Steam 状态读取尚未确认',choices:current.frame.choices.map(choice=>({...choice,enabled:false}))};}
     return {saved:false,applied:!refreshed.pending&&((intent.choice==='stop'&&refreshed.selected==='stop')||(intent.choice==='bigpicture'&&refreshed.selected==='bigpicture')||(intent.choice==='start'&&refreshed.selected!==''&&refreshed.selected!=='stop')),pending:refreshed.pending,notice:refreshed.notice,frame:refreshed,proof:refreshed.pending?'submitted':'observed-state'};
    }finally{executing=false;}
   },

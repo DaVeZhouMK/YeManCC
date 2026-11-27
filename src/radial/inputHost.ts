@@ -24,7 +24,7 @@ export function createLocalRadialInputActions(alive:()=>boolean){
    if(gameMirrorIdentity(getPolicyGame())!==identity)throw Error('当前游戏已变化');
    return {...common,scope:'game',game:structuredClone(game),entry:config.entries[gamePolicyKey(game)],schedule,gyro,label:game.name||gamePolicyKey(game)};
   },
-  global:{allowed:alive,game:getPolicyGame,locked:()=>getGameInputOverrideState().locked,targetPolicy:currentVirtualTargetPolicy,side:()=>powerSourceMode.value,read:readGlobal,power:()=>powerLifecycle.get(),acquire:tryAcquireQuickAction,cas:compareAndSwapInputSettings,closeJoyxoff:closeJoyxoffIfRunning,clearShortcut:()=>invoke('input.shortcutRuntime.clear',{})},
+  global:{allowed:alive,game:getPolicyGame,locked:()=>getGameInputOverrideState().locked,targetPolicy:currentVirtualTargetPolicy,side:()=>powerSourceMode.value,read:readGlobal,power:context=>context.readPower?context.readPower(signal=>powerLifecycle.get(undefined,signal)):powerLifecycle.get(),acquire:tryAcquireQuickAction,cas:compareAndSwapInputSettings,closeJoyxoff:closeJoyxoffIfRunning,clearShortcut:()=>invoke('input.shortcutRuntime.clear',{})},
   game:{featureAllowed:alive,game:getPolicyGame,label:game=>game.name||gamePolicyKey(game),power:()=>powerLifecycle.get(),acquire:tryAcquireQuickAction,load:loadGameCustomConfig,current:getGameCustomConfig,schedule:loadPerformanceSchedule,currentSchedule:()=>schedule,save:saveGameCustomConfig,closeJoyxoff:closeJoyxoffIfRunning,targetPolicy:currentVirtualTargetPolicy,rememberWholeInput:true,continuous:async()=>(await getContinuousPerformanceSnapshot()).controls,gyroDefaults:readGameMirrorGyroDefaults},
   nextRevision:()=>crypto.randomUUID(),
  });

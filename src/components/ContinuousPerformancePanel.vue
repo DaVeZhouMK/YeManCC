@@ -9,7 +9,7 @@ import GameProfileModeBanner from '@/components/GameProfileModeBanner.vue';
 import { computed, nextTick, onMounted, onBeforeUnmount, onDeactivated, ref, watch } from 'vue';
 import Slider from './Slider.vue';
 import {useRouter} from 'vue-router';
-import {undervoltState as uv,undervoltLabel,undervoltAvailable,refreshUndervoltRuntime,toggleUndervolt} from '@/bridge/undervoltRuntime';
+import {undervoltState as uv,undervoltLabel,undervoltAvailable,useUndervoltPresentation,toggleUndervolt} from '@/bridge/undervoltRuntime';
 import {ccdState as ccd,ccdAvailable,ccdOptions,refreshCcdRuntime,selectCcdMode,recordCcdVisibility} from '@/bridge/ccdRuntime';
 const uvRouter=useRouter();
 const quickAction=ref<'uv'|'ccd'>('uv');
@@ -37,7 +37,8 @@ const emit = defineEmits<{ (e: 'simulation'): void; (e: 'changed'): void }>();
 const showUv=computed(()=>!props.summaryOnly&&!props.panelSource&&props.scope!=='dedicated');
 const showCcd=computed(()=>showUv.value && snapshot.value?.hybrid===false && ccdAvailable.value);
 const quickNotice=computed(()=>quickAction.value==='ccd'?(showCcd.value?ccd.notice:''):(showUv.value?uv.notice:''));
-onMounted(()=>{if(showUv.value){void refreshUndervoltRuntime();void refreshCcdRuntime();}});
+useUndervoltPresentation(()=>showUv.value);
+onMounted(()=>{if(showUv.value)void refreshCcdRuntime();});
 const nativeLayout = computed(() => !props.panelSource || props.panelSource.nativeLayout === true);
 const snapshot = ref<ContinuousPerformanceSnapshot | null>(null), draft = ref<ContinuousSideControls | null>(null);
 watch([showCcd, () => snapshot.value?.hybrid, () => ccd.capability], () => {
@@ -153,7 +154,9 @@ async function load(force = false, checkContext = false) {
   const ticket = ++readEpoch, context = epoch, revision = draftRevision;
   refreshPending = false;
   try {
-    const value = await (props.panelSource ? props.panelSource.read(editSide.value ?? undefined) : getContinuousPerformanceSnapshot(props.scope, editSide.value ?? undefined));
+    const side = editSide.value ?? undefined;
+    const value = await (props.panelSource ? props.panelSource.read(side)
+      : getContinuousPerformanceSnapshot(props.scope, side, undefined, 'ensure', undefined, undefined, 'observe'));
     if (!alive || ticket !== readEpoch || context !== epoch) return;
     if (snapshot.value && (!sameEditContext(snapshot.value.identity, value.identity) || (snapshot.value.powerScheme ?? 'yeman') !== (value.powerScheme ?? 'yeman'))) {
       invalidateDraft();
@@ -238,14 +241,18 @@ onMounted(() => {
     document.removeEventListener('visibilitychange', onVisibility);
   });
   if (!props.panelSource) stops.push(subscribeMonitorTdpState(state => { runtimeTdp.value = state.status === 'applied' ? {mode:state.mode,watts:state.watts} : null; }));
+  // Synchronous subscription replays are covered by the mount read below.
+  let subscriptionsReady = false;
   if (props.panelSource) stops.push(props.panelSource.subscribe(() => { void load(false, true); }));
   else stops.push(subscribePolicyGameStatus(game => {
+    if (!subscriptionsReady) return;
     const identity = snapshot.value?.identity;
     const changed = !identity || identity.pid !== (game?.pid || 0) || identity.processCreated !== String(game?.processCreated || '') ||
       (identity.path || '').toLowerCase() !== (game?.path || '').toLowerCase() || identity.identityGeneration !== game?.identityGeneration;
     void load(changed);
-  }), onPerformanceScheduleChanged(() => { void load(false, true); }),
+  }), onPerformanceScheduleChanged(() => { if (subscriptionsReady) void load(false, true); }),
     onGameCustomConfigChanged(() => { void load(false, true); }), onFrameRatesChanged(() => { void load(); }));
+  subscriptionsReady = true;
   void load();
 });
 onBeforeUnmount(() => { invalidateDraft(); alive = false; epoch++; pending = null; for (const stop of stops) stop(); });

@@ -17,6 +17,8 @@ def bind_shared_publication(c, p, f):
     if 'publishSharedPowerLifecycle(' not in (Path(c['args'].source).parent/'sleep_resume_classification_native.inc').read_text(encoding='utf-8-sig'):
         return p, f, None
     actual = c['function']('publishSharedPowerLifecycle')
+    handoff = c['function']('queueSharedPowerPublication') if 'queueSharedPowerPublication(' in actual else ''
+    queue = c['function']('sleepPowerQueueProjection') if 'sleepPowerQueueProjection(' in (handoff or actual) else ''
     # The existing function() parser accepts ordinary signatures only.
     # Use its original mask/braced helpers for this exact noexcept signature.
     masked = c['mask_cpp'](source)
@@ -27,9 +29,9 @@ def bind_shared_publication(c, p, f):
     assert 'g_recoveryPowerBoundary.revoke();' in revocation and 'g_sharedPowerRevocations.revoke();' in revocation
     assert 'void sleepPowerArmRedelivery(HWND)' in p, 'original redelivery endpoint missing'
     assert 'g_sharedPowerPublicationRevision.fetch_add(1,std::memory_order_acq_rel)' in actual
-    assert 'g_sharedPowerProjectionPending.' in actual and 'PostMessageW(' in actual
+    assert 'g_sharedPowerProjectionPending.' in (queue or actual) and 'PostMessageW(' in (queue or actual)
     assert 'g_sharedPowerPublicationRevision' not in p
-    tagged = 'kSharedPowerProjectionPostReceipt' in actual
+    tagged = 'kSharedPowerProjectionPostReceipt' in (queue or actual)
     declarations = ('static std::mutex g_sharedPowerProjectionPostMutex;',
                     'static bool g_sharedPowerProjectionPosted=false;',
                     'static constexpr WPARAM kSharedPowerProjectionPostReceipt=1;')
@@ -52,8 +54,7 @@ struct ClassificationPublicationInterleave {
  std::latch postEntered{1},secondPublication{1},releasePost{1};
 };
 static ClassificationPublicationInterleave* classificationPublicationInterleave=nullptr;
-struct ClassificationMirrorPort {unsigned revocations=0;void revoke() noexcept {++revocations;}};
-static ClassificationMirrorPort g_recoveryPowerBoundary,g_sharedPowerRevocations;
+static ClassificationMirrorPort g_sharedPowerRevocations;
 static void revokeSharedPowerMirrors() noexcept;
 namespace ymcc::batterycharge {void notifySystemPower(){
  const auto notices=++classificationBatteryNotices;
@@ -91,8 +92,9 @@ static void notifySharedMediaDownloadsPower(){throw std::logic_error("unselected
     # Keep notification replay on its original port. The publication arm is
     # separately bound to the production body and only its OS call is stubbed.
     wrapped = '\n#define sleepPowerArmRedelivery classificationPublicationArmRedelivery\n'
-    wrapped += '#pragma push_macro("SetTimer")\n#undef SetTimer\n#define SetTimer classificationPublicationSetTimer\n'+arm+'\n#pragma pop_macro("SetTimer")\n'
-    wrapped += '\n#pragma push_macro("PostMessageW")\n#undef PostMessageW\n#define PostMessageW classificationPublicationPostMessage\n'+actual+'\n#pragma pop_macro("PostMessageW")\n'
+    wrapped += '#pragma push_macro("SetTimer")\n#undef SetTimer\n#define SetTimer classificationPublicationSetTimer\n'
+    wrapped += '#pragma push_macro("PostMessageW")\n#undef PostMessageW\n#define PostMessageW notificationPostMessage\n'+arm+'\n#pragma pop_macro("PostMessageW")\n#pragma pop_macro("SetTimer")\n'
+    wrapped += '\n#pragma push_macro("PostMessageW")\n#undef PostMessageW\n#define PostMessageW classificationPublicationPostMessage\n'+queue+'\n'+handoff+'\n'+actual+'\n#pragma pop_macro("PostMessageW")\n'
     wrapped += '#undef sleepPowerArmRedelivery\n'
     if tagged:
         wrapped+=c['function']('sleepPowerProjectionPostConsumed')+'\nstatic void classificationConsumePublicationPost(WPARAM receipt){sleepPowerProjectionPostConsumed(receipt);}\n'
@@ -100,6 +102,8 @@ static void notifySharedMediaDownloadsPower(){throw std::logic_error("unselected
         wrapped+='\nstatic void classificationConsumePublicationPost(WPARAM){}\n'
     wrapped = revocation+'\n'+wrapped
     binding = {'source':'native/main.cpp', 'actualPublisher':actual,
+               'actualQueueProjectionSha256':hashlib.sha256(queue.encode()).hexdigest() if queue else None,
+               'actualQueueHandoffSha256':hashlib.sha256(handoff.encode()).hexdigest() if handoff else None,
                'actualMirrorRevocation':revocation,
                'actualMirrorRevocationSha256':hashlib.sha256(revocation.encode()).hexdigest(),
                'mirrorTerminals':'two counted revoke endpoints; no registry, mapping, observers or cross-process execution',
@@ -237,16 +241,16 @@ static bool sgSleepTimeoutJoinEntry(int,ULONGLONG);
       'if(id==SG_RESUME_CLASSIFY_TIMER_ID){classificationTimerDue=nowTick+delay;return id;}if(id==SG_SLEEP_TIMEOUT_TIMER_ID){timeoutTimerDue=nowTick+delay;return id;}if(id==SG_MONITOR_ENTRY_FAILURE_TIMER_ID){monitorTimerDue=nowTick+delay;return id;}')
     p=p.replace('if(id==SG_MONITOR_ENTRY_FAILURE_TIMER_ID){monitorTimerDue=0;return TRUE;}',
       'if(id==SG_RESUME_CLASSIFY_TIMER_ID){classificationTimerDue=0;return TRUE;}if(id==SG_SLEEP_TIMEOUT_TIMER_ID){timeoutTimerDue=0;return TRUE;}if(id==SG_MONITOR_ENTRY_FAILURE_TIMER_ID){monitorTimerDue=0;return TRUE;}')
-    p=replace_function(p,'handlePowerResumeNotification','static void handlePowerResumeNotification(SgWork,const char*);')
+    p=replace_function(p,'handlePowerResumeNotification','static void handlePowerResumeNotification(SgWork,const char*,SgWorkItem* =nullptr);')
     p=replace_function(p,'sgBeginModernStandbyIntent','static void sgBeginModernStandbyIntent();')
     p=replace_function(p,'sgQueueWork','''static SgWorkItem fixtureWorkReceipt(SgWork kind,ULONGLONG gen){
- SgWorkItem item{kind,gen};if(kind==SgWork::WakeSuspend){
+ SgWorkItem item{kind,gen};if(kind!=SgWork::Suspend){
   item.wakeSleepSequence=g_sleepPowerDispatch.observedSleepBoundarySequence();
   item.wakeSuspendSerial=g_sharedPowerSuspendSerial.load();
  }return item;
 }
 std::vector<SgWorkItem> actualWakeQueue;
-void sgQueueWork(SgWork w,ULONGLONG g,ULONGLONG=0){if(w==SgWork::Suspend){++suspendQueued;return;}actualWakeQueue.push_back(fixtureWorkReceipt(w,g));}''')
+void sgQueueWork(SgWork w,ULONGLONG g,ULONGLONG=0,const SgWorkItem* proof=nullptr){if(w==SgWork::Suspend){++suspendQueued;return;}actualWakeQueue.push_back(proof?*proof:fixtureWorkReceipt(w,g));}''')
     p+='''
 static bool sgPowerButtonSleepConfigured(){return sgPowerButtonSleepMode()!=SgSleepMode::Unknown;}
 void sgClearSleepTarget(){frozen=false;}
@@ -260,11 +264,15 @@ void appendNativeLifecycleLog(const char* event,const json& value){sgRecordFact(
 void appendFanLifecycleLog(const char* event,const json& value){sgRecordFact(event,value);}
 void sleepRecoveryAutoCloseSuspendEpisode(){}
 void sleepRecoveryAutoInteractiveResume(ULONGLONG,int,ULONGLONG){}
-bool powerLifecycleMatches(PowerLifecycle p,ULONGLONG g){return g==generation&&g_powerLifecycle==p;}
-void publishPowerResumeReady(ULONGLONG g){if(g==generation){g_powerLifecycle=PowerLifecycle::Ready;g_resumeReadyGeneration=g;}}
+'''
+    ready=source[source.index('static bool powerLifecycleMatches('):source.index('static void postPowerResumeReady(')]
+    f+='\n'+ready+r'''
+void publishPowerResumeReady(ULONGLONG g,PowerResumeBoundary boundary){
+ if(recordPowerResumeReady(g,boundary,true))g_powerLifecycle=PowerLifecycle::Ready;
+}
 '''
     p,f,publication_binding=bind_shared_publication(c,p,f)
-    common=function('handlePowerResumeNotification');begin=function('sgBeginModernStandbyIntent')
+    common=function('handlePowerResumeNotification').replace('SgWorkItem* originalS4=nullptr','SgWorkItem* originalS4',1);begin=function('sgBeginModernStandbyIntent')
     if 'struct SgSleepTimeoutObservation {' in timeout:
         abort=function('sgAbortSleepIntent')
         abort_stop='sgSleepTimeoutStop(reason ? reason : "sleep-intent-canceled");'

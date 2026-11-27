@@ -84,9 +84,11 @@ const legacyCall=block(submit,'actual legacy SUBMIT_FRAME request call',
  REQUEST_GUARD:['inputHostWindowsMotionSubmissionCurrent','inputHostFrameSharedPowerCurrent','inputHostFrameSubmissionMayIssue','inputHostFrameSubmissionTransportRejected','inputHostFrameSubmissionRequestCurrent','inputHostRequestNeedsHardwarePower','inputHostRequestNeedsPowerScope','inputHostReceiptPassedSequenceGate','inputHostRequestPowerReceiptCurrent'].map(n=>extract('function',n)).join('\n'),
  FRAME:extract('struct','FocusFrameContent')+'\n'+extract('function','focusIsolationNeutralContent')+'\n'+extract('function','focusIsolationAssembleFrame'),
  PIPE_CLOSE:extract('function','inputHostPipeCloseOwned'),
+ RECREATE_WRITE:extract('struct','InputHostRecreateWrite'),
  PIPE_WRAPPERS:['inputHostPipeIo','inputHostWaitClientLocked'].map(n=>extract('function',n)).join('\n'),
  REQUEST_POWER_ADMISSION:block(request,'actual payload-aware request power admission','    const bool hardwarePowerRequired=','    const bool deferredVisibilityCommand='),
  PRE_ENVELOPE:block(request,'actual request transport scope and before-envelope admission','    const bool deferredVisibilityCommand','    // R2：envelope'),
+ FORGET_TARGET_INPUT:block(request,'actual input retirement and compact frame unbinding','    const auto forgetTargetInput=','    std::string requestText;'),
  TRANSPORT:block(request,'actual Connect through Read plus context/failure dispatch guards','    DWORD lastError = ERROR_SUCCESS;','    if (!read) {'),
  FAILED_CONNECT_CLEANUP:block(request,'actual transport failure resource retirement and flags','        if (pipe) {','        // Normal-use incidents'),
  LATE_ACK_TAIL:lateTail,
@@ -106,7 +108,7 @@ for(const [key,value]of Object.entries(parts)){assert.equal(fixture.split('@@'+k
 write('fixture.cpp',fixture);write('request_cases.inc',pin(path.join(fixtureDirectory,'request_cases.inc'),'parameterized-original-cases'));
 const roots=[headerRoot,path.join(repo,'native'),path.join(repo,'capabilities'),path.join(repo,'deps/json')],headers=new Map();
 function header(file){file=path.resolve(file);const name=path.basename(file);if(headers.has(name)){assert.equal(headers.get(name).origin,file,'header basename collision '+name);return;}const bytes=pin(file,'quoted-header-closure');headers.set(name,{origin:file,bytes});for(const match of bytes.toString('utf8').matchAll(/^\s*#\s*include\s*"([^"\r\n]+)"/gm)){const resolved=[path.resolve(path.dirname(file),match[1]),...roots.map(root=>path.resolve(root,match[1]))].find(fs.existsSync);assert(resolved,'unresolved quoted header '+match[1]);header(resolved);}}
-for(const name of ['input_frame_submission.h','touch_haptic_dispatch.h','game_feedback_receipt.h','windows_motion_submission.h','legion_motion_source.h','legion_motion_message_clock.h','virtual_output_status.h','input_host_pipe_transport.h','input_host_shared_power.h','msi_virtual_report_diagnostic.h','virtual_recovery_intent.h','virtual_start_protection.h','HcControllerMotionCapabilityCatalog.h','json.hpp']){const found=roots.map(root=>path.join(root,name)).find(fs.existsSync);assert(found,'required header '+name);header(found);}
+for(const name of ['input_frame_submission.h','touch_haptic_dispatch.h','game_feedback_receipt.h','windows_motion_submission.h','legion_motion_source.h','legion_motion_message_clock.h','virtual_output_status.h','input_host_pipe_transport.h','input_host_shared_power.h','input_host_compact_frame_reply.h','sleep_power_remote_contract.h','msi_virtual_report_diagnostic.h','virtual_recovery_intent.h','virtual_start_protection.h','HcControllerMotionCapabilityCatalog.h','json.hpp']){const found=roots.map(root=>path.join(root,name)).find(fs.existsSync);assert(found,'required header '+name);header(found);}
 for(const relative of controllerInputFixtureInputs)pin(path.join(repo,relative),'controller-fixture-input');
 for(const [name,row]of headers)write('source/'+name,row.bytes);
 write('source/windows.h',pin(path.join(fixtureDirectory,'windows.h'),'fake-win32-leaves'));

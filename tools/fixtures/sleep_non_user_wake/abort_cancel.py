@@ -34,7 +34,9 @@ def run(c):
                'steam-query-cancel':[('none','steam-query-canceled'),('none','steam-query-canceled-fault'),('gate-open-log','new-suspend'),('operation-wait','late506-before-cancel')],
                'deep-current':[('process-open','new506-user'),('opened-birth','new506-nonuser')],
                'partial-return':[('nt-return','partial-running-confirmation'),('nt-return','unknown-running-confirmation')],
-               'ready-wake':[('lifetime',e) for e in ['entry-current','entry-stale','entry-missing','entry-future','query-current','query-stale','exit']]}
+               'ready-wake':[('lifetime',e) for e in ['entry-current','entry-stale','entry-missing','entry-future','query-current','query-stale','exit']],
+               'kernel-wake-redelivery':[('kernel-wake-redelivery',e) for e in ['failed507','success507','new-generation','new-suspend','older-suspend','continue-to-s4','coalesce507','manual507','manual507-delayed','exit','failed506','success506','replace506','retired506','generation506','exit506','cross107failed','cross107posted','cross507failed','posted107-after507','posted107-before507']],
+               'kernel-wake-readback':[('kernel-wake-readback',e) for e in ['only507','only107','live-first','readback-first','new506-before','new506-queued','new-generation','new-suspend','exit']]}
         if selected not in exact:raise RuntimeError('unknown cancellation selection')
         cases=exact[selected]
     def write(name,data):
@@ -48,6 +50,9 @@ def run(c):
         assert mask[b]==';';return source[a:b+1]
     names=['sgMarkSleepTrigger','sgRenewCancellationReady','sgAbortSleepIntent','sgKernelPowerEventCallback','sgPublishSleepEventTime','sgRememberKernelSleepEntry','currentPowerGeneration','openHardwareWriteGate','sgResumeSleepTargetUnlocked','hardwareWriteAllowed','sgReadSleepTarget','sgClearSleepTargetIfMatches','sgSleepLeaseOwnedByGeneration','sgDrainProcessSuspendCountIfCurrent','readSharedSystemPower']
     fragments=[]
+    ready=source[source.index('static bool powerLifecycleMatches('):source.index('static uint64_t recordPowerResumeReady(')]
+    text('ready_lifecycle.inc',ready)
+    fragments.append(dict(name='ready_lifecycle',sha256=hashlib.sha256(ready.encode()).hexdigest(),verbatim=True))
     for n in names:
         s=function(n)
         if n=='sgDrainProcessSuspendCountIfCurrent':assert 'template<class Current>\n'+s in source;s='template<class Current>\n'+s
@@ -64,6 +69,13 @@ def run(c):
     for n in ['sgOrdinaryPauseCurrent','sgReturnedPauseCurrent','sgQueueReturnedPause']:text(n+'.inc',function(n,returned,'native/sleep_returned_pause_native.inc')+'\n')
     delays=re.findall(r'^static constexpr ULONGLONG SG_SLEEP_RESUME_RETRY_DELAYS_MS\[\] = [^;]+;',source,re.M);assert len(delays)==1;text('resume_delays.inc',delays[0]+'\n')
     header=(root/'native/wake_game_recovery.h').read_text(encoding='utf-8-sig')
+    strict_declarations=[]
+    for name in ('sgForgetAcceptedWakeMarker','sgConfirmStrictWakeLeaseResume'):
+        if name in header:
+            declaration=re.findall(r'^static (?:void|bool) '+name+r'\([^\n]+\);$',source,re.M)
+            assert len(declaration)==1,name
+            strict_declarations.extend(declaration)
+    text('strict_resume_declarations.inc','\n'.join(strict_declarations)+'\n')
     hm=c['mask'](header)
     def header_type(name):
         ms=list(re.finditer(r'struct '+name+r'\b[^;{}]*\{',hm));assert len(ms)==1
@@ -74,14 +86,30 @@ def run(c):
     batch=[header_type('SgWakeRecoveryEntry'),header_type('SgWakeRecoveryBatch'),'static SgWakeRecoveryBatch g_sgWakeRecovery;',retirement[0]]
     parked=re.findall(r'^static std::atomic<bool> g_sgWakeRecoveryParked\{false\};$',header,re.M);assert len(parked)==1
     batch.extend(parked)
+    if 'SgWakeAcceptedMarker' in header:
+        map_include=re.findall(r'^#include <map>$',header,re.M);assert len(map_include)==1
+        batch[:0]=map_include
+        key=re.findall(r'^using SgWakeAcceptedKey = [^;]+;$',header,re.M);assert len(key)==1
+        table=re.findall(r'^static std::map<[^;]+> g_sgWakeAcceptedMarkers;$',header,re.M);assert len(table)==1
+        limit=re.findall(r'^static constexpr size_t kSgWakeAcceptedMarkerLimit = [^;]+;$',header,re.M);assert len(limit)==1
+        batch.extend([key[0],header_type('SgWakeAcceptedMarker'),table[0],limit[0]])
+        helpers=['sgWakeAcceptedMarkerMatches','sgWakeReserveAcceptedMarkerRoom']
+        helpers.extend(name for name in ('sgForgetAcceptedWakeMarker','sgConfirmStrictWakeLeaseResume') if name in header)
+        for name in helpers:
+            body=function(name,header,'native/wake_game_recovery.h')
+            if name=='sgWakeReserveAcceptedMarkerRoom':
+                body='template<class Current>\n'+body
+                assert header.count(body)==1
+            batch.append(body);fragments.append(dict(name=name,sha256=hashlib.sha256(body.encode()).hexdigest(),verbatim=True))
     names=['sgWakeGameRecoveryHasWork','sgWakeRecoveryMarker','sgWakeRecoveryClearTarget','sgCanceledSleepRecoveryBoundaryCurrent','sgCanceledSleepRecoveryEntryCurrent','sgQueueCanceledSleepLeaseRecoveryUnlocked','sgReconcileSleepGameFlagsAfterRecoveryCancel','sgRetireAcceptedWakeMarkerUnlocked','sgCancelWakeGameRecoveryUnlocked','sgWakeGameRecoveryCanWaitForNextWakeUnlocked','sgInterruptWakeGameRecoveryUnlocked','sgParkedGameWakeInterrupted','sgCaptureGameWakeReady','sgGameWakeReady','sgParkGameWakeIfNotReady','sgWakeGameRecoveryWaitMs','sgWakeGameRecoveryTick','sgPrepareWakeRecoveryForSleep']
     for name in names:
         if name=='sgInterruptWakeGameRecoveryUnlocked':
             for helper in ('sgWakeGameRecoveryTerminalBoundaryUnlocked','sgFailWakeGameRecoveryUnlocked'):
                 body=function(helper,header,'native/wake_game_recovery.h')
                 batch.append(body);fragments.append(dict(name=helper,sha256=hashlib.sha256(body.encode()).hexdigest(),verbatim=True))
-            body=function('sgUndispatchedGameWakeBoundaryChanged',header,'native/wake_game_recovery.h')
-            batch.append(body);fragments.append(dict(name='sgUndispatchedGameWakeBoundaryChanged',sha256=hashlib.sha256(body.encode()).hexdigest(),verbatim=True))
+            helper='sgGameWakeBoundaryChanged' if 'sgGameWakeBoundaryChanged(' in header else 'sgUndispatchedGameWakeBoundaryChanged'
+            body=function(helper,header,'native/wake_game_recovery.h')
+            batch.append(body);fragments.append(dict(name=helper,sha256=hashlib.sha256(body.encode()).hexdigest(),verbatim=True))
         if name=='sgWakeGameRecoveryTick':
             helper='sgWakeGameRecoveryTickUnlocked';body=function(helper,header,'native/wake_game_recovery.h')
             batch.append(body);fragments.append(dict(name=helper,sha256=hashlib.sha256(body.encode()).hexdigest(),verbatim=True))
@@ -94,18 +122,47 @@ def run(c):
     for name in ['sgWaitForWork','sgServiceEntryObservationHandoff','sgWorkLoop','sgStartWorkThread','sgStopWorkThread','powerLifecycleMatches','sgReadFile','sgReadResumeMarkerChecked','sgMarkerCreated','sgMarkerIsSuspended','nativeValveValidateOwnedSuspendedTarget']:
         body=function(name);text(name+'.inc',body+'\n');fragments.append(dict(name=name,sha256=hashlib.sha256(body.encode()).hexdigest(),verbatim=True))
     ports=Path(__file__).with_name('abort_cancel_ports.inc').read_text(encoding='utf-8-sig')
-    if 'static void sgPostS4Wake(' in source:
+    if 'g_sgKernelCycles.claimLongScreenOffExit(' in source:
+        cycle_path=root/'native/sleep_kernel_cycle_native.inc'
+        cycle=cycle_path.read_text(encoding='utf-8-sig')
+        declarations=re.findall(r'^static (?:ymcc::sleeppower::KernelCycleObservations g_sgKernelCycles;|std::atomic<ULONGLONG> g_sgKernelSystemWake\{0\};)$',cycle,re.M)
+        assert len(declarations)==2
+        dependencies='#include "sleep_kernel_cycle.h"\n#include "sleep_timeout_policy.h"\n'+'\n'.join(declarations)+'\n'
+        for name in ('sgKernelEntryIdentity','sgKernelExitIdentity'):
+            if name+'(' in source:
+                body=function(name,cycle,'native/sleep_kernel_cycle_native.inc')
+                dependencies+=body+'\n'
+                fragments.append(dict(name=name,origin='native/sleep_kernel_cycle_native.inc',sha256=hashlib.sha256(body.encode()).hexdigest(),verbatim=True))
+        text('kernel_cycle_journal_state.inc',dependencies)
+        fragments.append(dict(name='kernel_cycle_journal_state',origin='native/sleep_kernel_cycle_native.inc',sha256=hashlib.sha256('\n'.join(declarations).encode()).hexdigest(),verbatim=True))
+        anchor='#include "sgKernelPowerEventCallback.inc"'
+        assert ports.count(anchor)==1
+        ports=ports.replace(anchor,'#include "kernel_cycle_journal_state.inc"\n'+anchor)
+    if 'static bool sgRenderKernelPowerIngress(' in source:
+        a=source.index('struct SgOriginalWakeDelivery {');b=source.index('static DWORD WINAPI sgKernelPowerEventCallback(',a)
+        ingress=source[a:b]
+        text('kernel_wake_ingress.inc',ingress)
+        fragments.append(dict(name='kernel_wake_ingress',sha256=hashlib.sha256(ingress.encode()).hexdigest(),verbatim=True))
+        anchor='#include "sgKernelPowerEventCallback.inc"'
+        assert ports.count(anchor)==1
+        ports=ports.replace(anchor,'#define YMCC_FIXTURE_KERNEL_WAKE_READBACK 1\n#include "sleep_kernel_cycle.h"\n#include "kernel_wake_ingress.inc"\n'+anchor)
+    post_name='sgPostKernelWake' if 'static void sgPostKernelWake(' in source else 'sgPostS4Wake'
+    if f'static void {post_name}(' in source:
         first='static std::mutex g_sgFailedS4Mutex;'
-        last='static void sgPostS4Wake('
+        last=f'static void {post_name}('
         assert source.count(first)==source.count(last)==1
         a,b=source.index(first),source.index(last)
         assert a<b
-        post=function('sgPostS4Wake')
-        text('sgPostS4Wake.inc',source[a:b]+post+'\n')
-        fragments.append(dict(name='sgPostS4Wake',sha256=hashlib.sha256(post.encode()).hexdigest(),verbatim=True))
+        post=function(post_name)
+        drain=function('sgRedeliverS4Wake')
+        text('sgPostS4Wake.inc',source[a:b]+post+'\n'+drain+'\n')
+        fragments.append(dict(name=post_name,sha256=hashlib.sha256(post.encode()).hexdigest(),verbatim=True))
+        fragments.append(dict(name='sgRedeliverS4Wake',sha256=hashlib.sha256(drain.encode()).hexdigest(),verbatim=True))
         anchor='#include "sgKernelPowerEventCallback.inc"'
         assert ports.count(anchor)==1
-        ports=ports.replace(anchor,'static void sleepPowerArmRedelivery(HWND){throw std::runtime_error("unexpected S4 retry in cancellation selector");}\n#include "sgPostS4Wake.inc"\n'+anchor)
+        ingress_anchor='#include "kernel_wake_ingress.inc"'
+        first_include=ingress_anchor if ingress_anchor in ports else anchor
+        ports=ports.replace(first_include,'static void sleepPowerArmRedelivery(HWND){throw std::runtime_error("unexpected retry timer in cancellation selector");}\n#define YMCC_FIXTURE_KERNEL_WAKE_REDELIVERY 1\n#pragma push_macro("SendMessageW")\n#define SendMessageW fakeSendKernelWake\n#include "sgPostS4Wake.inc"\n#pragma pop_macro("SendMessageW")\n'+first_include)
     import runpy
     ports=runpy.run_path(str(Path(__file__).with_name('retained_delivery.py')))['bind_abort'](c,ports,returned,text)
     text('Fixture.cpp',ports)
@@ -127,7 +184,7 @@ def run(c):
         text(stage+'-'+event+'.stdout',done.stdout);text(stage+'-'+event+'.stderr',done.stderr)
         if not done.stdout:raise RuntimeError('cancellation process did not produce result')
         row=json.loads(done.stdout);row['exitCode']=done.returncode;results.append(row)
-        if done.returncode or not row['callbackPublished'] or not row['safe'] or not row['normal'] or (stage=='owned-lease' and not row['ownedResourcesReturned']):
+        if done.returncode or row['callbackPublished']!=row.get('callbackExpected',True) or not row['safe'] or not row['normal'] or (stage=='owned-lease' and not row['ownedResourcesReturned']):
             text('RESULT.json',json.dumps(dict(status='FAIL',results=results,cases=cases),indent=2)+'\n')
             raise RuntimeError('cancellation boundary failed: '+stage+'/'+event)
     result=dict(status='PASS_SCOPED_OWNED_LEASE_COLD_BASELINE_OPEN' if selected and selected.startswith('owned-lease') else 'PASS_DIRECTED_CANCEL_BOUNDARIES',selected=selected,cases=cases,results=results,defaultParentExecuted=False,physicalCalls=sum(row.get('productNtCalls',0) for row in results),ownedProcessCallsOnly=True,coldWholeProcessBaselinePassed=all(row.get('coldProcessBaselineEqual',True) for row in results))

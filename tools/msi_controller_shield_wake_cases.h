@@ -12,6 +12,36 @@
      return std::count_if(logs.begin(), logs.end(), [&](const auto& log) { return log.value("state", "") == name; });
  };
 
+ prepareWake();
+ sgHandheldResumeInputOnWake("fixture-log-lanes"); drain();
+ const auto guardGeneration=g_oemVendorShieldWake.generation;
+ const auto checkPass=[&]{tick=g_oemVendorShieldWake.next;oemVendorStackSchedule();drain();};
+ auto tagged=[](const json& row){return row.value("wakeGuardQuietRepeat",false);};
+ logs.clear();
+ const auto initialQueries=taskQueries,initialProcessCalls=processCalls;
+ checkPass();
+ check(countState("task-absent")==0&&countState("applied")==0&&countState("wake-guard-pass")==1&&
+       taskQueries==initialQueries+2&&processCalls==initialProcessCalls+1,
+       "quiet follow-up skips only child readback logs; both tasks and process are still checked");
+ fixtureVendorDetail=true;logs.clear();checkPass();fixtureVendorDetail=false;
+ check(countState("task-absent")==2&&countState("applied")==1&&std::count_if(logs.begin(),logs.end(),tagged)==3&&
+       std::all_of(logs.begin(),logs.end(),[&](const json& r){return !tagged(r)||r.value("wakeGuardGeneration",0ull)==guardGeneration;}),
+       "both absent paths and quiet apply carry explicit detail markers for the original wake generation");
+ tasks[L"MSI_Center_M_Server"]={};logs.clear();checkPass();
+ check(countState("task-removed")==1&&countState("applied")==1&&std::none_of(logs.begin(),logs.end(),tagged),
+       "recreated task and successful correction are resident");
+ logs.clear();checkPass();
+ check(countState("task-absent")==2&&countState("applied")==1&&std::none_of(logs.begin(),logs.end(),tagged),
+       "first wholly quiet pass after correction is resident");
+ processFail=true;logs.clear();checkPass();processFail=false;
+ check(countState("partial-or-unavailable")==1,"failed process check retains original failure receipt");
+ logs.clear();checkPass();
+ check(countState("task-absent")==2&&countState("applied")==1,"first success after failure is resident");
+ ++fixtureVendorLogDeliveryEpoch;logs.clear();checkPass();
+ check(countState("task-absent")==2&&countState("applied")==1,"event sink recovery reoffers quiet witnesses");
+ ++g_powerGeneration;logs.clear();sgHandheldResumeInputOnWake("fixture-log-lanes-next-wake");drain();
+ check(countState("task-absent")==2&&countState("applied")==1,"next wake retains the first inspection of both paths");
+
  reset(); g_machineIdentity.family = YmccFamily::MsiClaw; seed();
  oemVendorStackShieldRequest(false); drain();
  const auto disabledEpoch = g_oemVendorStackRequested;

@@ -38,7 +38,7 @@ export function configureInputResumeAdapter(adapter,selection,repoRoot){
  const mainSha256=crypto.createHash('sha256').update(fs.readFileSync(main)).digest('hex');
  if(selection.expectedMainSha256&&mainSha256!==selection.expectedMainSha256)throw Error('INPUT_RESUME_MAIN_IDENTITY_MISMATCH');
  const sources=[...sourceNames],external=[];
- for(const file of [main,...['sleep_power_dispatch.h','sleep_power_state.h','sleep_wake_admission.h'].map(name=>path.join(headerRoot,name))]){
+ for(const file of [main,...['sleep_power_dispatch.h','sleep_power_state.h','sleep_power_observation.h','sleep_wake_admission.h'].map(name=>path.join(headerRoot,name))]){
   if(!fs.statSync(file).isFile())throw Error('INPUT_RESUME_SOURCE_FILE_REQUIRED');
   const relative=path.relative(repoRoot,file);
   if(relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative))external.push(path.resolve(file));else sources.push(relative.replaceAll('\\','/'));

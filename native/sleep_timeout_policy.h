@@ -7,6 +7,7 @@
 namespace ymcc::sleeptimeout {
 struct Window {
     static constexpr std::uint64_t delayMs=240000;
+    static constexpr std::uint64_t dispatchGraceMs=30000;
     static constexpr std::uint64_t unitsPerMs=10000;
     std::uint64_t origin=0, lastOrigin=0;
     bool waiting=false, requested=false;
@@ -24,8 +25,14 @@ struct Window {
     bool due(std::uint64_t now) const noexcept {
         return waiting&&now>=origin&&(now-origin)/unitsPerMs>=delayMs;
     }
+    // A queued timer may first run after Windows leaves standby, before 507 arrives.
+    bool canDispatchAt(std::uint64_t now) const noexcept {
+        if(!active()||now<origin)return false;
+        const auto elapsed=(now-origin)/unitsPerMs;
+        return elapsed>=delayMs&&elapsed<delayMs+dispatchGraceMs;
+    }
     bool request(std::uint64_t now) noexcept {
-        if(!due(now))return false;
+        if(!waiting||!canDispatchAt(now))return false;
         waiting=false;requested=true;return true;
     }
     void retire() noexcept {waiting=requested=false;}

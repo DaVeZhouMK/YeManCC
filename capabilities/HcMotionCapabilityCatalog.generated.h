@@ -6,8 +6,8 @@
 namespace ymcc::capabilities::motion {
 enum class Kind { None, Reviewed, Legacy, Default, Generic, Private };
 struct Descriptor { Kind kind; std::size_t slot; std::string_view capabilityId, deviceId, origin, deviceClass, selectorId, gyroMatrixId, accelMatrixId, sourceSha256; bool controllerPreferred; Kind primaryKind; };
-inline constexpr std::string_view catalogSha256 = "f47120a9b81ac2c178cf0718b052922e60fb3f01666360b1f2496d7a9a2f54b5";
-inline constexpr std::array<Descriptor, 96> descriptors = {{
+inline constexpr std::string_view catalogSha256 = "be1eaa2eac23c6269d909ab350ba258d91a1d824b074d70d9cab57ed7356c97a";
+inline constexpr std::array<Descriptor, 97> descriptors = {{
     {Kind::Reviewed, 0, "motion.reviewed.AYANEO3.0", "ymcc.device.AYANEO3", "reviewed-native-extension", "HandheldCompanion.Devices.AYANEO3", "hc-a250b19a:model:AYANEO3", "hc-a250b19a:ayaneo3:gyro:x-neg-z-y", "hc-a250b19a:ayaneo3:accel:neg-x-neg-z-y", "f6842f39b7078c87c60cba20dd5f7a215b2abbf8b00a4a2f86d5c03cf03fb803", false, Kind::Reviewed},
     {Kind::Reviewed, 1, "motion.reviewed.AYANEOAIR2.1", "ymcc.device.AYANEOAIR2", "reviewed-native-extension", "HandheldCompanion.Devices.AYANEOAIR2", "hc-a250b19a:model:AYANEOAIR2", "hc-a250b19a:ayaneo-air2:gyro:x-neg-z-y", "hc-a250b19a:ayaneo-air2:accel:neg-x-neg-z-y", "f6842f39b7078c87c60cba20dd5f7a215b2abbf8b00a4a2f86d5c03cf03fb803", false, Kind::Reviewed},
     {Kind::Reviewed, 2, "motion.reviewed.AYANEOAIRPro1S.2", "ymcc.device.AYANEOAIRPro1S", "reviewed-native-extension", "HandheldCompanion.Devices.AYANEOAIRPro1S", "hc-a250b19a:model:AYANEOAIRPro1S", "hc-a250b19a:ayaneo-airpro1s:gyro:x-neg-z-y", "hc-a250b19a:ayaneo-airpro1s:accel:x-neg-z-neg-y", "88163c634f3a7801f8db797ea98034822ac5f58faca1c4fc9d30e21899ff0b60", false, Kind::Reviewed},
@@ -96,6 +96,7 @@ inline constexpr std::array<Descriptor, 96> descriptors = {{
     {Kind::Default, 0, "motion.default.GPDWin2.0", "hc.device.GPDWin2", "frozen-HC-identity", "HandheldCompanion.Devices.GPDWin2", "hc-a250b19a:observed-default:GPDWin2", "hc-a250b19a:default-GPDWin2:gyro:x-y-z", "hc-a250b19a:default-GPDWin2:accel:x-y-z", "d387c867e32be25bc38ecb3208af2de4ae5e78893a7c67ba46355a98837aeec9", false, Kind::Default},
     {Kind::Default, 1, "motion.default.GPDWin3.1", "hc.device.GPDWin3", "frozen-HC-identity", "HandheldCompanion.Devices.GPDWin3", "hc-a250b19a:observed-default:GPDWin3", "hc-a250b19a:default-GPDWin3:gyro:x-y-z", "hc-a250b19a:default-GPDWin3:accel:x-y-z", "985f334c447bfb0d21c4535a5d0b0b6bc8fa08882f5e9c95eee64d97e9610f0c", false, Kind::Default},
     {Kind::Default, 2, "motion.default.SteamMachine.2", "ymcc.device.SteamMachine", "reviewed-native-extension", "HandheldCompanion.Devices.SteamMachine", "hc-a250b19a:observed-default:SteamMachine", "hc-a250b19a:default-SteamMachine:gyro:x-y-z", "hc-a250b19a:default-SteamMachine:accel:x-y-z", "aa9f9ffe00fcec76d5bcdfe6cb702b2194c019d7f4014d43941e1067688aabb1", false, Kind::Default},
+    {Kind::Default, 3, "motion.default.GPDWinMax3.3", "ymcc.device.GPDWinMax3", "reviewed-native-extension", "YeManCC.SourceDevices.GPDWinMax3", "ymcc:observed-default:GPDWinMax3", "hc-a250b19a:generic-DefaultDevice:gyro:x-z-y", "hc-a250b19a:generic-DefaultDevice:accel:x-z-y", "c5c539950e9bc737bff519b4bfd6879669f5e3d952e4dd2fdc7ee9f78528ccd7", false, Kind::Default},
     {Kind::Generic, 0, "motion.generic.DefaultDevice.0", "ymcc.motion.generic.DefaultDevice", "generic-transform-only", "HandheldCompanion.Devices.DefaultDevice", "hc-a250b19a:generic:DefaultDevice", "hc-a250b19a:generic-DefaultDevice:gyro:x-z-y", "hc-a250b19a:generic-DefaultDevice:accel:x-z-y", "c5c539950e9bc737bff519b4bfd6879669f5e3d952e4dd2fdc7ee9f78528ccd7", false, Kind::Generic},
     {Kind::Generic, 1, "motion.generic.ASUS.1", "ymcc.motion.generic.ASUS", "generic-transform-only", "HandheldCompanion.Devices.ASUS.ASUS", "hc-a250b19a:generic:ASUS", "hc-a250b19a:generic-ASUS:gyro:x-y-z", "hc-a250b19a:generic-ASUS:accel:x-y-z", "0a32983b05d3c9e30b3a4c6bfc9608ac962cbc70c005ed2d2a271946501e3cee", false, Kind::Generic},
     {Kind::Private, 0, "motion.private.ClawA1M.0", "hc.device.ClawA1M", "frozen-HC-identity", "HandheldCompanion.Devices.ClawA1M", "msi-MS-1T41", "hc-06c0b954:msi-claw-a1m:gyro:x-z-neg-y", "hc-06c0b954:msi-claw-a1m:accel:neg-x-neg-z-y", "fa7e4a2c2f6b56ba019689361769127875be4de0985351001839a48614d08748", false, Kind::Private},
@@ -110,8 +111,8 @@ inline constexpr std::size_t offset(Kind kind) noexcept {
     case Kind::Reviewed: return 0;
     case Kind::Legacy: return 28;
     case Kind::Default: return 85;
-    case Kind::Generic: return 88;
-    case Kind::Private: return 90;
+    case Kind::Generic: return 89;
+    case Kind::Private: return 91;
     default: return descriptors.size();
     }
 }
@@ -119,7 +120,7 @@ inline constexpr std::size_t count(Kind kind) noexcept {
     switch(kind) {
     case Kind::Reviewed: return 28;
     case Kind::Legacy: return 57;
-    case Kind::Default: return 3;
+    case Kind::Default: return 4;
     case Kind::Generic: return 2;
     case Kind::Private: return 6;
     default: return 0;

@@ -5,7 +5,8 @@ import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {REPO,MODULE,CASE_ID,moduleSources} from './adapter.mjs';
 import {allocateScratch,verifyScratch,archiveScratch,cleanupScratch} from './scratch.mjs';
-import {verifyCurrentReviewedScripts} from './script-review.mjs';
+import {verifyCurrentReviewedScripts,reverseReviewedDelta} from './script-review.mjs';
+import {createRequire} from 'node:module';
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const read=file=>JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
 const write=(file,value)=>fs.writeFileSync(file,JSON.stringify(value,null,2)+'\n');
@@ -19,8 +20,8 @@ export function evidencePath(value){
  need(!fs.existsSync(root),'NATIVE_RECOVERY_FRESH_OUTPUT_REQUIRED');return root;
 }
 function walk(root){const files=[];function visit(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const file=path.join(dir,entry.name);need(!entry.isSymbolicLink(),'NATIVE_RECOVERY_OUTPUT_REPARSE');if(entry.isDirectory())visit(file);else{need(entry.isFile(),'NATIVE_RECOVERY_OUTPUT_TYPE');files.push(file);}need(files.length<12000,'NATIVE_RECOVERY_OUTPUT_LIMIT');}}visit(root);return files.sort();}
-function captureInputs(root,spec,tool){
- const sources=[...new Set([...moduleSources(),...spec.sources,'tools/ymcc_sim/global/host-process.ps1'])].sort().map(relative=>{const original=path.join(REPO,relative),bytes=fs.readFileSync(original),saved=path.join(root,'input-sources',relative);fs.mkdirSync(path.dirname(saved),{recursive:true});fs.writeFileSync(saved,bytes,{flag:'wx'});return{path:relative,sha256:createHash('sha256').update(bytes).digest('hex'),saved};});
+function captureInputs(root,spec,tool,verified){
+ const sources=[...new Set([...moduleSources(),...spec.sources,'tools/ymcc_sim/global/host-process.ps1'])].sort().map(relative=>{const original=path.join(REPO,relative),bytes=fs.readFileSync(original),saved=path.join(root,'input-sources',relative);verified.verifyCaptured(relative,bytes);fs.mkdirSync(path.dirname(saved),{recursive:true});fs.writeFileSync(saved,bytes,{flag:'wx'});return{path:relative,sha256:createHash('sha256').update(bytes).digest('hex'),saved};});
  const snapshot={schemaVersion:1,module:MODULE,createdAt:new Date().toISOString(),sources,tool};write(path.join(root,'input-snapshot.json'),snapshot);return snapshot;
 }
 function prepareExecution(record,evidence,snapshot){
@@ -105,9 +106,10 @@ export function verifyOwnedJobReceipt(receipt,tool){
 export function runNativeRecovery(value,{prototype=false}={}){
  const root=evidencePath(value),spec=read(path.join(REPO,MODULE,'spec.json')),tool=read(path.join(REPO,MODULE,'toolchain-inputs.json'));
  need(path.resolve(process.execPath).toLowerCase()===path.resolve(tool.nodeExecutable).toLowerCase(),'NATIVE_RECOVERY_NODE_NOT_PINNED');
- const originalScriptReview=verifyCurrentReviewedScripts(spec,relative=>fs.readFileSync(path.join(REPO,relative)));
+ const {verifySourceContinuity}=createRequire(import.meta.url)('./source-continuity.mjs');
+ const verified=verifySourceContinuity(REPO,'native',spec,verifyCurrentReviewedScripts,reverseReviewedDelta),originalScriptReview=verified.receipt;
  for(const row of tool.files)need(hash(row.path)===row.sha256,'NATIVE_RECOVERY_TOOL_CHANGED:'+row.path);
- fs.mkdirSync(root,{recursive:true});const snapshot=captureInputs(root,spec,tool),record=allocateScratch(root);write(path.join(root,'scratch-allocation.json'),record);const scratch=prepareExecution(record,root,snapshot),frozen=path.join(scratch,'input-sources',MODULE),args=path.join(root,'job-arguments.json');
+ fs.mkdirSync(root,{recursive:true});const snapshot=captureInputs(root,spec,tool,verified),record=allocateScratch(root);write(path.join(root,'scratch-allocation.json'),record);const scratch=prepareExecution(record,root,snapshot),frozen=path.join(scratch,'input-sources',MODULE),args=path.join(root,'job-arguments.json');
  write(args,[path.join(frozen,'worker.mjs'),scratch]);const env={...process.env,PATHEXT:'.COM;.EXE;.BAT;.CMD'};delete env.NODE_OPTIONS;delete env.NODE_PATH;
  const jobStartedEpochMs=Date.now(),jobDeadlineEpochMs=jobStartedEpochMs+215000,jobReceiptPath=path.join(root,'owned-job.json');
  const job=spawnSync(tool.powershellExecutable,['-NoLogo','-NoProfile','-File',path.join(scratch,'input-sources/tools/ymcc_sim/global/host-process.ps1'),'-ProgramPath',tool.nodeExecutable,'-ArgumentsPath',args,'-DeadlineEpochMs',String(jobDeadlineEpochMs),'-CleanupReserveMs','5000','-DeadlineReceiptPath',jobReceiptPath],{cwd:scratch,env,windowsHide:true,timeout:220000,maxBuffer:4*1024*1024});

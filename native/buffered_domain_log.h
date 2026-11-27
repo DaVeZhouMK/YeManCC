@@ -24,9 +24,11 @@ public:
         FailureRecord first,last;
         unsigned pendingRows=0;
         bool streamOpen=false,streamGood=false;
+        std::uint64_t tailSeparators=0,lastTailSeparatorTick=0,lastTailSeparatorOffset=0;
     };
     Evidence evidenceSnapshot() const noexcept {
-        return {failureObservations_,firstFailure_,lastFailure_,pending_,stream_.is_open(),stream_.good()};
+        return {failureObservations_,firstFailure_,lastFailure_,pending_,stream_.is_open(),stream_.good(),
+            tailSeparators_,lastTailSeparatorTick_,lastTailSeparatorOffset_};
     }
     template<class Rotate>
     bool append(const std::wstring& path, std::string_view line, std::uint64_t now,
@@ -101,7 +103,13 @@ private:
     bool open(std::uint64_t tick) {
         if (stream_.is_open()) {if(!stream_.good())rememberFailure("stream-not-ready",tick,true);return stream_.good();}
         stream_.clear();
-        if (!openJsonLineAppend(stream_, std::filesystem::path(path_))) {rememberFailure("stream-open-or-tail",tick,true);close();return false;}
+        std::uint64_t separatorOffset=0;
+        if (!openJsonLineAppend(stream_, std::filesystem::path(path_), &separatorOffset)) {rememberFailure("stream-open-or-tail",tick,true);close();return false;}
+        if(separatorOffset){
+            if(tailSeparators_<CounterLimit)++tailSeparators_;
+            lastTailSeparatorTick_=tick;
+            lastTailSeparatorOffset_=separatorOffset;
+        }
         std::error_code ec;
         const auto size = std::filesystem::file_size(std::filesystem::path(path_), ec);
         if(ec)rememberFailure("file-size",tick,true,ec.value());
@@ -109,6 +117,7 @@ private:
         return true;
     }
     std::uint64_t failureObservations_=0;
+    std::uint64_t tailSeparators_=0,lastTailSeparatorTick_=0,lastTailSeparatorOffset_=0;
     FailureRecord firstFailure_,lastFailure_;
     std::ofstream stream_;
     std::wstring path_;

@@ -177,25 +177,23 @@ inline NativePrimaryProcessInventory nativePrimaryProcessInventoryText(const std
     NativePrimaryProcessInventory result;unsigned scanned=0;
     if(earliest.empty()||latest.empty()||earliest>latest){result.complete=false;result.reason="steam-native-primary-boundary-invalid";return result;}
     if(bytes.size()>nativePrimaryMaximumBytes){result.complete=false;result.reason="steam-native-primary-byte-limit";return result;}
-    // Borrow each complete source line. Unrelated diagnostics need neither a
-    // copy nor timestamp/path parsing; every possible primary marker still
-    // reaches the original strict parser, including malformed timestamps.
+    // Search the complete source for the marker. Count skipped line breaks
+    // only when a candidate needs its physical line number.
     std::size_t offset=0;
-    while(offset<bytes.size()){
-        const auto end=bytes.find('\n',offset);
-        const auto length=(end==std::string::npos?bytes.size():end)-offset;
-        const std::string_view view(bytes.data()+offset,length);
+    for(auto marker=bytes.find("Game process ");marker!=std::string::npos;marker=bytes.find("Game process ",offset)){
+        const auto previous=bytes.rfind('\n',marker);
+        const auto lineBegin=previous==std::string::npos?0:previous+1;
+        const auto end=bytes.find('\n',marker);
+        scanned+=1+static_cast<unsigned>(std::count(bytes.data()+offset,bytes.data()+lineBegin,'\n'));
+        const std::string_view line(bytes.data()+lineBegin,(end==std::string::npos?bytes.size():end)-lineBegin);
         offset=end==std::string::npos?bytes.size():end+1;
-        ++scanned;
-        if(view.find("Game process ")==std::string_view::npos)continue;
-        const std::string line(view);
-        std::string at;if(!timestamp(line,at)){
+        std::string_view at;if(!timestampView(line,at)){
             if(line.find("Game process added : AppID ")!=std::string::npos||line.find("Game process updated : AppID ")!=std::string::npos||line.find("Game process removed: AppID ")!=std::string::npos){result.complete=false;result.reason="steam-native-primary-diagnostic-malformed";return result;}
             continue;
         }
         if(at<earliest||at>latest)continue;
-        auto text=line.substr(22);if(!text.empty()&&text.back()=='\r')text.pop_back();size_t begin=0;bool removed=false;
-        const std::string added="Game process added : AppID ",updated="Game process updated : AppID ",drop="Game process removed: AppID ";
+        auto text=line.substr(22);if(!text.empty()&&text.back()=='\r')text.remove_suffix(1);size_t begin=0;bool removed=false;
+        constexpr std::string_view added="Game process added : AppID ",updated="Game process updated : AppID ",drop="Game process removed: AppID ";
         if(text.rfind(added,0)==0)begin=added.size();else if(text.rfind(updated,0)==0)begin=updated.size();else if(text.rfind(drop,0)==0){begin=drop.size();removed=true;}else continue;
         const auto sep=text.find(' ',begin),proc=text.rfind(", ProcID ");std::uint32_t app=0;std::uint64_t pid=0;
         if(sep==std::string::npos||proc==std::string::npos||proc<=sep||!appId(text.substr(begin,sep-begin),app)){
@@ -206,7 +204,7 @@ inline NativePrimaryProcessInventory nativePrimaryProcessInventoryText(const std
         bool local=false;
         if(!removed){if(pidEnd==std::string::npos||text.compare(pidEnd,5,", IP ")!=0){result.complete=false;result.reason="steam-native-primary-diagnostic-malformed";return result;}local=text.substr(pidEnd+5)=="0.0.0.0:0";}
         else if(pidEnd!=std::string::npos&&text.find_first_not_of(" \t\r",pidEnd)!=std::string::npos){result.complete=false;result.reason="steam-native-primary-diagnostic-malformed";return result;}
-        result.rows[app]={app,static_cast<std::uint32_t>(pid),at,text.substr(sep+1,proc-sep-1),local,removed,scanned};
+        result.rows[app]={app,static_cast<std::uint32_t>(pid),std::string(at),std::string(text.substr(sep+1,proc-sep-1)),local,removed,scanned};
         if(result.rows.size()>32){result.complete=false;result.reason="steam-native-primary-record-limit";return result;}
     }
     return result;

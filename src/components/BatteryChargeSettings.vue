@@ -4,7 +4,7 @@ import Dropdown from './Dropdown.vue';
 import { getUiVisibilityState, onUiVisibilityChange } from '@/bridge/uiLifecycle';
 import { getSharedPowerLifecycle, onSharedPowerLifecycle, type SharedPowerLifecycleSnapshot } from '@/bridge/powerLifecycleState';
 import InlineIcon from './InlineIcon.vue';
-import { batteryCharge, batteryChargeOptions, batteryChargeStatus, type BatteryChargeState } from '@/bridge/batteryCharge';
+import { batteryCharge, batteryChargeOptions, batteryChargeStatus, type BatteryChargeReadSource, type BatteryChargeState } from '@/bridge/batteryCharge';
 const state = ref<BatteryChargeState | null>(null);
 const selected = ref<number | string>('');
 const busy = ref(false), loading = ref(false), dirty = ref(false), error = ref('');
@@ -13,11 +13,12 @@ const mayRunSoftware = ref(false);
 let active = false, inPage = true, generation = 0;
 // BatteryHost admits its own device work; the fan/input write gate is independent.
 const batteryPowerPaused = (power: SharedPowerLifecycleSnapshot | null) =>
-  power?.phase !== 'ready' || power.known === false || power.notificationPending === true;
+  power?.phase !== 'ready' || power.known === false || power.notificationPending === true || power.scopeReadbackPending === true;
 const powerPaused = ref(batteryPowerPaused(getSharedPowerLifecycle()));
 let readFailures = 0, refreshQueued = false, powerGeneration = 0;
-let powerSuspendSerial: number | undefined;
+let powerSuspendSerial: number | undefined, powerNotificationSequence: number | undefined;
 let pendingRead: AbortController | undefined;
+let applyPreflightEpoch: number | undefined;
 let stopVisibility: (() => void) | undefined;
 let stopPower: (() => void) | undefined;
 const retryDelays = [1500, 5000, 15000];
@@ -49,24 +50,30 @@ function scheduleRead() {
   if (refreshQueued) { refreshQueued = false; void refresh(); return; }
   // Temporary failures get three bounded read-only attempts. Exhaustion stays
   // idle until a real foreground/power/route edge renews the budget.
-  const delay = readFailures > 0 ? retryDelays[readFailures - 1] :
+  const retry = readFailures > 0;
+  const delay = retry ? retryDelays[readFailures - 1] :
     (state.value?.supported || mayRunSoftware.value) ? 15000 : undefined;
-  if (delay !== undefined) timer = setTimeout(() => { timer = undefined; void refresh(); }, delay);
+  if (delay !== undefined) timer = setTimeout(() => { timer = undefined; void refresh(retry ? 'settings-retry' : 'settings-poll'); }, delay);
+}
+// A retired Apply may still be acknowledging firmware state in BatteryHost.
+// Keep Apply exclusive until settlement, but let the new scope observe state.
+function applyBlocksRead() {
+  return busy.value && (applyPreflightEpoch === undefined || applyPreflightEpoch === generation);
 }
 function requestRead() {
   if (!active) return;
   readFailures = 0;
-  if (loading.value || busy.value) { refreshQueued = true; return; }
+  if (loading.value || applyBlocksRead()) { refreshQueued = true; return; }
   void refresh();
 }
-async function refresh() {
-  if (!active || loading.value || busy.value) return;
+async function refresh(source: Extract<BatteryChargeReadSource, `settings-${string}`> = 'settings-edge') {
+  if (!active || loading.value || applyBlocksRead()) return;
   const epoch = generation;
   const owner = new AbortController();
   pendingRead = owner;
   refreshQueued = false; loading.value = true; stopTimer();
   try {
-    const next = await batteryCharge.get(owner.signal);
+    const next = await batteryCharge.get(owner.signal, source);
     if (active && generation === epoch) {
       accept(next); error.value = preferenceWarning.value;
       // Known unsupported hardware stays idle. An unknown transport/host or a
@@ -100,7 +107,9 @@ async function apply() {
     // The explicit Apply also acknowledges an uncertain firmware result with
     // a fresh read. Background reads never clear recovery or replay a write.
     if (!release && canRecover.value) {
+      applyPreflightEpoch = epoch;
       const fresh = await batteryCharge.refresh();
+      applyPreflightEpoch = undefined;
       if (!active || generation !== epoch) return;
       accept(fresh);
       if (!fresh.ok || !fresh.supported || !fresh.choices.includes(target)) { error.value = '当前设置未确认'; return; }
@@ -123,8 +132,9 @@ async function apply() {
       if (state.value) state.value = { ...state.value, ok: false, supported: false, currentLimit: null, verification: 'unconfirmed' };
     }
   } finally {
+    applyPreflightEpoch = undefined;
     busy.value = false;
-    if (active && generation !== epoch) void refresh();
+    if (active && generation !== epoch) requestRead();
     else scheduleRead();
   }
 }
@@ -147,17 +157,22 @@ function appeared() { if (!active) activate(); else if (!loading.value && !busy.
 onMounted(() => {
   let observedPower='';
   stopPower = onSharedPowerLifecycle(snapshot => {
-    const next=JSON.stringify([snapshot.generation,snapshot.suspendSerial,snapshot.phase,snapshot.known!==false,snapshot.notificationPending===true]);
-    if(next===observedPower)return;
+    const next=JSON.stringify([snapshot.generation,snapshot.suspendSerial,snapshot.phase,snapshot.known!==false,
+      snapshot.notificationPending===true,snapshot.scopeReadbackPending===true]);
+    // A notification can change the native request scope even when Ready stays visible.
+    const retireNotificationWork = powerGeneration !== 0 && snapshot.observedNotificationSequence !== powerNotificationSequence &&
+      (pendingRead !== undefined || busy.value);
+    powerNotificationSequence = snapshot.observedNotificationSequence;
+    if(next===observedPower&&!retireNotificationWork)return;
     observedPower=next;
     // A missed pause must still retire reads belonging to the old power cycle.
     const scopeChanged=powerGeneration!==0&&(snapshot.generation!==powerGeneration||snapshot.suspendSerial!==powerSuspendSerial);
     powerGeneration=snapshot.generation;
     powerSuspendSerial=snapshot.suspendSerial;
     powerPaused.value=batteryPowerPaused(snapshot);
-    if(powerPaused.value||scopeChanged){suspend();retireRead();}
+    if(powerPaused.value||scopeChanged||retireNotificationWork){suspend();retireRead();}
     if(!powerPaused.value)appeared();
-  }, { observeSuspendSerial: true });
+  }, { observeSuspendSerial: true, observeNotificationSequence: true });
   stopVisibility = onUiVisibilityChange(({ documentVisible, nativeWindowVisible }) => {
     if (documentVisible && nativeWindowVisible) activate(); else suspend();
   });

@@ -27,7 +27,9 @@ parser.add_argument('--sleep-request-case', default=None, help='Exact sender cas
 selection.add_argument('--resume-classification-sender-only', action='store_true', help='Original field classification and actual sender joined with public Reader only')
 parser.add_argument('--resume-sender-case', default=None, help='Exact original joined field selection')
 selection.add_argument('--broadcast-consumer-only', action='store_true', help='Execute complete original broadcast with independent observer fault ports')
-parser.add_argument('--broadcast-consumer-case', choices=["gate-query-reopen-refused","gate-query-normal","gate-query-event-refused","gate-query-handle-refused","gate-query-both-refused","gate-query-contended","gate-query-repeat-refused","sensor-query-normal","sensor-query-capture-allocation","sensor-query-refused-allocation","sensor-query-diagnostic-double","sensor-query-already-paused","sensor-query-inactive","journal-query-normal","journal-bare-normal","journal-query-armed-record","journal-bare-armed-record","journal-query-origin-record","journal-bare-origin-record","journal-query-classification-record","journal-bare-classification-record","journal-bare-monitor-record","journal-query-marker-allocation","journal-bare-marker-allocation","suspend-query-normal","suspend-bare-normal","suspend-query-notification-allocation","suspend-bare-notification-allocation","suspend-query-notification-allocation-double","normal","journal","capture","device-log","focus","radial","steam-close","steam-interactive","focus-observation","msi-observation","msi-completion","failure-log","suspend-prepare","suspend-cpu-observer-failure","suspend-foreground-queue-failure","argument-allocation","common-normal","common-entry-allocation","common-entry-log","common-keep-journal-allocation","common-input-release","common-input-reset","common-input-rescan","common-handheld","common-resuming","common-notification-allocation","common-msi-observation","common-diagnostic-double","common-retry-automatic","common-duplicate-automatic","common-duplicate-interactive","common-native-queue-normal","common-native-queue-entry-allocation","common-native-queue-keep-allocation","common-native-queue-allocation-fails"], default=None, help='Exact complete-broadcast scenario; requires --broadcast-consumer-only')
+parser.add_argument('--broadcast-consumer-case', choices=["gate-query-reopen-refused","gate-query-normal","gate-query-event-refused","gate-query-handle-refused","gate-query-both-refused","gate-query-contended","gate-query-repeat-refused","sensor-query-normal","sensor-query-capture-allocation","sensor-query-refused-allocation","sensor-query-diagnostic-double","sensor-query-already-paused","sensor-query-inactive","journal-query-normal","journal-bare-normal","journal-query-armed-record","journal-bare-armed-record","journal-query-origin-record","journal-bare-origin-record","journal-query-classification-record","journal-bare-classification-record","journal-bare-monitor-record","journal-query-marker-allocation","journal-bare-marker-allocation","suspend-query-normal","suspend-bare-normal","suspend-query-notification-allocation","suspend-bare-notification-allocation","suspend-query-notification-allocation-double","normal","journal","capture","device-log","focus","radial","steam-close","steam-interactive","focus-observation","msi-observation","msi-completion","failure-log","suspend-prepare","suspend-public-consumer-handoff","suspend-foreground-queue-failure","argument-allocation","common-normal","common-entry-allocation","common-entry-log","common-keep-journal-allocation","common-input-release","common-input-reset","common-input-rescan","common-handheld","common-resuming","common-notification-allocation","common-msi-observation","common-diagnostic-double","common-retry-automatic","common-duplicate-automatic","common-duplicate-interactive","common-native-queue-normal","common-native-queue-entry-allocation","common-native-queue-keep-allocation","common-native-queue-allocation-fails"], default=None, help='Exact complete-broadcast scenario; requires --broadcast-consumer-only')
+parser._option_string_actions['--broadcast-consumer-case'].choices.extend([
+    'common-s4-entry-boundary', 'common-s4-queue-revocation', 'common-s4-own-gate-close'])
 args = parser.parse_args()
 if args.broadcast_consumer_case is not None and not args.broadcast_consumer_only:
     parser.error('--broadcast-consumer-case requires --broadcast-consumer-only')
@@ -171,13 +173,15 @@ names = [
     'sgHandleModernStandbyWake','sgStopMonitorEntryFailureTimer','sgArmMonitorEntryFailureTimer','sgObserveEntryFailureDisplay','sgMonitorEntryFailureTick',
     'sgKernelPowerEventFileTime',
     *(['sgAdmitS4Wake'] if 'static bool sgAdmitS4Wake(' in source else []),
+    *(['fanHostRecordSharedCriticalWake'] if 'static void fanHostRecordSharedCriticalWake(' in source else []),
 ]
 has_retry_timer_scope = 'struct SgSleepRetryFailureScope {' in source
 if has_retry_timer_scope:names.insert(names.index('sgScheduleNextSleepRetry'),'sgArmSleepRetryTimer')
 functions = '\n\n'.join(function(name) for name in names)
 if 'static void sgArmS4WakeRedelivery(' in source:
     s4_begin=unique_anchor('static std::mutex g_sgFailedS4Mutex;')
-    s4_end=unique_anchor('static void sgPostS4Wake(')
+    post_name='sgPostKernelWake' if 'static void sgPostKernelWake(' in source else 'sgPostS4Wake'
+    s4_end=unique_anchor(f'static void {post_name}(')
     assert s4_begin<s4_end
     functions += '\n'+source[s4_begin:s4_end]+function('sgArmS4WakeRedelivery')+'\n'
 # The Native callback now consumes this actual source-order predicate.
@@ -360,6 +364,16 @@ static constexpr ULONGLONG SG_ENTRY_RETRY_DELAYS_MS[]={500,1000,2000};
 static constexpr unsigned SG_MAX_ENTRY_RETRIES=3;
 ymcc::sleeprepair::Budget g_sgAutomaticSleepBudget{3};
 ymcc::fan_wake::Observation g_fanPhysicalWake;
+static std::atomic<uint64_t> g_gamepadUiWakeGeneration{0},g_gamepadUiWakeSuspendSerial{0};
+struct ClassificationMirrorPort {unsigned revocations=0;void revoke() noexcept {++revocations;}};
+static ClassificationMirrorPort g_recoveryPowerBoundary; // External watchdog projection.
+static void fanHostObserveKernelEntry(unsigned long long generation,ULONGLONG at){
+ (void)g_fanPhysicalWake.recordSleep(generation,at);
+}
+// Record the public handoff; the physical Fan owner runs in its own fixture.
+static struct {bool startup=false;std::uint64_t generation=0,wake=0,suspendSequence=0,entry=0;} fixtureFanS0Exit;
+static void fanHostObserveKernelExit(unsigned long long generation,ULONGLONG wake,bool startup=false,
+ std::uint64_t sequence=0,ULONGLONG entry=0) noexcept {fixtureFanS0Exit={startup,generation,wake,sequence,entry};}
 static void fanHostRecordSharedHibernateWake(unsigned long long generation,ULONGLONG at){
  (void)g_fanPhysicalWake.recordSharedHibernateWake(generation,at);
 }
@@ -463,6 +477,8 @@ static bool notificationPostSucceeds=true;
 static unsigned notificationPostCalls=0;
 static unsigned notificationRedeliveryArms=0;
 void sleepPowerArmRedelivery(HWND){++notificationRedeliveryArms;}
+static unsigned fixtureWakeReadbackHints=0;
+[[maybe_unused]] static void sgProbeMissingKernelWake() noexcept {++fixtureWakeReadbackHints;} // Separate source-readback boundary.
 void inputCaptureSignalSensorPowerPause(){g_sensorSuspendCallbackActive.store(true);}
 BOOL notificationPostMessage(HWND hwnd,UINT message,WPARAM type,LPARAM value){
  assert(hwnd==g_hwnd&&message==kSleepPowerForwardMessage&&value>0&&ymcc::sleepnotifications::Evidence::index(static_cast<ULONG>(type))>=0);
@@ -501,7 +517,10 @@ bool sgSleepLeaseOwnedByGeneration(ULONGLONG g){return frozen&&g==generation;}
 SgResumeResult sgResumeSleepTarget(ULONGLONG g,bool){assert(g==generation);if(frozen){frozen=false;++resumeCount;}return {resumeCount};}
 // Single fake-PID terminal only. These are mock owner facts, not acceptance
 // of the actual S4 helper, recovery queue or retained on-disk orphan markers.
-SgResumeResult sgResumeHibernateSleepTarget(ULONGLONG expectedGen){return sgResumeSleepTarget(expectedGen,false);}
+SgResumeResult sgResumeHibernateSleepTarget(ULONGLONG expectedGen,const std::function<bool()>& current=nullptr,ULONGLONG=0){
+ if(current&&!current())return {};
+ return sgResumeSleepTarget(expectedGen,false);
+}
 void sgReconcileSleepGameFlagsAfterRecoveryCancel(const char*){
  SgSleepTarget target;
  const bool mockOwnerHeld=sgReadSleepTarget(target)&&target.markerOwned;
@@ -572,7 +591,7 @@ void sgBeginModernStandbyIntent(ULONGLONG=0){
  if(g_sgTask.mode==SgSleepMode::Unknown){g_sgTask.mode=SgSleepMode::S3;g_sgSleepIntentArmed=true;sgMarkSleepTrigger();g_powerLifecycle=PowerLifecycle::Suspended;}
  else g_sgModernStandbyActive=true;
 }
-void handlePowerResumeNotification(SgWork w,const char*){
+void handlePowerResumeNotification(SgWork w,const char*,SgWorkItem* =nullptr){
  if(sgSleepRetryActive()&&w!=SgWork::WakeSuspend)return;
  // The real common owner enters Resuming before it queues sgRealWake. This
  // inert port executes that queue synchronously; it must preserve the phase
@@ -588,6 +607,12 @@ void inputHostRequestWakeRescan(ULONGLONG){}
 
 '''
 preamble = preamble.replace('/* actual-shared-power-dispatch-constants */', dispatch_constants)
+if 'static bool sgContinuedWakeAge(' in timeout_native:
+    anchor='SgSystemSleepRequestResult sgRequestSystemSleep('
+    ports=('static bool sgContinuedWakeAge(ULONGLONG&);\nstatic void sgBindContinuedWake(int,ULONGLONG);\n'
+        if uses_timeout_owner else 'static bool sgContinuedWakeAge(ULONGLONG& age){age=0;return true;}\nstatic void sgBindContinuedWake(int,ULONGLONG){}\n')
+    assert preamble.count(anchor)==1
+    preamble=preamble.replace(anchor,ports+anchor)
 preamble = preamble.replace('/* actual-isolation-ready-deferred-binding */', ready_work_ports)
 item_at=masked.index('struct SgWorkItem {')
 work_item=source[item_at:braced(masked.index('{',item_at))]+';'

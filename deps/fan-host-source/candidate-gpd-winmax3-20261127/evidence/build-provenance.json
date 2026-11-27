@@ -1,0 +1,9 @@
+{
+  "scope": "existing actual isolated mainline Release build; no rebuild or runtime execution",
+  "artifactRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Max3Fan-20261127\\HostBuild2\\bin\\YeManFanHost\\release_win-x64",
+  "buildEvidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Max3Fan-20261127\\HostBuild2",
+  "metadataToolSha256": "14f1359a4d450ec2f2a6a3ecf4f10c1c330892fda800deba635f1e37f044614b",
+  "preparationToolSha256": "9812cfa34a1485f46ae837cd3b223d92506c2d0526dd613a6d48cbb706f7cef5",
+  "isolatedBuildTargetsSha256": "91a34e78fc404785a373488b3f561eb716312beadef2aad933ff192243737e5d",
+  "projectSourceRebuildReproducibilityProven": false
+}

@@ -4,6 +4,7 @@ import path from 'node:path';
 import {hash} from 'node:crypto';
 import {extract} from '../legion_motion_consumer/extract_main.mjs';
 import {verifyCompiledSharedNativePower} from './native_power_peer.mjs';
+import {terminal29CompileSourceProfile} from '../../input_coordinator_terminal29_source_profile.mjs';
 
 const sha = bytes => hash('sha256', bytes);
 const key = file => path.resolve(file).toLowerCase();
@@ -11,7 +12,6 @@ const proofs = new WeakMap();
 
 const contractId = 'current105-terminal29-shared-input-power-v1';
 const pins = {
-  fixtureSource: '5d9d9e84aaaf4c01aedffc12226185ffc224ee2deae697813ff0197fd88f5d74',
   tupleGenerated: '9581059315d42a86e573e80a788b0fb0157caf7d06ac20c7c100eb236b7ca930',
   recoveryBody: '0d49af1d7d1f588ea0be9e22acd83d62a1d0f5514dc1e738296bb7a96f99a4fa',
   switchBody: 'bb874bfd1fc0505467d92a83d1188b23867992a4b80619c8d49ef1e2eebde36d',
@@ -68,20 +68,27 @@ export function bindCurrent29LifecycleCandidate({n, source}) {
   assert.equal(key(layout.sourceRoot), key(n.sourceRoot));
   assert.equal(key(source.records.find(row => row.path === 'native/main.cpp').original), key(path.join(layout.sourceRoot, 'native/main.cpp')));
   const candidateMain = layout.productMainSha256;
+  const profile = terminal29CompileSourceProfile(layout.sourceRoot);
+  const rawPipe = profile.inputs.find(row => row.relative === 'tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc');
+  assert(rawPipe, 'CURRENT29_PIPE_SOURCE_PROFILE');
   for (const [file, digest] of [['native/main.cpp', candidateMain],
-    ['tools/fixtures/input_coordinator_lifecycle/fixture.cpp', pins.fixtureSource]]) {
+    [profile.fixture.relative, profile.fixture.sha256], [rawPipe.relative, rawPipe.sha256]]) {
     const matches = source.records.filter(row => row.path === file);
     assert.equal(matches.length, 1, 'CURRENT29_ORIGINAL_SOURCE');
+    assert.equal(key(matches[0].original), key(path.join(layout.sourceRoot,file)), 'CURRENT29_CAPTURED_ORIGINAL_SOURCE');
     for (const p of [matches[0].original, matches[0].snapshot]) readPin({path: p, sha256: matches[0].sha256}, digest);
   }
   const compiled = new Map();
-  for (const name of ['fixture.cpp', 'main.inert.cpp', 'tuple_recovery_cases.inc']) {
+  const generatedPipe = n.generationPreflight?.generatedOverrides?.filter(row=>row.relative===rawPipe.relative);
+  assert.equal(generatedPipe?.length,1,'CURRENT29_PIPE_STATIC_PREFLIGHT');
+  for (const name of ['fixture.cpp', 'main.inert.cpp', 'tuple_recovery_cases.inc', 'pipe_cases.inc']) {
     const matches = source.compiledGenerated.filter(row => path.basename(row.path) === name);
     assert.equal(matches.length, 1, 'CURRENT29_GENERATED_INPUT');
     const observed = ledger.inputs.filter(row => key(row.path) === key(matches[0].path));
     assert.equal(observed.length, 1, 'CURRENT29_GENERATED_COMPILER_INPUT');
     assert.equal(observed[0].sha256, matches[0].sha256, 'CURRENT29_COMPILER_INPUT_PIN');
-    compiled.set(name, {file: matches[0].path, bytes: readPin(matches[0], name === 'tuple_recovery_cases.inc' ? pins.tupleGenerated : matches[0].sha256)});
+    const expected = name === 'tuple_recovery_cases.inc' ? pins.tupleGenerated : name === 'pipe_cases.inc' ? generatedPipe[0].sha256 : matches[0].sha256;
+    compiled.set(name, {file: matches[0].path, bytes: readPin(matches[0], expected)});
   }
   const fixture = compiled.get('fixture.cpp');
   assert.equal(ledger.explicitTranslationUnits.filter(file => key(file) === key(fixture.file)).length, 1, 'CURRENT29_FIXTURE_TU');

@@ -41,6 +41,7 @@ internal sealed partial class RealHcBackend
     }
     internal bool SourceTransportCloseConfirmed=>sourceFanSession is {Phase:PinnedFanPhase.Closed,PendingIo:false};
     internal bool SourceAutomaticReturnObserved=>sourceFanSession?.AutomaticReturnObserved==true;
+    internal bool SourceReturnActionCompleted=>SourceAutomaticReturnObserved||sourceFanSession?.AutomaticCommandsReturned==true;
     internal bool SourceWritesObserved=>sourceFanSession?.ControlWasAttempted==true;
     internal bool SourceCloseIsOwed=>sourceFanSession is not null&&!SourceTransportCloseConfirmed;
     internal bool SourceControlCloseComplete=>!IsOpen && (sourceFanSession is null ? !sourceFanOpening : SourceTransportCloseConfirmed);
@@ -142,11 +143,13 @@ internal sealed partial class RealHcBackend
             throw new FanApiException(409,"SOURCE_FAN_RETURN_PENDING",owner.LastFailure??"Issued source operation pending");
         }
         var written=owner?.ControlWasAttempted==true;
-        if(written&&owner?.AutomaticReturnObserved!=true)
-            throw new FanApiException(409,"SOURCE_FAN_RETURN_UNPROVEN","Automatic mode was not observed");
-        oemReleaseActionKind=written ? "proven-by-source-auto-register-and-terminal-close" :
+        if(written&&!SourceReturnActionCompleted)
+            throw new FanApiException(409,"SOURCE_FAN_RETURN_UNPROVEN","Automatic return action was not completed");
+        var dualDutyCommands=owner?.AutomaticCommandsReturned==true;
+        oemReleaseActionKind=written ? (dualDutyCommands ? "proven-by-source-duty-zero-commands-and-terminal-close" : "proven-by-source-auto-register-and-terminal-close") :
             FanHostEngine.ReleaseActionKindName(OemReleaseAction.NotApplicable);
-        oemReleaseActionEvidence=written?"source-auto-register-and-exact-terminal-close-observed":"source-no-control-write-terminal-closed";
+        oemReleaseActionEvidence=written?(dualDutyCommands ? "source-issued-duty-channels-zero-write-returned-terminal-closed" :
+            "source-auto-register-and-exact-terminal-close-observed"):"source-no-control-write-terminal-closed";
         oemRestoreEvidence=oemReleaseActionEvidence;oemOwnershipStatus="source-resources-retired-physical-effect-not-observed";
         // Explicit source evidence must never masquerade as an HC callback,
         // virtual Close or ManagerFactory lifecycle receipt.

@@ -12,7 +12,9 @@
 #include "json.hpp"
 #include "sleep_power_state.h"
 #include "msi_owned_return_recovery.h"
+#include "msi_owned_return_off_endpoint.h"
 #include "msi_crash_recovery_journal.h"
+#include "virtual_output_status.h"
 using json = nlohmann::json;
 namespace msiRecovery = ymcc::msi::recovery;
 using ULONGLONG = unsigned long long;
@@ -35,7 +37,16 @@ static std::atomic<unsigned long long> g_msiOwnedReturnMatchedPower{0}, g_msiOwn
 static std::atomic<unsigned> g_msiOwnedReturnMatchedTopology{0};
 static std::atomic<ULONGLONG> g_msiOwnedReturnObserveAfter{0}, g_msiDinputReturnDebtPendingLogTick{0};
 static std::atomic<unsigned> g_msiOwnedReturnSeenTopology{0};
+static std::atomic<unsigned> g_xinputSlotIdentityEpoch{23};
+static std::atomic<std::uint64_t> g_sharedPowerSuspendSerial{0},g_msiOwnedReturnSeenSuspendSerial{0};
 static std::atomic<unsigned long long> g_msiOwnedReturnSeenPower{0}, g_msiOwnedReturnSeenSourceEvent{0};
+static ymcc::sleeppower::SharedPowerV1 g_msiOwnedReturnMatchPower;
+static ymcc::msi::ownedReturnOff::Publication g_msiOwnedReturnOffEndpoint;
+static std::atomic<bool> g_msiOwnedReturnOffHandoffPending{false};
+static struct {bool bound=false;} g_msiOwnedReturnOffRequalification;
+// This sidecar ends at durable settlement and receipt publication. The
+// original owned-return runtime fixture runs subsequent OFF requalification.
+static void msiOwnedReturnOffHandoffMaintenance(ULONGLONG) {}
 static bool g_inputHostProcess=false, g_inputHostPrepared=false, g_inputHostReleaseQuarantined=false, g_inputHostActive=false;
 static bool g_msiOwnedReturnRetrySafe=false, g_msiCrashLoaded=false, g_msiCrashStoreInvalid=false;
 static bool g_authorized=true, g_seam=false, g_hardware=true, g_foregroundBusy=false;
@@ -124,10 +135,12 @@ class Scope final {public:bool current()const noexcept{return true;}bool power()
 #define YMCC_LEGACY_RETURN_OBSERVATION_CAPTURE
 static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& output)noexcept{
     output={};output.generation=currentPowerGeneration();output.flags=ymcc::sleeppower::kKnown;
+    output.suspendSerial=g_sharedPowerSuspendSerial.load();
     if(hardwareWriteAllowed())output.flags|=ymcc::sleeppower::kHardwareAllowed;
     return ymcc::sleeppower::powerAdmitted(output);
 }
 static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& value)noexcept{
-    return ymcc::sleeppower::powerAdmitted(value)&&value.generation==currentPowerGeneration()&&hardwareWriteAllowed();
+    ymcc::sleeppower::SharedPowerV1 current;
+    return captureSharedPowerLifecycle(current)&&ymcc::sleeppower::samePowerRevocation(value,current);
 }
 #endif

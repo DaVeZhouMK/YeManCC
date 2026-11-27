@@ -6,6 +6,9 @@ using System.Security.Cryptography;
 using System.Text;
 
 namespace YeMan.Setup {
+ internal sealed class UnsafeInstallPathException : IOException {
+  internal UnsafeInstallPathException(string path):base("路径包含链接或重解析点："+path){}
+ }
  public static class SafeFiles {
   public static string IoPath(string p) { return p.StartsWith(@"\\?\") ? p : @"\\?\" + Path.GetFullPath(p); }
   public static void Copy(string from,string to,bool overwrite) { File.Copy(IoPath(from),IoPath(to),overwrite); }
@@ -47,7 +50,8 @@ namespace YeMan.Setup {
   public static void NoLinks(string path) {
    string p = Path.GetFullPath(path);
    while (!string.IsNullOrEmpty(p)) {
-    if ((File.Exists(p) || Directory.Exists(p)) && (File.GetAttributes(p) & FileAttributes.ReparsePoint) != 0) throw new IOException("目录包含链接或重解析点，请选择真实目录：" + p);
+    try{if((File.GetAttributes(p)&FileAttributes.ReparsePoint)!=0)throw new UnsafeInstallPathException(p);}
+    catch(FileNotFoundException){}catch(DirectoryNotFoundException){}
     p = Path.GetDirectoryName(p);
    }
   }
@@ -65,7 +69,7 @@ namespace YeMan.Setup {
    }
    return n;
   }
-  public static void Extract(string zip, string root, Func<string,bool> allowed) {
+  public static void Extract(string zip, string root, Func<string,bool> allowed, Func<string,bool> skip = null) {
    NoLinks(root); Directory.CreateDirectory(root); long total = 0;
    using (var archive = ZipFile.OpenRead(zip)) {
     if (archive.Entries.Count > 12000) throw new InvalidDataException("压缩包文件数超限");
@@ -82,6 +86,7 @@ namespace YeMan.Setup {
      if (!Under(Path.Combine(root, n.Replace('/', '\\')), root)) throw new InvalidDataException("路径越界");
     }
     foreach (var e in archive.Entries) {
+     if (skip != null && skip(EntryName(e.FullName))) continue;
      string n = EntryName(e.FullName); string p = Path.Combine(root, n.Replace('/', '\\')); NoLinks(p);
      if (n.EndsWith("/")) { Directory.CreateDirectory(p); continue; }
      Directory.CreateDirectory(Path.GetDirectoryName(p));
@@ -136,19 +141,29 @@ namespace YeMan.Setup {
   public void VerifyApplied() {
    foreach(var e in expected){SafeFiles.NoLinks(e.Key);if(e.Value==null){if(File.Exists(e.Key))throw new IOException("应删除的文件仍然存在："+e.Key);}else if(!File.Exists(e.Key)||SafeFiles.Hash(e.Key)!=e.Value)throw new IOException("最终文件完整性核验失败，可能被占用、隔离或外部修改："+e.Key);}
   }
-  public void Tree(string source, string target, bool preserveConfig, Predicate<string> preservePath=null) {
+  public void Tree(string source, string target, bool preserveConfig, Predicate<string> preservePath=null, bool optional=false) {
    SafeFiles.NoLinks(source); SafeFiles.NoLinks(target);
    bool previous=batching;batching=true;try {
    foreach (var p in SafeFiles.TreeFiles(source)) {
     string relative = p.Substring(source.Length).TrimStart('\\'); string to = Path.Combine(target, relative);
     if (File.Exists(to) && ((preservePath!=null&&preservePath(relative)) || (preserveConfig && (relative.EndsWith(".ini", StringComparison.OrdinalIgnoreCase) || relative.EndsWith(".cfg", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(relative).Equals("config_USER.json", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(relative).Equals("app.config.json", StringComparison.OrdinalIgnoreCase))))) continue;
-    Put(p, to);
+    try{Put(p,to);}
+    catch(Exception e){if(!optional||!CanSkipFile(e))throw;throw new InstallTargetBusyException(relative,e);}
    }
    }finally{batching=previous;}
    if(!batching)Json.Save(journal,changes);
   }
   static void MakeWritable(string path){var attributes=File.GetAttributes(path);if((attributes&FileAttributes.ReadOnly)!=0)File.SetAttributes(path,attributes&~FileAttributes.ReadOnly);}
-  static void RestoreAttributes(Change c){if(c.OriginalAttributes.HasValue)File.SetAttributes(c.Target,(FileAttributes)c.OriginalAttributes.Value);}
+  static bool CanSkipFile(Exception e){int code=e.HResult&0xffff;return e is UnauthorizedAccessException||(e is IOException&&(code==5||code==32||code==33||code==80||code==112||code==183||code==267||code==1175||code==1176||code==1177||code==1224));}
+  internal void RestoreTree(string root) {
+   RestorePaths(target=>SafeFiles.Under(target,root));
+  }
+  internal void RestorePaths(Predicate<string> match) {
+   // Keep durable intents for crash recovery, but stop verifying files restored to their original state.
+   for(int i=changes.Count-1;i>=0;i--)if(match(changes[i].Target))Restore(changes[i]);
+   var keys=new List<string>(expected.Keys);foreach(string key in keys)if(match(key))expected.Remove(key);
+  }
+  static void RestoreAttributes(Change c){if(c.OriginalAttributes.HasValue&&File.GetAttributes(c.Target)!=(FileAttributes)c.OriginalAttributes.Value)File.SetAttributes(c.Target,(FileAttributes)c.OriginalAttributes.Value);}
   static void Restore(Change c) {
    SafeFiles.NoLinks(c.Target);SafeFiles.NoLinks(c.Backup);
    if(c.Existed&&(!File.Exists(c.Backup)||SafeFiles.Hash(c.Backup)!=c.OriginalSha256))throw new IOException("备份校验失败："+c.Target);
@@ -168,7 +183,7 @@ namespace YeMan.Setup {
    }else if(File.Exists(c.Target))File.Delete(c.Target);
   }
   static void ValidateStaging(Change c){if(c.Staging==null)return;if(!Path.IsPathRooted(c.Staging)||!string.Equals(Path.GetDirectoryName(Path.GetFullPath(c.Staging)),Path.GetDirectoryName(Path.GetFullPath(c.Target)),StringComparison.OrdinalIgnoreCase)||!System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(c.Staging),@"^\.ymcc-[0-9a-f]{32}\.tmp$"))throw new IOException("恢复临时路径无效");}
-  public static void Recover(string storage,Predicate<string> permittedTarget=null) {
+  public static void Recover(string storage,Predicate<string> permittedTarget=null,Action<string[]> beforeRestore=null) {
    SafeFiles.NoLinks(storage);string p=Path.Combine(storage,"file-journal.json");if(!File.Exists(p))return;
    var items=Json.Read<Change[]>(File.ReadAllText(p));
    if(items==null)throw new IOException("恢复记录为空");
@@ -186,6 +201,7 @@ namespace YeMan.Setup {
    }
    foreach(var c in items)if(c==null||!SafeFiles.Under(c.Backup,storage)||c.Target==null||!Path.IsPathRooted(c.Target)||(permittedTarget!=null&&!permittedTarget(c.Target)))throw new IOException("恢复记录不安全或超出安装范围");
    foreach(var c in items)ValidateStaging(c);
+   if(beforeRestore!=null)beforeRestore(Array.ConvertAll(items,c=>c.Target));
    var errors=new List<string>();for(int i=items.Length-1;i>=0;--i)try{Restore(items[i]);}catch(Exception e){errors.Add(items[i].Target+"："+e.Message);}
    Json.Save(Path.Combine(storage,"rollback.json"),new {Complete=errors.Count==0,Errors=errors,RecoveryUtc=DateTime.UtcNow.ToString("o")});
    if(errors.Count>0)throw new IOException("回滚尚未完成；已继续恢复其他文件："+string.Join("；",errors));

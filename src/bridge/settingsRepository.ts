@@ -1197,6 +1197,12 @@ export async function saveSettingsSection(section: SettingsSection, value: JsonO
     const next = normalize(current);
     (next as any)[section] = mergeSettings((next as any)[section], snapshot);
     rememberOrdinaryBootPreferences(current, next, submittedOrigin, { section, value: snapshot });
+    // Schedule restoration can save the already persisted TDP limit. Keep
+    // recovery writes and boot-mode transactions on the original commit path.
+    const keys = section === 'tdp' ? Object.keys(snapshot) : [];
+    if (keys.length === 1 && keys[0] === 'tdpMax' && !submittedOrigin.origin && !submittedOrigin.bootContext &&
+        recoveryState.status === 'ready' && recoveryState.source === 'main' && recoveryState.persisted &&
+        cacheStamp !== null && equalSettingsDocuments(current, next)) return;
     cache = await writeBootPreference(next, current, generation, path, submittedOrigin);
   });
   writeQueue = run.catch(() => {});

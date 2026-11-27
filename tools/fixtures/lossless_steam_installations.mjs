@@ -18,7 +18,7 @@ export async function steamInstallationCases({root,source,load}){
     registry:{read:async()=>{legacyCalls++;return 'X:\\PrivateSteam';}},
     fs:{exists:async p=>{reads.push(['exists',p]);return files.has(p);},readTextFile:async p=>{reads.push(['read',p]);assert(files.has(p));return files.get(p);}}};
   const runtime={readLosslessRuntime:async()=>({...state}),invalidateLosslessRuntime:()=>{},losslessRuntimeRevision:()=>0,subscribeLosslessRuntime:()=>()=>{}};
-  const owner=load(source,{'./api':api,'./losslessProfiles':profiles,'./losslessRuntimeState':runtime,'./gamedetect':{},'./optiscalerClientSync':{}});
+  const owner=load(source,{'./api':api,'./losslessProfiles':profiles,'./losslessRuntimeState':runtime,'./powerLifecycleState':{sharedPowerWriteScope:noAction,getSharedPowerLifecycle:noAction,onSharedPowerLifecycle:noAction},'./gamedetect':{},'./optiscalerClientSync':{}});
   return {owner,shared,state,files,reads,queries:()=>queries,legacyCalls:()=>legacyCalls,setReceipt:v=>{receipt=v;},setError:e=>{queryError=e;},hold:()=>{let release;held=new Promise(r=>{release=r;});return()=>{held=null;release();};}};
  }
  const run=async(name,fn)=>{activeCase=name;await fn();cases.push(name);};

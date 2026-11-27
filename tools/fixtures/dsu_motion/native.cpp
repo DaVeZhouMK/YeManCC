@@ -5,6 +5,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <xinput.h>
+#include "input_host_shared_power.h"
 #include "dsu_protocol.h"
 #include "legion_motion_message_clock.h"
 #include "json.hpp"
@@ -30,6 +31,14 @@ static std::atomic<bool> g_msiDinputRouteDinputArmed{false},g_legionRawInputSubs
 static std::atomic<uint64_t> g_hidResolveCacheGeneration{5},g_legionMotionCaptureEpoch{7},g_legionMotionEpochStartedAt{1};
 enum class PowerLifecycle {Ready,Suspended};static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
 static uint64_t currentPowerGeneration(){return power.load();}
+using ymcc::sleeppower::SharedPowerV1;
+static SharedPowerV1 fixturePower;
+static bool keepStandbyInput=false, powerReadable=true;
+[[maybe_unused]] static bool sgShouldKeepInputDuringStandby(){return keepStandbyInput;}
+[[maybe_unused]] static int __cdecl readSharedSystemPower(SharedPowerV1* out,uint32_t bytes){
+    if(!powerReadable || bytes!=sizeof(*out))return 0;
+    *out=fixturePower;out->generation=currentPowerGeneration();return 1;
+}
 static unsigned legionMotionSelectedSensorIndex() noexcept{return 0;}
 static bool msiClawKnownBoardAuthority(){return false;}
 static bool msiControllerNeutralCleanupAllowed(bool){return false;}
@@ -64,11 +73,16 @@ static void check(bool good,const char* group){++checks;if(good)return;++failure
 static bool mapped(const json& m,const json& raw,unsigned offset,double& x,double& y,double& z){
     return ymccApplyNamedImuMatrix(m.at("id"),raw[offset],raw[offset+1],raw[offset+2],x,y,z);
 }
-static void produce(const json& row){
+static void produce(const json& row,const SharedPowerV1& sampled={},const SharedPowerV1* beforeAssembly=nullptr){
     power=1;g_hidResolveCacheGeneration=5;g_legionMotionCaptureEpoch=7;g_legionRawInputSubscribed=true;g_inputCaptureStop=false;g_powerLifecycle=PowerLifecycle::Ready;owner->activeBindingGeneration=11;
+    fixturePower={sizeof(SharedPowerV1),1,1,5,7,0,ymcc::sleeppower::kKnown|ymcc::sleeppower::kHardwareAllowed,3};
+    if(sampled.generation)fixturePower=sampled;
+    power=fixturePower.generation;
     InputCaptureGamepadSnapshot captured;captured.live=true;captured.connectedMask=1;captured.inputSource="xinput";
     captured.readAttemptSequence=1;captured.readStartedTick=captured.readCompletedTick=GetTickCount64();
-    captured.readPowerGeneration=1;captured.readTopologyGeneration=2;captured.readIdentityGeneration=9;captured.readContextStable=true;
+    captured.readPowerGeneration=fixturePower.generation;captured.readTopologyGeneration=2;captured.readIdentityGeneration=9;captured.readContextStable=true;
+    captured.sharedPower=fixturePower;
+    if(beforeAssembly)fixturePower=*beforeAssembly;
     t_commonFrameSource=&captured;
     const auto& r=row.at("raw");double gx=r[0],gy=r[1],gz=r[2],ax=r[3],ay=r[4],az=r[5];
     double mgx=0,mgy=0,mgz=0,maxa=0,may=0,maz=0;
@@ -132,6 +146,31 @@ static void sourceChanges(const json& cases){
     auto controller=input;controller["controller"]=true;
     for(unsigned what=0;what<5;++what){produce(controller);if(what==0)g_hidResolveCacheGeneration=6;if(what==1)g_legionMotionCaptureEpoch=8;if(what==2)g_legionRawInputSubscribed=false;if(what==3)g_inputCaptureStop=true;if(what==4)g_powerLifecycle=PowerLifecycle::Suspended;
         check(zeroMotion()&&!zeroPad(),"source-controller-retirement-keeps-base-pad");}
+    activeCase="public-power-at-dsu-encoding";
+    produce(input);const auto captured=fixturePower;
+    check(!zeroMotion()&&!zeroPad(),"current-power-sends-pad-and-motion");
+    ++fixturePower.publicationRevision;
+    check(!zeroMotion()&&!zeroPad(),"publication-only-advance-keeps-pad-and-motion");
+    ++fixturePower.suspendSerial;
+    check(zeroMotion()&&zeroPad(),"same-generation-new-suspend-neutralizes-wire");
+    auto pending=captured;pending.flags|=ymcc::sleeppower::kNotificationPending;++pending.observedNotificationSequence;
+    produce(input);fixturePower=pending;
+    check(zeroMotion()&&zeroPad(),"pending-suspend-notice-neutralizes-wire");
+    auto resumed=captured;++resumed.suspendSerial;++resumed.observedNotificationSequence;++resumed.publicationRevision;
+    produce(input,captured,&resumed);
+    check(zeroMotion()&&zeroPad(),"assembly-cannot-stamp-an-old-sample-with-the-new-range");
+    produce(input,resumed);
+    check(!zeroMotion()&&!zeroPad(),"fresh-sample-in-new-range-resumes-wire");
+    powerReadable=false;
+    check(zeroMotion()&&zeroPad(),"unreadable-current-power-neutralizes-wire");
+    auto neutral=input;neutral["neutral"]=true;produce(neutral);
+    check(zeroMotion()&&zeroPad(),"neutral-release-survives-unreadable-power");
+    powerReadable=true;
+    auto resuming=resumed;resuming.phase=3;resuming.flags=ymcc::sleeppower::kKnown;
+    keepStandbyInput=true;produce(input,resuming);
+    check(!zeroMotion()&&!zeroPad(),"retained-standby-input-can-send-current-resuming-sample");
+    keepStandbyInput=false;
+    check(zeroMotion()&&zeroPad(),"unretained-input-cannot-send-resuming-sample");
     produce(input);
 }
 static void udp(const json& cases){

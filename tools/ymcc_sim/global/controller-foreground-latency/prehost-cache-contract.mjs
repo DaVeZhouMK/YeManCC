@@ -23,18 +23,19 @@ function read(file){
     return JSON.parse(fs.readFileSync(full,'utf8').replace(/^\uFEFF/,''));
 }
 export function isPreHostCacheAdapter(adapter){
-    return adapter?.id===PREHOST_ID&&adapter.args?.includes('--prehost-writer')===true;
+    return adapter?.id===PREHOST_ID&&Boolean(adapter.args?.some(flag=>flag==='--prehost-writer'||flag==='--win5-return-exit2'));
 }
+const preHostSelection=adapter=>adapter.args?.includes('--win5-return-exit2')?'win5-return-exit2':'prehost-writer';
 // The common engine intentionally excludes id/title from execution identity.
 // Restore only this exact entry's ID for its mandatory reference consumer.
 export function preHostManifestAdapter(adapter){
-    if(adapter?.path!=='tools/shield_foreground_field_selftest.mjs'||adapter.args?.includes('--prehost-writer')!==true)return null;
+    if(adapter?.path!=='tools/shield_foreground_field_selftest.mjs'||!isPreHostCacheAdapter({...adapter,id:PREHOST_ID}))return null;
     need(adapter.id===undefined||adapter.id===PREHOST_ID,'MANIFEST_ID_CHANGED');
     return {...adapter,id:PREHOST_ID};
 }
 function descriptor(adapter){
     need(isPreHostCacheAdapter(adapter)&&adapter.kind==='node'&&adapter.path==='tools/shield_foreground_field_selftest.mjs'&&
-        adapter.scope==='behavioral-mock'&&JSON.stringify(adapter.args)===JSON.stringify(['--output','{outDir}/foreground-field','--prehost-writer'])&&
+        adapter.scope==='behavioral-mock'&&JSON.stringify(adapter.args)===JSON.stringify(['--output','{outDir}/foreground-field','--'+preHostSelection(adapter)])&&
         JSON.stringify(adapter.resultFiles)===JSON.stringify(['foreground-field/result.json'])&&adapter.cacheOutputManifest===undefined,'DESCRIPTOR_SCOPE_CHANGED');
     for(const file of SOURCES.slice(1))need(adapter.evidenceInputs?.includes(file),'DESCRIPTOR_INPUT_MISSING:'+file);
 }
@@ -45,7 +46,7 @@ export function preHostDescriptorContract(adapter,repoRoot){
     need(!process.env.NODE_OPTIONS&&!process.env.NODE_PATH,'INHERITED_NODE_PRELOAD_UNSUPPORTED');
     const snapshot=snapshotPreHostInputs(repoRoot),config=read(path.join(repoRoot,SOURCES.find(file=>file.endsWith('prehost-toolchain-inputs.json'))));
     need(key(process.execPath)===key(config.node),'NODE_ENGINE_CHANGED');
-    const contract={schemaVersion:1,kind:KIND,selection:'prehost-writer',buildProfile:'Unoptimized /Od /MT /DNDEBUG',
+    const contract={schemaVersion:1,kind:KIND,selection:preHostSelection(adapter),buildProfile:'Unoptimized /Od /MT /DNDEBUG',
         inputFingerprint:snapshot.fingerprint,inputCount:snapshot.inputCount,inputBytes:snapshot.pinnedBytes,
         membership:snapshot.membership,headerDeclaration:snapshot.headerDeclaration,
         childEnvironment:'constructed-from-empty;fixed-tools;private-owned-output-paths',
@@ -56,11 +57,11 @@ export function preHostDescriptorContract(adapter,repoRoot){
         environmentIdentity:sha(JSON.stringify({selection:contract.selection,childEnvironment:contract.childEnvironment,nodePreload:contract.nodePreload,platform:contract.platform}))};
 }
 
-function context(repoRoot,caseDir){
+function context(repoRoot,caseDir,selection){
     const caseRoot=path.resolve(caseDir),run=path.resolve(caseRoot,'../..'),core=path.resolve(repoRoot,'../../../Testing/YMCC');
     need(inside(path.join(core,'Evidence'),run)&&key(caseRoot)===key(path.join(run,'cases',PREHOST_ID)),'CASE_NOT_ORIGINAL_CORE_OUTPUT');
     const output=path.join(caseRoot,'foreground-field'),file=path.join(output,'result.json'),producer=read(file);
-    need(producer.passed===true&&producer.status==='PASS'&&producer.selection==='prehost-writer'&&producer.productMainExecuted===false&&
+    need(producer.passed===true&&producer.status==='PASS'&&producer.selection===selection&&producer.productMainExecuted===false&&
         producer.hardwareAccess===false&&producer.realSteamOrSleep===false,'PRODUCER_SCOPE_OR_STATUS');
     const workspace=path.resolve(producer.workspace),build=path.join(workspace,'Unoptimized');
     need(key(path.dirname(workspace))===key(path.join(core,'Evidence/Build'))&&/^S30-[a-z0-9]{6}$/i.test(path.basename(workspace)),'WORKSPACE_OWNERSHIP');
@@ -87,7 +88,7 @@ function parentFiles(run){return ['result.json','execution-budget.json','owned-j
 /** List original nested outputs for the existing cache index; no second index. */
 export function preHostEvidenceFiles(result,adapter,{includeParent=true,repoRoot=path.resolve(import.meta.dirname,'../../../..')}={}){
     if(!isPreHostCacheAdapter(adapter)||result.status!=='PASS')return [];
-    const c=context(repoRoot,result.evidenceDir);
+    const c=context(repoRoot,result.evidenceDir,preHostSelection(adapter));
     const outputs=read(c.expected.outputs);
     need(Array.isArray(outputs.outputPins)&&outputs.outputPins.length>0&&outputs.outputPins.length<=10000,'OUTPUT_GRAPH_COUNT');
     for(const row of outputs.outputPins)need(typeof row.path==='string'&&inside(c.build,row.path)&&/^[a-f0-9]{64}$/.test(row.sha256??''),'OUTPUT_GRAPH_PATH');
@@ -101,9 +102,10 @@ export function verifyPreHostCacheReference({manifest,raw,caseDir,requirePin}){
     if(!adapter)return null;
     descriptor(adapter);
     need(raw.id===PREHOST_ID,'RESULT_ID_CHANGED');
-    need(manifest.options.preHostFixedContract?.kind===KIND,'FIXED_CONTRACT_MISSING');
+    const selection=preHostSelection(adapter);
+    need(manifest.options.preHostFixedContract?.kind===KIND&&manifest.options.preHostFixedContract.selection===selection,'FIXED_CONTRACT_MISSING');
     need(raw.status==='PASS','SUCCESS_INPUT_GRAPH_REQUIRED');
-    const c=context(manifest.repoRoot,caseDir),producer=c.producer;
+    const c=context(manifest.repoRoot,caseDir,selection),producer=c.producer;
     for(const file of preHostEvidenceFiles(raw,adapter,{repoRoot:manifest.repoRoot}))requirePin(file);
     const declared=new Map([...manifest.inputs,...manifest.tools].map(row=>[key(row.path),row]));
     const sourceHashes=producer.sourceHashes;
@@ -123,11 +125,12 @@ export function verifyPreHostCacheReference({manifest,raw,caseDir,requirePin}){
     const header=fs.readFileSync(path.join(snapshot,'tools/msi_native_foreground_regression.h'),'utf8'),start=header.indexOf('    if(preHostWriterCase){');
     need(start>=0,'ORIGINAL_SELECTION_ANCHOR');
     const allowed=header.slice(start).match(/allowed=\{([\s\S]*?)\};/);need(allowed,'ORIGINAL_SELECTION_SET');
-    const selections=[...allowed[1].matchAll(/"([^"]+)"/g)].map(row=>row[1]),batch=read(path.join(c.build,'prehost-writer/result.json'));
+    const selections=selection==='win5-return-exit2'?[selection]:[...allowed[1].matchAll(/"([^"]+)"/g)].map(row=>row[1]);
+    const batch=read(path.join(c.build,'prehost-writer/result.json'));
     for(const row of batch.cases??[])need(row.passed&&row.exitCode===0&&row.job?.atomicJobAdmission&&row.job.zeroObservedBeforeDispose&&
         row.job.activeProcessesFinal===0&&row.job.disposed&&!row.job.terminateRequested,'SCENE_JOB_OR_STATUS');
     const output=collectPreHostOutputProvenance(path.dirname(c.workspace),c.workspace,c.build,read(path.join(c.build,'compiled-snapshot-hashes.json')),batch,selections,
-        {requireBuildDetails:true,expectedProvenance:read(c.expected.outputs)});
+        {requireBuildDetails:true,directedWin5:selection==='win5-return-exit2',expectedProvenance:read(c.expected.outputs)});
     for(const row of output.outputPins)requirePin(row.path,row.sha256);
     const process=read(path.join(c.output,'Unoptimized-build-process.json'));
     need(process.exitCode===0&&process.signal===null&&process.spawnError===null&&process.environmentMode==='fixed-prehost-child','BUILD_PROCESS');

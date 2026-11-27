@@ -61,11 +61,52 @@ static unsigned pipeCalls=0;static bool pipeThrows=false,pipeStale=false;static 
 static void settleTdpDaemonBootstrap(bool = false){}
 static json tdpDaemonPipeRequest(const json& req,DWORD,ULONGLONG=0,unsigned long long=0){++pipeCalls;if(pipeThrows)throw std::runtime_error("fixture-pipe-first-error Authorization: Bearer fixture-secret");if(pipeStale)++g_powerGeneration;json out=mockPipeResult;out["version"]=1;out["requestId"]=req["requestId"];return out;}
 """
+FAILURE_WITNESS_TESTS=r"""
+static void checkFailureWitnessReoffer(){
+ const auto oldRoot=g_testRoot;
+ for(auto& stream:g_tdpObservationStreams)stream.close();
+ g_testRoot=(fspath::path(oldRoot)/L"failure-witness").wstring();
+ const auto data=fspath::path(yemancc_data_dir()),resident=data/L"tdp.log",detail=data/L"tdp-detail.log";
+ const auto attempt=[](int i){appendTdpObservation("tdp.failed",{{"source","autofloat"},{"operationId","fixture-witness-"+std::to_string(i)},{"error","fixture-witness-write-failure"},{"rc",7}});};
+ const auto prior=g_tdpObservationFailures.load();
+ fspath::create_directory(resident);
+ g_domainLogEnabled[1]=true;
+ for(int i=1;i<32;++i)attempt(i);
+ check("unconfirmed TDP failures stay resident and do not spill into detail",
+       g_tdpObservationFailures.load()-prior==31&&!fspath::exists(detail));
+ fspath::remove(resident);
+ g_domainLogEnabled[1]=false;
+ attempt(32);
+ auto rows=readRows();
+ check("real TDP sink recovery retains the next original failure despite detail off",
+       rows.size()==2&&rows[0].value("event","")=="tdp.failed"&&rows[0].value("operationId","")=="fixture-witness-32"&&
+       rows[0].value("failureWitness","")=="reoffered-after-unconfirmed-append"&&rows[0].value("repeatCount",0)==32);
+ check("TDP summary keeps the first observation and the first written failure separate",
+       rows.size()==2&&rows[1].value("event","")=="tdp.failure-summary"&&rows[1].value("rawFirstError","")=="reoffered-base-record"&&
+       rows[1].value("firstOperationId","")=="fixture-witness-1"&&rows[1].value("firstRetainedOperationId","")=="fixture-witness-32"&&
+       rows[1].value("firstRetainedObservation",0)==32);
+ for(int i=33;i<64;++i)attempt(i);
+ check("confirmed TDP repeats are suppressed with detail off",readRows().size()==2&&!fspath::exists(detail));
+ g_domainLogEnabled[1]=true;attempt(64);g_domainLogEnabled[1]=false;
+ rows=readRows();std::ifstream parts(detail,std::ios::binary);std::string line;const bool got=static_cast<bool>(std::getline(parts,line));
+ const auto repeated=got?json::parse(line):json::object();
+ check("confirmed TDP repeat uses detail and keeps the 32-observation summary cadence",
+       rows.size()==3&&rows[2].value("repeatCount",0)==64&&got&&repeated.value("operationId","")=="fixture-witness-64"&&!std::getline(parts,line));
+ check("only the detail repeat records the earlier retained observation ordinal",
+       rows.size()==3&&!rows[0].contains("failureRepeatAfterRetainedObservation")&&
+       !rows[1].contains("failureRepeatAfterRetainedObservation")&&!rows[2].contains("failureRepeatAfterRetainedObservation")&&
+       repeated.value("repeatCount",0)==64&&!repeated.contains("failureWitness")&&
+       repeated.value("failureRepeatAfterRetainedObservation",0)==32);
+ for(auto& stream:g_tdpObservationStreams)stream.close();
+ g_testRoot=oldRoot;
+}
+"""
 TESTS=r"""
 __declspec(noinline) static void overwriteFixtureStack(){volatile unsigned long long bytes[512];for(size_t i=0;i<512;++i)bytes[i]=0xababababababababULL+i;}
 static json checks=json::array();
 static void check(const char* name,bool pass){checks.push_back({{"name",name},{"pass",pass}});}
 static std::vector<json> readRows(){for(auto& stream:g_tdpObservationStreams)stream.flush();std::ifstream in(fspath::path(yemancc_data_dir())/L"tdp.log");std::vector<json> rows;for(std::string line;std::getline(in,line);)if(!line.empty())rows.push_back(json::parse(line));return rows;}
+"""+FAILURE_WITNESS_TESTS+r"""
 int wmain(int argc,wchar_t** argv){
  if(argc==2&&wcscmp(argv[1],L"--fixture-timeout")==0){Sleep(60000);return 0;}
  if(argc==2&&wcscmp(argv[1],L"--fixture-stale")==0){Sleep(300);return 0;}
@@ -164,6 +205,7 @@ int wmain(int argc,wchar_t** argv){
  const auto beforeRepeat=readRows().size();for(int i=0;i<64;++i)appendTdpObservation("tdp.failed",{{"source","autofloat"},{"operationId","fixture-float-"+std::to_string(i)},{"error","fixture-original-encodings-error"},{"rc",7}});
  rows=readRows();unsigned firstError=0,summaries=0;for(size_t i=beforeRepeat;i<rows.size();++i){if(rows[i].value("event","")=="tdp.failed")++firstError;if(rows[i].value("event","")=="tdp.failure-summary"&&rows[i].value("repeatCount",0)>=32)++summaries;}
  check("autofloat-detail-off-first-original-error-plus-bounded-repeat-summary",firstError==1&&summaries==2);
+ checkFailureWitnessReoffer();
  const auto beforeSuccess=rows.size();const auto beforeSuccessTime=timestampCalls;for(int i=0;i<64;++i)appendTdpObservation("tdp.completed",{{"source","autofloat"},{"operationId","fixture-ok-"+std::to_string(i)}});
  rows=readRows();check("autofloat-detail-off-successes-aggregated-not-every-tick",rows.size()-beforeSuccess==2);
  check("suppressed-success-rows-skip-time-enrichment-except-two-original-aggregates",timestampCalls-beforeSuccessTime==2);

@@ -1,6 +1,6 @@
 import { FRAME_RATE_CEILINGS } from './frameRateModel';
 import { onUiVisibilityChange } from './uiLifecycle';
-import { getSharedPowerLifecycle, isSharedPowerLifecycleAdmitted, onSharedPowerLifecycle } from './powerLifecycleState';
+import { beginSharedPowerLifecycleReadback, getSharedPowerLifecycle, isSharedPowerLifecycleAdmitted, onSharedPowerLifecycle, type SharedPowerWriteScope } from './powerLifecycleState';
 import { registerScheduledTask } from '../scheduler';
 import { TdpRequestSupersededError } from '../robust/repairModel';
 // yeman.ts — 语义化后端桥层（强强壳 shell.run / fs 封装）
@@ -33,9 +33,9 @@ export function setPowerControlDir(dir: string): void {
   tdpDaemonUp = false;
   tdpDaemonStart = null;
   ++tdpDaemonEpoch;
-  tdpLifecycleEpoch++; tdpLifecycleSnapshot = null; tdpLifecycleRead = null; tdpBlockedPhase = null;
+  retireTdpLifecycleRead(); tdpBlockedPhase = null;
   tdpDaemonNeedsResume = false; tdpPowerGeneration = 0; tdpCommittedGeneration = 0;
-  tdpPowerSuspendSerial = undefined;
+  tdpPowerSuspendSerial = tdpPowerNotificationSequence = undefined;
   tdpExecutionCapability = null;
   ++tdpExecutionCapabilityEpoch;
   tdpExecutionCapabilityPending = null;
@@ -223,10 +223,32 @@ async function rememberManualScheme(key: SchemeKey, guid: string): Promise<void>
 }
 
 // 仅由启动、电源/唤醒、自动优化和档位切换等低频事件调用。
-export function ensureRememberedYemanSchemeActive(): Promise<void> {
+export function ensureRememberedYemanSchemeActive(owner?: {
+  current: () => boolean;
+  read: WakeSchemeAttempt['read'];
+}): Promise<void> {
+  const requireCurrent = () => {
+    if (owner?.current() === false) throw new Error('Wake power scheme request retired');
+  };
+  const selectionCurrent = owner && (async () => owner.current());
+  let wake: WakeSchemeAttempt | undefined;
+  if (owner) {
+    requireCurrent();
+    const admission = captureStaticWakeAdmission();
+    if (!admission) throw new Error('Wake power scheme admission unavailable');
+    wake = {
+      submitted: captureSleepPowerWrite({ powerAdmission: { ...admission,
+        expectedPowerSuspendSerial: getSharedPowerLifecycle()?.suspendSerial } }),
+      read: owner.read,
+      async write(work) { requireCurrent(); return await work(); },
+    };
+  }
   const run = powerSchemeEnsureQueue.then(async () => {
+    requireCurrent();
     const remembered = await readRememberedPowerScheme();
-    await ensureYemanScheme();
+    requireCurrent();
+    await ensureYemanScheme(selectionCurrent, wake?.submitted, wake);
+    requireCurrent();
     // This function is called only by automation-owned paths. Manual recovery
     // uses reconcileRememberedPowerScheme instead.
     if (!remembered || remembered.guid !== PW.YEMAN || (remembered.mode !== 'yeman' && remembered.mode !== 'auto')) {
@@ -234,9 +256,10 @@ export function ensureRememberedYemanSchemeActive(): Promise<void> {
     } else if (remembered.mode !== 'auto') {
       await rememberYemanScheme('auto');
     }
-    if (await getActiveScheme() === PW.YEMAN) return;
-    await setActiveScheme(PW.YEMAN);
-    if (await getActiveScheme() !== PW.YEMAN) throw new Error('切换野蛮系统电源后仍未生效');
+    if (await getActiveScheme(wake) === PW.YEMAN) return;
+    requireCurrent();
+    await setActiveScheme(PW.YEMAN, selectionCurrent, wake?.submitted, wake);
+    if (await getActiveScheme(wake) !== PW.YEMAN) throw new Error('切换野蛮系统电源后仍未生效');
   });
   powerSchemeEnsureQueue = run.catch(() => {});
   return run;
@@ -245,27 +268,102 @@ export function ensureRememberedYemanSchemeActive(): Promise<void> {
 // Reconcile a Windows power-scheme broadcast against the persisted owner.
 // The broadcast has no reliable source field, so the last YeManCC selection is
 // the only stable way to distinguish an expected manual scheme from takeover.
-export function reconcileRememberedPowerScheme(): Promise<'yeman' | 'auto' | 'manual'> {
+type RememberedSchemeOwner = 'yeman' | 'auto' | 'manual';
+export type WakeSchemeResult = RememberedSchemeOwner | 'retry-on-ready' | 'unconfirmed';
+interface WakeSchemeAttempt {
+  submitted: SleepPowerWrite;
+  read<T>(work: (signal?: AbortSignal) => Promise<T>): Promise<T>;
+  write<T>(work: () => Promise<T>): Promise<T>;
+}
+function readSchemeStep<T>(wake: WakeSchemeAttempt | undefined, work: (signal?: AbortSignal) => Promise<T>): Promise<T> {
+  return wake ? wake.read(work) : work();
+}
+
+export function reconcileRememberedPowerScheme(ownsRequest?: () => boolean, scope?: SharedPowerWriteScope): Promise<RememberedSchemeOwner> {
+  return queueRememberedPowerScheme(ownsRequest, undefined, scope);
+}
+
+export async function reconcilePowerSchemeAfterWake(ownsRequest?: () => boolean): Promise<WakeSchemeResult> {
+  const origin = getSharedPowerLifecycle();
+  const admission = captureStaticWakeAdmission();
+  if (!origin || !admission) return 'unconfirmed';
+  const controller = new AbortController();
+  let retire!: () => void;
+  const retired = new Promise<never>((_, reject) => { retire = () => reject(new Error('Wake power scheme request retired')); });
+  void retired.catch(() => {}); // A write can be the only outstanding step at revocation.
+  const current = () => {
+    const state = getSharedPowerLifecycle();
+    return !controller.signal.aborted && ownsRequest?.() !== false && isSharedPowerLifecycleAdmitted(state) &&
+      state?.generation === origin.generation && state.suspendSerial === origin.suspendSerial &&
+      state.observedNotificationSequence === origin.observedNotificationSequence;
+  };
+  const check = () => { if (!current()) throw new Error('Wake power scheme request retired'); };
+  let wrote = false;
+  const off = onSharedPowerLifecycle(() => {
+    if (!current()) { controller.abort(); retire(); }
+  }, { observeNotificationSequence: true, observeSuspendSerial: true });
+  const submittedPower = { ...admission, expectedPowerSuspendSerial: origin.suspendSerial };
+  try {
+    const result = await queueRememberedPowerScheme(current, {
+      submitted: captureSleepPowerWrite({ powerAdmission: submittedPower }),
+      async read(work) {
+        check();
+        const value = await Promise.race([work(controller.signal), retired]);
+        check();
+        return value;
+      },
+      async write(work) {
+        check();
+        const receipt = work();
+        wrote = true;
+        return await receipt;
+      },
+    });
+    if (current()) return result;
+    return wrote ? 'unconfirmed' : 'retry-on-ready';
+  } catch {
+    return !wrote && !current() ? 'retry-on-ready' : 'unconfirmed';
+  } finally { off(); }
+}
+
+function queueRememberedPowerScheme(ownsRequest?: () => boolean, wake?: WakeSchemeAttempt, scope?: SharedPowerWriteScope): Promise<RememberedSchemeOwner> {
+  const current = ownsRequest ? async () => ownsRequest() : undefined;
+  const requireCurrent = () => { if (ownsRequest?.() === false) throw new Error('power scheme request superseded'); };
+  const submitted = wake?.submitted ?? (scope && captureSleepPowerWrite({ powerAdmission: {
+    expectedPowerGeneration: scope[0], expectedPowerSuspendSerial: scope[1], expectedPowerNotificationSequence: scope[2],
+  } }));
+  const write = <T>(work: () => Promise<T>) => wake ? wake.write(work) : work();
+  const setActive = (guid: string) => scope ? setActiveSchemeForPowerScope(guid, scope) : setActiveScheme(guid, current, submitted, wake);
   const run = powerSchemeEnsureQueue.then(async () => {
+    requireCurrent();
     if (Date.now() < schemeProtectionSuspendUntil) return schemeProtectionSuspendMode;
+    // Settings loading can repair its document. Its repository keeps settlement.
     const remembered = await readRememberedPowerScheme();
+    requireCurrent();
     if (!remembered || remembered.mode === 'yeman' || remembered.mode === 'auto') {
-      await ensureYemanScheme();
+      await ensureYemanScheme(current, submitted, wake);
+      requireCurrent();
       if (!remembered || remembered.guid !== PW.YEMAN) {
-        await rememberYemanScheme('yeman');
+        await write(() => rememberYemanScheme('yeman'));
       }
-      if (await getActiveScheme() !== PW.YEMAN) await setActiveScheme(PW.YEMAN);
+      const active = await getActiveScheme(wake);
+      requireCurrent();
+      if (active !== PW.YEMAN) await setActive(PW.YEMAN);
       return remembered?.mode === 'auto' ? 'auto' : 'yeman';
     }
 
     const expected = remembered.selectedGuid ?? remembered.guid;
-    if ((await getActiveScheme()).toLowerCase() === expected.toLowerCase()) return 'manual';
+    const active = await getActiveScheme(wake);
+    requireCurrent();
+    if (active.toLowerCase() === expected.toLowerCase()) return 'manual';
     const key = remembered.selectedKey;
     if (key === 'besteff' || key === 'bestperf' || key === 'bal') {
-      await setActiveScheme(PW.WIN_BAL);
-      await setOverlay(key === 'besteff' ? PW.OV_EFF : key === 'bestperf' ? PW.OV_PERF : PW.OV_NONE);
+      await setActive(PW.WIN_BAL);
+      requireCurrent();
+      const overlay = key === 'besteff' ? PW.OV_EFF : key === 'bestperf' ? PW.OV_PERF : PW.OV_NONE;
+      await write(() => setOverlay(overlay, submitted));
     } else {
-      await setActiveScheme(expected);
+      await setActive(expected);
     }
     return 'manual';
   });
@@ -888,8 +986,8 @@ export interface UpdateProgressState {
   error?: string;
   updatedAt?: number;
 }
-export async function updateState(): Promise<UpdateProgressState> {
-  return invoke<UpdateProgressState>('app.updateState', {}, { timeoutMs: 5000 });
+export async function updateState(signal?: AbortSignal): Promise<UpdateProgressState> {
+  return invoke<UpdateProgressState>('app.updateState', {}, { timeoutMs: 5000, signal });
 }
 // 语义化版本比较：a<b 返回 -1，a==b 返回 0，a>b 返回 1
 export function compareVersions(a: string, b: string): number {
@@ -1092,6 +1190,18 @@ let tdpExecutionCapabilityPending: Promise<TdpExecutionCapability> | null = null
 let tdpExecutionCapabilityEpoch = 0;
 let tdpExecutionCapabilityError: Error | null = null;
 let tdpRecoveryStop: (() => void) | null = null;
+let tdpRecoveryCapabilityRead: { controller: AbortController; task: Promise<TdpExecutionCapability> } | null = null;
+function retireTdpRecoveryCapabilityRead(): void {
+  const read = tdpRecoveryCapabilityRead; tdpRecoveryCapabilityRead = null;
+  read?.controller.abort();
+}
+async function refreshTdpRecoveryCapability(): Promise<TdpExecutionCapability> {
+  if (tdpRecoveryCapabilityRead) return tdpRecoveryCapabilityRead.task;
+  const controller = new AbortController();
+  const read = tdpRecoveryCapabilityRead = { controller, task: getTdpExecutionCapability(true, controller.signal) };
+  try { return await read.task; }
+  finally { if (tdpRecoveryCapabilityRead === read) tdpRecoveryCapabilityRead = null; }
+}
 function stopTdpRecovery(): void {
   const stop = tdpRecoveryStop; tdpRecoveryStop = null; stop?.();
 }
@@ -1105,14 +1215,14 @@ function queueTdpRecovery(): void {
     await reconcileTdpPowerSession().catch(() => false);
   }, { pauseWhenHidden: false });
 }
-export async function getTdpExecutionCapability(refresh = false): Promise<TdpExecutionCapability> {
+export async function getTdpExecutionCapability(refresh = false, signal?: AbortSignal): Promise<TdpExecutionCapability> {
   if (!refresh && tdpExecutionCapabilityError) throw tdpExecutionCapabilityError;
   if (!refresh && tdpExecutionCapability) return tdpExecutionCapability;
   if (!refresh && tdpExecutionCapabilityPending) return tdpExecutionCapabilityPending;
   const epoch = ++tdpExecutionCapabilityEpoch;
   const generation = getSettingsGeneration();
   const pending = (async () => {
-    const value = await invoke<TdpExecutionCapability>('tdp.capability', {}, { timeoutMs: 3000 });
+    const value = await invoke<TdpExecutionCapability>('tdp.capability', {}, { timeoutMs: 3000, signal });
     if (!value || !['default', 'msi-g3e-wmi'].includes(value.provider) ||
         (value.cpuVendorIdentity !== undefined && cpuVendorIdentity(value.cpuVendorIdentity) === 'unknown') ||
         typeof value.selected !== 'boolean' || typeof value.ready !== 'boolean' ||
@@ -1124,7 +1234,7 @@ export async function getTdpExecutionCapability(refresh = false): Promise<TdpExe
       throw new Error('TDP 执行能力返回无效，请确认前端与原生版本一致；不自动换通道');
     }
     assertSettingsGeneration(generation);
-    if (epoch !== tdpExecutionCapabilityEpoch) throw new Error("TDP 能力请求已过期，请重试");
+    if (signal?.aborted || epoch !== tdpExecutionCapabilityEpoch) throw new Error("TDP 能力请求已过期，请重试");
     tdpExecutionCapability = value;
     tdpExecutionCapabilityError = null;
     if (!value.ready) queueTdpRecovery();
@@ -1133,7 +1243,7 @@ export async function getTdpExecutionCapability(refresh = false): Promise<TdpExe
   tdpExecutionCapabilityPending = pending;
   try { return await pending; }
   catch (error) {
-    if (epoch === tdpExecutionCapabilityEpoch) {
+    if (!signal?.aborted && epoch === tdpExecutionCapabilityEpoch) {
       tdpExecutionCapabilityError = error instanceof Error ? error : new Error(String(error));
       queueTdpRecovery();
     }
@@ -1254,32 +1364,48 @@ async function tdpDaemonSet(watts: number, observation?: TdpObservationContext):
 }
 
 let tdpLifecycleSnapshot: PowerLifecycleState | null = null;
-let tdpLifecycleRead: Promise<PowerLifecycleState | null> | null = null;
+let tdpLifecycleRead: { controller: AbortController; task: Promise<PowerLifecycleState | null> } | null = null;
 let tdpLifecycleEpoch = 0;
 let tdpBlockedPhase: string | null = null;
 let tdpDaemonNeedsResume = false;
 let tdpResumePending: { epoch: number; session: number; required: boolean; task: Promise<boolean> } | null = null;
 let tdpPowerGeneration = 0, tdpCommittedGeneration = 0;
-let tdpPowerSuspendSerial: number | undefined;
+let tdpPowerSuspendSerial: number | undefined, tdpPowerNotificationSequence: number | undefined;
+
+function retireTdpLifecycleRead(): void {
+  ++tdpLifecycleEpoch; tdpLifecycleSnapshot = null;
+  const read = tdpLifecycleRead; tdpLifecycleRead = null;
+  read?.controller.abort();
+  retireTdpRecoveryCapabilityRead();
+}
+
+function tdpPowerReceiptIsOld(state: PowerLifecycleState): boolean {
+  return state.generation < tdpPowerGeneration ||
+    tdpPowerSuspendSerial !== undefined && state.suspendSerial !== undefined && state.suspendSerial < tdpPowerSuspendSerial ||
+    tdpPowerNotificationSequence !== undefined && (state.observedNotificationSequence ?? -1) < tdpPowerNotificationSequence;
+}
 
 // Startup and power edges own validation. The steady-state floating path only
 // reads this immutable snapshot; native still enforces its current write lease.
-export function invalidateTdpPowerSession(phase: 'suspending' | 'suspended' | 'resuming' | 'ready' | 'unknown', generation?: number, authoritative = false, suspendSerial?: number): void {
+export function invalidateTdpPowerSession(phase: 'suspending' | 'suspended' | 'resuming' | 'ready' | 'unknown', generation?: number, authoritative = false, suspendSerial?: number, notificationSequence?: number): void {
   if (suspendSerial !== undefined && tdpPowerSuspendSerial !== undefined && suspendSerial < tdpPowerSuspendSerial) return;
+  if (notificationSequence !== undefined && tdpPowerNotificationSequence !== undefined && notificationSequence < tdpPowerNotificationSequence) return;
   const suspendChanged = suspendSerial !== undefined && tdpPowerGeneration > 0 && suspendSerial !== tdpPowerSuspendSerial;
+  const notificationChanged = notificationSequence !== undefined && tdpPowerGeneration > 0 && notificationSequence !== tdpPowerNotificationSequence;
   const needsResume = !authoritative || phase !== 'unknown' && phase !== 'ready' ||
     Number.isSafeInteger(generation) && generation! > tdpPowerGeneration ||
     !!tdpBlockedPhase && tdpBlockedPhase !== 'unknown';
   if (Number.isSafeInteger(generation) && generation! > 0) {
     if (generation! < tdpPowerGeneration || !authoritative && phase !== 'ready' && generation! <= tdpCommittedGeneration) return;
-    if (!suspendChanged && phase === 'ready' && !tdpBlockedPhase && !tdpDaemonNeedsResume &&
+    if (!suspendChanged && !notificationChanged && phase === 'ready' && !tdpBlockedPhase && !tdpDaemonNeedsResume &&
       tdpLifecycleSnapshot?.generation === generation && isSharedPowerLifecycleAdmitted(tdpLifecycleSnapshot)) return;
     tdpPowerGeneration = generation!;
   }
   if (suspendSerial !== undefined) tdpPowerSuspendSerial = suspendSerial;
-  ++tdpLifecycleEpoch; tdpLifecycleSnapshot = null; tdpLifecycleRead = null;
+  if (notificationSequence !== undefined) tdpPowerNotificationSequence = notificationSequence;
+  retireTdpLifecycleRead();
   tdpBlockedPhase = phase === 'ready' ? null : phase;
-  if (suspendChanged) tdpRuntimeStore.invalidatePower();
+  if (suspendChanged || notificationChanged) tdpRuntimeStore.invalidatePower();
   // Context contention closes write admission; it is not itself a new sleep
   // requiring owned helper handles to be rebuilt on every unknown/Ready pair.
   if (tdpDaemonUp && needsResume) tdpDaemonNeedsResume = true;
@@ -1287,44 +1413,59 @@ export function invalidateTdpPowerSession(phase: 'suspending' | 'suspended' | 'r
 }
 async function readTdpLifecycle(refresh = false): Promise<PowerLifecycleState | null> {
   if (!refresh && tdpLifecycleSnapshot) return tdpLifecycleSnapshot;
-  if (tdpLifecycleRead) return tdpLifecycleRead;
+  if (tdpLifecycleRead) return tdpLifecycleRead.task;
   const epoch = tdpLifecycleEpoch;
-  const task = powerLifecycle.get().catch(() => null).then(state => {
-    if (epoch !== tdpLifecycleEpoch || state && (state.generation < tdpPowerGeneration ||
-      tdpPowerSuspendSerial !== undefined && state.suspendSerial !== undefined && state.suspendSerial < tdpPowerSuspendSerial)) return null;
+  const controller = new AbortController();
+  const acceptReadback = beginSharedPowerLifecycleReadback({ confirmReady: true });
+  const task = powerLifecycle.get(undefined, controller.signal).catch(() => null).then(state => {
+    if (epoch !== tdpLifecycleEpoch || state && tdpPowerReceiptIsOld(state)) return null;
+    acceptReadback(state);
+    // A new boundary can synchronously retire the reader that discovered it.
+    const shared = getSharedPowerLifecycle();
+    if (epoch !== tdpLifecycleEpoch || shared?.scopeReadbackPending) return null;
+    // Once ordered authority exists, incomplete or stale Ready cannot replace it.
+    if (state && isSharedPowerLifecycleAdmitted(state) && shared?.suspendSerial !== undefined &&
+      shared.observedNotificationSequence !== undefined && (!isSharedPowerLifecycleAdmitted(shared) ||
+        state.known !== true || state.generation !== shared.generation || state.suspendSerial !== shared.suspendSerial ||
+        state.observedNotificationSequence !== shared.observedNotificationSequence ||
+        (state.publicationRevision ?? -1) < (shared.publicationRevision ?? 0))) return null;
     if (state && Number.isSafeInteger(state.generation) && state.generation > 0) {
       const generationChanged = tdpPowerGeneration > 0 && state.generation > tdpPowerGeneration;
       const suspendChanged = tdpPowerSuspendSerial !== undefined && state.suspendSerial !== undefined && state.suspendSerial !== tdpPowerSuspendSerial;
-      if (generationChanged || suspendChanged) {
+      const notificationChanged = tdpPowerNotificationSequence !== undefined && state.observedNotificationSequence !== undefined &&
+        state.observedNotificationSequence !== tdpPowerNotificationSequence;
+      if (generationChanged || suspendChanged || notificationChanged) {
         // Recover a boundary whose entire broadcast was missed. Old pending
         // completions cannot populate the new session; no hardware probe/write.
         ++tdpLifecycleEpoch;
+        retireTdpRecoveryCapabilityRead();
         tdpRuntimeStore.invalidatePower();
         if (tdpDaemonUp && generationChanged) tdpDaemonNeedsResume = true;
       }
       tdpLifecycleSnapshot = state; tdpPowerGeneration = Math.max(tdpPowerGeneration, state.generation);
       if (state.suspendSerial !== undefined) tdpPowerSuspendSerial = state.suspendSerial;
+      if (state.observedNotificationSequence !== undefined) tdpPowerNotificationSequence = state.observedNotificationSequence;
       const admitted = isSharedPowerLifecycleAdmitted(state);
       if (admitted) tdpCommittedGeneration = Math.max(tdpCommittedGeneration, state.generation);
       tdpBlockedPhase = admitted ? null : state.known === false || state.phase === 'ready' ? 'unknown' : state.phase;
     }
     return state;
   });
-  tdpLifecycleRead = task;
-  try { return await task; } finally { if (tdpLifecycleRead === task) tdpLifecycleRead = null; }
+  const read = tdpLifecycleRead = { controller, task };
+  try { return await task; } finally { if (tdpLifecycleRead === read) tdpLifecycleRead = null; }
 }
-// Startup/show/focus reconciliation can observe a Ready whose broadcast was
-// lost while the WebView was hidden/recreated. Adopt only the native snapshot;
-// this read never replays a hardware write or runs in the floating adjustment.
+// Startup/show/focus can discover a missed boundary. The shared owner confirms
+// new Ready scopes; reconciliation does not replay the last hardware write.
 export async function reconcileTdpPowerSession(retryUnsupported = false): Promise<boolean> {
   const session = tdpDaemonEpoch;
   const state = await readTdpLifecycle(true);
   if (!state || session !== tdpDaemonEpoch || state !== tdpLifecycleSnapshot || !isSharedPowerLifecycleAdmitted(state)) return false;
   const epoch = tdpLifecycleEpoch;
+  const current = () => epoch === tdpLifecycleEpoch && session === tdpDaemonEpoch && state === tdpLifecycleSnapshot;
   const unsupported = getTdpCapabilityState() === 'unsupported';
   if (tdpExecutionCapabilityError || tdpExecutionCapability?.ready === false || retryUnsupported && unsupported) {
-    const capability = await getTdpExecutionCapability(true);
-    if (!capability.ready || epoch !== tdpLifecycleEpoch || session !== tdpDaemonEpoch) return false;
+    const capability = await refreshTdpRecoveryCapability().catch(error => { if (current()) throw error; return null; });
+    if (!capability?.ready || !current()) return false;
     if (retryUnsupported && unsupported) reconcileTdpCapabilityReady();
   }
   // A real unsupported backend waits for a new session/explicit reopen, rather
@@ -1332,24 +1473,24 @@ export async function reconcileTdpPowerSession(retryUnsupported = false): Promis
   if (unsupported && !retryUnsupported) { stopTdpRecovery(); return false; }
   // Resume only an already-owned helper; never reapply the last watts here.
   if (tdpDaemonUp && tdpDaemonNeedsResume && !await resumeTdpDaemonAfterWake(false, { epoch, state })) return false;
-  if (epoch !== tdpLifecycleEpoch || session !== tdpDaemonEpoch || state !== tdpLifecycleSnapshot) return false;
+  if (!current()) return false;
   reconcileTdpPowerReady();
   stopTdpRecovery();
   return true;
 }
-export async function primeTdpSession(initial?: Promise<PowerLifecycleState | null>): Promise<boolean> {
+export async function primeTdpSession(initial?: Promise<PowerLifecycleState | null>, { startHelper = true } = {}): Promise<boolean> {
   const epoch = tdpLifecycleEpoch, session = tdpDaemonEpoch;
   const current = () => epoch === tdpLifecycleEpoch && session === tdpDaemonEpoch;
   const state = initial ? await initial : await readTdpLifecycle();
   if (tdpDaemonStop) await tdpDaemonStop;
-  if (!state || !current() || !isSharedPowerLifecycleAdmitted(state) || state.generation < tdpPowerGeneration ||
-      tdpPowerSuspendSerial !== undefined && state.suspendSerial !== undefined && state.suspendSerial < tdpPowerSuspendSerial) return false;
+  if (!state || !current() || !isSharedPowerLifecycleAdmitted(state) || getSharedPowerLifecycle()?.scopeReadbackPending || tdpPowerReceiptIsOld(state)) return false;
   tdpLifecycleSnapshot = state; tdpBlockedPhase = null;
   if (state.suspendSerial !== undefined) tdpPowerSuspendSerial = state.suspendSerial;
+  if (state.observedNotificationSequence !== undefined) tdpPowerNotificationSequence = state.observedNotificationSequence;
   tdpPowerGeneration = Math.max(tdpPowerGeneration, state.generation); tdpCommittedGeneration = Math.max(tdpCommittedGeneration, state.generation);
   const capability = await getTdpExecutionCapability();
   if (!current() || !capability.ready) return false;
-  const ready = capability.selected || await ensureTdpDaemon();
+  const ready = !startHelper || capability.selected || await ensureTdpDaemon();
   return ready && current();
 }
 if (typeof window !== 'undefined') {
@@ -1366,21 +1507,21 @@ if (typeof window !== 'undefined') {
   on('window.focus', recoverIfNeeded);
   let sharedPowerKey = '';
   onSharedPowerLifecycle(state => {
-    const key = `${state.generation}:${state.suspendSerial}:${state.phase}:${state.known}:${state.hardwareWritesAllowed}:${state.notificationPending === true}`;
+    const key = `${state.generation}:${state.suspendSerial}:${state.observedNotificationSequence}:${state.phase}:${state.known}:${state.hardwareWritesAllowed}:${state.notificationPending === true}:${state.scopeReadbackPending === true}`;
     if (key === sharedPowerKey) return;
     sharedPowerKey = key;
     // This is a current native fact, not another independently ordered power edge.
     const admitted = isSharedPowerLifecycleAdmitted(state);
     const phase = admitted ? 'ready' : state.known === false || state.phase === 'ready' ? 'unknown' : state.phase;
-    invalidateTdpPowerSession(phase, state.generation, true, state.suspendSerial);
+    invalidateTdpPowerSession(phase, state.generation, true, state.suspendSerial, state.observedNotificationSequence);
     if (admitted && (tdpRecoveryStop || tdpBlockedPhase || !tdpLifecycleSnapshot))
       void reconcileTdpPowerSession().catch(() => { queueTdpRecovery(); });
-  }, { observeSuspendSerial: true });
+  }, { observeSuspendSerial: true, observeNotificationSequence: true });
 }
 async function assertHardwareWriteAllowed(trace?: ReturnType<typeof beginTdpObservation>) {
   if (tdpBlockedPhase) throw new Error(`系统电源恢复尚未完成，已阻止硬件写入（${tdpBlockedPhase}）`);
   const state = await readTdpLifecycle();
-  trace?.emit('tdp.lifecycle', state ? { phase: state.phase, generation: state.generation, hardwareWritesAllowed: state.hardwareWritesAllowed } : { phase: 'not-observed' });
+  trace?.emitLifecycle('power-write-gate', state ? { phase: state.phase, generation: state.generation, hardwareWritesAllowed: state.hardwareWritesAllowed } : { phase: 'not-observed' });
   if (!isSharedPowerLifecycleAdmitted(state)) {
     throw new Error(`系统电源恢复尚未完成，已阻止硬件写入（${state?.phase ?? 'unknown'}）`);
   }
@@ -1406,9 +1547,12 @@ export async function resumeTdpDaemonAfterWake(required = false, observed?: { ep
 }
 async function resumeTdpDaemonObservedCore(required: boolean, trace: ReturnType<typeof beginTdpObservation>, observed?: { epoch: number; state: PowerLifecycleState }): Promise<boolean> {
   const session = tdpDaemonEpoch;
-  if ((await getTdpExecutionCapability()).selected) { trace.emit('tdp.skipped', { skipped: true, reason: 'existing-MSI-native-route-no-daemon-handles' }); return session === tdpDaemonEpoch; }
   const epoch = observed?.epoch ?? tdpLifecycleEpoch;
   const current = () => epoch === tdpLifecycleEpoch && session === tdpDaemonEpoch;
+  // A shared capability read can finish after this wake lost ownership.
+  const capability = await getTdpExecutionCapability();
+  if (!current()) return false;
+  if (capability.selected) { trace.emit('tdp.skipped', { skipped: true, reason: 'existing-MSI-native-route-no-daemon-handles' }); return true; }
   // A reconciliation just read native state. Share that exact same-epoch
   // snapshot instead of making a second IPC query on the recovery edge.
   const state = observed && current() && observed.state === tdpLifecycleSnapshot
@@ -1494,7 +1638,7 @@ async function setTdpObservedCore(
     minPL1: target.minPL1, maxPL1: target.maxPL1, provider: capability.provider });
   if (opts.save !== false) {
     await saveTdp(mode, target.intentW); // Keep portable intent; never silently migrate 55/120W to 35W.
-    trace.emit('tdp.lifecycle', { configSaved: true });
+    trace.emitLifecycle('config-saved', { configSaved: true });
   }
   if (!opts.apply) return true;
 
@@ -1549,7 +1693,7 @@ async function setTdpObservedCore(
         assertCurrent();
         try {
           const diagnostic = await tdpDaemonSet(w, trace.context);
-          if (diagnostic) trace.emit('tdp.lifecycle', { hardwareCommandReturned: diagnostic.hardwareCommandReturned,
+          if (diagnostic) trace.emitLifecycle('daemon-write-receipt', { hardwareCommandReturned: diagnostic.hardwareCommandReturned,
             readbackMatched: diagnostic.readbackMatched, verificationScope: diagnostic.verificationScope });
         } catch (error) {
           // A response timeout may follow a real write. Never replay it through
@@ -1585,7 +1729,7 @@ async function setTdpObservedCore(
       return false; // Cancellation is neither applied nor a backend failure latch.
     }
     if (!result.applied) throw new Error(result.error || 'TDP hardware write skipped');
-    trace.emit('tdp.lifecycle', { powerEpoch: receipt.powerEpoch, stale: !tdpRuntimeStore.isCurrent(receipt), ignored: !tdpRuntimeStore.isCurrent(receipt) });
+    trace.emitLifecycle('completion-currentness', { powerEpoch: receipt.powerEpoch, stale: !tdpRuntimeStore.isCurrent(receipt), ignored: !tdpRuntimeStore.isCurrent(receipt) });
     if (!admitted() || !tdpRuntimeStore.isCurrent(receipt)) {
       tdpRuntimeStore.finishUnknown(receipt);
       trace.emit('tdp.skipped', { reason: 'superseded-after-hardware-completion', stale: true, ignored: true });
@@ -1606,6 +1750,7 @@ export async function stopTdpDaemon(): Promise<void> {
   if (tdpDaemonStop) return tdpDaemonStop;
   const owned = tdpDaemonUp, starting = tdpDaemonStart, epoch = ++tdpDaemonEpoch;
   stopTdpRecovery();
+  retireTdpRecoveryCapabilityRead();
   tdpDaemonUp = false; tdpDaemonStart = null; tdpDaemonNeedsResume = false;
   const stop = (async () => {
     try {
@@ -1733,7 +1878,7 @@ export function windowsValueToSliderAggr(value: number): number {
 // Reapply every submitted CPU policy, including the same GUID. Use the native
 // Power API so frequent changes never create powercfg processes. Older shells
 // retain the CLI path only for an explicit unknown-command response.
-export async function setActiveScheme(guid: string = PW.YEMAN, isCurrent?: () => Promise<boolean>, submitted?: SleepPowerWrite): Promise<void> {
+export async function setActiveScheme(guid: string = PW.YEMAN, isCurrent?: () => Promise<boolean>, submitted?: SleepPowerWrite, wake?: WakeSchemeAttempt): Promise<void> {
   await assertPowerSchemeSelectionCurrent(isCurrent);
   if (!submitted) {
     try {
@@ -1748,22 +1893,28 @@ export async function setActiveScheme(guid: string = PW.YEMAN, isCurrent?: () =>
     await assertPowerSchemeSelectionCurrent(isCurrent);
   }
   const args = ['/setactive', guid];
-  const result = submitted ? await runSleepPowerCommand(args, 5000, submitted) : await shell.run('powercfg', args, 5000);
+  const execute = () => submitted ? runSleepPowerCommand(args, 5000, submitted) : shell.run('powercfg', args, 5000);
+  const result = wake ? await wake.write(execute) : await execute();
   if (submitted) await assertPowerWriteOwner(submitted);
   if (result.exitCode !== 0) throw new Error(`powercfg /setactive ${guid} 失败：${(result.stderr || result.stdout).trim() || 'exit ' + result.exitCode}`);
 }
+export async function setActiveSchemeForPowerScope(guid: string, powerScope: SharedPowerWriteScope): Promise<void> {
+  const result = await invoke<{ ok: boolean; code: number }>('power.setActiveScheme', { scheme: guid, powerScope }, { timeoutMs: 5000 });
+  if (result?.ok !== true || result.code !== 0) throw new Error('电源方案激活失败或回执无效');
+}
 export interface SleepPowerWrite extends BootPreferenceWrite {
-  powerAdmission?: StaticWakeAdmission | null;
+  powerAdmission?: (StaticWakeAdmission & { expectedPowerSuspendSerial?: number }) | null;
 }
 export function captureSleepPowerWrite(options: SleepPowerWrite = {}): SleepPowerWrite {
   const supplied = options.powerAdmission;
   const original = supplied === undefined ? captureStaticWakeAdmission() : supplied;
   return { ...captureBootPreferenceWrite(options), powerAdmission: original && { ...original } };
 }
-function requireSleepPowerAdmission(options: SleepPowerWrite): StaticWakeAdmission {
+function requireSleepPowerAdmission(options: SleepPowerWrite): NonNullable<SleepPowerWrite['powerAdmission']> {
   const original = options.powerAdmission, current = captureStaticWakeAdmission();
   if (!original || !current || original.expectedPowerGeneration !== current.expectedPowerGeneration ||
-      original.expectedPowerNotificationSequence !== current.expectedPowerNotificationSequence)
+      original.expectedPowerNotificationSequence !== current.expectedPowerNotificationSequence ||
+      (original.expectedPowerSuspendSerial !== undefined && original.expectedPowerSuspendSerial !== getSharedPowerLifecycle()?.suspendSerial))
     throw new Error('电源状态未确认或已变化，请在唤醒后重试');
   return original;
 }
@@ -1785,27 +1936,28 @@ export async function reactivateCurrentScheme(options: SleepPowerWrite = {}): Pr
     throw new Error(`电源方案刷新失败：${(result.stderr || result.stdout).trim() || `exit ${result.exitCode}`}`);
   }
 }
-export async function importScheme(file: string, submitted = captureSleepPowerWrite()): Promise<void> {
-  const r = await runSleepPowerCommand(['/import', file, PW.YEMAN], 30000, submitted);
+export async function importScheme(file: string, submitted = captureSleepPowerWrite(), wake?: WakeSchemeAttempt): Promise<void> {
+  const execute = () => runSleepPowerCommand(['/import', file, PW.YEMAN], 30000, submitted);
+  const r = wake ? await wake.write(execute) : await execute();
   await assertPowerWriteOwner(submitted);
   if (r.exitCode !== 0) {
     // GUID 已存在属于良性情况（方案本来就在，无需重复导入）——只要方案确实在就不算失败；
     // 否则（文件损坏/无权限）才真正抛错，避免静默失败后 setactive 报“找不到方案”。
-    if (!(await schemeExists(PW.YEMAN))) {
+    if (!(await schemeExists(PW.YEMAN, wake))) {
       throw new Error(`导入电源方案失败：${(r.stderr || r.stdout).trim() || 'exit ' + r.exitCode}`);
     }
   }
 }
-export async function schemeExists(guid: string): Promise<boolean> {
+export async function schemeExists(guid: string, wake?: WakeSchemeAttempt): Promise<boolean> {
   // Always query the native API afresh: a confirmed absence may authorize recovery.
   // Only an explicit old-shell unknown command permits the legacy CLI path.
   let result: unknown;
   try {
-    result = await invoke<unknown>('power.schemeExists', { scheme: guid }, { timeoutMs: 5000 });
+    result = await readSchemeStep(wake, signal => invoke<unknown>('power.schemeExists', { scheme: guid }, { timeoutMs: 5000, signal }));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (!/^unknown(?::| command:)\s*power\.schemeExists$/i.test(message)) throw error;
-    const r = await shell.run('powercfg', ['/query', guid]);
+    const r = await readSchemeStep(wake, () => shell.run('powercfg', ['/query', guid]));
     return r.exitCode === 0;
   }
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
@@ -1835,23 +1987,25 @@ function logYemanSchemePersonality(details: Record<string, unknown>): void {
   } catch { /* 日志不可用也不影响电源检查流程。 */ }
 }
 
-async function ensureYemanSchemePersonality(isCurrent?: () => Promise<boolean>): Promise<void> {
+async function ensureYemanSchemePersonality(isCurrent?: () => Promise<boolean>, wake?: WakeSchemeAttempt): Promise<void> {
   // SUB_NONE 的设置直接位于方案根下；每侧仅检查一次，写入结果只记录退出码。
   const path = `SYSTEM\\CurrentControlSet\\Control\\Power\\User\\PowerSchemes\\${PW.YEMAN}\\${PW.G_PERSONALITY}`;
-  await Promise.all((['AC', 'DC'] as const).map(async (side) => {
+  const checks = (['AC', 'DC'] as const).map(async (side) => {
     let stage: 'read' | 'check' | 'write' = 'read';
     try {
-      const current = await invoke<unknown>('registry.read', {
+      const current = await readSchemeStep(wake, signal => invoke<unknown>('registry.read', {
         root: 'HKLM', path, name: side === 'AC' ? 'ACSettingIndex' : 'DCSettingIndex',
-      }, { timeoutMs: 1500 });
+      }, { timeoutMs: 1500, signal }));
       if (current === 1) return;
       stage = 'check';
       await assertPowerSchemeSelectionCurrent(isCurrent);
       stage = 'write';
-      const result = await shell.run('powercfg', [
+      const args = [
         side === 'AC' ? '/setacvalueindex' : '/setdcvalueindex',
         PW.YEMAN, PW.SUB_NONE, PW.G_PERSONALITY, '1',
-      ], 3000);
+      ];
+      const result = wake ? await wake.write(() => runSleepPowerCommand(args, 3000, wake.submitted)) :
+        await shell.run('powercfg', args, 3000);
       logYemanSchemePersonality({
         side, stage, commandSucceeded: result.exitCode === 0, exitCode: result.exitCode,
         detail: (result.stderr || result.stdout).trim().slice(0, 512),
@@ -1863,26 +2017,32 @@ async function ensureYemanSchemePersonality(isCurrent?: () => Promise<boolean>):
         detail: (error instanceof Error ? error.message : String(error)).slice(0, 512),
       });
     }
-  }));
+  });
+  if (!wake) { await Promise.all(checks); return; }
+  // A revoked read on one side must not release a write already issued by the other.
+  for (const result of await Promise.allSettled(checks)) {
+    if (result.status === 'rejected') throw result.reason;
+  }
 }
 
 // 方案缺失时先恢复；确认存在后尽力修正 AC/DC 电源计划类型，失败仅记日志。
-export async function ensureYemanScheme(isCurrent?: () => Promise<boolean>, submitted = captureSleepPowerWrite()): Promise<void> {
+export async function ensureYemanScheme(isCurrent?: () => Promise<boolean>, submitted = captureSleepPowerWrite(), wake?: WakeSchemeAttempt): Promise<void> {
   await assertPowerSchemeSelectionCurrent(isCurrent);
-  if (!(await schemeExists(PW.YEMAN))) {
+  if (!(await schemeExists(PW.YEMAN, wake))) {
     const pow = join(PC_DIR, 'YM.pow');
-    if (!(await fs.exists(pow))) throw new Error('YM.pow 电源方案文件不存在，无法恢复野蛮系统电源');
+    if (!(await readSchemeStep(wake, () => fs.exists(pow)))) throw new Error('YM.pow 电源方案文件不存在，无法恢复野蛮系统电源');
     await assertPowerSchemeSelectionCurrent(isCurrent);
-    await importScheme(pow, submitted);
-    if (!(await schemeExists(PW.YEMAN))) {
+    await importScheme(pow, submitted, wake);
+    if (!(await schemeExists(PW.YEMAN, wake))) {
       throw new Error('野蛮系统电源方案恢复失败：导入后仍未在系统电源列表中找到该方案');
     }
   }
-  await ensureYemanSchemePersonality(isCurrent);
+  await ensureYemanSchemePersonality(isCurrent, wake);
   await assertPowerSchemeSelectionCurrent(isCurrent);
 }
-export async function setOverlay(guid: string): Promise<void> {
-  const r = await shell.run('powercfg', ['/overlaysetactive', guid]);
+export async function setOverlay(guid: string, submitted?: SleepPowerWrite): Promise<void> {
+  const args = ['/overlaysetactive', guid];
+  const r = submitted ? await runSleepPowerCommand(args, 30000, submitted) : await shell.run('powercfg', args);
   if (r.exitCode !== 0) {
     throw new Error(`powercfg /overlaysetactive ${guid} 失败：${(r.stderr || r.stdout).trim() || 'exit ' + r.exitCode}`);
   }
@@ -1913,16 +2073,16 @@ async function setPowerValueIndexBestEffort(ac: boolean, subGroup: string, setti
     // CPU/大小核心等写入类参数：单条失败静默忽略，不阻断后续参数。
   }
 }
-export async function getActiveScheme(): Promise<string> {
+export async function getActiveScheme(wake?: WakeSchemeAttempt): Promise<string> {
   // 优先 native PowerGetActiveScheme API（毫秒级、纯 GUID、无中文文案解析）；
   // 兜底 powercfg /getactivescheme 子进程（旧 exe 兼容）。
   try {
-    const g = await invoke<string>('power.activeScheme', {});
+    const g = await readSchemeStep(wake, signal => invoke<string>('power.activeScheme', {}, { signal }));
     if (typeof g === 'string' && /^[0-9a-fA-F-]{36}$/.test(g)) return g.toLowerCase();
   } catch {
     /* → powercfg 兜底 */
   }
-  const r = await shell.run('powercfg', ['/getactivescheme']);
+  const r = await readSchemeStep(wake, () => shell.run('powercfg', ['/getactivescheme']));
   const m = (r.stdout || '').match(/GUID:\s*([0-9a-fA-F\-]+)/);
   return m ? m[1].toLowerCase() : '';
 }
@@ -2004,13 +2164,14 @@ export function ensureSelectedPowerScheme(key: SchemeKey = 'yeman', isCurrent?: 
 // 子组的隐藏属性，失败项再尝试写入正确的 scheme/setting 注册表路径。
 // Windows/OEM 对不同核心类别的支持可能不同，native 返回的单项失败仍按
 // 原兼容策略继续；整批 IPC/电源租约拒绝则必须上抛，不能将未执行记为成功。
-async function applyPowerValueBatch(ac: boolean, entries: Array<[string, number]>): Promise<void> {
+async function applyPowerValueBatch(ac: boolean, entries: Array<[string, number]>, powerScope?: SharedPowerWriteScope): Promise<void> {
   if (entries.length === 0) return;
   await registry.writePowerBatch(
     PW.YEMAN,
     PW.SUB,
     ac ? 'ACSettingIndex' : 'DCSettingIndex',
     entries.map(([setting, value]) => ({ setting, value: Math.trunc(value) })),
+    powerScope,
   );
 }
 
@@ -2320,6 +2481,10 @@ export async function setCoreModeDc(mode: CoreMode): Promise<void> {
   await setPowerValueIndexBestEffort(false, S, PW.G_CORE, String(core));
   await setPowerValueIndexBestEffort(false, S, PW.G_HETERO, String(hetero));
   await setPowerValueIndexBestEffort(false, S, PW.G_SHORT, String(shortRun));
+}
+export async function setCoreModeForPowerScope(side: 'ac' | 'dc', mode: CoreMode, powerScope: SharedPowerWriteScope): Promise<void> {
+  const [core, hetero, shortRun] = CORE_MAP[mode];
+  await applyPowerValueBatch(side === 'ac', [[PW.G_CORE, core], [PW.G_HETERO, hetero], [PW.G_SHORT, shortRun]], powerScope);
 }
 // 读取当前大小核心调度模式（AC 或 DC）；读取不到/非标准组合返回 null
 export async function readCoreMode(ac: boolean): Promise<CoreMode | null> {
@@ -2655,15 +2820,27 @@ async function reloadRtssProfiles(dir: string,current?:RtssOutputCurrent): Promi
   }
 }
 
-export function setRtssLimit(fps: number, isCurrent: () => boolean = () => true): Promise<void> {
+export function setRtssLimit(fps: number, isCurrent: () => boolean = () => true, retired?: Promise<undefined>): Promise<void> {
   const run = rtssConfigWriteQueue.then(async () => {
     if (!isCurrent()) return;
-    const dir = await resolveRtssDir();
-    const global = `${dir}\\Profiles\\Global`;
-    if (!(await fs.exists(global))) throw new Error('RTSS Global 配置不存在');
+    // Retire only read-only preparation; a submitted write keeps the queue until it settles.
+    const prepare = async () => {
+      const dir = await resolveRtssDir(isCurrent);
+      if (!isCurrent()) return;
+      const global = `${dir}\\Profiles\\Global`;
+      const exists = await fs.exists(global);
+      if (!isCurrent()) return;
+      if (!exists) throw new Error('RTSS Global 配置不存在');
+      return { dir, global, txt: await fs.readTextFile(global) };
+    };
+    const reading = prepare();
+    const prepared = await (retired ? Promise.race([reading, retired]) : reading).catch(error => {
+      if (isCurrent()) throw error;
+    });
+    if (!prepared || !isCurrent()) return;
+    const { dir, global, txt } = prepared;
   // NaN/Infinity 防护：非法输入写入 0（不锁帧），绝不写坏 RTSS 配置（2026-08-05 修复）
   const v = Number.isFinite(fps) ? Math.max(0, Math.round(fps)) : 0;
-  const txt = await fs.readTextFile(global);
   const lines = txt.split(/\r?\n/);
   let found = false;
   const outLines = lines.map((line) => {

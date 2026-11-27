@@ -302,13 +302,19 @@ def frontend_boundary_fixture(source):
  parts={'IDENTITY':extract(source,'static void decorateFrontendLogWriter(json& entry) {'),
   'ROTATE':extract(source,'static void rotateOneLogFile(const std::wstring& path, unsigned long long maxBytes) {'),
   'BOUNDED':extract(source,'static std::string boundedJsonString(const json& value, const char* key, size_t limit) {'),
+  'TRACE_HELPERS':'\n'.join(extract(source,signature) for signature in (
+   'static bool frontendUiActionLinkValid(const json& trace) {',
+   'static bool frontendUnlinkedNavigationSample(const json& trace) {',
+   'static bool frontendPreviewRepeatSample(const json& trace) {',
+   'static json projectMonitorHudStartupTrace(const json& value) {',
+   'static json parseFrontendTraceMessage(const std::string& message, bool gamepadComplete, bool& traceFromMessage) {')),
   'TRACE':extract(source,'static bool appendFrontendTrace(const json& input) noexcept {'),
   'ERROR':extract(source,'static bool appendFrontendDiagnostic(const json& input) noexcept {'),
   'WEBVIEW':extract(source,'static void appendWebViewDiagnostic(json entry) {')}
  for key,value in parts.items():
   marker='// ACTUAL_'+key
-  assert template.count(marker)==1
-  template=template.replace(marker,value,1)
+  assert template.count(marker+'\n')==1
+  template=template.replace(marker+'\n',value+'\n',1)
  return template
 
 def frontend_boundary_main(a):
@@ -327,7 +333,7 @@ def frontend_boundary_main(a):
  put('compile.stdout.raw',result.stdout);put('compile.stderr.raw',result.stderr)
  save('COMPILE.json',{'exitCode':result.returncode,'arguments':args,'elapsedMs':(time.monotonic()-tick)*1000})
  if result.returncode:return result.returncode
- selections=('exec-guard',) if a.frontend_exec_guard else ('owner-phase',) if a.frontend_owner_phase else ('identity-known','identity-unknown') if a.frontend_writer_identity else ('trace','error','webview','budgets')
+ selections=('exec-guard',) if a.frontend_exec_guard else ('owner-phase',) if a.frontend_owner_phase else ('identity-known','identity-unknown') if a.frontend_writer_identity else ('trace','error','webview','budgets','trace-payload')
  for selection in selections:
   native_args=[str(exe),str(run/selection),selection]
   if a.frontend_exec_guard:native_args.append(str(a.frontend_guard_input))

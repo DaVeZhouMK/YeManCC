@@ -82,6 +82,8 @@ static void sgPruneRetainedWorkDeliveryLocked() {
 static bool sgWorkDeliveryCovers(const SgWorkItem& pending,const SgWorkItem& item,bool returned) {
     if(pending.pauseCanceledDelivery||pending.kind!=item.kind||pending.generation!=item.generation)return false;
     if(!pending.wakeBoundaryMatches(item.wakeSleepSequence,item.wakeSuspendSerial))return false;
+    // A later S4 witness can survive an entry that supersedes this queued wake.
+    if(pending.wakeOriginal107<item.wakeOriginal107)return false;
     if(item.kind!=SgWork::Suspend)return true;
     if((pending.pauseOrdinaryWitness&&!sgOrdinaryPauseCurrent(pending))||
        (pending.pauseEntryFileTime&&!sgReturnedPauseCurrent(pending)))return false;
@@ -106,12 +108,13 @@ static bool sgRetainWorkDeliveryLocked(const SgWorkItem& item,bool returned) {
            !lease.processCreated||lease.powerGeneration!=item.generation)return false;
         slot=4;
     }
-    if(item.kind==SgWork::WakeSuspend&&slot<g_sgRetainedWorkDelivery.size()) {
+    if((item.kind==SgWork::WakeSuspend||item.kind==SgWork::WakeHibernate)&&slot<g_sgRetainedWorkDelivery.size()) {
         const auto sequence=g_sleepPowerDispatch.observedSleepBoundarySequence();
         const auto serial=g_sharedPowerSuspendSerial.load(std::memory_order_acquire);
         if(!item.wakeBoundaryMatches(sequence,serial))return false;
         auto& retained=g_sgRetainedWorkDelivery[slot];
-        if(retained.order&&!retained.item.wakeBoundaryMatches(sequence,serial))retained={};
+        if(retained.order&&(!retained.item.wakeBoundaryMatches(sequence,serial)||
+            retained.item.wakeOriginal107<item.wakeOriginal107))retained={};
     }
     if(slot>=g_sgRetainedWorkDelivery.size()||g_sgRetainedWorkDelivery[slot].order||g_sgRetainedWorkOrder==~0ull)
         throw std::bad_alloc();

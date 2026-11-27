@@ -505,6 +505,7 @@ static void inputHostStopLocked(const char* reason) {
     const char* visibilityDecision = "unknown";
     // 批118：切换期"保持隐藏"独立记账——不冒充 restored，也不进隔离（端点状态本身是好的）。
     bool visibilityHeld = false;
+    const InputHostRuntimeReturnPower runtimeReturnPower;
     if (msiSdReleaseRequired && !releaseProven) {
         visibilityDecision = "msi-sd-release-fence";
         g_inputHostReleaseQuarantined = true;
@@ -519,7 +520,7 @@ static void inputHostStopLocked(const char* reason) {
         visibilityDecision = "ps-owned-return-unproven";
         g_inputHostReleaseQuarantined=true;g_inputHostStartBlocked=true;
     } else if (knownRuntimeReturnRequired &&
-            !(knownRuntimePreflight=inputHostTargetReturnBeforeRuntimeRestoreLocked(g_inputHostRunId,g_inputHostEpoch))) {
+            !(knownRuntimePreflight=inputHostTargetReturnBeforeRuntimeRestoreLocked(g_inputHostRunId,g_inputHostEpoch,runtimeReturnPower))) {
         visibilityDecision="known-owned-target-return-unproven";
         g_inputHostReleaseQuarantined=true;g_inputHostStartBlocked=true;
     } else if (releaseProven && inputHostStopHoldsPhysicalVisibility(reason)) {
@@ -536,10 +537,11 @@ static void inputHostStopLocked(const char* reason) {
         });
     } else if (releaseProven || explicitRestoreAfterExit) {
         visibilityDecision = "restore-attempted";
-        visibilityRestored = hidHideRestorePhysicalTransaction(reason);
+        visibilityRestored = (!knownRuntimeReturnRequired || runtimeReturnPower.current()) && hidHideRestorePhysicalTransaction(reason);
         visibilityDecision = visibilityRestored ? "restored" : "restore-failed";
         const bool knownRuntimeSettled = !knownRuntimeReturnRequired ||
-            (visibilityRestored && inputHostTargetReturnAfterRuntimeQuarantineLocked(g_inputHostRunId,g_inputHostEpoch));
+            (visibilityRestored && inputHostTargetReturnAfterRuntimeQuarantineLocked(g_inputHostRunId,g_inputHostEpoch,runtimeReturnPower) &&
+             runtimeReturnPower.current());
         if (!visibilityRestored || !knownRuntimeSettled) {
             g_inputHostReleaseQuarantined = true;
             g_inputHostStartBlocked = true;

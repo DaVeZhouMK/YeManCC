@@ -61,6 +61,7 @@ static void msiOwnedReturnRetainOnTerminal(const MsiClawCommandOutcome& out) {
 }
 static std::atomic<ULONGLONG> g_msiOwnedReturnObserveAfter{0};
 static std::atomic<unsigned> g_msiOwnedReturnSeenTopology{0};
+static std::atomic<std::uint64_t> g_msiOwnedReturnSeenSuspendSerial{0};
 static std::atomic<unsigned long long> g_msiOwnedReturnSeenPower{0};
 static std::atomic<unsigned long long> g_msiOwnedReturnSeenSourceEvent{0};
 
@@ -310,6 +311,7 @@ static MsiOwnedReturnSignal msiOwnedReturnReadSignalFor(const msiRecovery::Recor
     }
     const auto sampleCurrent=[&](ULONGLONG at) {
         return sample.live && sample.readIdentityGeneration==identity &&
+            sample.sharedPower.generation==power && sharedPowerLifecycleCurrent(sample.sharedPower) &&
             identity==g_xinputSlotIdentityEpoch.load(std::memory_order_acquire) &&
             currentPowerGeneration()==power && g_xinputTopologyEpoch.load(std::memory_order_acquire)==topology &&
             ymcc::virtualOutputSourceCurrent({sample.readAttemptSequence,sample.readStartedTick,sample.readCompletedTick,
@@ -468,6 +470,7 @@ static void msiOwnedReturnMaintenance(ULONGLONG now) {
     if(!g_msiOwnedReturnPending.load(std::memory_order_acquire))return;
     const bool sameEvent=g_msiOwnedReturnSeenTopology.load(std::memory_order_acquire)==g_xinputTopologyEpoch.load(std::memory_order_acquire) &&
         g_msiOwnedReturnSeenPower.load(std::memory_order_acquire)==currentPowerGeneration() &&
+        g_msiOwnedReturnSeenSuspendSerial.load(std::memory_order_acquire)==g_sharedPowerSuspendSerial.load(std::memory_order_acquire) &&
         g_msiOwnedReturnSeenSourceEvent.load(std::memory_order_acquire)==g_msiOwnedReturnSourceEvent.load(std::memory_order_acquire);
     if(sameEvent && (!g_msiOwnedReturnWorking.load(std::memory_order_acquire) ||
        now<g_msiOwnedReturnObserveAfter.load(std::memory_order_acquire)))return;
@@ -493,9 +496,10 @@ static void msiOwnedReturnMaintenance(ULONGLONG now) {
     if(g_inputHostVirtualIntentWriters.load(std::memory_order_acquire)!=0 ||
        !observationCurrent() || !msiOwnedReturnContext(power,mode,episode))return; // keep duty during partial settings/Host/power changes
     const auto sourceEvent=g_msiOwnedReturnSourceEvent.load(std::memory_order_acquire);
-    if(!g_msiOwnedReturnRecovery.due(now,topology,power,sourceEvent)){msiOwnedReturnPublish();return;}
+    if(!g_msiOwnedReturnRecovery.due(now,topology,power,sourceEvent,observation.suspendSerial)){msiOwnedReturnPublish();return;}
     g_msiOwnedReturnSeenTopology.store(topology,std::memory_order_release);
     g_msiOwnedReturnSeenPower.store(power,std::memory_order_release);
+    g_msiOwnedReturnSeenSuspendSerial.store(observation.suspendSerial,std::memory_order_release);
     g_msiOwnedReturnSeenSourceEvent.store(sourceEvent,std::memory_order_release);
     g_msiOwnedReturnObserveAfter.store(now+ymcc::msi::ownedReturn::Recovery::observationIntervalMs,std::memory_order_release);
     msiOwnedReturnPublish();

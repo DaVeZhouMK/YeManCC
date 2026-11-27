@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 
 internal static class FanPublicPowerControlCases
 {
@@ -17,6 +18,11 @@ internal static class FanPublicPowerControlCases
 
     internal static void Run(Assembly host, Func<object> create, Action<string, bool, string> check, Action<object> scenario, string selection)
     {
+        if (selection == "control-queued-request-revocation")
+        {
+            RunQueuedRequestRevocation(host, check, scenario);
+            return;
+        }
         var cases = new[] { "control-hints-and-duty", "control-stale-producer", "control-native-write-child", "control-foreign-child", "control-oem-return-and-msi-source" };
         if (selection != "control-all" && !cases.Contains(selection, StringComparer.Ordinal)) throw new ArgumentException("Unknown explicit control power case");
         foreach (var name in cases.Where(name => selection == "control-all" || name == selection))
@@ -124,6 +130,71 @@ internal static class FanPublicPowerControlCases
             }
             scenario(new { name, ok, writes, actualDutyDelegate = true, NativeAuthorityAndProcessAndSdkArePorts = true, physicalWrites = 0 });
             if (!ok) return;
+        }
+    }
+
+    private static void RunQueuedRequestRevocation(Assembly host, Action<string, bool, string> check, Action<object> scenario)
+    {
+        Type T(string name) => host.GetType("YeManFanHost." + name, true)!;
+        foreach (var enable in new[] { false, true })
+        {
+            var name = enable ? "control-queued-enable" : "control-queued-acquire";
+            var options = T("HostOptions").GetMethod("Parse", Flags)!.Invoke(null,
+                new object[] { new[] { "--mock-handshake", "--mock-zero-hardware-evidence" } })!;
+            var engine = Activator.CreateInstance(T("FanHostEngine"), Flags, null, new object?[] { options, null }, null)!;
+            var gate = Field(engine, "gate")!;
+            var state = Field(engine, "state")!;
+            object? State(string property) => state.GetType().GetProperty(property, Flags)!.GetValue(state);
+            IDisposable Bind(FanPublicPowerScopePort port) => (IDisposable)Call(engine, "BindImportedPowerForRequest", port, port.Purpose)!;
+            var ok = true;
+            void C(string text, bool value, string detail = "") { ok &= value; check(name + ": " + text, value, detail); }
+            using var old = FanPublicPowerScopePort.Create(host);
+            using var fresh = FanPublicPowerScopePort.Create(host);
+            using var imported = new ManualResetEventSlim();
+            Exception? retired = null;
+            Thread? worker = null;
+            try
+            {
+                object? initialLease = null;
+                JsonElement body = default;
+                if (enable)
+                {
+                    using var seed = FanPublicPowerScopePort.Create(host);
+                    using var seedRequest = Bind(seed);
+                    initialLease = Call(engine, "AcquireControl")!;
+                    var leaseId = initialLease.GetType().GetProperty("LeaseId", Flags)!.GetValue(initialLease);
+                    var nodes = new[] { 0, 30, 60, 90 }.Select(tempC => new { tempC, dutyPercent = tempC });
+                    body = JsonSerializer.SerializeToElement(new { leaseId, nodes });
+                }
+                void Execute() { if (enable) Call(engine, "Enable", body); else Call(engine, "AcquireControl"); }
+                lock (gate)
+                {
+                    worker = new Thread(() => retired = Error(() =>
+                    {
+                        using var oldRequest = Bind(old);
+                        imported.Set();
+                        Execute();
+                    })) { IsBackground = true };
+                    worker.Start();
+                    C("imported original request is waiting inside engine call", imported.Wait(2000) &&
+                        SpinWait.SpinUntil(() => (worker.ThreadState & ThreadState.WaitSleepJoin) != 0, 2000));
+                    old.Revoke();
+                }
+                if (!worker.Join(2000)) throw new TimeoutException("Host control request did not return");
+                C("rejects retired request at commit boundary", Code(retired) == "FAN_PUBLIC_POWER_SUPERSEDED", Code(retired));
+                C("old request leaves lease and curve state unchanged", ReferenceEquals(State("Lease"), initialLease) &&
+                    State("HardwareWritesEnabled") is false);
+                using (Bind(fresh))
+                {
+                    var current = Error(Execute);
+                    C("new request with its own current grant succeeds", current is null &&
+                        (enable ? State("HardwareWritesEnabled") is true : State("Lease") is not null), Code(current));
+                }
+                C("old request returns only its own import", old.Disposals == 1 && old.HandlesClosed && old.Settlements == 0);
+            }
+            catch (Exception error) { C("original engine scenario completed", false, error.ToString()); }
+            finally { if (worker is null || !worker.IsAlive) Call(engine, "Dispose"); }
+            scenario(new { name, ok, actualEngine = true, physicalWrites = 0 });
         }
     }
 }

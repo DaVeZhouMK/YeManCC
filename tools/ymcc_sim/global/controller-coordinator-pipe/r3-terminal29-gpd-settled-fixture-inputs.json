@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "kind": "TERMINAL29_GPD_SETTLED_FIXTURE_INPUT_SUCCESSOR",
+  "priorProfileSha256": "720f2c3ec61da702ab5cc37962ebda1ba8a96fcc936f9e7b371c9d24d3c3c1e3",
+  "fixture": {
+    "relative": "tools/fixtures/input_coordinator_lifecycle/fixture.cpp",
+    "original": {
+      "bytes": 365204,
+      "sha256": "4b0e44f3e2b346179a5be7b3edd047dfcde96dd853aae4a00996ea9a8e1ff856"
+    },
+    "projected": {
+      "bytes": 367208,
+      "sha256": "34f8f3a75abb64be9553c71cf6ecc3f7d6bae36aa2721ab21eb535b3ad9bcd36"
+    }
+  },
+  "pipeCases": {
+    "relative": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+    "original": {
+      "bytes": 261268,
+      "sha256": "7a131b44ee7f28edc9d5db341e558ae079633f6ce0f323cbdaa857d13171679b"
+    },
+    "projected": {
+      "bytes": 261888,
+      "sha256": "fa5307c3def83b54f18af7114cbc327b16a2b232169f4ea440e4b2c7fef0c75c"
+    }
+  },
+  "producerData": {
+    "bytes": 246681,
+    "sha256": "d47d06889eb54daf93b725060eb5c94dbad28bfb64d40547da30455c15f1b315",
+    "locations": [
+      { "sourceLine": 670, "sourceUtf8Byte": 100116 },
+      { "sourceLine": 778, "sourceUtf8Byte": 115951 }
+    ]
+  }
+}

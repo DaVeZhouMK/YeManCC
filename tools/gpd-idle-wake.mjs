@@ -5,6 +5,18 @@ import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
+// Complete BUS admission dispatch between the reconcile preamble and frame sampling.
+// Reusable by the full-pipe fixture without introducing a second copy of this policy.
+export function extractGpdFirstOnBusAdmission(source){
+ const begin='    const int hostLiveness = inputHostProcessLivenessTry();';
+ const end='    preambleHostReconcileCost.finish();';
+ const start=source.indexOf(begin),finish=source.indexOf(end);
+ assert(start>=0&&finish>start&&source.lastIndexOf(begin)===start&&source.lastIndexOf(end)===finish,'BUS admission anchors changed');
+ const fragment=source.slice(start,finish);
+ assert(fragment.includes('inputHostMayQueueGpdNativeWriterWait()')&&fragment.includes('const bool queuedStart=inputHostQueueLifecycleWork(personaTransition'),'Original BUS queue dispatch not found');
+ return {fragment,start,end:finish};
+}
+
 // Optional leaf of the existing controller.native-foreground-latency entry.
 // Every control decision is extracted from the selected production source.
 export function runGpdIdleWake({repo,args,output,extract,calibrationToolchainPreamble,runnerPath}) {
@@ -24,8 +36,10 @@ export function runGpdIdleWake({repo,args,output,extract,calibrationToolchainPre
  assert(!fs.existsSync(output)||fs.readdirSync(output).length===0,'Output must be fresh');
  const sha=x=>crypto.createHash('sha256').update(x).digest('hex');
  const leaf=fileURLToPath(import.meta.url),templatePath=path.join(path.dirname(leaf),'gpd-idle-wake.cpp.in');
- const inputs={main:path.join(repo,'native/main.cpp'),stop:path.join(repo,'native/virtual_controller_stop_runtime.h'),
+ const inputs={main:path.join(repo,'native/main.cpp'),start:path.join(repo,'native/virtual_controller_start_runtime.h'),stop:path.join(repo,'native/virtual_controller_stop_runtime.h'),
   wake:path.join(repo,'native/virtual_wake_execution_runtime.h'),protection:path.join(repo,'native/virtual_start_protection.h'),
+  queue:path.join(repo,'native/virtual_controller_queued_start_runtime.h'),contract:path.join(repo,'native/virtual_controller_runtime_contract.h'),
+  persona:path.join(repo,'native/controller_persona.h'),liveness:path.join(repo,'native/msi_host_liveness_admission.h'),
   json:path.join(repo,'deps/json/json.hpp'),runner:runnerPath,leaf,template:templatePath,
   extractor:path.join(repo,'tools/fixtures/msi_owned_return_retired_io/source-binding.mjs'),
   toolchain:path.join(repo,'tools/fixtures/hc_reviewed_calibration/toolchain.mjs')};
@@ -40,25 +54,40 @@ export function runGpdIdleWake({repo,args,output,extract,calibrationToolchainPre
  save('INPUT.json',report);
  try {
   const main=snapshots.get(inputs.main).toString('utf8');
-  const call='if(publicationWanted && !hostRunning)inputHostRetireUnownedRogWakeHoldForStart();';
-  assert.equal(main.split(call).length,2,'Original BUS retirement call changed');
-  const gate='(personaTransition || !g_wakeHoldPhysicalUnhide.load(std::memory_order_acquire) || nativeWriterWaitMayQueue)';
-  assert.equal(main.split(gate).length,2,'Original BUS wake gate changed');
+  const {fragment,start,end}=extractGpdFirstOnBusAdmission(main);
+  const bindCall='const std::string requested = ymcc::inputHost::queuedPlayerStart::bind(original);';
+  assert.equal(main.split(bindCall).length,2,'Production queue ticket binding call changed');
   for(const name of names){
    const spans=[],directory=path.join(output,name),include=path.join(directory,'include');fs.mkdirSync(include,{recursive:true});
+   spans.push({source:inputs.main,symbol:'inputCaptureBusTick/admission-dispatch',start,end,sha256:sha(fragment)});
    const take=(file,symbol)=>extract(snapshots.get(file).toString('utf8'),'function',symbol,file,spans);
+   // The optional BUS baseline changes its own admission functions, not these downstream Start excerpts.
+   const actualStart=take(inputs.start,'inputHostStart'),{startUtf8Byte,startLine}=spans.pop();
+   const extractStart=(symbol,pattern)=>{
+    const matches=[...actualStart.matchAll(pattern)];assert.equal(matches.length,1,'Start excerpt: '+symbol);
+    const {0:body,index}=matches[0],before=actualStart.slice(0,index),begin=startUtf8Byte+Buffer.byteLength(before);
+    const line=startLine+before.split('\n').length-1;
+    spans.push({symbol,kind:'excerpt',file:inputs.start,startLine:line,endLine:line+body.split('\n').length-1,
+     startUtf8Byte:begin,endUtf8ByteExclusive:begin+Buffer.byteLength(body),sha256:sha(body)});
+    return body;
+   };
    const replacements={
     '@@CLEANUP@@':take(inputs.stop,'inputHostOwnedCleanupProvenLocked'),
     '@@ARM@@':take(inputs.wake,'inputHostArmWakePhysicalHold'),
     '@@RETIRE@@':take(sources[name],'inputHostRetireUnownedRogWakeHoldForStart'),
     '@@MAYQUEUE@@':take(sources[name],'inputHostMayQueueGpdNativeWriterWait'),
-    '@@BUS_RETIRE@@':call,'@@BUS_GATE@@':gate};
+    '@@BUS_ADMISSION@@':fragment,'@@BUS_QUEUE_BIND@@':bindCall,
+    '@@BUS_LIVENESS_GATE@@':take(inputs.main,'msiHostLifecycleAdmissionAllowed'),
+    '@@START_OUTCOME@@':extractStart('inputHostStart/RequestOutcome',/^    struct RequestOutcome \{[\s\S]*?^    \} requestOutcome\{requestTicket\};/gm),
+    '@@START_QUARANTINE@@':extractStart('inputHostStart/release-quarantine',/^    if \(g_inputHostReleaseQuarantined\) \{[\s\S]*?^    \}/gm),
+    '@@START_PROTECTION_FINISH@@':take(inputs.main,'inputHostStartProtectionFinish')};
+   assert(replacements['@@START_QUARANTINE@@'].includes('"release-quarantine"'));
    const template=snapshots.get(templatePath).toString('utf8');let code=template;const edits=[];
    for(const [marker,body] of Object.entries(replacements)){assert.equal(code.split(marker).length,2);const offset=code.indexOf(marker);edits.push({marker,offset,body});code=code.slice(0,offset)+body+code.slice(offset+marker.length);}
    let inverse=code;for(const e of edits.toReversed()){assert.equal(inverse.slice(e.offset,e.offset+e.body.length),e.body);inverse=inverse.slice(0,e.offset)+e.marker+inverse.slice(e.offset+e.body.length);}
    assert.equal(inverse,template);assert(!code.includes('@@'));
    fs.writeFileSync(path.join(directory,'Actual.cpp'),code,{flag:'wx'});
-   for(const [target,input] of [['json.hpp',inputs.json],['virtual_start_protection.h',inputs.protection]])fs.writeFileSync(path.join(include,target),snapshots.get(input),{flag:'wx'});
+   for(const input of [inputs.json,inputs.protection,inputs.queue,inputs.contract,inputs.persona,inputs.liveness])fs.writeFileSync(path.join(include,path.basename(input)),snapshots.get(input),{flag:'wx'});
    const entry={name,spans,generatedSha256:sha(code),inverseExact:true,status:'PREPARED_NOT_RUN'};report.variants.push(entry);
    fs.writeFileSync(path.join(directory,'SOURCE-BINDING.json'),JSON.stringify({entry,edits},null,2),{flag:'wx'});
    if(prepareOnly)continue;

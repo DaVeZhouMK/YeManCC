@@ -13,7 +13,7 @@ import {monitorEditorCases} from './monitorEditorCases.mjs';
 import {naturalNavigationCases} from './naturalNavigationCases.mjs';
 import {scrollStabilityCases} from './scrollStabilityCases.mjs';
 import {gyroPageNavigationCases,gyroControlCases,gyroFullscreenCases,gyroPowerRecoveryCases,gyroPresetSwitchCases} from './gyroNavigationCases.mjs';
-import {virtualStartProtectionCases,virtualClickStartCases,virtualClickStartNames,virtualClickWriteFailureCase,virtualClickWriteFailureName,readVirtualStartFailedCommit} from './virtualStartProtectionCases.mjs';
+import {virtualStartProtectionCases,virtualClickStartCases,virtualClickStartNames,virtualClickWriteFailureCase,virtualClickWriteFailureName,virtualClickAdmissionExpiryCase,virtualClickAdmissionExpiryName,readVirtualStartFailedCommit} from './virtualStartProtectionCases.mjs';
 import os from 'node:os';import {createHash} from 'node:crypto';import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
 const uiGuarded=Boolean(process.env.YMCC_UI_TOOL_HELPER_URL||process.env.YMCC_SIM_GLOBAL_RUN==='1');
 if(uiGuarded&&(!process.env.YMCC_UI_TOOL_HELPER_URL||!process.env.YMCC_UI_TOOL_MANIFEST||!process.env.YMCC_UI_SOURCE_ROOT))throw Error('UI_TOOL_STAGE_CONTEXT_REQUIRED');
@@ -171,7 +171,10 @@ async function checkShortcutRetirement(height){
   if(uiScope==='overlay'){await overlayPresentationCases({height,open,actionCase,state,page,task});return;}
   if(uiScope==='custom-touch'){await customTouchCases({height,open,command,press,actionCase,state,shot});return;}
   if(uiScope==='virtual-click-start'){
-   if(!nativeFailedCommit)await virtualClickStartCases({height,open,actionCase});
+   if(!nativeFailedCommit){
+    await virtualClickStartCases({height,open,actionCase});
+    await virtualClickAdmissionExpiryCase({height,open,actionCase});
+   }
    await virtualClickWriteFailureCase({height,open,actionCase,nativeFailedCommit});
    return;
   }
@@ -558,7 +561,7 @@ try{
 }catch(error){failures.push({kind:'runner',error:String(error),stack:error.stack});console.error(error);}finally{
  const inputsUnchanged=proofInputs.every(file=>testedInputs[file]===hash(file));
  if(uiScope==='virtual-click-start'){
-  const names=nativeFailedCommit?[virtualClickWriteFailureName]:[...Object.values(virtualClickStartNames),virtualClickWriteFailureName];
+  const names=nativeFailedCommit?[virtualClickWriteFailureName]:[...Object.values(virtualClickStartNames),virtualClickWriteFailureName,virtualClickAdmissionExpiryName];
   const expected=[720,800].flatMap(height=>names.map(name=>`${height}:${name}`)).sort();
   const actual=actions.map(({height,name})=>`${height}:${name}`).sort();
   if(states.length!==0||JSON.stringify(actual)!==JSON.stringify(expected))failures.push({kind:'virtual-click-start-selection-mismatch',actual,expected});

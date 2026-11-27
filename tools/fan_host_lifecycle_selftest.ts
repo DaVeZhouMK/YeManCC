@@ -901,10 +901,42 @@ async function main(): Promise<void> {
   // 逐条登记路线断言：①恢复 owner 是唯一的公共路径——桥侧恢复 owner 区不按任何登记路线名分支
   // （即公共修复对全登记路线生效，不要求逐机型改写设备代码）；②逐路线 writer/restore 仍归
   // Host/HC，桥侧公共 owner 区未复制或越权改写某条路线的 writer/restore 常量。
-  const recoveryOwnerRegion = bridgeSource.slice(
-    bridgeSource.indexOf('private noteRecoveryIntentPending'),
-    bridgeSource.indexOf('async close(): Promise<void>'),
+  const ts: typeof import('typescript') = createRequire(resolvePath('package.json'))('typescript');
+  const bridge = ts.createSourceFile('fanHost.ts', bridgeSource, ts.ScriptTarget.Latest, true);
+  const lifecycleClass = bridge.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === 'FanHostLifecycle');
+  assert(lifecycleClass && ts.isClassDeclaration(lifecycleClass), 'D8: production FanHostLifecycle class is required');
+  const method = (name: string) => lifecycleClass.members.find(
+    (node): node is import('typescript').MethodDeclaration => ts.isMethodDeclaration(node) && node.name.getText(bridge) === name,
   );
+  const ownerStart = method('noteRecoveryIntentPending'), ownerEnd = method('close');
+  const mutation = method('mutateWithBoundedRetry');
+  assert(ownerStart && ownerEnd && mutation && ownerStart.pos < mutation.pos && mutation.end < ownerEnd.pos,
+    'D8: production owner bounds must contain the shared mutation method');
+  const manualRoute = "'HandheldCompanion.Devices.GPDWin4'";
+  let manualRouteAt = -1;
+  const hasConjunct = (node: import('typescript').Expression, text: string): boolean => node.getText(bridge) === text ||
+    (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken &&
+      (hasConjunct(node.left, text) || hasConjunct(node.right, text)));
+  const findManualRoute = (node: import('typescript').Node, explicit = false): void => {
+    if (ts.isIfStatement(node)) {
+      const firstAttempt = hasConjunct(node.expression, 'attempt === 0') && hasConjunct(node.expression, 'explicitControl');
+      findManualRoute(node.expression, explicit);
+      findManualRoute(node.thenStatement, explicit || firstAttempt);
+      if (node.elseStatement) findManualRoute(node.elseStatement, explicit);
+      return;
+    }
+    if (explicit && ts.isStringLiteral(node) && node.getText(bridge) === manualRoute) {
+      assert(manualRouteAt === -1, 'D8: only the original manual Win4 route may be exempt');
+      manualRouteAt = node.getStart(bridge);
+    }
+    ts.forEachChild(node, child => findManualRoute(child, explicit));
+  };
+  findManualRoute(mutation);
+  assert(manualRouteAt >= 0 && mutation.getText(bridge).includes("const explicitControl = context.action === 'apply' || context.action === 'apply-preset';"),
+    'D8: the Win4 exception must be inside the explicit first-attempt path');
+  // Exclude just the factory literal; all other route references are checked.
+  const recoveryOwnerRegion = bridgeSource.slice(ownerStart.getStart(bridge), manualRouteAt) +
+    bridgeSource.slice(manualRouteAt + manualRoute.length, ownerEnd.getStart(bridge));
   assert(recoveryOwnerRegion.includes('private scheduleRecoveryTick') &&
     recoveryOwnerRegion.includes('private async runRecoveryTick') &&
     recoveryOwnerRegion.includes('private async replayResumeCurve'),
@@ -1105,9 +1137,9 @@ async function main(): Promise<void> {
     replayRead.includes('this.parkTerminalControlRefusal(intentRevision, generation, readProcess, readEpoch, error);') &&
     replayRead.includes('throw error;') &&
     !replayRead.includes('.catch(() => null)') &&
-    bridgeSource.includes('mutateWithBoundedRetry(') &&
-    (bridgeSource.includes('this.applyMutation(this.desiredCurve as readonly FanNode[])') || bridgeSource.includes('this.applyMutation(cloneFanNodes(latestCurve))') || bridgeSource.includes('this.applyMutation(this.desiredCurve as readonly FanNode[], intentRevision)')) &&
-    bridgeSource.includes('() => this.replayResumeCurve(generation, intentRevision)'),
+    method('replayResumeCurve')?.getText(bridge).includes('this.applyMutation(this.desiredCurve as readonly FanNode[], intentRevision, undefined, assertWakeWriteCurrent)') &&
+    method('resume')?.getText(bridge).includes('this.resumeInternal(publishedWake)') &&
+    /this\.mutateWithBoundedRetry\(\s*context,\s*\(\) => this\.replayResumeCurve\(context, publishedWake\),/.test(method('resumeInternal')?.getText(bridge) ?? ''),
   'bridge must retain one recovery owner and a read-only replay snapshot that preserves declared refusals while allowing ordinary read uncertainty');
   // 920 §8.0-D B5 remap: the old assertion demanded "a resident ten-second guard with unbounded
   // retry". Its `!RECOVERY_WINDOW_MS` / `!RECOVERY_MAX_ATTEMPTS` clauses directly contradicted
@@ -1127,29 +1159,42 @@ async function main(): Promise<void> {
     !bridgeSource.includes('const RECOVERY_MAX_ATTEMPTS = 3;') &&
     !bridgeSource.includes('notifyPowerSourceChanged('),
   'fan recovery must not add a second resident guard/retry owner, must not retry unboundedly, and must not be AC/DC triggered');
-  assert(bridgeSource.includes('private async findExactHostOwner(config: FanHostConfig): Promise<number>') &&
-    bridgeSource.includes('const verifiedOwner = await this.findExactHostOwner(config);') &&
+  const launcherClass = bridge.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === 'NativeFanHostLauncher');
+  assert(launcherClass && ts.isClassDeclaration(launcherClass), 'production Fan launcher class is required');
+  const launcherMethod = (name: string) => launcherClass.members.find(
+    node => ts.isMethodDeclaration(node) && node.name.getText(bridge) === name,
+  )?.getText(bridge) ?? '';
+  const residentRecovery = launcherMethod('recoverPreviousHost');
+  const findOwner = residentRecovery.indexOf('const verifiedOwner = await this.findExactHostOwner(config,');
+  const checkPair = residentRecovery.indexOf('await this.requireSharedPowerHost(config, { ...previousInstance, executable: config.hostExecutable });');
+  const sendClose = residentRecovery.indexOf('closeResponse = await http.request(');
+  const sendShutdown = residentRecovery.indexOf('const shutdownResponse = await http.request(');
+  assert(launcherMethod('findExactHostOwner').includes('await proc.identity(ownerPid)') &&
+    findOwner >= 0 && findOwner < checkPair && checkPair < sendClose && sendClose < sendShutdown &&
+    residentRecovery.includes('await this.resolveExactHostInstance(config, verifiedOwner)') &&
     bridgeSource.includes('proc.findExact(config.hostExecutable)') &&
     bridgeSource.includes('let legacyHealth: { status: number; body: string } | undefined;') &&
     bridgeSource.includes('旧 Fan Host 会话令牌不匹配') &&
     bridgeSource.includes('isLegacyUnauthenticatedFanHostHealth(legacyHealth, config.protocolVersion)') &&
     bridgeSource.includes('旧 Fan Host 健康响应来自非当前 YeManFanHost') &&
-    bridgeSource.includes('const liveWrites = closedState?.hardwareWritesEnabled === true || closedState?.hardwareWrites === true;') &&
+    residentRecovery.includes('const liveWrites = closedState?.hardwareWritesEnabled === true || closedState?.hardwareWrites === true;') &&
     bridgeSource.includes('function hasExplicitIncompleteHcCloseEvidence(state: unknown, requireDeviceManagerStop: boolean): boolean') &&
     (bridgeSource.match(/hasExplicitIncompleteHcCloseEvidence\(closedState, true\)/g) ?? []).length >= 2 &&
     bridgeSource.includes('function hasAcceptedStoppedHcCloseEvidence(state: unknown): boolean') &&
     bridgeSource.includes("typeof remote.state === 'string'") &&
     bridgeSource.includes('HC Close 资源清理在等待窗口内未完成'),
   'startup recovery must verify the exact loopback Host process before sending close/shutdown and reject live-write or incomplete HC Close telemetry');
-  const adoptResident = bridgeSource.indexOf('tryAdoptAuthenticatedResidentHost(config)');
-  const prePayloadRecovery = bridgeSource.indexOf('recoverPreviousHostBeforePayloadMutation(config)');
-  const adoptAfterRecover = bridgeSource.indexOf('resident-host-adopted-after-recover');
+  const startup = launcherMethod('startCore');
+  const prepareResident = launcherMethod('recoverPreviousHostBeforePayloadMutation');
+  const adoptResident = startup.indexOf('tryAdoptAuthenticatedResidentHost(config)');
+  const prePayloadRecovery = startup.indexOf('recoverPreviousHostBeforePayloadMutation(config, assertCurrent)');
+  const adoptAfterRecover = startup.indexOf('resident-host-adopted-after-recover');
   const liveSessionKept = bridgeSource.indexOf('resident-host-live-session-kept');
   // FAN-927 §2（2026-09-27 用户批准）：部署验证收敛到 ensureFanHostDeployment 的唯一入口
   // （正常开启只核对小部署记录；记录缺失/不匹配才在内部调用 installAndVerifyPayload 做一次
   // 完整验证）。锚点从旧的"每次启动都跑安装器"改为这个唯一入口，顺序语义保持不变。
-  const payloadInstall = bridgeSource.indexOf('ensureFanHostDeployment(config, fanStateDirectory)');
-  const tokenCreation = bridgeSource.indexOf('config.sessionToken = createSessionToken()');
+  const payloadInstall = startup.indexOf('ensureFanHostDeployment(config, fanStateDirectory, assertCurrent, options)');
+  const tokenCreation = startup.indexOf('const nextToken = createSessionToken()');
   assert(adoptResident >= 0 && prePayloadRecovery > adoptResident && adoptAfterRecover > prePayloadRecovery && liveSessionKept >= 0 && payloadInstall > adoptAfterRecover && tokenCreation > payloadInstall &&
     bridgeSource.includes('private async tryAdoptAuthenticatedResidentHost(config: FanHostConfig): Promise<FanHostProcess | null>') &&
     bridgeSource.includes('resident-host-adopted') &&
@@ -1157,11 +1202,12 @@ async function main(): Promise<void> {
     bridgeSource.includes('isLiveResidentFanState(remoteState)') &&
     bridgeSource.includes('rememberDesiredCurve') &&
     bridgeSource.includes('adopted?: boolean') &&
-    bridgeSource.includes('private async recoverPreviousHostBeforePayloadMutation(config: FanHostConfig): Promise<void>') &&
-    bridgeSource.includes('会话文件缺失但端点要求会话令牌') &&
-    bridgeSource.includes('已拒绝无认证关闭请求') &&
-    bridgeSource.includes('旧 Fan Host 会话文件缺失且健康端点不可用') &&
-    bridgeSource.includes('await this.recoverLegacyUnauthenticatedHost(config);'),
+    prepareResident.includes('await this.recoverPreviousHost(config, assertCurrent);') &&
+    prepareResident.includes('会话文件缺失但端点要求会话令牌') &&
+    prepareResident.includes('已拒绝无认证关闭请求') &&
+    prepareResident.includes('旧 Fan Host 会话文件缺失且健康端点不可用') &&
+    prepareResident.includes('FAN_SHARED_POWER_PAIR_REQUIRED') &&
+    !prepareResident.includes('this.recoverLegacyUnauthenticatedHost('),
   'startup must adopt a live authenticated Host before Close/shutdown, then recover leftovers before mutating payload ACL/files');
   assert(apiSource.includes("fanStateDir: () => invoke<string>('app.fanStateDir', {}, { timeoutMs: 5000 })") &&
     nativeSource.includes('static std::wstring fan_host_state_dir()') &&
@@ -1196,11 +1242,15 @@ async function main(): Promise<void> {
     keepaliveObserveStart > keepaliveTickStart && keepalivePostStart < keepaliveTickStart &&
     keepaliveMayBody.includes('fanHostPowerMayWrite()') &&
     fanWriteAdmissionStart >= 0 && fanWriteAdmissionEnd > fanWriteAdmissionStart &&
-    fanWriteAdmissionBody.includes('g_fanPhysicalWake.ready(g)') &&
-    fanWriteAdmissionBody.includes('hardwareWriteAllowed()') &&
+    fanWriteAdmissionBody.includes('g_fanPhysicalWake.ready(g,entry)') &&
+    fanWriteAdmissionBody.includes('kHardwareAllowed') &&
+    fanWriteAdmissionBody.includes('kNotificationPending') &&
+    fanWriteAdmissionBody.includes('powerObservationCurrent(&readSharedSystemPower, power)') &&
+    fanWriteAdmissionBody.includes('entry==g_sgLatestSleepEntryFileTime.load') &&
     fanWriteAdmissionBody.includes('fanHostPhysicalWakeCurrent()') &&
     keepaliveTickBody.includes('fanLeaseKeepaliveMayRun()') &&
     keepaliveTickBody.includes('fanLeaseKeepalivePostHeartbeat') &&
+    keepaliveTickBody.includes('fanLeaseKeepaliveReceiptCurrentLocked(leaseId,logLeaseSequence,receiptPower)') &&
     keepalivePostBody.includes('L"/api/heartbeat"') &&
     !keepaliveTickBody.includes('/api/enable') &&
     !keepaliveTickBody.includes('/api/preset') &&
@@ -1225,7 +1275,7 @@ async function main(): Promise<void> {
     hostSource.includes('ReferenceEquals(source, cpuTemperatureMonitor)') &&
     hostSource.includes('signal.HealthRevision == Volatile.Read(ref temperatureHealthRevision)') &&
     hostSource.includes('FanDispatchFailure?.Invoke(ex)') &&
-    hostSource.includes('realBackend.TemperatureMonitorStale = OnBackendTemperatureMonitorStale;') &&
+    hostSource.includes('realBackend.TemperatureMonitorStale = signal => CompletePublicResourceOwner(() => OnBackendTemperatureMonitorStale(signal));') &&
     staleHandlerStart >= 0 && staleHandlerEnd > staleHandlerStart &&
     staleHandlerBody.includes('realBackend.IsTemperatureStaleCurrent(signal)') &&
     staleHandlerBody.indexOf('realBackend.IsTemperatureStaleCurrent(signal)') <
@@ -1258,13 +1308,24 @@ async function main(): Promise<void> {
     hostSource.includes('if (realBackend is not null && (!state.OpenCalled || !state.OpenEventsCalled))'),
   'lease admission cannot precede HC OpenEvents');
   const directHostWriters = [
-    'WriteEcByte', 'ECRamDirectWriteByte', 'WriteMsiWmiFanTable',
+    'WriteEcByte', 'WriteMsiWmiFanTable',
     'WriteMsiWmiData', 'ApplyMsiFanCurve', 'ApplyMsiHcDefaultRelease',
     'ApplyLenovoFanCurve', 'ApplyLenovoHcDefaultTable',
     'ApplyLegionGo2FanCurve', 'ApplyLegionGo2OemRelease',
     'ApplySmartFanModeBaseline', 'InvokeSetFanControl',
   ];
-  assert(directHostWriters.every((name) => !hostSource.includes(name)) &&
+  // The inherited EC route binds the existing HC transport once. No other caller may reference it.
+  const writerSource = hostSource.replace(/^[ \t]*\/\/[^\r\n]*/gm, '');
+  const inheritedEcClass = /^    private sealed class InheritedEcFanWriter\r?\n([\s\S]*?)^    }/m.exec(writerSource)?.[1];
+  const inheritedEcReferences = writerSource.match(/\bECRamDirectWriteByte\b/g) ?? [];
+  const inheritedEcBinding = inheritedEcClass?.match(/^        internal static InheritedEcFanWriter\? Bind\(object target, FanRoute\? route\)\r?\n([\s\S]*?)^        }/m)?.[1];
+  const inheritedEcRouteAllowed = inheritedEcClass === undefined ? inheritedEcReferences.length === 0 :
+    inheritedEcReferences.length === 1 &&
+    /SupportsRoute\(FanRoute\? route\)\s*=>\s*route is\s*\{\s*Kind:\s*FanRouteKind\.GenericDuty,\s*RestoreStrategy:\s*FanRestoreStrategy\.GenericEcControl\s*\}/.test(inheritedEcClass) &&
+    /if \(!SupportsRoute\(route\)\) return null;\s+var root = InheritedRoot\(target\);\s+if \(root is null\) return null;\s+var boundary = target\.GetType\(\)\.GetMethod\("ECRamDirectWriteByte"\)/.test(inheritedEcBinding ?? '') &&
+    inheritedEcClass.includes('control?.DeclaringType != root || duty?.DeclaringType != root') &&
+    inheritedEcClass.includes('boundary.DeclaringType != root || boundary.ReturnType != typeof(bool)');
+  assert(directHostWriters.every((name) => !hostSource.includes(name)) && inheritedEcRouteAllowed &&
     hostSource.includes('ApplyPowerProfile(profile, msiNodes: nodes, msiAdmissionEpoch: admittedGateEpoch);') &&
     hostSource.includes('ApplyPowerProfile(BuildPowerProfile(Array.Empty<double>(), software: false));') &&
     hostSource.includes('Route?.RestoreStrategy == FanRestoreStrategy.MsiHcDefaultRelease') &&
@@ -1273,12 +1334,12 @@ async function main(): Promise<void> {
     hostSource.includes('Invoke(device, "ReleaseMsiFanControl", "oem-restore")') &&
     hostSource.includes('else if (UsesBackendFanWriter)') &&
     hostSource.includes('ApplyAsusCurveViaBackend(profile);'),
-  'approved route writer boundary must remain HC callback, MSI scoped fan-only transport, or selected ASUS backend; no unreviewed Host vendor writer');
+  'approved route writer boundary must stay scoped to HC callback, admitted inherited EC, MSI fan-only transport, or selected ASUS backend; no unreviewed Host vendor writer');
   assert(profileCallbackSources.every((source) => (source.match(/\bsource\b/g) ?? []).length === 1) &&
     /Enum\.Parse\(updateType,\s*"Background"(?:,\s*ignoreCase:\s*false)?\)/.test(hostSource),
   'HC device fan callbacks must remain UpdateSource-independent; Host uses the upstream Background context');
   const temperatureDispatchStart = hostSource.indexOf('private void OnHcCpuTemperatureChanged(HWiNFOTemperatureMonitor source, float? value)');
-  const dutyDispatchStart = hostSource.indexOf('private void WriteFanProfileDuty(double duty)', temperatureDispatchStart);
+  const dutyDispatchStart = hostSource.indexOf('private void WriteFanProfileDuty(', temperatureDispatchStart);
   const temperatureWriterStart = hostSource.indexOf('private void SetFanProfileTemperature(object fanProfile, float temperature)', dutyDispatchStart);
   const speedReaderStart = hostSource.indexOf('private double ReadFanProfileSpeed(object fanProfile)', temperatureWriterStart);
   assert(temperatureDispatchStart >= 0 && dutyDispatchStart > temperatureDispatchStart &&
@@ -2376,10 +2437,12 @@ async function main(): Promise<void> {
   assert(powerRows.length === 1, 'the startup page must render exactly one bound boot/wake fan row');
   const powerRow = powerRows[0];
   const fanBootBinding = powerRow.includes('v-model="fanControlOnBoot"') || powerRow.includes(':model-value="fanControlOnBoot"');
+  const fanBootCopy = /\bdescription="([^"]+)"/.exec(powerRow)?.[1];
   assert(fanBootBinding && powerRow.includes('@update:model-value="onFanControlBootToggle"') &&
     !powerRow.includes(':disabled="true"') &&
-    powerRow.includes('\u6839\u636e\u9002\u914d\u673a\u578b\u81ea\u52a8\u542f\u52a8\u98ce\u6247'),
-  'the boot/wake fan row must be an operable bound switch with the fixed copy');
+    (fanBootCopy === '\u6839\u636e\u9002\u914d\u673a\u578b\u81ea\u52a8\u542f\u52a8\u98ce\u6247' ||
+      fanBootCopy === '\u5f00\u673a\u5e94\u7528\u98ce\u6247\u6321\u4f4d\u5e76\u542f\u52a8'),
+  'the boot/wake fan row must be an operable bound switch with the startup description');
 
   // FAN-932 §2.1: boot and wake share one serialized, generation-deduped entry.
   const autoStartStart = shellSource.indexOf('function ensureFanAutoStart(');
@@ -2387,34 +2450,50 @@ async function main(): Promise<void> {
   assert(autoStartStart >= 0 && autoStartEnd > autoStartStart,
     'the single shared auto-start orchestration entry must exist');
   const autoStartBody = shellSource.slice(autoStartStart, autoStartEnd);
+  const autoStartOrderIsSafe = (body: string) => {
+    const start = body.indexOf('fanHostLifecycle.start(');
+    const apply = body.indexOf('fanHostLifecycle.apply(');
+    const source = ts.createSourceFile('fanAutoStart.ts', body, ts.ScriptTarget.Latest, true);
+    const deniesBeforeApply = (node: import('typescript').Node): boolean => {
+      if (ts.isIfStatement(node) && node.getStart(source) > start && node.end < apply &&
+          node.expression.getText(source).replace(/\s/g, '') === '!gate.allowed||!gate.writeReady' &&
+          ts.isBlock(node.thenStatement) && node.thenStatement.statements.some(ts.isReturnStatement)) return true;
+      return ts.forEachChild(node, child => deniesBeforeApply(child) || undefined) === true;
+    };
+    return start >= 0 && apply > start && deniesBeforeApply(source);
+  };
   assert(autoStartBody.includes('fanHostLifecycle.hasControlIntent') &&
     autoStartBody.includes("readSettingsSection<{ fanControl?: boolean }>('startupDesired')") &&
     autoStartBody.includes('startup.fanControl !== true') &&
-    autoStartBody.includes('fanHostLifecycle.start()') &&
+    autoStartBody.includes('fanHostLifecycle.start(') &&
     autoStartBody.includes('gate.allowed') && autoStartBody.includes('gate.writeReady') &&
     autoStartBody.includes('getFanPresetCurve(') && autoStartBody.includes('fanHostLifecycle.apply('),
   'the shared entry must read the preference, defer to an existing intent, gate on allowed+writeReady and apply the saved curve');
-  assert(autoStartBody.indexOf('fanHostLifecycle.start()') < autoStartBody.indexOf('gate.writeReady') &&
-    autoStartBody.indexOf('gate.writeReady') < autoStartBody.indexOf('fanHostLifecycle.apply('),
+  assert(autoStartOrderIsSafe(autoStartBody),
   'the shared entry must start, then gate on writeReady, then apply (never apply before admission)');
   // Negative control: an apply issued before the admission gate must be rejected.
   const mutantAutoStart = autoStartBody.replace(
-    'const gate = await fanHostLifecycle.start();',
-    'await fanHostLifecycle.apply(getFanPresetCurve(getFanFeatureSettings().preset)); const gate = await fanHostLifecycle.start();');
-  assert(mutantAutoStart.indexOf('fanHostLifecycle.apply(') < mutantAutoStart.indexOf('gate.writeReady'),
+    'const gate = await runWakeStep(',
+    'await fanHostLifecycle.apply(getFanPresetCurve(getFanFeatureSettings().preset)); const gate = await runWakeStep(');
+  assert(mutantAutoStart !== autoStartBody && !autoStartOrderIsSafe(mutantAutoStart),
     'negative control: an apply issued before the admission gate must be detected');
   assert(shellSource.includes("ensureFanAutoStart('boot')") &&
     shellSource.includes("ensureFanAutoStart('resume', resumeGeneration)"),
   'boot and wake must both drive the single shared auto-start entry');
   // Boot must wait for the renderer reattach decision before it may auto-start.
   const reattachHook = shellSource.indexOf('const fanReattach = fanHostLifecycle.reattachAfterRendererRestart()');
-  assert(reattachHook > 0 &&
-    shellSource.indexOf("fanReattach.then(() => ensureFanAutoStart('boot'))") > reattachHook,
+  const reattachAwait = shellSource.indexOf('await fanReattach;', reattachHook);
+  const bootCall = shellSource.indexOf("ensureFanAutoStart('boot')");
+  assert(reattachHook >= 0 && reattachAwait > reattachHook && bootCall > reattachAwait &&
+    (shellSource.match(/ensureFanAutoStart\('boot'\)/g) ?? []).length === 1,
   'the boot auto-start must run only after the renderer reattach decision resolves');
   // Wake must sequence resume() before the auto-start (never two concurrent writes).
-  const resumeReadyIdx = shellSource.indexOf('void fanHostLifecycle.resume().catch(');
-  assert(resumeReadyIdx > 0 &&
-    shellSource.indexOf("ensureFanAutoStart('resume', resumeGeneration)", resumeReadyIdx) > resumeReadyIdx,
+  const wakeStart = shellSource.indexOf('function onFanResumeReady(');
+  const wakeEnd = shellSource.indexOf('function onPowerResumed(', wakeStart);
+  const wakeBody = shellSource.slice(wakeStart, wakeEnd);
+  assert(wakeStart >= 0 && wakeEnd > wakeStart &&
+    (shellSource.match(/ensureFanAutoStart\('resume', resumeGeneration\)/g) ?? []).length === 1 &&
+    /fanHostLifecycle\.resumeAfterNativeReady\(resumeGeneration, committedWake\)\.then\(\(resumeOk\) => \{\s*request\.nativeReadyInFlight = false;\s*if \(!stillCurrent\(\)\) return;\s*if \(resumeOk\) \{[^}]*if \(fanHostLifecycle\.hasControlIntent\) return;\s*return ensureFanAutoStart\('resume', resumeGeneration\);/.test(wakeBody),
   'wake must complete resume() before it may auto-start');
 
   // FAN-932 §2.1(3): an already-established intent reports itself, which is what
@@ -2515,6 +2594,9 @@ async function main(): Promise<void> {
   }
 
   // E 组（§5.2）：崩溃前仍有效的记录 ⇒ 一次有界恢复并**实际再调**。
+  const readOrdinaryCrashPower = async () => ({ generation: 1, known: true, phase: 'ready' as const,
+    notificationPending: false, resumeReady: false, physicalWakeObserved: false, hardwareWritesAllowed: true,
+    inputReady: true, hibernateAvailable: true });
   {
     const crashAdapter = new FakeAdapter();
     const crashLauncher = new FakeLauncher();
@@ -2524,6 +2606,7 @@ async function main(): Promise<void> {
       adapter: crashAdapter,
       launcher: crashLauncher,
       heartbeatIntervalMs: 60_000,
+      readNativePowerState: readOrdinaryCrashPower,
       readNativeActivity: async () => ({
         schemaVersion: 1,
         active: false,
@@ -2571,6 +2654,7 @@ async function main(): Promise<void> {
       adapter: mismatchAdapter,
       launcher: new FakeLauncher(),
       heartbeatIntervalMs: 60_000,
+      readNativePowerState: readOrdinaryCrashPower,
       readNativeActivity: async () => ({
         schemaVersion: 1,
         active: false,
@@ -2581,7 +2665,8 @@ async function main(): Promise<void> {
       }),
     });
     // 记录里的设备类与本次握手不同 ⇒ 不写硬件（FakeAdapter 握手是 GPDWin5）。
-    assert((await mismatch.recoverAfterUncleanExit()) === false && !mismatchAdapter.calls.includes('enable'),
+    assert((await mismatch.recoverAfterUncleanExit()) === false &&
+      mismatchAdapter.calls.includes('handshake') && !mismatchAdapter.calls.includes('enable'),
       'a device mismatch must not auto-apply the recorded curve');
     await mismatch.close();
   }
@@ -2610,17 +2695,31 @@ async function main(): Promise<void> {
   // ③ 周期诊断写（每 5 tick 一条）撤销，只在 tick 真的动作时留证；
   // ④ 渲染侧运行期自证回读从 1 Hz 降到 5 s；
   // ⑤ AC/DC 由 App.vue 事件触发一次曲线重放。
-  assert(!hostSource.includes('new Timer(_ => PowerProfileWatchdogTick(), null, 1000, 1000)') &&
-    hostSource.includes('new Timer(_ => PowerProfileWatchdogTick(), null, Timeout.Infinite, Timeout.Infinite)') &&
-    hostSource.includes('powerProfileWatchdog.Change(0, Timeout.Infinite);') &&
-    !hostSource.includes('powerProfileWatchdog.Change(0, 1000);'),
+  const watchdogStart = hostSource.slice(hostSource.indexOf('private void EnsurePowerProfileWatchdog()'),
+    hostSource.indexOf('private void PowerProfileWatchdogTick('));
+  const watchdogTick = hostSource.slice(hostSource.indexOf('private void PowerProfileWatchdogTick('),
+    hostSource.indexOf('private bool PowerProfileWatchdogTickCore('));
+  const watchdogCoreAdmission = /private bool PowerProfileWatchdogTickCore\([^)]*\)\s*\{[\s\S]*?if \(!IsFanDispatchOwnerCurrent\(dispatchOwner\)[^\n]*return false;/.exec(hostSource)?.[0] ?? '';
+  const watchdogArms = hostSource.match(/\bpowerProfileWatchdog\??\.Change\s*\(/g) ?? [];
+  assert(/powerProfileWatchdog\s*=\s*new Timer\(_ => PowerProfileWatchdogTick\(replayOwner\), null, Timeout\.Infinite, Timeout\.Infinite\);/.test(watchdogStart) &&
+    watchdogStart.includes('powerProfileWatchdog.Change(0, Timeout.Infinite);') &&
+    hostSource.includes('powerProfileWatchdog.Change(Math.Max(0, delayMs), Timeout.Infinite);') &&
+    watchdogArms.length === 2,
   'the profile watchdog must be armed event-driven (one-shot), never as a resident 1 Hz poll');
-  assert(!hostSource.includes('tick % 5 == 0') && hostSource.includes('if (acted)') &&
-    hostSource.includes('private bool PowerProfileWatchdogTickCore(long? admittedModeEpoch = null)') &&
-    hostSource.includes('msiAdmissionEpoch: admittedGateEpoch') &&
-    hostSource.includes('!IsFanDispatchOwnerCurrent(dispatchOwner)') &&
-    hostSource.includes('mode = "event-driven"') && hostSource.includes('intervalMs = 0'),
+  assert(!hostSource.includes('tick % 5 == 0') &&
+    /if \(acted\)\s*Diagnostic\?\.Invoke\("profile\.watchdog-sample", PowerProfileWatchdogDiagnostics\);/.test(watchdogTick) &&
+    (hostSource.match(/Diagnostic\?\.Invoke\("profile\.watchdog-sample"/g) ?? []).length === 1 &&
+    watchdogStart.includes('mode = "event-driven"') && watchdogStart.includes('intervalMs = 0'),
   'the periodic watchdog diagnostic write must be event-only and the diagnostics must state event-driven');
+  assert(/var replayOwner = CaptureFanDispatchOwner\(\);\s*powerProfileWatchdog = new Timer/.test(watchdogStart) &&
+    /if \(timerOwner is \{ \} producer && \(!IsFanDispatchOwnerCurrent\(producer\) \|\| AreTemperatureWritesBlocked\(\)\)\) return;\s*var started/.test(watchdogTick) &&
+    watchdogTick.includes('var dispatchOwner = timerOwner ?? CaptureFanDispatchOwner(admittedEpoch);') &&
+    watchdogTick.includes('OnStaPowerBounded(() => PowerProfileWatchdogTickCore(admittedEpoch, dispatchOwner)') &&
+    watchdogTick.includes('PowerProfileWatchdogTickCore(admittedOwner: timerOwner)') &&
+    /\(long\? admittedModeEpoch = null, FanDispatchOwner\? admittedOwner = null\)/.test(watchdogCoreAdmission) &&
+    watchdogCoreAdmission.includes('var dispatchOwner = admittedOwner ?? CaptureFanDispatchOwner(admittedGateEpoch);') &&
+    hostSource.includes('msiAdmissionEpoch: admittedGateEpoch'),
+  'the watchdog must reject a stale or blocked timer owner and preserve the admitted owner through replay');
   // FAN-931 P1.5（2026-09-27 裁决）：一次性武装必须为两条"有界延迟复核"补上**消费者**——
   // 否则 ①discard→等 Applied 的 2 s 截止点永远不会被报告（只有截止之后那一拍才看得到），
   // ②克隆失败的有限重试永远不会真的发生（retry-exhausted 也不可达）。
@@ -2641,8 +2740,8 @@ async function main(): Promise<void> {
     hostSource.includes('SelectHcDefaultProfileForPowerLine(candidates, online)') &&
     hostSource.includes('profilePowerLineOnline = online;'),
   'write-time and event refresh must use the same live AC/DC observation for template selection and bookkeeping');
-  assert(bridgeSource.includes('async reapplyActiveCurve(reason: string): Promise<boolean>') &&
-    shellSource.includes("fanHostLifecycle.reapplyActiveCurve('ac-changed')"),
+  assert(bridgeSource.includes('async reapplyActiveCurve(reason: string, isCurrent?: () => boolean): Promise<boolean>') &&
+    shellSource.includes("fanHostLifecycle.reapplyActiveCurve('ac-changed', current)"),
   'AC/DC must drive exactly one curve replay from the renderer event, not from Host polling');
   const telemetryInterval = /telemetryTimer = window\.setInterval\(\(\) => \{ void refreshTelemetry\(\); \}, (\d+)\);/.exec(switchSource);
   assert(telemetryInterval !== null && telemetryInterval[1] === '5000',

@@ -12,8 +12,9 @@ const {build}=req('esbuild'),{parse,compileScript,compileStyle}=req('vue/compile
 const runtime=process.env.YMCC_UI_BROWSER_MODULE_DIR||'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';
 const {chromium}=createRequire(path.join(runtime,'_controller-display-test.cjs'))('playwright');
 const outputArgs=process.argv.slice(2);let positionalOut,explicitOut;
-let powerPreviewOnly=false;
-for(let i=0;i<outputArgs.length;i++){const arg=outputArgs[i];if(arg==='--out'||arg==='--output'){assert(outputArgs[i+1],'output directory is required');explicitOut=outputArgs[++i]}else if(arg==='--power-preview-only'){assert(!powerPreviewOnly,'duplicate preview selection');powerPreviewOnly=true}else{assert(!arg.startsWith('--'),'unknown option: '+arg);assert(!positionalOut,'only one positional output directory is accepted');positionalOut=arg}}
+let powerPreviewOnly=false,gyroStatusOnly=false;
+for(let i=0;i<outputArgs.length;i++){const arg=outputArgs[i];if(arg==='--out'||arg==='--output'){assert(outputArgs[i+1],'output directory is required');explicitOut=outputArgs[++i]}else if(arg==='--power-preview-only'){assert(!powerPreviewOnly,'duplicate preview selection');powerPreviewOnly=true}else if(arg==='--gyro-status-only'){assert(!gyroStatusOnly,'duplicate gyro status selection');gyroStatusOnly=true}else{assert(!arg.startsWith('--'),'unknown option: '+arg);assert(!positionalOut,'only one positional output directory is accepted');positionalOut=arg}}
+assert(!(powerPreviewOnly&&gyroStatusOnly),'select only one isolated scenario');
 const out=path.resolve(explicitOut||positionalOut||process.env.YMCC_UI_BROWSER_OUT||path.resolve(root,'../../../Build/Validation/VirtualInput-CapabilityClosure-20261018/Browser','controller-display-'+new Date().toISOString().replace(/[:.]/g,'-')));
 assert(!fs.existsSync(path.join(out,'results.json'))&&!fs.existsSync(path.join(out,'source-bindings.json')),'choose a fresh output directory; prior run evidence is retained');
 fs.mkdirSync(out,{recursive:true});
@@ -54,6 +55,8 @@ const result=await build({metafile:true,loader:{'.png':'dataurl','.svg':'dataurl
 import {DEFAULT_GAMEPAD_REDIST_DIRECTORY,HIDHIDE_INSTALLER_NAME} from './src/bridge/hidHideSetupPrompt.ts';import {createApp,nextTick} from 'vue';import {screenTouchpadDefaults} from './src/bridge/screenTouchpads.ts';import Preview from './src/components/GamepadVisualizer.vue';import {normalizeSettings} from './src/bridge/settingsRepository.ts';
 ${powerPreviewOnly ? 'const Controller=Preview,Gyro=Preview;' : `import Controller from './src/views/ButtonMappingView.vue';import Gyro from './src/views/GyroMotionView.vue';`}
 import {startUiPowerReconciliation} from './src/bridge/uiLifecycle.ts';
+import {spatialNavigationTarget} from './src/gamepad/spatial.ts';
+window.__statusDirection=(base,dx,dy)=>{const current=document.querySelector(base);const controls=[...document.querySelectorAll('.gyro-integrated-page [data-gp-row]')].filter(n=>!n.disabled&&n.getClientRects().length);return spatialNavigationTarget(controls,current,{dx,dy})};
 const initial=normalizeSettings({input:{outputTarget:{persona:'steamdeck',buttonMappingEnabled:true,gyroEnabled:true},gyroMotion:{enabled:true,preset:'custom',outputStick:'right',outputMode:'virtual-stick',motionMode:'on',virtualPadLink:true}}});
 window.__fixture={settings:initial,events:{},writes:[],requests:[],ipcCalls:[],apiCalls:[],touchpads:Object.fromEntries(['disabled','steamdeck','dualsense-edge','elite'].map(persona=>[persona,{...screenTouchpadDefaults(persona),persona,ok:true,available:true,steamDeckAvailable:false,ps5Available:false,visible:false,reason:'isolated-display-fixture'}])),shortcut:null,lastGamepadState:null,settingsListeners:new Set(),editorListeners:new Set()};window.__emit=(name,data)=>{if(name==='gamepad.state')window.__fixture.lastGamepadState=data;for(const cb of window.__fixture.events[name]??[])cb(data)};window.__normalize=normalizeSettings;window.__tick=nextTick;window.__environmentInstallerDefaults={directory:DEFAULT_GAMEPAD_REDIST_DIRECTORY,name:HIDHIDE_INSTALLER_NAME};
  let app;window.__mount=(mode,persona='elite')=>{app?.unmount();app=createApp(mode==='controller'?Controller:mode==='gyro'?Gyro:Preview,mode==='preview'?{persona,settings:{enabled:false},showTestMode:false}:{});app.mount('#app')};
@@ -81,7 +84,7 @@ window.__fixture={settings:initial,events:{},writes:[],requests:[],ipcCalls:[],a
   });
 }}]});
 const js=result.outputFiles[0].text;
-const css=source(path.join(root,'src/styles/tokens.css')).toString('utf8')+'\n'+styles.join('\n');
+const css=source(path.join(root,'src/styles/tokens.css')).toString('utf8')+'\n'+(gyroStatusOnly?source(path.join(root,'src/styles/integratedConsole.css')).toString('utf8')+'\n':'')+styles.join('\n');
 const html='<!doctype html><meta charset="utf-8"><title>Controller display validation</title><style>'+css+'\nbody{margin:0;background:var(--bg-solid);color:var(--text);font-family:system-ui}#app{padding:24px;max-width:800px;margin:auto}</style><main id="app"></main><script src="/fixture.js"></script>';
 server=createServer((request,response)=>{
   if(request.url.startsWith('/gamepad-base.png')){response.setHeader('Content-Type','image/png');response.end(source(path.join(root,'public/gamepad-base.png')));return}
@@ -95,7 +98,119 @@ httpPort=server.address().port;
   const origin='http://127.0.0.1:'+httpPort;
   await page.route('**/*',route=>{const url=route.request().url();if(url.startsWith(origin+'/')||url.startsWith('data:'))return route.continue();errors.push('external request blocked: '+url);return route.abort()});
   await page.goto(origin);
-  if(powerPreviewOnly){
+  if(gyroStatusOnly){
+    const status=page.locator('.gyro-virtual-status');
+    let requestId=100;
+    const mount=async(persona='steamdeck',enabled=true,link=true)=>{
+      await page.evaluate(({persona,enabled,link})=>{
+        const f=window.__fixture;
+        f.shortcut=null;
+        f.settings=window.__normalize({input:{outputTarget:{persona,buttonMappingEnabled:enabled,gyroEnabled:true},gyroMotion:{enabled:true,preset:'fps',outputMode:'virtual-stick',motionMode:'off',motionTrigger:'LT',virtualPadLink:link}}});
+        window.__mount('gyro');
+      },{persona,enabled,link});
+      await page.waitForFunction(()=>document.querySelector('.gyro-virtual-status')?.textContent!=='虚拟手柄-待确认');
+    };
+    const report=async(persona='steamdeck',overrides={})=>{
+      const output={state:'active',reason:'current-session-frame-accepted',requestedPersona:persona,boundPersona:persona,hostEpoch:2,hostAlive:true,prepared:true,neutralized:true,frameAccepted:true,sourceLive:true,sourceCurrent:true,steamRunning:true,suppressionState:'verified',startProtection:{requestId:++requestId,persona,locked:false,phase:'success'},...overrides};
+      await page.evaluate(async output=>{window.__emit('gamepad.state',{virtualOutput:output});await window.__tick()},output);
+      return output;
+    };
+    const text=async(expected,tone)=>{
+      assert.equal(await status.innerText(),expected);
+      assert((await status.getAttribute('class')).split(/\s+/).includes(tone));
+    };
+    await mount('disabled',false,true);
+    await text('请到控制器开启虚拟手柄','off');
+    assert.match(await page.locator('.gyro-power-btn.link').innerText(),/已开启/);
+    cases.push('gyro heading prompts the Controller page even when linkage alone is enabled');
+    await mount('steamdeck',false);
+    await report();
+    await text('请到控制器开启虚拟手柄','off');
+    cases.push('a saved persona or leftover native receipt cannot turn an unrequested output into enabled');
+    for(const [persona,name] of [['steamdeck','SteamDeck'],['dualsense-edge','PS5'],['elite','Xbox']]){
+      await mount(persona,true,false);
+      await text(name+'虚拟手柄-状态待确认','pending');
+      await report(persona);
+      await text(name+'虚拟手柄-已开启','on');
+      await report(persona,{state:'suspected-failed',reason:'transport-fault'});
+      await text(name+'虚拟手柄-故障','warning');
+      assert.match(await status.getAttribute('title'),/通信异常/);
+      await report(persona,{state:'recovering'});
+      await text(name+'虚拟手柄-正在恢复','pending');
+      const ready=await report(persona);
+      await text(name+'虚拟手柄-已开启','on');
+      await report(persona,{state:'suspected-failed',reason:'transport-fault',startProtection:{...ready.startProtection,requestId:1}});
+      await text(name+'虚拟手柄-已开启','on');
+      cases.push(persona+' actual backend confirmation/fault/recovery and stale-receipt rejection; linkage off stays independent');
+    }
+    await mount();
+    await report('steamdeck',{steamRunning:false});
+    await text('SteamDeck虚拟手柄-故障','warning');
+    assert.match(await status.getAttribute('title'),/Steam/);
+    await report('steamdeck',{sourceCurrent:false});
+    await text('SteamDeck虚拟手柄-等待输入','pending');
+    await report('steamdeck',{switchPending:true});
+    await text('SteamDeck虚拟手柄-检查中','pending');
+    await report('elite');
+    await text('SteamDeck虚拟手柄-正在切换','pending');
+    cases.push('Steam absent, missing current input, unfinished switch and mismatched persona cannot falsely display enabled');
+    await page.evaluate(async()=>{window.__emit('input.shortcutRuntime',{active:true,persona:'elite',virtualEnabled:true,gyroEnabled:true});await window.__tick()});
+    await text('Xbox虚拟手柄-状态待确认','pending');
+    await report('elite');
+    await text('Xbox虚拟手柄-已开启','on');
+    await page.evaluate(async()=>{window.__emit('input.shortcutRuntime',{active:true,persona:'elite',virtualEnabled:false,gyroEnabled:false});await window.__tick()});
+    await text('请到控制器开启虚拟手柄','off');
+    await page.evaluate(async()=>{window.__emit('input.shortcutRuntime',{active:true,persona:'elite',virtualEnabled:true,gyroEnabled:true});await window.__tick()});
+    await text('Xbox虚拟手柄-状态待确认','pending');
+    await report('elite');
+    await text('Xbox虚拟手柄-已开启','on');
+    await page.evaluate(async()=>{window.__emit('input.shortcutRuntime',{active:true,persona:'elite',virtualEnabled:true,gyroEnabled:false});await window.__tick()});
+    await text('Xbox虚拟手柄-已开启','on');
+    cases.push('same-persona re-enable requires new backend evidence; gyro-only shortcut never changes virtual-controller state');
+    await page.evaluate(async()=>{window.__emit('input.shortcutRuntime',{active:false});await window.__tick()});
+    await report();
+    await text('SteamDeck虚拟手柄-已开启','on');
+    assert.equal(await page.evaluate(()=>window.__fixture.settings.input.outputTarget.persona),'steamdeck');
+    cases.push('temporary controller enable/disable/persona state is read-only and clears back to configured selection');
+    await page.evaluate(async()=>{window.__emit('gamepad.state',{});await window.__tick()});
+    await text('SteamDeck虚拟手柄-状态待确认','pending');
+    cases.push('missing current backend evidence clears a previous success');
+    for(const height of [720,800])for(const width of [800,540]){
+      await page.setViewportSize({width:1280,height});
+      await page.evaluate(width=>{document.getElementById('app').style.width=width+'px'},width);
+      for(const state of ['off','on','fault']){
+        await mount('steamdeck',state!=='off');
+        if(state!=='off')await report('steamdeck',state==='fault'?{state:'suspected-failed',reason:'transport-fault'}:{});
+        const layout=await page.evaluate(()=>{
+          const header=document.querySelector('.gyro-page-heading'),title=header.querySelector('h1'),status=header.querySelector('.gyro-virtual-status'),label=status.querySelector('span'),action=header.querySelector('button');
+          const rect=n=>{const r=n.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,height:r.height}};
+          return {header:rect(header),title:rect(title),status:rect(status),action:rect(action),textFits:label.scrollWidth<=label.clientWidth,focusStops:status.querySelectorAll('button,a,input,select,[tabindex]').length,tabIndex:status.tabIndex,actionRow:action.dataset.gpRow,actionCol:action.dataset.gpCol};
+        });
+        assert(layout.title.right<layout.status.left&&layout.status.right<layout.action.left,'heading columns do not overlap');
+        assert(layout.textFits,'entire concise label remains visible at '+width+' / '+height+' / '+state);
+        assert(layout.header.height<=42,'status must not add a second heading row');
+        assert.equal(layout.focusStops,0);assert.equal(layout.tabIndex,-1);
+        assert.equal(layout.actionRow,'-2');assert.equal(layout.actionCol,'1');
+        if(width===800){const shot=path.join(out,'gyro-status-'+state+'-'+height+'.png');await page.screenshot({path:shot,animations:'disabled'});screenshots.push(shot)}
+      }
+      const navigation=await page.evaluate(()=>{
+        const right=document.querySelector('.gyro-power-btn.link'),left=document.querySelector('.gyro-power-btn:not(.link)'),simulation=document.querySelector('.gyro-simulation-open');
+        return {down:window.__statusDirection('.gyro-simulation-open',0,1)===right,left:window.__statusDirection('.gyro-power-btn.link',-1,0)===left,right:window.__statusDirection('.gyro-power-btn:not(.link)',1,0)===right,up:window.__statusDirection('.gyro-power-btn.link',0,-1)===simulation};
+      });
+      assert.deepEqual(navigation,{down:true,left:true,right:true,up:true});
+      cases.push('1280x'+height+' panel '+width+': off/on/fault labels fit one row; actual spatial resolver keeps natural up/down/left/right');
+    }
+    await page.evaluate(()=>window.scrollTo(0,140));
+    const scroll=await page.evaluate(()=>window.scrollY);
+    await report();
+    await report('steamdeck',{state:'suspected-failed',reason:'transport-fault'});
+    assert.equal(await page.evaluate(()=>window.scrollY),scroll,'status updates must not move the page');
+    assert.equal(await page.evaluate(()=>window.__fixture.writes.length),0,'status detection must not save or enable anything');
+    await page.evaluate(()=>window.__mount('preview'));
+    assert.equal(await page.evaluate(()=>window.__fixture.events['input.shortcutRuntime']?.size??0),0);
+    assert.equal(await page.evaluate(()=>window.__fixture.events['gamepad.state']?.size??0),1,'only the already-existing preview subscription remains after gyro unmount');
+    cases.push('status updates preserve scroll and settings, and gyro subscriptions are removed on unmount');
+  }else if(powerPreviewOnly){
     const artwork=page.locator('.device-vector');
     await artwork.waitFor();
     const unchanged=()=>page.evaluate(()=>window.__artwork===document.querySelector('.device-vector'));

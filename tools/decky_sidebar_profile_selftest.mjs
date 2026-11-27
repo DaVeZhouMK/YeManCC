@@ -46,6 +46,24 @@ await check('deleting dedicated removes its complete profile and RTSS entry and 
  assert.equal((await f.read()).game.fields.profile.value,'global');assert.equal(f.counts.profileRemovals,1);assert.equal(f.counts.profileRestores,1);f.stop();
 });
 await check('deletion remains available when only the performance read has temporarily failed',async()=>{const f=await fixture(seed());f.state.performanceReadError=true;const s=await f.read();assert.equal(s.performance,undefined);assert.equal(s.game.fields.profile.supported,true);assert.equal((await f.request('global',s)).ok,true);assert.equal(f.memory.view().entries['game.exe'],undefined);f.stop();});
+await check('a committed profile never restores hardware in a retired public scope',async()=>{
+ const rows=[];
+ for(const value of ['dedicated','global']){
+  let f,s;
+  f=await fixture(value==='global'?seed():undefined,{readHooks:{profileCommitted:()=>{
+   f.emit('power.resumed',{generation:s.generation,readbackScope:{suspendSerial:4,notificationSequence:22}});
+  }}});
+  try{
+   Object.assign(f.state.power,{suspendSerial:3,observedNotificationSequence:21,publicationRevision:10});
+   s=await f.read();
+   const reply=await f.request(value,s);
+   rows.push({value,saved:reply.result?.saved,pending:reply.result?.pending,restores:f.counts.profileRestores??0,
+    committed:!!f.memory.view().entries['game.exe']===(value==='dedicated')});
+  }finally{f.stop();}
+ }
+ console.log(JSON.stringify({profileAfterSave:rows}));
+ assert.deepEqual(rows,['dedicated','global'].map(value=>({value,saved:true,pending:true,restores:0,committed:true})));
+});
 await check('replaying the same authenticated import packet returns its receipt without creating twice',async()=>{
  const f=await fixture();assert.equal((await f.request('dedicated')).ok,true);const n=f.replies.length;f.emit('deckySidebar.mirrorRequest',structuredClone(f.lastPacket));await flush();
  assert.equal(f.replies.slice(n).find(x=>x.message.type==='reply')?.message.ok,true);assert.equal(f.counts.profileImports,1);f.stop();

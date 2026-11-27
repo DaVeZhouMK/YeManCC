@@ -22,8 +22,10 @@ export function prepareInputResumeSource(main,template){
  const parts={POWER_ENUM:powerEnum[0],MESSAGES:['#define WM_POWER_RESUME_COMMIT ','#define WM_POWER_INPUT_RECOVER ','static constexpr UINT kSleepPowerForwardMessage=','static constexpr UINT kSharedPowerStateMessage=','static constexpr UINT_PTR kSleepPowerRedeliveryTimer='].map(line).join('\n'),ROG_GUARDS:guardParts,ROG_PENDING:pending,ROG_BIND:bind.replace('static bool rogRecoverBindSerialized(','static bool productionRogRecoverBindSerialized('),ROG_CONSUME:take('rogRemapConsumeDeferredRecover'),ROG_INVOKE:scoped?'return productionRogRecoverBindSerialized(why,generation,dispatched);':'(void)generation;if(dispatched)*dispatched=true;return productionRogRecoverBindSerialized(why);',GAMEPAD_PROGRESS:main.includes('struct GamepadResumeProgress {')?structure('GamepadResumeProgress'):'',RECOVER:take('gamepadRecoverAfterResume'),DELIVERY:[line('static std::atomic<unsigned long long> g_powerResumeCommitRedelivery'),take('sleepPowerArmRedelivery'),...(main.includes('static void sleepPowerArmUnknownRedelivery(')?[take('sleepPowerArmUnknownRedelivery')]:[]),...(main.includes('static void sleepPowerRetainCommittedDelivery(')?[take('sleepPowerRetainCommittedDelivery')]:[]),take('sleepPowerRedeliverCommitted')].join('\n'),INPUT_CASE:wholeCase,TIMER:timer,CLEAR_ROG_PENDING:scoped?'std::lock_guard<std::mutex> lock(g_rogRecoverPendingMx);g_rogRecoverPending={};':'g_rogRecoverPendingGen.store(0);',HAS_ROG_PENDING:scoped?'std::lock_guard<std::mutex> lock(g_rogRecoverPendingMx);return g_rogRecoverPending.device!=0;':'return g_rogRecoverPendingGen.load()!=0;'};
  if(timerBody.includes('sgRedeliverS4Wake(h);')){
   const state=[...main.matchAll(/^static struct SgFailedS4Delivery \{[\s\S]*?^\} g_sgFailedS4Delivery;/gm)];assert.equal(state.length,1,'Unique original S4 delivery state');
-  parts.MESSAGES+='\n'+line('#define WM_SG_S4_WAKE ');
-  parts.DELIVERY+='\n'+[line('static std::mutex g_sgFailedS4Mutex;'),state[0][0],take('sgRedeliverS4Wake')].join('\n');
+  const redelivery=take('sgRedeliverS4Wake');
+  parts.MESSAGES+='\n'+['#define WM_SG_S4_WAKE ','#define WM_SG_S0_WAKE ','static constexpr UINT WM_FAN_KERNEL_POWER_FACT ',
+   'static std::atomic<ULONGLONG> g_sgLatestSleepEntryFileTime{','static std::atomic<ULONGLONG> g_sgClosedSleepIntentFileTime{'].map(line).join('\n');
+  parts.DELIVERY+='\n'+[line('static std::mutex g_sgFailedS4Mutex;'),state[0][0],line('static SgFailedS4Delivery::Wake g_sgOriginalHibernateIngress;'),take('sgKernelEventSupersededByS4'),redelivery].join('\n');
  }
  if(wholeCase.includes('g_wakeFocusNudgePower'))parts.DELIVERY+='\n'+line('static ymcc::sleeppower::SharedPowerV1 g_wakeFocusNudgePower;');
  if(template.includes('@@RAW_READER@@')){
@@ -31,7 +33,8 @@ export function prepareInputResumeSource(main,template){
  bindings.push({symbol:'WM_POWER_RESUME_COMMIT',kind:'case',file:'native/main.cpp',beginUtf8Byte:Buffer.byteLength(main.slice(0,commitAt)),bodySha256:sha(body),onlyCaseHeaderAdaptedForBalancedExtractor:true});
  Object.assign(parts,{RAW_READER:take('readSharedSystemPower').replace('static int __cdecl readSharedSystemPower(','static int __cdecl fixtureProductionReadSharedSystemPower('),POWER_CAPTURE:'[[maybe_unused]] '+take('captureSharedPowerLifecycle'),POWER_CURRENT:take('sharedPowerLifecycleCurrent'),PUBLIC_COMMIT:body,PUBLIC_PROJECTION:take('projectSharedPowerLifecycle'),PUBLIC_PUBLISHER:take('publishSharedPowerLifecycle').replace('static void publishSharedPowerLifecycle(','static void productionPublishSharedPowerLifecycle(')});
  if(template.includes('@@PUBLIC_PROJECTION_WINDOW@@')){
-  const tagged=parts.PUBLIC_PUBLISHER.includes('g_sharedPowerProjectionPosted');
+  const queue=parts.PUBLIC_PUBLISHER.includes('sleepPowerQueueProjection(')?take('sleepPowerQueueProjection')+'\n':'';
+  const tagged=Boolean(queue)||parts.PUBLIC_PUBLISHER.includes('g_sharedPowerProjectionPosted');
   parts.PUBLIC_PROJECTION_WINDOW='static void diagnosticProjectionWindow([[maybe_unused]] HWND h,[[maybe_unused]] WPARAM w){projectSharedPowerLifecycle(h);}';
   parts.RESET_PUBLIC_PROJECTION='';
   if(tagged){
@@ -42,11 +45,11 @@ export function prepareInputResumeSource(main,template){
    const body=extract(sig+windowText.slice(windowText.indexOf('{')),'function','diagnosticProjectionWindow','native/main.cpp',[]).slice(sig.length);
    assert(body.includes('sleepPowerProjectionPostConsumed(w);'));
    bindings.push({symbol:'kSharedPowerStateMessage',kind:'case',file:'native/main.cpp',beginUtf8Byte:Buffer.byteLength(main.slice(0,start)),bodySha256:sha(body),onlyCaseHeaderAdaptedForBalancedExtractor:true});
-   parts.PUBLIC_PUBLISHER=declarations.join('\n')+'\n'+parts.PUBLIC_PUBLISHER+'\n'+take('sleepPowerProjectionPostConsumed');
+   parts.PUBLIC_PUBLISHER=declarations.join('\n')+'\n'+queue+parts.PUBLIC_PUBLISHER+'\n'+take('sleepPowerProjectionPostConsumed');
    parts.PUBLIC_PROJECTION_WINDOW=sig+body;
    parts.RESET_PUBLIC_PROJECTION='sleepPowerProjectionPostConsumed(kSharedPowerProjectionPostReceipt);';
   }
- }else assert(!parts.PUBLIC_PUBLISHER.includes('g_sharedPowerProjectionPosted'),'INPUT_RESUME_TAGGED_PROJECTION_REQUIRES_WINDOW_RECEIPT');
+ }else assert(!/g_sharedPowerProjectionPosted|sleepPowerQueueProjection\(/.test(parts.PUBLIC_PUBLISHER),'INPUT_RESUME_TAGGED_PROJECTION_REQUIRES_WINDOW_RECEIPT');
  }
  let code=template;for(const [name,value]of Object.entries(parts)){const marker='@@'+name+'@@';assert.equal(code.split(marker).length,2,'Unique original fixture slot '+name);code=code.replace(marker,()=>value);}assert(!/@@\w+@@/.test(code));
  return {code,bindings,compiledParts:Object.entries(parts).map(([symbol,value])=>({symbol,sha256:sha(value)})),adaptations:['Exact ROG bind function identifier renamed to productionRogRecoverBindSerialized; wrapper observes attempts and forwards exact result/output.','Original timed_mutex has an observer which forwards its exact real timed lock; original guard/scopes and800ms wait execute.','Case header adapted solely to lexical function extractor; original case body is byte-preserved.','Legacy source without borrowed power uses original one-argument method; new consumer supplies immutable generation.','Device, Host, screenpad/MSI and focus/timer leaves are inert; ReadyFlag observes exact stores and uses real atomic storage.']};
@@ -56,7 +59,7 @@ export async function runInputResumeFixture({repo,out,selectedCase,mainFile=path
  const started=performance.now();assert(!fs.existsSync(out),'INPUT_RESUME_FRESH_OUTPUT_REQUIRED');fs.mkdirSync(out,{recursive:true});
  const save=(name,data)=>fs.writeFileSync(path.join(out,name),typeof data==='string'||Buffer.isBuffer(data)?data:JSON.stringify(data,null,2)+'\n',{flag:'wx'});
  assert(path.isAbsolute(mainFile)&&path.isAbsolute(headerRoot),'INPUT_RESUME_ABSOLUTE_SOURCE_REQUIRED');
- const headers=['sleep_power_dispatch.h','sleep_power_state.h','sleep_power_observation.h','sleep_wake_admission.h'];
+ const headers=['sleep_power_dispatch.h','sleep_power_state.h','sleep_power_observation.h','sleep_wake_admission.h','recovery_resume_commit.h'];
  const sourcePaths=[...headers.map(name=>'native/'+name),'native/main.cpp','deps/json/json.hpp','tools/input_power_gate_r122_selftest.mjs','tools/fixtures/input_power_gate_r122/resume.mjs','tools/fixtures/input_power_gate_r122/resume.cpp','tools/fixtures/msi_owned_return_retired_io/source-binding.mjs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'];
  const observedPath=relative=>relative==='native/main.cpp'?mainFile:headers.some(name=>relative==='native/'+name)?path.join(headerRoot,path.basename(relative)):path.join(repo,relative);
  const bytes=new Map(sourcePaths.map(relative=>[relative,fs.readFileSync(observedPath(relative))]));

@@ -29,7 +29,15 @@ if(dcPower||process.argv.includes('--app-player')){
  const bodies=tree.statements.filter(n=>ts.isFunctionDeclaration(n)&&names.has(n.name?.text)).map(n=>n.getText(tree)).join('\n');
  const binding=app.match(/@error="([^"]+)"/)?.[1];assert.ok(binding,'real video error binding missing');
  const visibilityApi=windowVisibility?',visibility:onBackgroundVisibilityChange,shown:onBackgroundWindowShown,hidden:onBackgroundWindowHidden,loaded:onBackgroundVideoLoaded,canPlay:onBackgroundVideoCanPlay':'';
- const activationApi=(factoryGate?',activation:onBackgroundWindowActivation':'')+(windowFocusGate?',focus:onBackgroundFocusChanged':'');
+ let startupForeground='';
+ ts.forEachChild(tree,function find(node){
+  if(ts.isIfStatement(node)&&node.expression.getText(tree)==='initialWindowState'&&ts.isBlock(node.thenStatement)){
+   const seed=node.thenStatement.statements.filter(n=>ts.isIfStatement(n)&&n.getText(tree).includes('decorativeWindowForeground.value = initialWindowState.foreground'));
+   if(seed.length===1)startupForeground=seed[0].getText(tree);
+  }
+  ts.forEachChild(node,find);
+ });
+ const activationApi=(factoryGate?',activation:onBackgroundWindowActivation':'')+(windowFocusGate?',focus:onBackgroundFocusChanged':'')+(startupForeground?',seedForeground:(initialWindowState)=>{'+startupForeground+'}':'');
  const make=new Function('env',ts.transpileModule('with(env){'+bodies+';return {error:(event)=>('+binding+')(event),play:reconcileBackgroundVideo,playing:onBackgroundVideoPlaying,clear:clearBackgroundRetry,suspend:suspendBackgroundVideo,allowed:dynamicBackgroundAllowed'+(editorCover?',hold:acquireControllerEditorBackgroundHold,pause:onBackgroundVideoPause,canPlay:onBackgroundVideoCanPlay':'')+(dcPower?',setup:setupBackgroundVideo,lifecycle:reconcileBackgroundLifecycle,resume:resumeBackgroundVideo,pause:onBackgroundVideoPause,canPlay:onBackgroundVideoCanPlay,retry:scheduleSharedBackgroundRetry,epoch:()=>backgroundMediaEpoch,hls:()=>hlsInstance':'')+visibilityApi+activationApi+'};}',{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText);
  const captured={key:'steam-1361510',assetId:'3b507d102803210fd2601475605a7275',bindingRevision:6,kind:'video'};
  const reports=[],tests=[];const dcRuntime=dcPower?await createDcPowerRuntime(out):null;let checks=0;const same=(a,b,m)=>{checks++;assert.deepEqual(a,b,m);};
@@ -51,16 +59,33 @@ if(dcPower||process.argv.includes('--app-player')){
     destroy(){calls.push('hls:destroy');}
    }
    env.window.Hls=MediaHls;
+   env.currentBackgroundHls=()=>options.loadHls?undefined:env.window.Hls;
+   env.loadBackgroundHls=async()=>options.loadHls?options.loadHls(MediaHls):MediaHls;
    if(options.deferTicks)env.nextTick=fn=>new Promise(resolve=>ticks.push(resolve)).then(()=>fn?.());
   }
   video.hasAttribute=k=>video.getAttribute(k)!==null;
-  Object.assign(env,{playingWallpaperPreviews:0,factoryBackgroundVideo:ref(false),factoryBackgroundPoster:ref(undefined),factoryVideoStartTimer:null,factoryWindowForeground:null,backgroundWindowActivation:null,
+  Object.assign(env,{playingWallpaperPreviews:0,softwareWebViewRendering:false,factoryBackgroundVideo:ref(false),factoryBackgroundPoster:ref(undefined),factoryVideoStartTimer:null,factoryWindowForeground:null,backgroundWindowActivation:null,decorativeWindowForeground:ref(null),
    document:{visibilityState:'visible',hasFocus:()=>true},queueSharedBackgroundRefresh(){},setNativeWindowVisible(){},stopDynamicBackgroundWatch(){},requestVideoPowerCheck(){},
    dynamicOriginalFallback:null,dynamicBackgroundGeneration:1,sharedMediaDirty:false,currentGame:{pid:12345,processCreated:'134372974230246308'},
    getCurrentGame:()=>env.currentGame,isCurrentGameTarget:target=>target===env.currentGame,sharedMediaRevisions:{outdated:()=>!!env.staleBinding}});
   const api=make(env);return {api,env,video,timers,reports,calls,ticks,hls,source(mode){return dcRuntime.source(mode);},async drain(){for(let n=0;n<48;n++){for(const resolve of ticks.splice(0))resolve();await Promise.resolve();}assert.equal(ticks.length,0,'bounded nextTick drain');},async fire(){const [id,t]=[...timers][0]||[];assert.ok(t,'missing owned retry');timers.delete(id);t.fn();for(let i=0;i<8;i++)await Promise.resolve();}};
  }
  async function run(name,fn){tests.push({name,fn});}
+ if(windowVisibility&&startupForeground)await run('Startup native foreground is shared by decorations and dynamic playback',async()=>{
+  const f=fixture();
+  f.api.seedForeground({foreground:false});
+  await f.api.play();
+  same(f.video.paused,true,'an inactive initial window cannot play even when DOM has focus');
+  same(f.calls,[],'inactive startup does not start the decoder');
+  f.api.activation({detail:{active:true}});await f.drain();
+  same(f.video.paused,false,'native activation starts playback');
+  f.api.seedForeground({foreground:false});await f.api.play();
+  same(f.video.paused,false,'a late initial state cannot override activation');
+  f.api.activation({detail:{active:false}});await f.drain();
+  same(f.video.paused,true,'native deactivation pauses playback');
+  const oldHost=fixture();oldHost.api.seedForeground({});await oldHost.api.play();
+  same(oldHost.video.paused,false,'old hosts fall back to DOM focus until native state is known');
+ });
  if(windowVisibility)await run('Repeated media readiness keeps the current play request',async()=>{
   const f=fixture();let finish;
   f.env.backgroundPlayback={value:null};
@@ -118,6 +143,23 @@ if(dcPower||process.argv.includes('--app-player')){
   foreground(false);await drain();same(f.video.paused,true,'native blur pauses playback');
   foreground(true);await drain();same([...f.timers.values()][0]?.ms,0,'resume reuses the existing source');
   await f.fire();same(f.video.paused,false,'native foreground resumes playback');
+ });
+ if(factoryGate&&windowVisibility)await run('Software WebView keeps the built-in poster without scheduling a video start',async()=>{
+  const f=fixture();f.env.softwareWebViewRendering=true;
+  f.env.backgroundSource.value='fixed';f.env.factoryBackgroundVideo.value=true;
+  f.env.factoryBackgroundPoster.value='poster';f.video.src='';f.video.readyState=0;
+  f.env.windowApi={getState:async()=>{assert.fail('no extra native foreground query');}};
+  await f.api.play();f.api.activation({detail:{active:true}});f.api.focus?.();f.api.canPlay();await f.drain();
+  same(f.video.src,'','factory source remains unassigned');
+  same(f.video.paused,true,'no decoder start');
+  same(f.timers.size,0,'no delayed foreground probe');
+ });
+ if(factoryGate&&windowVisibility)await run('Software WebView still plays explicit and dynamic videos',async()=>{
+  for(const source of ['fixed','dynamic']){
+   const f=fixture();f.env.softwareWebViewRendering=true;f.env.backgroundSource.value=source;
+   f.api.activation({detail:{active:true}});await f.drain();
+   same(f.video.paused,false,source+' video plays');
+  }
  });
  await run('captured TMNT stale error must not poison current shared asset',()=>{const f=fixture();f.api.error({target:{error:{code:3}}});same(f.reports,[],'detached error cannot report the current TMNT asset');same(f.env.backgroundMediaEpoch,1,'detached error cannot invalidate current decoder');});
  for(const code of [1,2])await run('TMNT media interruption code '+code+' retains valid cached video',()=>{const f=fixture();f.video.error={code};f.api.error({target:f.video});same(f.reports,[],'interruption is not shared corruption');same(f.timers.size,1,'one selected recovery timer');same([...f.timers.values()][0].ms,500,'first foreground retry is prompt and owned');same(f.video.paused,true,'interrupted decoder paused');same(f.video.src,'','interrupted decoder releases source');});
@@ -389,9 +431,9 @@ async function createDcPowerRuntime(directory,{withoutPowerKey=false}={}) {
  };
  const sourcePath=project+'/src/bridge/dynamicBackground.ts';
  const input=fs.readFileSync(sourcePath,'utf8');
- const keyAnchor='JSON.stringify([acdc,sleep.generation,sleep.suspendSerial,game.pid';
+ const keyAnchor='JSON.stringify([acdc,sleep.generation,sleep.suspendSerial,sleep.observedNotificationSequence,game.pid';
  if(withoutPowerKey)assert.equal(input.split(keyAnchor).length,2,'power-key negative requires exactly one production key');
- const result=await build({absWorkingDir:project,stdin:{contents:`export {refreshDynamicBackground,getDynamicBackgroundState} from './src/bridge/dynamicBackground';export * from './src/bridge/wallpaperPowerPolicy';export {powerSourceMode,startForegroundPowerSourceRefresh} from './src/bridge/powerSource';export {onSharedPowerLifecycle,getSharedPowerLifecycle,isSharedPowerLifecycleAdmitted} from './src/bridge/powerLifecycleState';export {tdpRuntimeStore} from './src/bridge/tdpRuntimeState';export {shouldSkipVideoReconcile} from './src/bridge/backgroundPolicy';`,resolveDir:project,sourcefile:'own-background-dc-entry.ts'},bundle:true,platform:'node',format:'esm',write:false,metafile:true,plugins:[{name:'dc-boundary-ports',setup(builder){
+ const result=await build({absWorkingDir:project,stdin:{contents:`export {refreshDynamicBackground,getDynamicBackgroundState} from './src/bridge/dynamicBackground';export * from './src/bridge/wallpaperPowerPolicy';export {powerSourceMode,powerSourceBatteryPresent,readPowerSourceMode,startForegroundPowerSourceRefresh} from './src/bridge/powerSource';export {watch} from 'vue';export {onSharedPowerLifecycle,getSharedPowerLifecycle,isSharedPowerLifecycleAdmitted} from './src/bridge/powerLifecycleState';export {tdpRuntimeStore} from './src/bridge/tdpRuntimeState';export {shouldSkipVideoReconcile} from './src/bridge/backgroundPolicy';`,resolveDir:project,sourcefile:'own-background-dc-entry.ts'},bundle:true,platform:'node',format:'esm',write:false,metafile:true,plugins:[{name:'dc-boundary-ports',setup(builder){
   builder.onResolve({filter:/^\.\/(?:bridge\/)?(ipc|sharedGameMedia|steamMediaSource|uiSettings|yeman|uiLifecycle)$/},args=>({path:'./'+args.path.split('/').at(-1),namespace:'dc-port'}));
   builder.onLoad({filter:/.*/,namespace:'dc-port'},args=>({contents:mocks[args.path],loader:'js'}));
   if(withoutPowerKey)builder.onLoad({filter:/[\\/]dynamicBackground\.ts$/},()=>({contents:input.replace(keyAnchor,keyAnchor.replace('[acdc,','[')),loader:'ts',resolveDir:path.dirname(sourcePath)}));
@@ -493,6 +535,25 @@ async function registerDcPowerCases({run,fixture,same,runtime,out}) {
   same(f.video.paused,true,'decoder paused');same(f.video.src,'','media source removed');same(f.reports,[],'DC is not corruption');
  });
 
+ await run('HLS script finishing after source change or DC never attaches to the old video',async()=>{
+  for(const revoke of ['source','power']){
+   const loaded=deferred();let ctor;
+   const f=fixture({hls:true,loadHls:cls=>{ctor=cls;return loaded.promise.then(()=>ctor);}});
+   const pending=f.api.setup();await microtasks();assert.ok(ctor,'script load is pending');
+   if(revoke==='source'){f.env.backgroundUrl.value='fixture.mp4';await f.api.setup();}
+   else {f.source('dc');f.api.lifecycle();}
+   loaded.resolve();await pending;
+   same(f.hls.length,0,'revoked request cannot construct or attach HLS');
+   same(f.reports,[],'revocation never quarantines a media asset');
+  }
+ });
+
+ await run('HLS runtime load failure is local and preserves a shared asset',async()=>{
+  const f=fixture({hls:true,loadHls:async()=>undefined});f.video.error={code:3};
+  await f.api.setup();same(f.reports,[],'loader failure is not a shared decoder error');
+  same(f.hls.length,0,'unavailable runtime never attaches');same(f.timers.size,1,'existing local recovery owns retries');
+ });
+
  await run('DC: repeated suspension and old timer HLS error playing cannot revive media',async()=>{
   const f=fixture({hls:true});await f.api.setup();f.api.retry('old retry');
   const lateRetry=[...f.timers.values()][0].fn,oldHls=f.hls[0];f.source('dc');f.api.lifecycle();
@@ -591,6 +652,28 @@ async function registerDcPowerCases({run,fixture,same,runtime,out}) {
   runtime.identity.negative=negative.identity;globalThis.__OWN_BACKGROUND_DC__=state;
  });
 
+ await run('DC: a newer Ready observation retires an in-flight dynamic wallpaper lookup',async()=>{
+  const priorPower=state.power,oldReply=deferred();
+  const f=mediaFixture({lookup:n=>n===1?oldReply.promise:Promise.resolve(cached)});
+  state.power={...priorPower,suspendSerial:7,observedNotificationSequence:20};
+  const send=patch=>{state.power={...state.power,...patch};state.nativeListeners.get('power.lifecycleChanged')({...state.power});};
+  try{await withMountedPower(runtime,async()=>{
+   let retired=false;
+   const old=api.refreshDynamicBackground(game).then(result=>{retired=true;return result;});
+   try{
+    await reached(f,'lookup');
+    send({publicationRevision:2});await microtasks();
+    same(retired,false,'revision-only Ready leaves its lookup in flight');
+    send({publicationRevision:3,observedNotificationSequence:21});await microtasks();
+    same(retired,true,'a new notification scope retires the old lookup before its reply');
+    same(await old,null,'retired lookup has no wallpaper');
+    same((await api.refreshDynamicBackground(game))?.state.mediaAssetId,cached.asset.id,'fresh Ready can load the same game independently');
+    same(count(f,'lookup'),2,'only the current lookup is added');
+    oldReply.resolve({...cached,asset:{...cached.asset,id:'old'}});await microtasks();
+    same(f.events.map(e=>[e.type,e.detail.mediaAssetId]),[['dynamic-background:loaded',cached.asset.id]],'only the new scope publishes');
+   }finally{oldReply.resolve(cached);await old;}
+  });}finally{state.power=priorPower;}
+ });
  await run('DC: same-generation Ready retires a held foreground power source read',async()=>{
   runtime.reset();const priorPower=state.power,priorTransport=state.transport;
   state.power={...priorPower,suspendSerial:7};
@@ -615,6 +698,121 @@ async function registerDcPowerCases({run,fixture,same,runtime,out}) {
   }finally{
    stop();old.resolve({});fresh.resolve({});await microtasks();state.power=priorPower;state.transport=priorTransport;
    assert.equal(state.nativeListeners.size,0,'power and AC/DC subscriptions returned');
+  }
+ });
+ await run('DC: a later same-scope Ready cancels only the old source read and wakes its callers',async()=>{
+  const priorPower=state.power,priorTransport=state.transport;
+  state.power={...priorPower,publicationRevision:1,suspendSerial:10,observedNotificationSequence:20};
+  const reads=[],published=[];
+  state.transport={invoke(command,args,{signal,timeoutMs}){
+   assert.equal(command,'power.sourceSnapshot');assert.equal(timeoutMs,2000);
+   return new Promise((resolve,reject)=>{
+    const read={args,aborted:false,resolve:r=>{signal.removeEventListener('abort',abort);resolve(r);}};
+    function abort(){read.aborted=true;reject(Error('IPC request retired'));}
+    signal.addEventListener('abort',abort,{once:true});reads.push(read);
+   });
+  }};
+  const stop=api.startForegroundPowerSourceRefresh(mode=>published.push(mode));
+  const send=patch=>{state.power={...state.power,...patch};state.nativeListeners.get('power.lifecycleChanged')({...state.power});};
+  const fact=(acLine,revision)=>({known:true,acLine,generation:1,revision,batteryKnown:true,hasBattery:true});
+  let pending;
+  try{
+   await microtasks();assert.equal(reads.length,1);reads[0].resolve(fact(1,1000));await microtasks();
+   send({publicationRevision:2,suspendSerial:11});await microtasks();assert.equal(reads.length,2);
+   let received;pending=api.readPowerSourceMode().then(mode=>{received=mode;});
+   send({publicationRevision:3});await microtasks();
+   assert.equal(reads[1].aborted,false,'revision-only publication keeps its read');assert.equal(reads.length,2);
+   send({publicationRevision:4,observedNotificationSequence:21});await microtasks();
+   assert.equal(reads[1].aborted,true,'same-generation merged Ready retires the prior IPC');
+   assert.equal(reads.length,3,'only one successor starts before the held old reply');
+   assert.deepEqual(reads[2].args,{refresh:true});
+   reads[2].resolve(fact(0,1002));await microtasks();
+   assert.equal(received,'dc','existing callers can use the fresh source without falling back to AC');
+   reads[1].resolve(fact(1,1001));await microtasks();
+   assert.equal(api.powerSourceMode.value,'dc');assert.deepEqual(published,['ac','dc']);
+   send({publicationRevision:5,observedNotificationSequence:22});await microtasks();
+   assert.equal(reads.length,3,'a confirmed source and no live read need no extra snapshot');
+  }finally{
+   stop();for(const read of reads)read.resolve({});await pending;await microtasks();
+   state.power=priorPower;state.transport=priorTransport;
+   assert.equal(state.nativeListeners.size,0);
+  }
+ });
+ await run('DC: a newer scope hint fences old receipts while the cached phase is still Ready',async()=>{
+  const priorPower=state.power,priorTransport=state.transport;
+  state.power={...priorPower,suspendSerial:12,publicationRevision:1,observedNotificationSequence:30};
+  const old=deferred(),fresh=deferred(),reads=[],published=[];
+  state.transport={invoke(command,args,{signal}){
+   assert.equal(command,'power.sourceSnapshot');reads.push(signal);
+   return reads.length===1?old.promise:fresh.promise;
+  }};
+  const stop=api.startForegroundPowerSourceRefresh(mode=>published.push(mode));
+  const send=(event,value)=>state.nativeListeners.get(event)(value);
+  const fact=(acLine,revision)=>({known:true,acLine,generation:1,revision});
+  try{
+   await microtasks();same(reads.length,1,'one initial read');
+   send('power.resumed',{generation:1,readbackScope:{suspendSerial:13,notificationSequence:31}});
+   await microtasks();
+   same(api.getSharedPowerLifecycle().phase,'ready','the cached phase remains available to the UI');
+   same(api.getSharedPowerLifecycle().scopeReadbackPending,true,'public readback is still pending');
+   same(reads[0].aborted,true,'public scope retires the old AC/DC read');
+   old.resolve(fact(1,1100));
+   for(const event of ['power.sourceChanged','power.acChanged','power.sourceHeartbeat'])send(event,fact(1,1101));
+   await microtasks();
+   same(api.powerSourceMode.value,null,'old AC/DC receipts cannot fill the suspended source');
+   same(published,[],'no restore is requested while the newer scope is unverified');
+   state.power={...state.power,suspendSerial:13,publicationRevision:2,observedNotificationSequence:31,hardwareWritesAllowed:false};
+   send('power.lifecycleChanged',state.power);
+   await microtasks();same(reads.length,2,'matching Ready starts one replacement read without device permission');
+   fresh.resolve(fact(0,1102));await microtasks();
+   same(api.powerSourceMode.value,'dc','only the matching observation updates the mode');
+   same(published,['dc'],'exactly one current AC/DC callback');
+  }finally{
+   stop();old.resolve({});fresh.resolve({});await microtasks();
+   state.power=priorPower;state.transport=priorTransport;
+   assert.equal(state.nativeListeners.size,0);
+  }
+ });
+ await run('DC: synchronous battery publication cannot restore a retired power scope',async()=>{
+  const priorPower=state.power,priorTransport=state.transport;
+  state.power={...priorPower,suspendSerial:40,publicationRevision:500,observedNotificationSequence:500};
+  const reads=[],published=[];
+  state.transport={invoke(command,args,{signal}){
+   assert.equal(command,'power.sourceSnapshot');
+   return new Promise((resolve,reject)=>{
+    const onAbort=()=>reject(Error('IPC request retired'));
+    signal.addEventListener('abort',onAbort,{once:true});
+    reads.push({signal,resolve:value=>{signal.removeEventListener('abort',onAbort);resolve(value);}});
+   });
+  }};
+  const stop=api.startForegroundPowerSourceRefresh(mode=>published.push(mode));
+  const publish=patch=>{state.power={...state.power,...patch};state.nativeListeners.get('power.lifecycleChanged')(state.power);};
+  let nested=0;
+  const stopWatch=api.watch(api.powerSourceBatteryPresent,value=>{
+   if(value!==true||nested)return;
+   ++nested;
+   publish({generation:3,suspendSerial:41,publicationRevision:501,observedNotificationSequence:501,phase:'suspending',hardwareWritesAllowed:false});
+  },{flush:'sync'});
+  try{
+   await microtasks();same(reads.length,1,'original foreground read is outstanding');
+   state.nativeListeners.get('power.sourceHeartbeat')({known:true,ac:false,generation:2,revision:1300,batteryKnown:true,hasBattery:true});
+   await microtasks();
+   same(nested,1,'real reactive callback delivers sleep before the old heartbeat finishes');
+   same(api.getSharedPowerLifecycle().phase,'suspending','new suspend is from the same public owner');
+   same(reads[0].signal.aborted,true,'suspend releases the old foreground IPC');
+   same(api.powerSourceMode.value,null,'superseded heartbeat must leave AC/DC unknown during suspend');
+   same(api.tdpRuntimeStore.get().mode,null,'old heartbeat must leave TDP source unknown');
+   same(published,[],'old heartbeat must not request foreground restore');
+   publish({publicationRevision:502,observedNotificationSequence:502,phase:'ready',hardwareWritesAllowed:true});
+   await microtasks();same(reads.length,2,'one current read after Ready');
+   reads[1].resolve({known:true,acLine:0,generation:3,revision:1,batteryKnown:true,hasBattery:true});await microtasks();
+   reads[0].resolve({known:true,acLine:1,generation:2,revision:1301});await microtasks();
+   same(api.powerSourceMode.value,'dc','current scope accepts its own observation');
+   same(published,['dc'],'replacement observation publishes once and late reply is inert');
+  }finally{
+   stopWatch();stop();for(const read of reads)read.resolve({});await microtasks();
+   state.power=priorPower;state.transport=priorTransport;
+   same(state.nativeListeners.size,0,'all subscriptions returned');
   }
  });
 }

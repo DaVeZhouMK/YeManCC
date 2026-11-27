@@ -10,6 +10,24 @@
 #include <utility>
 
 namespace ymcc::capabilities::oem {
+namespace gpd {
+// YMCC-owned chassis; keep this identity paired with PinnedFanSourceCatalog.cs.
+// Matching the chassis does not grant any Win5 non-input capability.
+inline constexpr Device winMax3{
+    "ymcc.device.GPDWinMax3", "YeManCC.SourceDevices.GPDWinMax3",
+    "YeManCC.SourceDevices.GPDWinMax3", false, 0, 0};
+inline constexpr bool matchesWinMax3(std::string_view manufacturer, std::string_view board) noexcept {
+    return manufacturer == "GPD" && board == "G1638-01";
+}
+inline constexpr bool isWinMax3(std::string_view cls) noexcept {
+    return cls == winMax3.consumerClass;
+}
+inline constexpr bool winMax3HidMatches(unsigned vid, unsigned pid, unsigned page,
+                                        unsigned usage, unsigned inputBytes) noexcept {
+    return vid == 0x2F24 && pid == 0x0137 && page == 0xFF00 && usage == 0x0001 && inputBytes >= 11;
+}
+} // namespace gpd
+
 namespace aokzoe {
 // AOKZOEA1.cs OEMChords; A1Pro -> A1, A1X/A2 -> A1Pro.
 // These six operations describe three controls, not six independent buttons.
@@ -98,7 +116,7 @@ public:
         if (initialized_ && family_ == family && deviceClass_ == deviceClass)
             return binding_;
         std::string nextClass(deviceClass);
-        const auto* model = ymcc::capabilities::find(deviceClass);
+        const auto* model = gpd::isWinMax3(deviceClass) ? &gpd::winMax3 : ymcc::capabilities::find(deviceClass);
         InputBinding<Catalog> next;
         next.model = model;
         const auto consume = [&](const std::string& canonical) {

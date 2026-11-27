@@ -18,6 +18,44 @@
 namespace ymcc::tdpdiag {
 using Json = nlohmann::json;
 namespace fs = std::filesystem;
+inline void compactHelperStartContext(const char* event, Json& row) {
+    if (!event || std::string_view(event) != "tdp.helper-start" || !row.is_object()) return;
+    constexpr auto marker = "helperStartContextV1";
+    const auto schema = row.find("schemaVersion"), route = row.find("route");
+    if (row.contains(marker) || schema == row.end() || !schema->is_number_integer() || *schema != 1 ||
+        route == row.end() || (*route != "daemon" && *route != "cli")) return;
+    const auto owner = row.find("owner"), identity = row.find("machineIdentitySource"),
+        started = row.find("processStarted"), returned = row.find("hardwareCommandReturned"),
+        readback = row.find("readbackMatched");
+    if (owner == row.end() || *owner != "YMCC-parent" ||
+        identity == row.end() || *identity != "existing-native-startup-cache" ||
+        started == row.end() || !started->is_boolean() || started->get<bool>() ||
+        returned == row.end() || *returned != "not-observed" ||
+        readback == row.end() || *readback != "not-observed") return;
+    try { row.emplace(marker, 1); }
+    catch (const std::bad_alloc&) { return; }
+    row.erase(owner);
+    row.erase(identity);
+    row.erase(started);
+    row.erase(returned);
+    row.erase(readback);
+}
+inline void compactMsiWmiCallDefaults(const char* event, Json& row) {
+    const std::string_view name(event);
+    if (name != "tdp.oem-call-start" && name != "tdp.oem-call-result") return;
+    const auto route = row.find("route");
+    if (route == row.end() || *route != "msi-g3e-wmi" || row.contains("msiWmiCallDefaultsV1")) return;
+    static const Json defaults = {{"owner", "YMCC-native-MSI-TDP"},
+        {"verificationScope", "existing-WMI-call-boundary-only"},
+        {"machineIdentitySource", "existing-native-startup-cache"},
+        {"runtimeHelperRelevant", false}, {"processStarted", false}, {"physicalPowerVerified", false}};
+    for (auto field = defaults.begin(); field != defaults.end(); ++field) {
+        const auto value = row.find(field.key());
+        if (value == row.end() || value->type() != field->type() || *value != *field) return;
+    }
+    row.emplace("msiWmiCallDefaultsV1", true);
+    for (auto field = defaults.begin(); field != defaults.end(); ++field) row.erase(field.key());
+}
 // Success detail is classified before allocating native row copies. Unknown and
 // failed outcomes retain base evidence even when optional detail is disabled.
 inline bool successfulFloatingDetail(const char* event, const Json& detail) {

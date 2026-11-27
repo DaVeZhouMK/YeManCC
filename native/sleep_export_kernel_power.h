@@ -12,7 +12,8 @@
 namespace ymcc::sleepexport {
 
 using KernelHistoryJson = nlohmann::json;
-inline constexpr unsigned kernelHistoryLookbackMs = 24 * 60 * 60 * 1000;
+// A delayed export after a long screen-off session can need both prior days.
+inline constexpr unsigned kernelHistoryLookbackMs = 72 * 60 * 60 * 1000;
 inline constexpr unsigned kernelHistoryMaxEvents = 64;
 inline constexpr unsigned kernelHistoryMaxXmlBytes = 32 * 1024;
 inline constexpr unsigned kernelHistoryMaxTotalXmlBytes = 256 * 1024;

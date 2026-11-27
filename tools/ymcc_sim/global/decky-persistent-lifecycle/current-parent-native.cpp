@@ -117,16 +117,28 @@ static Json diagnostics=Json::array();
 static Json fallbackMeasurements=Json::array();
 static std::atomic<bool> g_exitRequested{false};
 static struct {bool isolated=false;} g_aiFanMockSession;
-struct Session {unsigned pid=41;unsigned long long created=123;std::wstring root=L"C:\\FixtureSteam";};
+struct Session {unsigned pid=41;unsigned long long created=123;std::wstring root=L"C:\\FixtureSteam";bool operator==(const Session&) const=default;};
 static struct {Session sessionSnapshot()const{return {};}} g_steamSettingsObserver;
-static struct {unsigned reads=0;void requestRefresh(const Session&){++reads;}} g_steamModeObserver;
+static struct {
+ unsigned reads=0;void requestRefresh(const Session&){++reads;}
+ bool requestDeckyResumeRefresh(const Session&,const ymcc::sleeppower::SharedPowerV1&,std::string*){return false;}
+} g_steamModeObserver;
 
 static unsigned long long currentPowerGeneration(){return powerGeneration;}
+[[maybe_unused]] static ymcc::sleeppower::SharedPowerV1 fixtureDeckyPower(unsigned long long generation){
+    using namespace ymcc::sleeppower;
+    SharedPowerV1 power;power.generation=power.suspendSerial=generation;power.publicationRevision=1;
+    power.phase=g_powerLifecycle==PowerLifecycle::Ready?0u:3u;
+    power.flags=kKnown|(power.phase==0&&!g_exitRequested?kHardwareAllowed:0u);
+    return power;
+}
+[[maybe_unused]] static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& power) noexcept {
+    return ymcc::sleeppower::samePowerRevocation(power,fixtureDeckyPower(currentPowerGeneration()));
+}
 // Only the legacy Ready extraction references these fanout ports. The current
 // extraction calls the Decky leaf directly; appearance has its own fixture.
 [[maybe_unused]] static void stopPowerResumeWatchdog(){++watchdogStops;}
 [[maybe_unused]] static void steamAppearanceResumeCommitted(unsigned long long) {}
-[[maybe_unused]] static void nativeAyaLightingResume() {}
 static void deckySidebarDiagnostic(const char* event,const Json& detail,bool){diagnostics.push_back({{"event",event},{"detail",detail}});}
 #define g_deckySidebarRuntime (*activeRuntime)
 #include "decky_wake_ready_consumer.inc"
@@ -190,8 +202,13 @@ inline Json committedReady(const std::filesystem::path& output){
     harness.runtime.shutdown();activeRuntime=nullptr;const auto destroyed=harness.client->snapshot();
     need(before==sleeping&&before==resuming&&after==before+1&&duplicate==after,"original-ready-only-once-and-no-sleeping-rebind");
     need(originalLoader>0&&finalLoader==originalLoader&&originalBinding>0&&nextBinding>0&&nextBinding!=originalBinding,"current-ready-keeps-owned-loader-and-replaces-binding");
+#ifdef YMCC_FIXTURE_PUBLIC_DECKY_READY
+    constexpr auto readyScope="public-ready";
+#else
+    constexpr auto readyScope="committed-ready";
+#endif
     need(acceptedDiagnostics==1&&diagnostics.size()==acceptedDiagnostics&&diagnostics[0]["detail"]["bindingRequested"]==true&&
-        diagnostics[0]["detail"]["scope"]=="committed-ready"&&acceptedModeReads==1&&g_steamModeObserver.reads==acceptedModeReads,"shared-ready-consumer-records-once-and-suppresses-duplicate");
+        diagnostics[0]["detail"]["scope"]==readyScope&&acceptedModeReads==1&&g_steamModeObserver.reads==acceptedModeReads,"shared-ready-consumer-records-once-and-suppresses-duplicate");
     need(destroyed.fullyDestroyed&&beforeHandles==handles()&&context.alive(),"current-ready-destroyed-with-strict-parent-handle-equality");
     return {{"sleepObserved",true},{"readyGranted",true},{"currentGeneration",powerGeneration},
         {"bindingCallsBefore",before},{"bindingCallsSleeping",sleeping},{"bindingCallsResuming",resuming},{"bindingCallsAfterReady",after},{"bindingCallsAfterDuplicate",duplicate},
@@ -410,7 +427,11 @@ int main(int argc,char** argv){
     int code=0;if(rtfixture::tryStalledChild(code))return code;if(ymcc::deckybinding::fixture::tryRunChild(code))return code;
     if(argc==1)return currentparent::inertLoader();
     if(argc==2&&std::string(argv[1])=="--current-owned-fallback-descendant"){if(!currentparent::signalFallbackActorEntered(L"YMCC_CURRENT_PARENT_DESC_READY"))return 94;Sleep(30000);return 0;}
-    if(argc!=2)return 64;
+    constexpr auto readyId="native.committed-ready-executes-original-rebind-consumer";
+    constexpr auto stopFallbackId="native.job-stop-failure-falls-back-to-owned-job-close";
+    const std::string_view selected=argc==3?argv[2]:"";
+    const bool all=argc==2;
+    if(!all&&selected!=readyId&&selected!=stopFallbackId)return 64;
     using namespace currentparent;
     const auto actualImage=detail::executable();lstrcpynW(currentprobe::image,actualImage.c_str(),32768);
     const auto output=std::filesystem::absolute(argv[1]);std::filesystem::create_directories(output);
@@ -418,12 +439,16 @@ int main(int argc,char** argv){
     cryptoThreadsBefore=threadTable();
     const auto calibration=initializeSharedCryptoForMeasurement();cryptoThreadsAfter=threadTable();Json cases=Json::array();
     const auto test=[&](const char* id,const auto& action){currentprobe::stage=id;try{cases.push_back({{"id",id},{"passed",true},{"measurements",action()}});}catch(const std::exception& e){cases.push_back({{"id",id},{"passed",false},{"error",e.what()}});}std::ofstream(output.parent_path()/"native-progress.json",std::ios::binary)<<cases.dump(2)<<'\n';};
-    test("native.exit-clears-owned-process-job-worker-event",[&]{return stopAndLate(output/"e",{},false);});
-    test("native.explicit-off-and-fatal-off-veto-late-wakes",[&]{const auto user=stopAndLate(output/"o",{},false),fatal=stopAndLate(output/"f","decky-render-failed",false);return Json{{"userOff",user},{"fatalOff",fatal},{"explicitOffHonored",true},{"fatalOffHonored",true}};});
-    test("native.late-actual-recovery-callback-after-exit",[&]{return stopAndLate(output/"l",{},true);});
-    test("native.committed-ready-executes-original-rebind-consumer",[&]{return committedReady(output/"p");});
-    test("native.job-stop-failure-falls-back-to-owned-job-close",[&]{return jobCloseFallback(output/"j");});
-    test("native.crash-budget-cannot-renew-on-recovery-or-unknown",[&]{return crashBudget(output/"b");});
+    if(all){
+        test("native.exit-clears-owned-process-job-worker-event",[&]{return stopAndLate(output/"e",{},false);});
+        test("native.explicit-off-and-fatal-off-veto-late-wakes",[&]{const auto user=stopAndLate(output/"o",{},false),fatal=stopAndLate(output/"f","decky-render-failed",false);return Json{{"userOff",user},{"fatalOff",fatal},{"explicitOffHonored",true},{"fatalOffHonored",true}};});
+        test("native.late-actual-recovery-callback-after-exit",[&]{return stopAndLate(output/"l",{},true);});
+    }
+    if(all||selected==readyId)test(readyId,[&]{return committedReady(output/"p");});
+    if(all||selected==stopFallbackId)test(stopFallbackId,[&]{return jobCloseFallback(output/"j");});
+    if(all){
+        test("native.crash-budget-cannot-renew-on-recovery-or-unknown",[&]{return crashBudget(output/"b");});
+    }
     const auto passed=std::count_if(cases.begin(),cases.end(),[](const Json& row){return row.value("passed",false);});
     const Json report{{"schema","ymcc.current-decky-parent-native.v1"},{"passed",static_cast<std::size_t>(passed)==cases.size()},
         {"cases",cases},{"remainingTrackedJobHandles",currentprobe::jobHandles()},{"resourceLedgerOverflow",currentprobe::overflow.load()},{"sharedCryptoInitialization",calibration},{"productCallbackMode","typed-only; legacy macro absent"},

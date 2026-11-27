@@ -48,6 +48,7 @@ static ULONGLONG sgNowFileTime(){return nowFile;}
 static ULONGLONG sgSleepTimeoutOriginalIntent(){return originalIntent;}
 static bool sgSleepTimeoutSuccessAfter(ULONGLONG){return success;}
 static bool sgSleepTimeoutDispatchPermitted(){return timeoutPermitted;}
+static bool sgContinuedWakeAge(ULONGLONG& age){age=0;return true;} // This sender leaf has no S0 classification receipt.
 static bool sgAbnormalPermitted(){return abnormalPermitted;}
 static bool sgAbnormalDispatchReady(){return abnormalPermitted;}
 @@USER_VETO@@
@@ -96,8 +97,13 @@ static void expect(bool ok,const char* message){++assertions;if(!ok)failures.emp
 static void reset(){
     // Finish every outstanding real Dispatch receipt through its original
     // owner protocol; no reset or replacement private notification authority.
-    ingress(PBT_APMQUERYSUSPENDFAILED);const auto old=g_sleepPowerDispatch.pendingReplay();
-    if(old){const auto owned=g_sleepPowerDispatch.forwarded(old.sequence,old.type,1250);g_sleepPowerDispatch.complete(owned,1251);}
+    ingress(PBT_APMQUERYSUSPENDFAILED);
+    while(const auto old=g_sleepPowerDispatch.pendingReplay()){
+        const auto owned=g_sleepPowerDispatch.forwarded(old.sequence,old.type,1250);
+        if(!owned)throw std::logic_error("fixture could not claim its pending power receipt");
+        g_sleepPowerDispatch.complete(owned,1251);
+    }
+    if(g_sleepPowerDispatch.pendingSuspend())throw std::logic_error("fixture did not settle its power receipts");
     fixtureGeneration=17;g_powerLifecycle=PowerLifecycle::Suspended;g_sharedPowerPublicationRevision=1;g_sharedPowerSuspendSerial=1;
     g_exitRequested=false;readKnown=true;hardwareGate=false;g_guardEnabled=true;
     g_sgLastPowerButtonWakeEventFileTime=g_sgLastKernel506EventFileTime=0;g_sgLastPowerButtonSleepIntentFileTime=originalIntent;

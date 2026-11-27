@@ -60,12 +60,14 @@ export function parseOptions(args){
  for(const m of o.modules)if(!CONFIG.modules[m])throw Error('UNKNOWN_MODULE:'+m);
  if(o.coordinatorCase!==undefined&&(o.coordinatorCase.trim()!==o.coordinatorCase||!o.coordinatorCase||o.modules.length||o.bugPlan||o.fullAcceptance||o.mode==='full'||o.tests.length!==1||o.tests[0]!=='controller.coordinator-lifecycle'))throw Error('COORDINATOR_CASE_REQUIRES_ONE_EXPLICIT_ORIGINAL_TEST');
  if(o.coordinatorToolPlan!==undefined&&o.coordinatorCase!=='onex-diagnostic-tls-startup')throw Error('COORDINATOR_TOOL_PLAN_REQUIRES_ONEX_TLS_CASE');
- if((o.coordinatorManagedDll!==undefined||o.coordinatorDotnet!==undefined)&&!['prepare-rejection-cold','gpd-expired-first-on-full-cycle','wake-kept-source:GPD:expired-then-current'].includes(o.coordinatorCase))throw Error('COORDINATOR_PREREQUISITES_REQUIRE_MANAGED_CASE');
+ if((o.coordinatorManagedDll!==undefined||o.coordinatorDotnet!==undefined)&&!['prepare-rejection-cold','gpd-expired-first-on-full-cycle','gpd-settled-first-on-full-cycle','gpd-win5-elite-quarantine-then-on','wake-kept-source:GPD:expired-then-current','ps-exit-held-ownership-receipt','ps-exit-held-ownership-receipt:pair'].includes(o.coordinatorCase))throw Error('COORDINATOR_PREREQUISITES_REQUIRE_MANAGED_CASE');
  if(!o.help&&!o.bugPlan&&!o.modules.length&&!o.tests.length&&o.mode!=='plan'&&o.mode!=='full')throw Error('EXPLICIT_MODULE_OR_TEST_REQUIRED');
  validateInputResumeSelection(o);validateCommonHidSelection(o);
  return o;
 }
 export async function selectCases(o,repoRoot=REPO){
+ const win5ReturnExit2=process.env.YMCC_FOREGROUND_SHIELD_MODE==='win5-return-exit2';
+ if(win5ReturnExit2&&(o.mode==='full'||o.fullAcceptance||o.bugPlan||o.modules.length||o.tests.length!==1||o.tests[0]!==PREHOST_ID))throw Error('WIN5_RETURN_EXIT2_REQUIRES_ONE_EXPLICIT_ORIGINAL_TEST');
  const catalog=[...getAdapters(repoRoot,{identityOnly:true}),...getSleepAdapters(repoRoot,{identityOnly:true})];const idx=read(path.join(repoRoot,'tools/ymcc_sim/global/extra-adapter-index.json'));
  const extraRows=idx.groups.flatMap(g=>g.rows);const known=[...catalog,...extraRows];
  const selectionPolicy={...validateSelectionPolicy(known,CONFIG),configuration:pin(path.join(repoRoot,'tools/ymcc_sim/optimization/modules.json'))};
@@ -103,17 +105,20 @@ export async function selectCases(o,repoRoot=REPO){
  const deferExtra=o.mode!=='run'||!o.rerun;
  const directWire=o.mode==='run'&&selectedExtra.includes(WIRE_ID);
  const directCoordinator=o.coordinatorCase!==undefined&&selectedExtra.includes('controller.coordinator-lifecycle');
+ const preparedCoordinator=!directCoordinator&&o.mode!=='full'&&o.tests.includes('controller.coordinator-lifecycle')&&
+  selectedExtra.includes('controller.coordinator-lifecycle')&&Object.hasOwn(process.env,'YMCC_SIM_CURRENT29_LIFECYCLE_PREPARATIONS');
  const directCommonHid=o.commonHidRuntimeOnly===true&&selectedExtra.includes('controller.unified-standard-input');
   const directInputResume=o.inputResumeOnly===true&&selectedExtra.includes(INPUT_RESUME_ID);
  const directHostIds=o.mode==='run'?selectedExtra.filter(id=>[HOST_PROTOCOL_ID,HOST_PARENT_ID].includes(id)):[];
- const directPreHost=o.mode==='run'&&process.env.YMCC_FOREGROUND_SHIELD_MODE==='prehost-writer'&&selectedExtra.includes(PREHOST_ID);
-  const generalExtra=selectedExtra.filter(id=>(!directWire||id!==WIRE_ID)&&!directHostIds.includes(id)&&(!directPreHost||id!==PREHOST_ID)&&(!directCoordinator||id!=='controller.coordinator-lifecycle')&&(!directCommonHid||id!=='controller.unified-standard-input')&&(!directInputResume||id!==INPUT_RESUME_ID));
+ const directPreHost=selectedExtra.includes(PREHOST_ID)&&(win5ReturnExit2||(o.mode==='run'&&process.env.YMCC_FOREGROUND_SHIELD_MODE==='prehost-writer'));
+  const generalExtra=selectedExtra.filter(id=>(!directWire||id!==WIRE_ID)&&!directHostIds.includes(id)&&(!directPreHost||id!==PREHOST_ID)&&(!(directCoordinator||preparedCoordinator)||id!=='controller.coordinator-lifecycle')&&(!directCommonHid||id!=='controller.unified-standard-input')&&(!directInputResume||id!==INPUT_RESUME_ID));
   const deferred=deferExtra?generalExtra.map(id=>extraRows.find(a=>a.id===id)).filter(a=>a.profiles.includes(o.profile)):[];
  const coordinator=directCoordinator?(await import('../global/controller-coordinator-lifecycle/supplemental.mjs')).getSupplementalAdapter({caseName:o.coordinatorCase,deadlineEpochMs:o.coordinatorDeadlineEpochMs,planning:o.mode==='plan',toolPlan:o.coordinatorToolPlan,managedDll:o.coordinatorManagedDll,dotnet:o.coordinatorDotnet}):null;
+ const prepared=preparedCoordinator?(await import('../global/extra-adapters.mjs')).getExtraAdapters(repoRoot,{selectedIds:['controller.coordinator-lifecycle']}).find(a=>a.id==='controller.coordinator-lifecycle'):null;
  const commonHid=directCommonHid?(await import('../global/controller-catalog/adapter.mjs')).getControllerCatalogAdapters(repoRoot).find(a=>a.id==='controller.unified-standard-input'):null;
   // A view of the existing indexed ID, not another registration or parent factory.
   const inputResume=directInputResume?{...extraRows.find(a=>a.id===INPUT_RESUME_ID),title:'Original input resume selection',kind:'node',path:'tools/input_power_gate_r122_selftest.mjs',args:[],timeoutMs:180000,scope:'behavioral-mock',evidenceInputs:['tools/input_power_gate_r122_selftest.mjs']}:null;
-  const extra=[...directHostIds.map(id=>hostLifecycleCacheAdapter(id)),...(commonHid?[commonHid]:[]),...(inputResume?[inputResume]:[]),...(coordinator?[coordinator]:[]),...(generalExtra.length&&!deferExtra?(await import('../global/extra-adapters.mjs')).getExtraAdapters(repoRoot,{selectedIds:generalExtra}):[]),...(directWire?(await import('../global/controller-lifecycle-pipe/adapter.mjs')).getControllerLifecyclePipeAdapters():[]),...(directPreHost?(await import('../global/controller-foreground-latency/adapter.mjs')).getControllerForegroundLatencyAdapters().filter(a=>a.id===PREHOST_ID):[])];
+ const extra=[...directHostIds.map(id=>hostLifecycleCacheAdapter(id)),...(commonHid?[commonHid]:[]),...(inputResume?[inputResume]:[]),...(coordinator?[coordinator]:[]),...(prepared?[prepared]:[]),...(generalExtra.length&&!deferExtra?(await import('../global/extra-adapters.mjs')).getExtraAdapters(repoRoot,{selectedIds:generalExtra}):[]),...(directWire?(await import('../global/controller-lifecycle-pipe/adapter.mjs')).getControllerLifecyclePipeAdapters():[]),...(directPreHost?(await import('../global/controller-foreground-latency/adapter.mjs')).getControllerForegroundLatencyAdapters({win5ReturnExit2}).filter(a=>a.id===PREHOST_ID):[])];
  const byId=new Map([...core,...extra].map(a=>[a.id,a]));
  const selected=wanted.map(id=>byId.get(id)).filter(a=>a&&a.profiles.includes(o.profile));
  if(bugSelection){
@@ -125,7 +130,7 @@ export async function selectCases(o,repoRoot=REPO){
  const configured=configureCandidateAdapters(unique.canonical,o,repoRoot).map(a=>configureUiPowerCache(a,repoRoot));validateAdapters(configured,repoRoot);
  const commonHidAdapter=directCommonHid?configured.find(a=>a.id==='controller.unified-standard-input'):null;
   const inputResumeAdapter=directInputResume?configured.find(a=>a.id===INPUT_RESUME_ID):null;
-  return {adapters:configured,duplicateReferences:unique.deduplicated,deferred,selectedIds:[...new Set([...unique.canonical.map(a=>a.id),...deferred.map(a=>a.id)])],knownCount:known.length,requested:wanted.length,selectionPolicy,...(commonHidAdapter?{commonHidSelection:{...commonHidAdapter.originalProjection,entry:commonHidAdapter.path,arguments:commonHidAdapter.args}}:{}),...(inputResumeAdapter?{inputResumeSelection:{...inputResumeAdapter.originalProjection,entry:inputResumeAdapter.path,arguments:inputResumeAdapter.args}}:{}),...(directCoordinator?{coordinatorSelection:{canonicalTestId:'controller.coordinator-lifecycle',caseName:o.coordinatorCase,defaultCoordinatorDispatched:false,...coordinator.selectionDetails}}:{}),...(bugSelection?{bugSelection,bugPlan}:{})};
+  return {adapters:configured,duplicateReferences:unique.deduplicated,deferred,selectedIds:[...new Set([...unique.canonical.map(a=>a.id),...deferred.map(a=>a.id)])],knownCount:known.length,requested:wanted.length,selectionPolicy,...(commonHidAdapter?{commonHidSelection:{...commonHidAdapter.originalProjection,entry:commonHidAdapter.path,arguments:commonHidAdapter.args}}:{}),...(inputResumeAdapter?{inputResumeSelection:{...inputResumeAdapter.originalProjection,entry:inputResumeAdapter.path,arguments:inputResumeAdapter.args}}:{}),...(directCoordinator?{coordinatorSelection:{canonicalTestId:'controller.coordinator-lifecycle',caseName:o.coordinatorCase,defaultCoordinatorDispatched:false,...coordinator.selectionDetails}}:prepared?{coordinatorSelection:{canonicalTestId:prepared.id,route:'prepared-current29',entry:prepared.path,arguments:prepared.args,blockedReason:prepared.blockedReason??null}}:{}),...(bugSelection?{bugSelection,bugPlan}:{})};
 }
 // Only these reviewed, pure source contracts have no process/compiler dependency.
 // A changed test script needs review; product input changes remain automatic.
@@ -182,7 +187,7 @@ function evidencePins(result,a,{includeParent=true,hostProtocolEvidence}={}){
  if(result.bundle?.path)files.push(result.bundle.path);
  return [...new Set(files)].filter(f=>fs.existsSync(f)&&fs.statSync(f).isFile()).map(pin);
 }
-function cacheFile(a){const root=path.join(CORE,'State/ExecutionCache');fs.mkdirSync(root,{recursive:true});return path.join(root,a.id+'.json');}
+function cacheFile(a){const root=path.join(CORE,'State/ExecutionCache');fs.mkdirSync(root,{recursive:true});const suffix=a.id===PREHOST_ID&&a.args?.includes('--win5-return-exit2')?'.win5-return-exit2':'';return path.join(root,a.id+suffix+'.json');}
 // Reuse the exact read-only identity/evidence consumers for explicit intake.
 export {identityFor as fingerprintSelectedCase,evidencePins as collectCacheEvidencePins};
 const cached=file=>{try{return read(file);}catch{return null;}};
@@ -211,6 +216,7 @@ async function executePlan(args=process.argv.slice(2),context){
  const plan=[];for(const a of selection.adapters){if(o.mode==='run'){plan.push({id:a.id,domain:a.domain,scope:a.scope,source:a.path,timeoutMs:a.timeoutMs,cacheable:null,reasons:[],decision:o.rerun?'RUN_EXPLICIT':'CHECK_REFERENCE_UNDER_LOCK',identity:null,identityDeferredToLockedExecution:true});continue;}const file=cacheFile(a),prior=cached(file);const identity=identityFor(a,prior,o,authority,runDir);const inspection=inspectSelectedCache(a,identity,prior);
   plan.push({id:a.id,domain:a.domain,scope:a.scope,source:a.path,timeoutMs:a.timeoutMs,cacheable:identity.cacheable,reasons:inspection.reasons,decision:o.mode==='full'||o.rerun?'RUN_EXPLICIT':inspection.reusable?inspection.status:'RUN_IF_REQUESTED',identity:identity.identity});}
  for(const a of selection.deferred)plan.push({id:a.id,domain:a.domain,scope:null,source:null,decision:o.mode==='full'?'RUN_EXPLICIT':'NOT_RUN_UNPROVEN_CLOSURE',registrationOnly:true,reasons:[o.mode==='full'?'Full delegates this registered ID to global; closure materialization and execution verdict remain unverified':'Legacy descriptor and tool preparation deferred; use explicit single-case Rerun or full acceptance'],executedThisRun:false});
+ for(const a of selection.adapters){if(a.id===PREHOST_ID&&a.args.includes('--win5-return-exit2'))plan.find(row=>row.id===a.id).arguments=a.args;}
  const identityMs=performance.now()-identityStart;
  write(path.join(runDir,'plan.json'),{schemaVersion:1,mode:o.mode,tier:o.tier,modules:o.modules,moduleCoverage:o.modules.map(m=>({module:m,description:CONFIG.modules[m].description})),knownCount:selection.knownCount,requested:selection.requested,selectionPolicy:selection.selectionPolicy,deduplicated:selection.duplicateReferences,tests:plan,...(selection.commonHidSelection?{commonHidSelection:selection.commonHidSelection}:{}),...(selection.inputResumeSelection?{inputResumeSelection:selection.inputResumeSelection}:{}),...(selection.bugSelection?{bugSelection:selection.bugSelection,bugPlan:selection.bugPlan}:{}),...(selection.coordinatorSelection?{coordinatorSelection:selection.coordinatorSelection}:{}),toolError,selectionMs,identityMs,noTestsExecuted:true,fullProductAcceptance:false});
  if(o.mode==='plan'){console.log(JSON.stringify({status:'PLAN_ONLY',runDir,planned:plan.length,duplicateReferences:selection.duplicateReferences.length,selectionMs,identityMs,wallMs:performance.now()-start}));return 0;}
@@ -251,12 +257,16 @@ async function executePlan(args=process.argv.slice(2),context){
    const row={id:a.id,status:result.status,attemptedThisRun:true,executedThisRun:Number.isInteger(result.pid),actualPassedThisRun:result.status==='PASS'&&Number.isInteger(result.pid),durationMs:performance.now()-t,reference:pin(path.join(result.evidenceDir,'result.json'))};rows.push(row);
    const dependencyPaths=[...new Set([...(result.dependencyInputs??[]).map(r=>r.path),...preHostDependencyPaths(result,a)])];
    const after=identityFor(a,{dependencyPaths},o,authority,runDir);
-   // Source/tool drift in the original result remains a failure and is not reusable.
-   const entry={schemaVersion:1,identity:after.identity,result:row.reference,evidencePins:evidencePins(result,a,{includeParent:!isPreHostCacheAdapter(a)&&!isHostLifecycleCacheAdapter(a)}),dependencyPaths,...(hostProtocolEvidence?{hostProtocolEvidence}:{}),recordedAt:new Date().toISOString()};
    const currentPins=new Map([...after.manifest.inputs,...after.manifest.tools].map(r=>[r.role+'|'+r.path,r.sha256]));
    const identityDrift=[...identity.manifest.inputs,...identity.manifest.tools].some(r=>currentPins.get(r.role+'|'+r.path)!==r.sha256)||(isPreHostCacheAdapter(a)&&identity.manifest.options.preHostFixedContract?.inputFingerprint!==after.manifest.options.preHostFixedContract?.inputFingerprint)||(isHostLifecycleCacheAdapter(a)&&JSON.stringify(identity.manifest.options.hostProtocolFixedContract)!==JSON.stringify(after.manifest.options.hostProtocolFixedContract))||(a.uiPowerCacheContract&&identity.identity!==after.identity);
    if(identityDrift){row.status='INCOMPLETE_IDENTITY_DRIFT';row.actualPassedThisRun=false;row.identityChangedDuringExecution=true;}
-   if(after.cacheable&&!identityDrift){if(isPreHostCacheAdapter(a)||isHostLifecycleCacheAdapter(a)){if(result.status==='PASS'){write(path.join(runDir,isHostLifecycleCacheAdapter(a)?(a.id===HOST_PARENT_ID?'host-parent-cache-pending.json':'host-protocol-cache-pending.json'):'prehost-cache-pending.json'),{schemaVersion:1,adapter:a,entry});row.cacheWrite='PENDING_PARENT_RETURN';}else row.cacheWrite='NOT_STORED_SUCCESS_GRAPH_UNPROVEN';}else if(a.uiPowerCacheContract){
+   const cacheCandidate=after.cacheable&&!identityDrift;
+   const needsEvidenceValidation=a.cacheOutputManifest||a.uiPowerCacheContract||isPreHostCacheAdapter(a)||isHostLifecycleCacheAdapter(a);
+   // Keep dedicated output/proof validation even when a cache entry cannot be stored.
+   const evidence=cacheCandidate||needsEvidenceValidation?evidencePins(result,a,{includeParent:!isPreHostCacheAdapter(a)&&!isHostLifecycleCacheAdapter(a),hostProtocolEvidence}):null;
+   if(cacheCandidate){
+    const entry={schemaVersion:1,identity:after.identity,result:row.reference,evidencePins:evidence,dependencyPaths,...(hostProtocolEvidence?{hostProtocolEvidence}:{}),recordedAt:new Date().toISOString()};
+    if(isPreHostCacheAdapter(a)||isHostLifecycleCacheAdapter(a)){if(result.status==='PASS'){write(path.join(runDir,isHostLifecycleCacheAdapter(a)?(a.id===HOST_PARENT_ID?'host-parent-cache-pending.json':'host-protocol-cache-pending.json'):'prehost-cache-pending.json'),{schemaVersion:1,adapter:a,entry});row.cacheWrite='PENDING_PARENT_RETURN';}else row.cacheWrite='NOT_STORED_SUCCESS_GRAPH_UNPROVEN';}else if(a.uiPowerCacheContract){
       const proof=inspectSelectedCache(a,after,entry,{pendingParentReturn:true});
       if(proof.status==='CACHED_REFERENCE'){write(path.join(runDir,a.id+'-cache-pending.json'),{adapter:a,entry});row.cacheWrite='PENDING_PARENT_RETURN';}
       else{row.cacheWrite='NOT_STORED_UI_POWER_GRAPH_UNPROVEN';row.cacheQualification=proof.reasons;}

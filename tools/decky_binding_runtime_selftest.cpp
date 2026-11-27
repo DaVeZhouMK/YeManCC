@@ -646,32 +646,37 @@ inline Json preparationAdmissionHints(const std::filesystem::path& output,const 
             {"canceled",canceled.load()},{"completed",completed.load()},{"boundaryAccepted",boundaryAccepted},{"duplicateReadyRejected",duplicateRejected},{"offHintRejected",offRejected},
             {"bindingPlans",h.plans.load()},{"afterOff",state(resources)},{"beforeHandles",before},{"afterHandles",handles()}});
     }
-    for(const std::string boundary:{"deadline-ready","deadline-session","ordinary-failure","cleanup-ready","cleanup-session","cleanup-preflight"}){
-        const bool parked=boundary!="ordinary-failure",launch=boundary=="cleanup-preflight";
+    for(const std::string boundary:{"deadline-ready","deadline-session","ordinary-failure","cleanup-ready","cleanup-session","cleanup-preflight",
+            "package-ready","package-session","package-preflight"}){
+        const bool parked=boundary!="ordinary-failure",launch=boundary.ends_with("-preflight"),package=boundary.starts_with("package-");
         const std::string failure=boundary.starts_with("cleanup-")?"resource-worker-cleanup-incomplete":
-            parked?"resource-worker-deadline":"resource-hash-mismatch";
-        std::atomic<unsigned> reads{0},admissions{0},preflights{0};std::atomic<bool> allowed{false};
+            package?"resource-package-mismatch":parked?"resource-worker-deadline":"resource-hash-mismatch";
+        const std::string preflightFailure=package?failure:"resource-hash-mismatch";
+        std::atomic<unsigned> reads{0},admissions{0},preflights{0};std::atomic<bool> allowed{false},desktop{false};
         Harness h(output/boundary,context,false,[&]{++admissions;return allowed.load()?ymcc::deckysidebar::LaunchAdmission{true}:
+                desktop.load()?ymcc::deckysidebar::LaunchAdmission{false,"steam-bigpicture-required",false}:
                 ymcc::deckysidebar::LaunchAdmission{false,"steam-ui-state-pending",true};},
-            {},[&]{++preflights;return std::string("resource-hash-mismatch");},{},{},{},{},[&](const std::function<bool()>&){
+            {},[&]{++preflights;return preflightFailure;},{},{},{},{},[&](const std::function<bool()>&){
                 if(++reads==1)return failure;
                 return std::string{};
             });
         const auto before=handles();need(h.runtime.setEnabled(true),"prewarm-deadline-enable");
         need(waitFor([&]{return reads==1&&h.runtime.snapshot().phase=="waiting-manual-steam";},1500),"prewarm-deadline-initial-result");
+        if(package)desktop=true; // First verified publication after the failed warmup.
         for(unsigned hint=0;hint<4;++hint){
             const auto prior=admissions.load();need(h.runtime.requestLaunchAdmissionRefresh(),"prewarm-deadline-hint-accepted");
             need(waitFor([&]{return admissions>prior;},500),"prewarm-deadline-hint-consumed");
         }
         // Observe the completed worker turn, not just entry to its admission read.
         if(!parked)need(waitFor([&]{return reads>=2;},500),"ordinary-failure-no-longer-rechecked");
+        if(package)need(waitFor([&]{return h.runtime.snapshot().reason=="steam-bigpicture-required";},500),"package-prewarm-desktop-not-consumed");
         const auto beforeBoundary=reads.load();
         bool boundaryAccepted=true;
         if(boundary.ends_with("-ready"))boundaryAccepted=h.runtime.requestPreparationRefresh(79);
         if(boundary.ends_with("-session"))h.runtime.observeSteam(1,true);
         if(launch){
             allowed=true;boundaryAccepted=h.runtime.requestLaunchAdmissionRefresh();
-            need(waitFor([&]{return preflights==1&&h.runtime.snapshot().reason=="resource-hash-mismatch";},1500),"parked-prewarm-blocked-admitted-preflight");
+            need(waitFor([&]{return preflights==1&&h.runtime.snapshot().reason==preflightFailure;},1500),"parked-prewarm-blocked-admitted-preflight");
         }else if(parked)need(waitFor([&]{return reads>=2;},1500),"prewarm-real-boundary-did-not-recheck");
         h.runtime.shutdown();const auto resources=h.client->snapshot();
         const bool ok=beforeBoundary==(parked?1u:2u)&&reads==(launch?1u:2u)&&preflights==(launch?1u:0u)&&boundaryAccepted&&
@@ -685,26 +690,63 @@ inline Json preparationAdmissionHints(const std::filesystem::path& output,const 
 inline Json resourceAdmissionHandoff(const std::filesystem::path& output,const std::string& variant){
     Controls controls(L"runtime-success-checkpoint");Context context;ContextJob contextOwner(worker::number(context.lease.at("pid")));
     std::atomic<unsigned> reads{0};std::atomic<bool> deny{false};std::atomic<ULONGLONG> firstFailure{0};
-    Harness h(output,context,false,[&]{return deny.load()?ymcc::deckysidebar::LaunchAdmission{false,"steam-ui-state-pending",variant=="automatic"}:ymcc::deckysidebar::LaunchAdmission{true};},{},[&]{
+    std::atomic<ULONGLONG> secondPreflight{0},thirdPreflight{0};
+    // Pending Steam UI is retryable in production; only the source of the refresh differs by variant.
+    Harness h(output,context,false,[&]{return deny.load()?ymcc::deckysidebar::LaunchAdmission{false,"steam-ui-state-pending",true}:ymcc::deckysidebar::LaunchAdmission{true};},{},[&]{
         const auto n=++reads;
         if(n==1){firstFailure=GetTickCount64();deny=true;return std::string("resource-worker-deadline");}
-        if(n==2)return std::string(variant=="reject"?"resource-hash-mismatch":"resource-worker-deadline");
+        if(n==2){secondPreflight=GetTickCount64();return std::string(variant=="reject"?"resource-hash-mismatch":"resource-worker-deadline");}
+        if(n==3)thirdPreflight=GetTickCount64();
         return std::string{};
     });
     const auto before=handles();need(h.runtime.setEnabled(true),"resource-handoff-enable");
     need(waitFor([&]{return h.runtime.snapshot().phase=="waiting-manual-steam";},2200),"resource-handoff-did-not-defer");
-    const auto deniedReads=reads.load(),deniedPlans=h.plans.load();deny=false;
+    const auto deniedReads=reads.load(),deniedPlans=h.plans.load();const auto admittedAt=GetTickCount64();deny=false;
     if(variant!="automatic")need(h.runtime.requestLaunchAdmissionRefresh(),"resource-handoff-current-mode-not-admitted");
-    need(waitFor([&]{return reads>=2&&h.runtime.snapshot().phase=="unavailable";}),"resource-handoff-second-preflight-missing");
-    bool healed=false;
+    if(!waitFor([&]{return reads>=2&&h.runtime.snapshot().phase=="unavailable";})){
+        const auto observed=h.runtime.snapshot();
+        const auto first=firstFailure.load(),second=secondPreflight.load(),third=thirdPreflight.load();
+        const std::string failure="resource-handoff-second-preflight-missing: "+Json{
+            {"preflightReads",reads.load()},{"readsWhileDenied",deniedReads},{"bindingPlans",h.plans.load()},
+            {"phase",observed.phase},{"reason",observed.reason},{"enabled",observed.enabled},{"pid",observed.pid},
+            {"elapsedFromFirstFailureMs",GetTickCount64()-first},{"admittedAfterMs",admittedAt-first},
+            {"secondPreflightAfterMs",second?Json(second-first):Json(nullptr)},
+            {"thirdPreflightAfterMs",third?Json(third-first):Json(nullptr)}}.dump();
+        if(variant!="off")throw std::runtime_error(failure);
+
+        // Preserve the failed admission assertion, and observe explicit OFF before the harness destructor.
+        const auto stopStarted=GetTickCount64();
+        h.runtime.shutdown();
+        const auto stopMs=GetTickCount64()-stopStarted;
+        const auto readsAtStop=reads.load(),plansAtStop=h.plans.load();
+        const bool lateAdmissionRejected=!h.runtime.requestLaunchAdmissionRefresh();
+        Sleep(2200);
+        const auto after=h.runtime.snapshot();
+        const auto destroyed=h.client->snapshot();
+        const auto afterHandles=handles();
+        const bool cefUnaffected=context.alive();
+        const bool quiet=reads==readsAtStop&&h.plans==plansAtStop;
+        const bool confirmed=!after.enabled&&after.pid==0&&destroyed.fullyDestroyed&&destroyed.handles==0&&
+            destroyed.pendingIo==0&&destroyed.jobActiveProcesses==0&&before==afterHandles&&cefUnaffected&&lateAdmissionRejected&&quiet;
+        return {{"id","native.typed-history-resource-handoff-off"},{"passed",false},{"error",failure},
+            {"offAfterPreflightFailure",{{"diagnosticOnly",true},{"confirmed",confirmed},{"stopMs",stopMs},{"lateWindowMs",2200},
+                {"lateAdmissionRejected",lateAdmissionRejected},{"quiet",quiet},
+                {"readsAtStop",readsAtStop},{"readsAfterLateWindow",reads.load()},
+                {"plansAtStop",plansAtStop},{"plansAfterLateWindow",h.plans.load()},
+                {"enabled",after.enabled},{"pid",after.pid},{"phase",after.phase},
+                {"beforeHandles",before},{"afterHandles",afterHandles},{"cefUnaffected",cefUnaffected},{"afterOff",state(destroyed)}}}};
+    }
+    bool healed=false,lateAdmissionRejected=false;
     if(variant=="recover"||variant=="automatic")healed=waitFor([&]{return h.healthyGeneration>=1;},3500);
-    else if(variant=="off"){h.runtime.shutdown();Sleep(2200);}
+    else if(variant=="off"){h.runtime.shutdown();lateAdmissionRejected=!h.runtime.requestLaunchAdmissionRefresh();Sleep(2200);}
     else Sleep(2200);
-    const auto elapsed=GetTickCount64()-firstFailure.load();const auto phase=h.runtime.snapshot();const auto inspections=reads.load(),plans=h.plans.load();
+    const auto firstFailureAt=firstFailure.load(),secondPreflightAt=secondPreflight.load(),thirdPreflightAt=thirdPreflight.load();
+    const auto elapsed=GetTickCount64()-firstFailureAt;const auto phase=h.runtime.snapshot();const auto inspections=reads.load(),plans=h.plans.load();
     const bool pairedPlanDiagnostics=h.planStarts==plans&&h.planFinishes==plans;
     h.runtime.shutdown();const auto destroyed=h.client->snapshot();
-    const bool expected=(variant=="recover"||variant=="automatic")?healed&&inspections==3&&plans==1&&phase.pid!=0&&elapsed>=2900:
-        !healed&&inspections==2&&plans==0&&phase.pid==0&&(variant!="off"||!phase.enabled);
+    const bool expected=(variant=="recover"||variant=="automatic")?healed&&inspections==3&&plans==1&&phase.pid!=0&&elapsed>=2900&&
+        (variant!="recover"||(secondPreflightAt>=firstFailureAt&&thirdPreflightAt>secondPreflightAt&&thirdPreflightAt-firstFailureAt>=2900)):
+        !healed&&inspections==2&&plans==0&&phase.pid==0&&(variant!="off"||(!phase.enabled&&lateAdmissionRejected&&destroyed.jobActiveProcesses==0));
     const auto preparationHints=variant=="automatic"?preparationAdmissionHints(output/"preparation-hints",context):Json{{"passed",true},{"selected",false}};
     Json retryOnHint={{"passed",true},{"selected",false}};
     if(variant=="automatic"){
@@ -764,7 +806,10 @@ inline Json resourceAdmissionHandoff(const std::filesystem::path& output,const s
         {"passed",preparationHints.value("passed",false)&&retryOnHint.value("passed",false)&&deniedReads==1&&deniedPlans==0&&expected&&pairedPlanDiagnostics&&
         destroyed.fullyDestroyed&&destroyed.handles==0&&destroyed.pendingIo==0&&before==handles()&&context.alive()},
         {"variant",variant},{"preflightReads",inspections},{"bindingPlans",plans},{"readsWhileDenied",deniedReads},{"plansWhileDenied",deniedPlans},
-        {"recovered",healed},{"pairedPlanDiagnostics",pairedPlanDiagnostics},{"elapsedFromFirstFailureMs",elapsed},{"phase",phase.phase},{"reason",phase.reason},
+        {"recovered",healed},{"pairedPlanDiagnostics",pairedPlanDiagnostics},{"elapsedFromFirstFailureMs",elapsed},
+        {"secondPreflightAfterMs",secondPreflightAt?Json(secondPreflightAt-firstFailureAt):Json(nullptr)},
+        {"thirdPreflightAfterMs",thirdPreflightAt?Json(thirdPreflightAt-firstFailureAt):Json(nullptr)},
+        {"lateAdmissionRejected",lateAdmissionRejected},{"phase",phase.phase},{"reason",phase.reason},
         {"afterOff",state(destroyed)},{"beforeHandles",before},{"afterHandles",handles()},{"cefUnaffected",context.alive()}};
 }
 inline Json rejectedFinalAdmission(const std::filesystem::path& output,std::string_view variant={}){
@@ -775,7 +820,9 @@ inline Json rejectedFinalAdmission(const std::filesystem::path& output,std::stri
     const bool busy=localBusy||malformedBusy||externalBusy;
     const bool early=variant=="connection-early";
     const bool stopDuringPreflight=variant=="connection-preflight-off";
-    const bool scoped=!variant.empty(),connection=scoped&&!busy&&variant!="mode-same";
+    const bool foreignProof=variant=="mode-foreign-proof";
+    const bool missingProof=variant=="mode-missing-proof";
+    const bool scoped=!variant.empty()&&!missingProof&&!foreignProof,connection=scoped&&!busy&&variant!="mode-same";
     const ymcc::deckysidebar::LaunchBindingScope prepared{session,session.account,1,"doc:1"};
     std::atomic<unsigned> reads{0},preflights{0};std::atomic<bool> settle{false};
     std::atomic<bool> secondPreflightEntered{false},preflightRevoked{false},loaderPublished{false};
@@ -834,7 +881,7 @@ inline Json rejectedFinalAdmission(const std::filesystem::path& output,std::stri
             need(shared.requestConnectionRefresh(session),"later-connection-refresh-must-not-overwrite-first-cache-clear");
         }
     },[&]{++preflights;return std::string{};},{},{},{},{},{},{},[&](ymcc::deckysidebar::Config& config){
-        if(!scoped)return;
+        if(!scoped&&!foreignProof)return;
         if(stopDuringPreflight){
             auto changed=std::move(config.changed);
             config.changed=[&,changed=std::move(changed)](const auto& state){if(state.pid)loaderPublished=true;changed(state);};
@@ -847,7 +894,9 @@ inline Json rejectedFinalAdmission(const std::filesystem::path& output,std::stri
         }
         auto plan=std::move(config.bindingPlan);
         config.bindingPlan=[&,plan=std::move(plan)](auto kind,auto generation,const auto& current){
-            auto result=plan(kind,generation,current);result.launchScope=prepared;return result;
+            auto result=plan(kind,generation,current);result.launchScope=prepared;
+            if(foreignProof)++result.launchScope.steam.created;
+            return result;
         };
     });owner=&harness;
     const auto before=handles(); // Compare after both owners have stopped.
@@ -907,7 +956,7 @@ inline Json rejectedFinalAdmission(const std::filesystem::path& output,std::stri
     const bool page=variant=="connection-page"||variant=="local-busy-page";
     const bool expectHold=scoped&&!malformedBusy&&!externalBusy;
     const bool holdAttributed=(malformedBusy||externalBusy)?logs.empty():logs.size()==1&&
-        logs[0].value("preparedBindingHold",std::string{})==(expectHold?"held":"binding-steam-scope-mismatch");
+        logs[0].value("preparedBindingHold",std::string{})==(expectHold?"held":foreignProof?"binding-steam-scope-mismatch":"binding-proof-unverified");
     auto synthetic=Json{{"scope","final-launch-admission"},{"bootstrapStage","mode-cache-miss"},{"preparedBindingHold","unrecognized-private-detail"}};
     const bool unknownOmitted=!ymcc::deckydiag::record("bootstrap-watch",synthetic).contains("preparedBindingHold");
     synthetic["preparedBindingHold"]="held";synthetic["scope"]="other-stage";
@@ -1565,6 +1614,8 @@ inline Json retainedPageGrant(const std::filesystem::path& output,std::string_vi
         if((selection=="late-health")!=late||(selection=="await-identity"&&!pending))continue;
         std::atomic<unsigned> healthPhase{0},steps{0},heldAtStep{0},releasedAtGate{0},gateCalls{0};
         std::atomic<unsigned> staleReads{0};std::atomic<ULONGLONG> lateReceiptAt{0};
+        std::atomic<unsigned> presentationChanges{0};
+        constexpr ULONGLONG power=37;
         std::atomic<Action> nextPage{Action::none};std::atomic<ULONGLONG> pendingAt{0},resolvedAt{0};
         std::atomic<bool> sawFirstHealth{false};
         Harness* target=nullptr;DWORD originalPid=0;
@@ -1574,9 +1625,11 @@ inline Json retainedPageGrant(const std::filesystem::path& output,std::string_vi
             const auto phase=healthPhase.load();
             if(phase==1)sawFirstHealth=true;
             if(lateReceiptAt&&phase==3)++staleReads;
-            ymcc::deckysidebar::ConnectionHealth value{phase!=0,phase==2,"fixture-official-backend-unavailable",false,"fixture-retained-page"};
-            value.transportConnected=phase!=0;return value;
+            ymcc::deckysidebar::ConnectionHealth value{phase!=0,phase==2,
+                phase==3?"official-backend-unavailable":"fixture-retained-transport",false,"fixture-retained-page"};
+            value.transportConnected=phase!=0;value.powerGeneration=power;return value;
         },{},{},{},[&](auto& config){
+            config.connectionPresentationChanged=[&]{++presentationChanges;};
             // Assignable to both sides of the original private port revision.
             config.connectionStepReserved=[&](Action action,const auto&,const auto&... beforeEffect){
                 if(target->client->snapshot().processId==originalPid)++heldAtStep;
@@ -1627,6 +1680,18 @@ inline Json retainedPageGrant(const std::filesystem::path& output,std::string_vi
         const bool completed=late&&!lateHealthy?staleReads>1:waitFor([&]{return steps>=expectedSteps&&h.globalConnected.load()>=2;},
             pending?12500:7500); // Original retry and subsequent health confirmation are separate waits.
         const auto plans=h.plans.load();const auto finalPid=h.client->snapshot().processId;
+        const auto connectedBeforeLateRecovery=h.globalConnected.load();
+        const auto exhaustion=h.runtime.snapshot();
+        bool presentation=true;
+        if(lateHealthy)presentation=!exhaustion.connectionExhaustedAtPower&&!exhaustion.connectionExhaustedOfficialBackend&&presentationChanges==0;
+        else if(late){
+            presentation=exhaustion.connectionExhaustedAtPower==power&&exhaustion.connectionExhaustedOfficialBackend&&presentationChanges==1;
+            healthPhase=2;need(h.runtime.requestConnectionCheck(),"terminal-presentation-fresh-check");
+            const bool cleared=waitFor([&]{return presentationChanges.load()==2&&h.globalConnected.load()==2;},1000);
+            const auto recovered=h.runtime.snapshot();
+            presentation=presentation&&cleared&&!recovered.connectionExhaustedAtPower&&!recovered.connectionExhaustedOfficialBackend&&
+                recovered.revision==exhaustion.revision;
+        }
         h.runtime.shutdown();const auto returned=h.client->snapshot();
         unsigned exhausted=0,reopen=0;bool expired=false;
         if(late)for(const auto& record:h.globalRecoveryLog){
@@ -1635,19 +1700,20 @@ inline Json retainedPageGrant(const std::filesystem::path& output,std::string_vi
             if(stage=="recovery-exhausted"){++exhausted;expired=record.value("recoveryTrigger",std::string{})=="observation-budget-expired";}
         }
         const bool behavior=heldAtStep==expectedSteps&&(late?gateCalls==0&&plans==1&&finalPid==originalPid&&reopen==1&&
-            (lateHealthy?exhausted==0&&h.globalConnected==2:exhausted==1&&expired&&h.globalConnected==1):
+            (lateHealthy?exhausted==0&&connectedBeforeLateRecovery==2:exhausted==1&&expired&&connectedBeforeLateRecovery==1):
             (scenario=="refused"||missingProof)?gateCalls==0&&plans==1&&finalPid==originalPid&&
             (!missingProof||nextPage==Action::reopen):pending?nextPage==Action::rebuild&&resolvedAt>=pendingAt&&
             resolvedAt-pendingAt>=ymcc::deckysidebar::ConnectionRecoveryWindow::evidenceIntervalMs&&gateCalls==1&&releasedAtGate==1:
             scenario=="granted"?gateCalls==1&&releasedAtGate==1&&finalPid!=originalPid:gateCalls==0&&finalPid!=originalPid);
-        rows.push_back({{"scenario",scenario},{"passed",completed&&steps==expectedSteps&&behavior&&returned.fullyDestroyed&&handles()==before},
+        rows.push_back({{"scenario",scenario},{"passed",completed&&steps==expectedSteps&&behavior&&presentation&&returned.fullyDestroyed&&handles()==before},
             {"steps",steps.load()},{"heldAtStep",heldAtStep.load()},{"gateCalls",gateCalls.load()},{"releasedAtGate",releasedAtGate.load()},
             {"nextPage",nextPage==Action::rebuild?"rebuild":nextPage==Action::reopen?"reopen":"none"},
             {"identityWaitMs",pendingAt&&resolvedAt>=pendingAt?resolvedAt-pendingAt:0},
             {"originalChild",originalPid},{"observedChild",finalPid},{"plans",plans},{"completed",completed},{"beforeHandles",before},
             {"afterHandles",handles()},{"returned",returned.fullyDestroyed},{"realSteamOrDeviceActions",0}});
         if(late)rows.back().update(Json{{"staleReads",staleReads.load()},{"reopen",reopen},{"exhausted",exhausted},
-            {"expiredNormally",expired},{"connected",h.globalConnected.load()},{"recoveryLog",h.globalRecoveryLog}});
+            {"expiredNormally",expired},{"connected",connectedBeforeLateRecovery},{"recoveryLog",h.globalRecoveryLog},
+            {"presentation",presentation},{"presentationChanges",presentationChanges.load()}});
     }
     return rows;
 }
@@ -1858,7 +1924,7 @@ inline Json intentReady(const std::filesystem::path& output,bool retained){
         {"duplicateSignals",512},{"preparationsBefore",preparations},{"preparationsAfter",h.preparations.load()},{"loaderPidUnchanged",true},{"cefAlive",context.alive()},{"after",after},
         {"atExit",state(h.client->snapshot())},{"beforeHandles",beforeHandles},{"afterHandles",handles()}};
 }
-inline Json healing(const std::filesystem::path& output,bool retained,const std::string& boundary,bool heldEndpoint=false){
+inline Json healing(const std::filesystem::path& output,bool retained,const std::string& boundary,bool heldEndpoint=false,bool fatalOff=false){
     const bool childExit=boundary=="child-exit",late=boundary=="late-result",off=boundary=="off";
     Controls controls(childExit?(heldEndpoint?L"exited-held-runtime":L"runtime-success-exit"):L"runtime-success-checkpoint");
     Context context;ContextJob contextOwner(worker::number(context.lease.at("pid")));
@@ -1906,18 +1972,51 @@ inline Json healing(const std::filesystem::path& output,bool retained,const std:
         accepted=resume(h.runtime,100);need(accepted,"first-resume-rejected");controls.waitReady();
         middle=runtimeState(h);setEnvironment(L"YMCC_BINDING_CLIENT_FIXTURE_MODE",L"runtime-success-checkpoint");
         if(off){
-            std::atomic<bool> stopped{false};std::thread stopper([&]{h.runtime.shutdown();stopped=true;});
+            detail::Handle loader,binding;
+            const std::string fatalReason="decky-render-failed";
+            if(fatalOff){
+                const auto active=h.client->snapshot();
+                need(h.results==1&&h.plans==2&&active.pendingIo>0&&controls.releaseUnsent()&&
+                    WaitForSingleObject(attempted.value,0)==WAIT_TIMEOUT,"fatal OFF must meet a held, unread recovery result");
+                loader.value=OpenProcess(SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,originalLoader);
+                binding.value=OpenProcess(SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,active.processId);
+                need(loader.value&&binding.value&&h.runtime.ownsLiveProcess(loader.value)&&
+                    WaitForSingleObject(binding.value,0)==WAIT_TIMEOUT,"fatal OFF must meet the owned live Loader and binding");
+                const std::string run(32,'a');
+                need(ymcc::deckyhealth::matches(Json{{"reason",fatalReason},{"runId",run}},middle,run),"fatal close reason not admitted");
+            }
+            const auto offAt=GetTickCount64();
+            bool bindingReturned=false;
+            std::atomic<bool> stopped{false};std::thread stopper([&]{
+                if(fatalOff)bindingReturned=h.runtime.setEnabled(false,fatalReason);else h.runtime.shutdown();
+                stopped=true;
+            });
             const bool disabled=waitFor([&]{return !h.runtime.snapshot().enabled;});
+            const bool releaseAfterRevocation=!fatalOff||(disabled&&controls.releaseUnsent()&&WaitForSingleObject(attempted.value,0)==WAIT_TIMEOUT);
             controls.releaseNow();stopper.join();
+            const auto elapsed=GetTickCount64()-offAt;
             lateAttempt=WaitForSingleObject(attempted.value,0)==WAIT_OBJECT_0;
             const bool resumeRejected=!resume(h.runtime,101),recoveryRejected=!h.runtime.requestTransportRecovery();
             const auto after=runtimeState(h);Sleep(350);const auto c=h.client->snapshot();
-            return {{"id","native.typed-healing-off-beats-late-resume-result"},
+            Json row={{"id","native.typed-healing-off-beats-late-resume-result"},
                 {"passed",disabled&&stopped&&lateAttempt&&resumeRejected&&recoveryRejected&&!h.runtime.snapshot().enabled&&
-                    h.runtime.snapshot().phase=="disabled"&&h.plans==2&&h.results==1&&c.fullyDestroyed&&beforeHandles==handles()&&context.alive()},
+                    h.runtime.snapshot().phase=="disabled"&&h.plans==2&&h.results==1&&c.fullyDestroyed&&context.alive()},
                 {"initial",initial},{"pending",middle},{"afterOff",after},{"lateResultAttempted",lateAttempt},
                 {"resumeAfterOffRejected",resumeRejected},{"recoveryAfterOffRejected",recoveryRejected},
-                {"acceptedResults",h.results.load()},{"plansAfterQuiet",h.plans.load()},{"atExit",state(c)},{"afterHandles",handles()},{"beforeHandles",beforeHandles}};
+                {"acceptedResults",h.results.load()},{"plansAfterQuiet",h.plans.load()},{"atExit",state(c)},{"beforeHandles",beforeHandles}};
+            if(fatalOff){
+                const bool loaderExited=WaitForSingleObject(loader.value,0)==WAIT_OBJECT_0;
+                const bool bindingExited=WaitForSingleObject(binding.value,0)==WAIT_OBJECT_0;
+                DWORD closeError=0;need(loader.close(closeError)&&binding.close(closeError),"fatal OFF observer close");
+                const auto final=h.runtime.snapshot();
+                row["fatalHeld"]={{"releaseAfterRevocation",releaseAfterRevocation},{"offMs",elapsed},{"deadlineMs",3200},
+                    {"loaderExited",loaderExited},{"bindingExited",bindingExited},{"bindingReturned",bindingReturned},
+                    {"reason",final.reason},{"contextAlive",context.alive()},{"loaderPidAfterQuiet",final.pid}};
+                row["passed"]=row.value("passed",false)&&releaseAfterRevocation&&elapsed<3200&&loaderExited&&bindingExited&&
+                    bindingReturned&&final.reason==fatalReason&&!final.pid&&!c.handles&&!c.pendingIo&&!c.activeCalls&&!c.jobActiveProcesses;
+            }
+            row["afterHandles"]=handles();row["passed"]=row.value("passed",false)&&row.at("afterHandles")==beforeHandles;
+            return row;
         }
         accepted=resume(h.runtime,101)&&accepted;
         duplicateRejected=!resume(h.runtime,101);zeroRejected=!resume(h.runtime,0);
@@ -2282,7 +2381,9 @@ struct Modes {
   return realModeObserver?readSnapshot(realModeObserver,session,miss,publication,observationTick,peerRevision):observedMode;
  }
  bool requestRefresh(const Session& session,bool invalidate=true){++refreshes;return realModeObserver?realModeObserver->requestRefresh(session,invalidate):invalidate||!refusePassiveRefresh;}
- bool requestDeckyHealthRefresh(const Session& session){++refreshes;return realModeObserver?realModeObserver->requestDeckyHealthRefresh(session):!refusePassiveRefresh;}};
+ bool requestDeckyHealthRefresh(const Session& session){++refreshes;return realModeObserver?realModeObserver->requestDeckyHealthRefresh(session):!refusePassiveRefresh;}
+ bool canReuseDeckyHealthPublication(const Session& session,std::uint64_t publication){return realModeObserver&&realModeObserver->canReuseDeckyHealthPublication(session,publication);}
+};
 inline bool retainedConsent=false;
 inline ymcc::deckyupdate::Recovery* initialUpdateRecovery=nullptr;
 struct Consent {
@@ -3566,6 +3667,50 @@ inline Json offlineIdentity(const std::filesystem::path& output){
     actual::fixedTick=1500000;lightIdle();for(unsigned repeat=0;repeat<1000;++repeat)lightIdle();
     actual::fixedTick=1529999;lightIdle();need(actual::refreshes==lightAt+1,"usable-sidebar-does-not-poll-at-failed-backend-cadence");
     actual::fixedTick=1530000;lightIdle();need(actual::refreshes==lightAt+2,"usable-sidebar-keeps-original-idle-observation");
+    {
+        // A different consumer already did the same-session, same-peer read.
+        // Keep the observer, published timestamp and health consumer real.
+        auto good=actual::observedMode;
+        good["deckyBackendConnected"]=true;good["deckyClientChecking"]=false;
+        good["deckyClientState"]="connected";
+        ymcc::steamui::ModeObserver observer;
+        ymcc::steamui::ModeObserverConfig config;config.debounceMs=1;
+        config.read=[&](const auto&){return good;};
+        config.admissionPowerReader=&actual::readFixturePower;
+        actual::stampModeReader(config);
+        need(observer.initialize(std::move(config)),"fresh-health-observer-initialized");
+        observer.setDemand(ymcc::steamui::ModeConsumer::Decky,true);observer.observeSteam(actual::observedSession);
+        ULONGLONG observedAt=0;std::uint64_t publication=0;
+        need(waitFor([&]{observer.snapshot(actual::observedSession,nullptr,nullptr,&publication,&observedAt);return observedAt!=0&&publication!=0;}),"fresh-health-shared-read-published");
+        struct RestoreHealthPorts {~RestoreHealthPorts(){actual::realModeObserver=nullptr;actual::fixedTick=1530000;}} restore;
+        actual::realModeObserver=&observer;
+        const auto queuedAt=actual::refreshes;
+        auto healthyRead=actual::actualConnectionHealth();Window idleWindow;
+        actual::fixedTick=observedAt+1000;
+        const auto freshHealth=healthyRead();
+        need(freshHealth.required&&freshHealth.connected&&!freshHealth.paused,"fresh-reading-proves-all-channels");
+        idleWindow.observe(observedAt+1000,freshHealth);
+        std::cout<<"FRESH_HEALTH_REUSE redundantRequests="<<actual::refreshes-queuedAt
+            <<" nextCheckMs="<<idleWindow.timeout(observedAt+1000)<<std::endl;
+        need(actual::refreshes==queuedAt,"fresh-current-shared-health-must-not-queue-duplicate-read");
+        need(idleWindow.timeout(observedAt+1000)==29000,"fresh-health-retains-thirty-seconds-from-the-publication-not-from-its-reuse");
+        const auto afterReuse=observer.diagnosticDeckyWorkerCpu();
+        need(afterReuse&&afterReuse->readsStarted==1&&afterReuse->deckyHealthSlotsArmed==0,"reuse-dispatches-no-shared-read-or-health-slot");
+        auto otherSession=actual::observedSession;++otherSession.created;
+        need(!observer.canReuseDeckyHealthPublication(otherSession,publication)&&!observer.canReuseDeckyHealthPublication(actual::observedSession,publication+1),"foreign-or-replaced-publication-cannot-be-reused");
+        const auto serial=actual::fixtureSuspendSerial.fetch_add(1);
+        const bool retiredPower=observer.canReuseDeckyHealthPublication(actual::observedSession,publication);
+        actual::fixtureSuspendSerial=serial;
+        need(!retiredPower,"same-generation-resleep-retires-health-reuse");
+        actual::fixedTick=observedAt+30000;
+        idleWindow.observe(observedAt+30000,healthyRead());
+        need(actual::refreshes==queuedAt+1,"expired-shared-health-still-queues-one-ordinary-read");
+        const auto afterExpiry=observer.diagnosticDeckyWorkerCpu();
+        need(afterExpiry&&afterExpiry->deckyHealthSlotsArmed==1,"expiry-arms-the-original-shared-health-slot");
+        need(observer.requestConnectionRefresh(actual::observedSession),"explicit-menu-refresh-still-admitted");
+        need(!observer.canReuseDeckyHealthPublication(actual::observedSession,publication),"explicit-refresh-retires-previously-reusable-health");
+        observer.shutdown();
+    }
     actual::observedMode.erase("deckyClientVerified");actual::observedMode["deckyBackendConnected"]=true;
     recovery.observe(10002,clientDown);
     actual::observedMode["deckyClientChecking"]=false;actual::observedMode["deckyClientConnected"]=true;const auto ready=admittedHealth();need(ready.connected,"actual-browser-client-and-native-channels-certify-connection");
@@ -3992,17 +4137,19 @@ int main(int argc,char** argv){
            finalAdmissionVariant!="connection-off"&&finalAdmissionVariant!="mode-same"&&finalAdmissionVariant!="local-busy"&&
            finalAdmissionVariant!="local-busy-off"&&finalAdmissionVariant!="local-busy-page"&&
            finalAdmissionVariant!="transport-busy"&&finalAdmissionVariant!="malformed-busy"&&finalAdmissionVariant!="connection-early"&&
-           finalAdmissionVariant!="connection-preflight-off")return 64;
+           finalAdmissionVariant!="connection-preflight-off"&&finalAdmissionVariant!="hold-attribution")return 64;
     }
     const auto parameter=argc==4?std::string_view(argv[3]):std::string_view{};
     const bool retiredOfflineSelection=parameter=="--retired-offline-proof";
     if(retiredOfflineSelection&&std::string_view(argv[2])!="native.typed-offline-current-ui-account-consumers")return 64;
     const bool deferredPreflightSelection=parameter=="--preparation-revalidation=deferred-session";
     if(deferredPreflightSelection&&std::string_view(argv[2])!="native.typed-preparation-revalidation")return 64;
+    const bool fatalHeldSelection=parameter=="--healing-off=fatal-held";
+    if(parameter.starts_with("--healing-off=")&&(!fatalHeldSelection||std::string_view(argv[2])!="native.typed-healing-off"))return 64;
     const auto pageGrantSelection=parameter=="--retained-verified-fault-only=await-identity"?"await-identity":
         parameter=="--retained-verified-fault-only=late-health"?"late-health":"";
     if(*pageGrantSelection&&std::string_view(argv[2])!="native.typed-ready-rebind")return 64;
-    if(!retiredOfflineSelection&&!deferredPreflightSelection&&!*pageGrantSelection&&finalAdmissionVariant.empty()&&argc!=2&&argc!=3&&!(argc==4&&(std::string_view(argv[3])=="--loader-native-close=joint-live"||std::string_view(argv[3])=="--loader-native-close=joint"||std::string_view(argv[3])=="--loader-native-close=final"||std::string_view(argv[3])=="--loader-native-close=reentry"||std::string_view(argv[3])=="--loader-native-close=paused"||std::string_view(argv[3]).rfind("--pre-result-retirement=",0)==0||std::string_view(argv[3])=="--global-missed-event"||std::string_view(argv[3])=="--terminal-reconnect"||std::string_view(argv[3])=="--retained-refresh"||std::string_view(argv[3])=="--retained-busy"||std::string_view(argv[3])=="--retained-first-proof"||std::string_view(argv[3])=="--retained-local-busy"||std::string_view(argv[3])=="--presence-publication"||std::string_view(argv[3])=="--queued-stable-only"||std::string_view(argv[3])=="--watch-reattach-only"||std::string_view(argv[3])=="--fresh-handshake-only"||std::string_view(argv[3])=="--retained-handshake-only"||std::string_view(argv[3])=="--retained-first-peer-only"||std::string_view(argv[3])=="--retained-verified-fault-only")))return 64;
+    if(!retiredOfflineSelection&&!deferredPreflightSelection&&!fatalHeldSelection&&!*pageGrantSelection&&finalAdmissionVariant.empty()&&argc!=2&&argc!=3&&!(argc==4&&(std::string_view(argv[3])=="--loader-native-close=joint-live"||std::string_view(argv[3])=="--loader-native-close=joint"||std::string_view(argv[3])=="--loader-native-close=final"||std::string_view(argv[3])=="--loader-native-close=reentry"||std::string_view(argv[3])=="--loader-native-close=paused"||std::string_view(argv[3]).rfind("--pre-result-retirement=",0)==0||std::string_view(argv[3])=="--global-missed-event"||std::string_view(argv[3])=="--terminal-reconnect"||std::string_view(argv[3])=="--retained-refresh"||std::string_view(argv[3])=="--retained-busy"||std::string_view(argv[3])=="--retained-first-proof"||std::string_view(argv[3])=="--retained-local-busy"||std::string_view(argv[3])=="--presence-publication"||std::string_view(argv[3])=="--queued-stable-only"||std::string_view(argv[3])=="--watch-reattach-only"||std::string_view(argv[3])=="--fresh-handshake-only"||std::string_view(argv[3])=="--retained-handshake-only"||std::string_view(argv[3])=="--retained-first-peer-only"||std::string_view(argv[3])=="--retained-verified-fault-only")))return 64;
     if(argc==4&&std::string_view(argv[3])=="--watch-reattach-only"&&std::string_view(argv[2])!="native.typed-ready-rebind")return 64;
     if(argc==4&&std::string_view(argv[3])=="--queued-stable-only"&&std::string_view(argv[2])!="native.typed-ready-rebind")return 64;
     if(argc==4&&std::string_view(argv[3])=="--fresh-handshake-only"&&std::string_view(argv[2])!="native.typed-ready-rebind")return 64;
@@ -4074,7 +4221,14 @@ int main(int argc,char** argv){
     test("native.typed-runtime-live-watch",[&]{return healthy(output/"healthy");});
     test("native.typed-stalled-binding-stop",[&]{return stalled(output/"stalled-cv",L"runtime-stall-cv");});
     test("native.typed-stalled-binding-descendants",[&]{return stalled(output/"stalled-descendants",L"stubborn-descendant");});
-    test("native.typed-rejected-final-admission",[&]{return rejectedFinalAdmission(output/"final-admission",finalAdmissionVariant);});
+    test("native.typed-rejected-final-admission",[&]{
+        if(finalAdmissionVariant!="hold-attribution")return rejectedFinalAdmission(output/"final-admission",finalAdmissionVariant);
+        auto missing=rejectedFinalAdmission(output/"missing-proof","mode-missing-proof");
+        auto foreign=rejectedFinalAdmission(output/"foreign-proof","mode-foreign-proof");
+        return Json{{"id","native.typed-rejected-final-admission-releases-watch-before-off"},
+            {"passed",missing.value("passed",false)&&foreign.value("passed",false)},
+            {"parameter",finalAdmissionVariant},{"missing",std::move(missing)},{"foreign",std::move(foreign)}};
+    });
     test("native.typed-preparation-revalidation",[&]{return deferredPreflightSelection?deferredPreflightSession(output/"deferred-session"):rejectedAfterPreparation(output/"preparation-admission");});
     test("native.typed-s0-intent-ready-owned",[&]{return intentReady(output/"intent-ready-owned",false);});
     test("native.typed-s0-intent-ready-retained",[&]{return intentReady(output/"intent-ready-retained",true);});
@@ -4112,7 +4266,7 @@ int main(int argc,char** argv){
     test("native.typed-healing-resume-disconnect-retained",[&]{return healing(output/"resume-retained",true,"resume-disconnect");});
     test("native.typed-healing-resume-then-disconnect-owned",[&]{return healing(output/"resume-first-owned",false,"resume-then-disconnect");});
     test("native.typed-healing-late-result-owned",[&]{return healing(output/"late-owned",false,"late-result");});
-    test("native.typed-healing-off",[&]{return healing(output/"off",false,"off");});
+    test("native.typed-healing-off",[&]{return healing(output/"off",false,"off",false,fatalHeldSelection);});
     for(const bool retained:{false,true}){
         const auto name=retained?"native.typed-healing-child-exit-retained":"native.typed-healing-child-exit-owned";
         test(name,[&]{

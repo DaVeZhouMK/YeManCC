@@ -149,9 +149,11 @@ static bool sgAbnormalEtwStop() {
         else {ok=false;error=ERROR_TIMEOUT;}
     }
     if(!ok)g_sgAbnormalDropped.store(true,std::memory_order_release);
-    sgRecordFact("abnormal-sleep-live-source-stop",{{"source","episode-etw"},{"closed",ok},{"error",error},
-        {"eventsLost",source.properties.value.EventsLost},{"logBuffersLost",source.properties.value.LogBuffersLost},{"realTimeBuffersLost",source.properties.value.RealTimeBuffersLost},
-        {"assessment",ok&&!g_sgAbnormalDropped.load()?"closed":"UNKNOWN"},{"mandatoryEvidence",true}});
+    try {
+        sgRecordFact("abnormal-sleep-live-source-stop",{{"source","episode-etw"},{"closed",ok},{"error",error},
+            {"eventsLost",source.properties.value.EventsLost},{"logBuffersLost",source.properties.value.LogBuffersLost},{"realTimeBuffersLost",source.properties.value.RealTimeBuffersLost},
+            {"assessment",ok&&!g_sgAbnormalDropped.load()?"closed":"UNKNOWN"},{"mandatoryEvidence",true}});
+    } catch(...) { /* The caller still needs the actual ETW cleanup result. */ }
     return ok;
 }
 static bool sgAbnormalEtwStart(ULONGLONG origin) {

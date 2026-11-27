@@ -9,6 +9,8 @@ const {build}=req('esbuild'), {parse,compileScript,compileStyle}=req('vue/compil
 const runtime=process.env.YMCC_UI_BROWSER_MODULE_DIR||'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';
 const {chromium}=createRequire(path.join(runtime,'_fan-wake-chain.cjs'))('playwright');
 const out=path.resolve(process.env.YMCC_FAN_OBSERVATION_CANCEL_EVIDENCE_DIR||path.join(root,'../../../_scratch/fan-observation-cancel-'+Date.now()));fs.mkdirSync(out,{recursive:true});
+const readyOnly=process.argv.slice(2).length===1&&process.argv[2]==='--merged-ready-only';
+assert.ok(!process.argv[2]||readyOnly,'unknown fan observation selection');
 const fixture=path.join(root,'tools/fan_view_bridge_wake_fixture.ts');
 const mocks={
   '@/bridge/fanHost':`export {fanHostLifecycle,resolveFanEntryAction} from ${JSON.stringify(fixture)};`,
@@ -36,7 +38,7 @@ try{
  page=await browser.newPage();page.on('pageerror',e=>errors.push(e.message));
  await page.addInitScript(()=>{const original=window.setInterval.bind(window),clear=window.clearInterval.bind(window),ticks=new Map();window.__fanPageObservationTicks=ticks;window.setInterval=(fn,ms,...args)=>{const id=original(fn,ms,...args);if(ms===5000&&typeof fn==='function')ticks.set(id,()=>fn(...args));return id;};window.clearInterval=id=>{ticks.delete(id);clear(id);};});
  const snapshot=()=>page.evaluate(()=>({pressed:document.querySelector('.fan-toggle').getAttribute('aria-pressed'),text:document.querySelector('.fan-toggle').textContent,disabled:document.querySelector('.fan-toggle').disabled,notice:document.querySelector('.fan-status-banner')?.textContent,globalActive:window.__chain.lastControlActive,writes:window.__chain.boundary.writes,intent:window.__chain.lifecycle.hasControlIntent,recovery:window.__chain.lifecycle.recoveryActive,enables:window.__chain.trace.filter(t=>t.op==='enable').length}));
- for(const shape of ['error','not-ready'])for(const action of ['new-manual','new-bridge-curve','off','hide']){
+ if(!readyOnly)for(const shape of ['error','not-ready'])for(const action of ['new-manual','new-bridge-curve','off','hide']){
   await page.goto('http://127.0.0.1:'+server.address().port+'/?family=ROGAlly&cold=1');await page.waitForSelector('.fan-toggle');
   await page.evaluate(()=>{const f=window.__chain;f.setNative(6,'ready');f.lifecycle.setPowerGeneration(6);f.lifecycle.observePowerBoundary('resume-ready',6);});
   await page.locator('.fan-toggle').click();await page.waitForFunction(()=>document.querySelector('.fan-toggle').getAttribute('aria-pressed')==='true'&&!document.querySelector('.fan-toggle').disabled,null,{timeout:7000});
@@ -66,6 +68,39 @@ try{
   }catch(e){ok=false;error=String(e);}
   cases.push({shape,action,ok,error,before,after});
  }
- assert.deepEqual(errors,[]);const result={ok:cases.every(c=>c.ok)&&!errors.length,checks:cases.length,cases,pageErrors:errors,hardwareCalls:0,scope:'actual FanView + actual bridge; held native read after current failed/not-ready GET; actual manual DOM or public OFF/visibility; inert Host and native; no device or CPU benchmark'};
+ {
+  await page.goto('http://127.0.0.1:'+server.address().port+'/?family=GPDWin5&cold=1');await page.waitForSelector('.fan-toggle');
+  await page.evaluate(()=>{const f=window.__chain;f.setNative(6,'ready');f.lifecycle.setPowerGeneration(6);f.lifecycle.observePowerBoundary('resume-ready',6);});
+  await page.locator('.fan-toggle').click();await page.waitForFunction(()=>document.querySelector('.fan-toggle').getAttribute('aria-pressed')==='true'&&!document.querySelector('.fan-toggle').disabled,null,{timeout:7000});
+  await page.evaluate(()=>{
+   const f=window.__chain,original=f.boundary.getState.bind(f.boundary);
+   const test=window.__mergedReady={reads:[],release:null};
+   f.boundary.getState=(timeout,source)=>{
+    if(source!=='page-telemetry')return original(timeout,source);
+    test.reads.push(f.native.generation);
+    if(test.reads.length!==1)return original(timeout,source);
+    const old=f.boundary.snapshot();return new Promise(resolve=>{test.release=()=>resolve(old);});
+   };
+   for(const tick of window.__fanPageObservationTicks.values())tick();
+  });
+  await page.waitForFunction(()=>window.__mergedReady.release!==null,null,{timeout:1000});
+  await page.evaluate(async()=>{
+   const f=window.__chain;
+   await f.sleep(7,false);f.setNative(7,'ready');
+   window.__mergedReady.wake=f.lifecycle.resumeAfterNativeReady(7).catch(e=>String(e.message));
+  });
+   let ok=true,error='',admission,wake,before,after;
+  try{
+    admission=await page.evaluate(()=>{const {phase,powerGeneration,wakeReadyGeneration}=window.__chain.lifecycle.coordinatorSnapshot;return {phase,powerGeneration,wakeReadyGeneration};});
+    assert.deepEqual(admission,{phase:'ready',powerGeneration:7,wakeReadyGeneration:7});
+   await page.waitForFunction(()=>window.__mergedReady.reads.includes(7),null,{timeout:1250});
+    wake=await page.evaluate(()=>window.__mergedReady.wake);
+    before=await snapshot();
+   await page.evaluate(()=>window.__mergedReady.release());await page.waitForTimeout(120);
+    after=await snapshot();assert.deepEqual(after,before,'retired observation changed current controls, status, or writes');
+  }catch(e){ok=false;error=String(e);}
+   cases.push({shape:'merged-ready',action:'retire-old-page-status',ok,error,admission,wake,before,after,reads:await page.evaluate(()=>window.__mergedReady.reads)});
+ }
+ assert.deepEqual(errors,[]);const result={ok:cases.every(c=>c.ok)&&!errors.length,selection:readyOnly?'merged-ready-only':'default',checks:cases.length,cases,pageErrors:errors,hardwareCalls:0,scope:'actual FanView + actual bridge; held pre-wake/page recovery reads; inert Host and Native; no device or CPU benchmark'};
  fs.writeFileSync(path.join(out,'results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify({ok:result.ok,checks:result.checks,failed:cases.filter(c=>!c.ok).map(c=>c.shape+'/'+c.action+': '+c.error),evidenceRoot:out}));if(!result.ok)process.exitCode=1;
 }finally{if(browser)await browser.close();await new Promise(r=>server.close(r));}

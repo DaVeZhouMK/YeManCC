@@ -44,6 +44,7 @@ if(process.argv.includes('--exact-path-contention-native-only')||process.argv.in
   process.exit(process.exitCode??0);
 }
 const options=parseOptions(process.argv.slice(2));
+const defaultLinkedLaunch=!options.processStatusOnly&&!options.rtssProcessIoOnly;
 const rawSha256=bytes=>createHash('sha256').update(bytes).digest('hex');
 const repoRoot=fs.realpathSync(process.cwd());
 const repoBridgeFile=path.resolve(repoRoot,'src/bridge/yeman.ts');
@@ -101,13 +102,30 @@ function evaluate(file,imports={},rtssIoState=null) {
   const globals={console,setTimeout:options.rtssProcessIoOnly&&rtssIoState?((fn,ms)=>{(rtssIoState.waits??=[]).push(ms);fn();return 0;}):setTimeout,clearTimeout,performance:{now:()=>Date.now()},window:windowPort,document:documentPort,CustomEvent:customEvent};
   Object.assign(windowPort,{setTimeout:globals.setTimeout,clearTimeout:globals.clearTimeout});
   const actualModules=new Map(),actualPaths={'./uiLifecycle':'src/bridge/uiLifecycle.ts','./bridge/uiLifecycle':'src/bridge/uiLifecycle.ts','../scheduler':'src/scheduler.ts','../robust/repairModel':'src/robust/repairModel.ts','@/robust/repairModel':'src/robust/repairModel.ts','./tdpCircuitBreaker':'src/bridge/tdpCircuitBreaker.ts','./powerSource':'src/bridge/powerSource.ts'};
-  if(options.rtssProcessIoOnly)Object.assign(actualPaths,{
+  if(options.rtssProcessIoOnly||defaultLinkedLaunch)Object.assign(actualPaths,{
     './steamInstallationFacts':'src/bridge/steamInstallationFacts.ts','./bootModeGlobalPreferences':'src/bridge/bootModeGlobalPreferences.ts',
     './inputConfigHash':'src/bridge/inputConfigHash.ts','./settingsBaseline':'src/bridge/settingsBaseline.ts',
   });
-  const loadActual=relative=>{if(actualModules.has(relative))return actualModules.get(relative);const input=selectedInput(path.join(repoRoot,relative)),key=input.file+'#production-pure-dependency';if(!selectedCode.has(key))selectedCode.set(key,transformSync(input.text,{loader:'ts',format:'cjs'}).code);const loaded={exports:{}};actualModules.set(relative,loaded.exports);vm.runInNewContext(selectedCode.get(key),{...globals,module:loaded,exports:loaded.exports,require:requireActual});actualModules.set(relative,loaded.exports);if(relative==='src/scheduler.ts')fixtureCleanups.add(()=>{for(const name of loaded.exports.getScheduledTaskNames())loaded.exports.unregisterScheduledTask(name);});return loaded.exports;};
+  if(defaultLinkedLaunch){
+    Object.assign(globals,{queueMicrotask,AbortController});
+    actualPaths['./powerLifecycleState']=actualPaths['./bridge/powerLifecycleState']='src/bridge/powerLifecycleState.ts';
+  }
+  const loadActual=relative=>{
+    if(actualModules.has(relative))return actualModules.get(relative);
+    const input=selectedInput(path.join(repoRoot,relative)),key=input.file+'#production-pure-dependency';
+    if(!selectedCode.has(key))selectedCode.set(key,transformSync(input.text,{loader:'ts',format:'cjs'}).code);
+    const loaded={exports:{}};actualModules.set(relative,loaded.exports);
+    vm.runInNewContext(selectedCode.get(key),{...globals,module:loaded,exports:loaded.exports,require:requireActual});
+    if(defaultLinkedLaunch&&relative==='src/bridge/powerLifecycleState.ts'){
+      const subscribe=loaded.exports.onSharedPowerLifecycle;
+      loaded.exports={...loaded.exports,onSharedPowerLifecycle(...args){const release=subscribe(...args);fixtureCleanups.add(release);return release;}};
+    }
+    actualModules.set(relative,loaded.exports);
+    if(relative==='src/scheduler.ts')fixtureCleanups.add(()=>{for(const name of loaded.exports.getScheduledTaskNames())loaded.exports.unregisterScheduledTask(name);});
+    return loaded.exports;
+  };
   function requireActual(name){
-    if(options.rtssProcessIoOnly && name==='../../PowerControl/settings-baseline.json')return JSON.parse(selectedInput(path.join(repoRoot,'PowerControl/settings-baseline.json')).text);
+    if((options.rtssProcessIoOnly||defaultLinkedLaunch)&&name==='../../PowerControl/settings-baseline.json')return JSON.parse(selectedInput(path.join(repoRoot,'PowerControl/settings-baseline.json')).text);
     if(options.rtssProcessIoOnly && (name==='./powerLifecycleState'||name==='./bridge/powerLifecycleState'))return {onSharedPowerLifecycle:()=>()=>{}};
     if(Object.hasOwn(actualPaths,name))return loadActual(actualPaths[name]);if(Object.hasOwn(imports,name))return imports[name];if(name==='vue')return vue;throw Error('Unexpected import '+name);
   }
@@ -143,7 +161,45 @@ function rtssProcessIoPort(state,cmd,args) {
   }
   throw Error('Unexpected RTSS process I/O IPC '+cmd);
 }
-function fixture(){const state={subscriptions:new Map(),calls:[],running:false,result:{ok:true},startup:{known:true,enabled:false,conflict:false},service:{ok:true,known:true,installed:true,automatic:true,running:true},error:null};const invoke=async(cmd,args)=>{state.calls.push({cmd,args:JSON.parse(JSON.stringify(args))});if(options.rtssProcessIoOnly)return rtssProcessIoPort(state,cmd,args);if(cmd==='power.lifecycle')return {generation:1,phase:'ready',hardwareWritesAllowed:true};if(cmd==='proc.running'){if(options.processStatusOnly){if(Object.hasOwn(state,'processError'))throw state.processError;if(Object.hasOwn(state,'processReply'))return state.processReply;}return{steam:state.running};}if(cmd==='fs.readDir')return [];if(cmd==='steam.ui.launch'){if(state.error)throw Error(state.error);return state.running?{...state.result,alreadyRunning:true,dispatched:false}:state.result;}if(cmd==='steam.startup.get')return state.startup;if(cmd==='steam.startup.set'){state.startup.enabled=args.enabled;return{ok:true,enabled:args.enabled,...(state.service?{service:state.service}:{})}}throw Error('Unexpected IPC '+cmd)};const on=(event,listener)=>{assert.equal(typeof listener,'function');let set=state.subscriptions.get(event);if(!set)state.subscriptions.set(event,set=new Set());set.add(listener);return()=>{set.delete(listener);if(!set.size)state.subscriptions.delete(event);};};const api=evaluate('src/bridge/api.ts',{'./ipc':{invoke,on}});const bridge=evaluate('src/bridge/yeman.ts',{'./api':api,'./ipc':{invoke,on},'./frameRateModel':evaluate('src/bridge/frameRateModel.ts'),'./tdpRuntimeState':evaluate('src/bridge/tdpRuntimeState.ts'),'./gamingHomePolicy':evaluate('src/bridge/gamingHomePolicy.ts'),'./tdpStaticDiagnostics':{},'./rtssOverlay':{},'./settingsRepository':{setSettingsDirectory(){}},'./tdpCircuitBreaker':{},'./controllerShortcutRules':{OEM_EMPTY_SNAPSHOT:{}}},options.rtssProcessIoOnly?state:null);return {state,bridge};}
+function fixture(){
+  const state={subscriptions:new Map(),calls:[],powerReads:[],running:false,result:{ok:true},startup:{known:true,enabled:false,conflict:false},service:{ok:true,known:true,installed:true,automatic:true,running:true},error:null};
+  const invoke=async(cmd,args,ipcOptions)=>{
+    if(defaultLinkedLaunch&&cmd==='power.lifecycle'){
+      assert.deepEqual(Object.keys(args),[]);
+      assert.equal(ipcOptions.timeoutMs,3000);
+      assert(ipcOptions.signal instanceof AbortSignal);
+      state.powerReads.push(cmd);
+      // This hidden fixture exercises Steam routing, not TDP hardware admission.
+      return {generation:1,phase:'suspended',known:true,hardwareWritesAllowed:false,inputReady:false};
+    }
+    state.calls.push({cmd,args:JSON.parse(JSON.stringify(args))});
+    if(options.rtssProcessIoOnly)return rtssProcessIoPort(state,cmd,args);
+    if(cmd==='power.lifecycle')return {generation:1,phase:'ready',hardwareWritesAllowed:true};
+    if(cmd==='proc.running'){
+      if(options.processStatusOnly){if(Object.hasOwn(state,'processError'))throw state.processError;if(Object.hasOwn(state,'processReply'))return state.processReply;}
+      return {steam:state.running};
+    }
+    if(cmd==='fs.readDir')return [];
+    if(cmd==='steam.ui.launch'){if(state.error)throw Error(state.error);return state.running?{...state.result,alreadyRunning:true,dispatched:false}:state.result;}
+    if(cmd==='steam.startup.get')return state.startup;
+    if(cmd==='steam.startup.set'){state.startup.enabled=args.enabled;return {ok:true,enabled:args.enabled,...(state.service?{service:state.service}:{})};}
+    throw Error('Unexpected IPC '+cmd);
+  };
+  const on=(event,listener)=>{
+    assert.equal(typeof listener,'function');let set=state.subscriptions.get(event);
+    if(!set)state.subscriptions.set(event,set=new Set());set.add(listener);
+    const release=()=>{set.delete(listener);if(!set.size&&state.subscriptions.get(event)===set)state.subscriptions.delete(event);};
+    if(defaultLinkedLaunch)fixtureCleanups.add(release);
+    return release;
+  };
+  const api=evaluate('src/bridge/api.ts',{'./ipc':{invoke,on}});
+  const bridge=evaluate('src/bridge/yeman.ts',{'./api':api,'./ipc':{invoke,on},'./frameRateModel':evaluate('src/bridge/frameRateModel.ts'),
+    './tdpRuntimeState':evaluate('src/bridge/tdpRuntimeState.ts'),'./gamingHomePolicy':evaluate('src/bridge/gamingHomePolicy.ts'),
+    './tdpStaticDiagnostics':{},'./rtssOverlay':{},'./settingsRepository':{setSettingsDirectory(){}},'./tdpCircuitBreaker':{},
+    './controllerShortcutRules':{OEM_EMPTY_SNAPSHOT:{}}},options.rtssProcessIoOnly?state:null);
+  if(defaultLinkedLaunch)fixtureCleanups.add(()=>assert.equal(state.subscriptions.size,0,'owned IPC listeners must be released'));
+  return {state,bridge};
+}
 async function runProcessStatusCases() {
   // This is the real full bridge; only its IPC ports are deterministic fakes.
   const source=selectedInput(processBridgeFile);
@@ -395,8 +451,21 @@ if(options.rtssProcessIoOnly) {
 } else if(options.processStatusOnly) {
   await runProcessStatusCases();
 } else {
-await check('actual bridge initialization is observation-free',()=>assert.equal(fixture().state.calls.length,0));
-await check('actual power lifecycle subscriptions do not launch or observe Steam',async()=>{const {state}=fixture();assert.deepEqual([...state.subscriptions.keys()],['window.focus','power.suspending','power.resuming','power.resumed']);for(const [event,set]of state.subscriptions)if(event.startsWith('power.'))for(const listener of set)listener({generation:1});await Promise.resolve();assert.deepEqual(state.calls.map(call=>call.cmd),['power.lifecycle']);});
+await check('actual bridge initialization is observation-free',()=>{
+  const {state}=fixture();assert.deepEqual(state.calls,[]);assert.deepEqual(state.powerReads,[]);
+});
+await check('actual power lifecycle subscriptions do not launch or observe Steam',async()=>{
+  const {state}=fixture();
+  assert.deepEqual([...state.subscriptions.keys()],['window.focus','power.lifecycleChanged','power.suspending','power.resuming','power.resumed',
+    'power.resume-ready','window.shown','window.restored','window.maximized','window.summoned','webview.recovering','gameMedia.resume-ready']);
+  for(const [event,set]of state.subscriptions)if(event.startsWith('power.')){
+    assert.equal(set.size,1,'one native listener for '+event);
+    for(const listener of set)listener({generation:1});
+  }
+  await Promise.resolve();
+  assert.deepEqual(state.powerReads,['power.lifecycle']);
+  assert.deepEqual(state.calls,[]);
+});
 await check('actual bridge rejects implicit startup',async()=>{const {state,bridge}=fixture();await assert.rejects(bridge.launchSteam(),/手动启动/);assert.equal(state.calls.length,0)});
 await check('actual bridge uses native launch exclusively without VBS dependency',async()=>{const {state,bridge}=fixture();await bridge.launchSteam({userInitiated:true});assert.deepEqual(state.calls.map(x=>x.cmd),['steam.ui.launch']);assert.deepEqual(state.calls[0].args,{userInitiated:true});});
 await check('existing Steam cannot get startup flags or mode switch',async()=>{const {state,bridge}=fixture();state.running=true;await bridge.launchSteam({userInitiated:true});assert.deepEqual(state.calls,[{cmd:'steam.ui.launch',args:{userInitiated:true}}])});
@@ -406,7 +475,29 @@ await check('startup enable and disable never start Steam',async()=>{const {stat
 await check('startup enable requires current native EarlyStart confirmation and never falls back to launch',async()=>{for(const service of [null,{ok:false,known:false,installed:false,automatic:false,running:false,reason:'service-missing'}]){const {state,bridge}=fixture();state.service=service;await assert.rejects(bridge.steamMasterSet(true),/EarlyStart Service/);assert.deepEqual(state.calls,[{cmd:'steam.startup.set',args:{enabled:true}}])}});
 await check('unknown startup cannot be displayed as confirmed off',async()=>{const {state,bridge}=fixture();state.startup.known=false;await assert.rejects(bridge.steamMasterOn(),/读取失败/)});
 await check('unrelated earlystart entry produces conflict without overwrite',async()=>{const {state,bridge}=fixture();state.startup.conflict=true;await assert.rejects(bridge.steamMasterOn(),/其他自定义命令/);assert.equal(state.calls.length,1)});
-await check('standalone VBS and BAT remain available but outside product calls',()=>{const bridge=fs.readFileSync('src/bridge/yeman.ts','utf8'),view=fs.readFileSync('src/views/SteamView.vue','utf8');assert(!bridge.includes('YeManSteam.vbs'));assert(!bridge.includes('YeManSteam.bat'));assert(!view.includes('shell.hidden'));for(const file of ['PowerControl/YeManSteam.vbs','PowerControl/YeManSteam.bat','PowerControl/YeManSteam2.bat'])assert(fs.existsSync(file));const native=fs.readFileSync('native/steam_native_launch_windows.h','utf8');assert(!/wscript|cscript|powershell|cmd.exe|CreateJobObject|AssignProcessToJobObject|Sleep\(|SetTimer/.test(native));const core=fs.readFileSync('native/steam_native_launch.h','utf8');assert(core.includes('origin==Origin::Manual\n        ? io.spawnManualSteam(executable,startupArguments)'));assert(core.indexOf('io.spawnManualSteam(executable,startupArguments)')<core.indexOf('const auto addons=io.addons()'));assert.equal((native.match(/ShellExecuteExW\(&request\)/g)||[]).length,1);const manualShell=native.slice(native.indexOf('bool spawnSteamShell('),native.indexOf('bool spawnManualSteam('));assert(manualShell.includes('!manualSteamFallbackAllowed(executable)'));assert(manualShell.includes('request.lpVerb=L"open"'));assert(manualShell.includes('request.lpFile=executable.c_str();request.lpParameters=arguments.c_str()'));assert(native.includes('CloseHandle(child.hThread);CloseHandle(child.hProcess)'));assert(native.includes('absentExcept(child.dwProcessId)'));});
+await check('standalone VBS and BAT remain available but outside product calls',()=>{
+  const bridge=fs.readFileSync('src/bridge/yeman.ts','utf8'),view=fs.readFileSync('src/views/SteamView.vue','utf8');
+  assert(!bridge.includes('YeManSteam.vbs'));assert(!bridge.includes('YeManSteam.bat'));assert(!view.includes('shell.hidden'));
+  for(const file of ['PowerControl/YeManSteam.vbs','PowerControl/YeManSteam.bat','PowerControl/YeManSteam2.bat'])assert(fs.existsSync(file));
+  const native=fs.readFileSync('native/steam_native_launch_windows.h','utf8');
+  assert(!/wscript|cscript|powershell|cmd.exe|CreateJobObject|AssignProcessToJobObject|Sleep\(|SetTimer/.test(native));
+  const core=fs.readFileSync('native/steam_native_launch.h','utf8');
+  const begin=core.indexOf('Result runWithReceipt('),end=core.indexOf('} // namespace detail',begin);
+  assert(begin>=0&&end>begin);
+  const receiptBody=core.slice(begin,end);
+  const manual=/origin\s*==\s*Origin::Manual\s*\?\s*io\.spawnManualSteam\(executable,\s*selectedExecutable\.empty\(\)\s*\?\s*startupArguments\s*:\s*L""\)/.exec(receiptBody);
+  assert(manual,'manual launch keeps defaults only when no executable was explicitly selected');
+  const skipLinks=receiptBody.indexOf('if(advanced||origin==Origin::BootSelected||!selectedExecutable.empty())return result;');
+  const addons=receiptBody.indexOf('const auto addons=io.addons()');
+  assert(manual.index<skipLinks&&skipLinks<addons,'launch and explicit-selection early return precede addon discovery');
+  assert.equal((native.match(/ShellExecuteExW\(&request\)/g)||[]).length,1);
+  const shellStart=native.indexOf('bool spawnSteamShell('),shellEnd=native.indexOf('bool spawnManualSteam(',shellStart);
+  assert(shellStart>=0&&shellEnd>shellStart);
+  const manualShell=native.slice(shellStart,shellEnd);
+  assert(manualShell.includes('!manualSteamFallbackAllowed(executable)'));assert(manualShell.includes('request.lpVerb=L"open"'));
+  assert(manualShell.includes('request.lpFile=executable.c_str();request.lpParameters=arguments.c_str()'));
+  assert(native.includes('CloseHandle(child.hThread);CloseHandle(child.hProcess)'));assert(native.includes('absentExcept(child.dwProcessId)'));
+});
 await check('portable linked configuration follows the same PowerControl root as native',async()=>{const {state,bridge}=fixture();bridge.setPowerControlDir('D:\\Portable YMCC\\PowerControl');await bridge.steamCustomAddons();assert.deepEqual(state.calls,[{cmd:'fs.readDir',args:{path:'D:\\Portable YMCC\\PowerControl\\YeManSteam'}}])});
 const result={ok:true,passed:cases.length,cases,realSteamOperations:0,realInstallationWrites:0};if(options.out)fs.writeFileSync(options.out,JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
 }

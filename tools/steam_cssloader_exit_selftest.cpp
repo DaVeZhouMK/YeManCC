@@ -27,25 +27,40 @@ struct Scene {
  std::filesystem::path dir,link,image;Session session{L"C:\\owned-fixture-steam",42,0,100};
  std::vector<std::unique_ptr<Child>> children;std::atomic<HANDLE>active=nullptr;deckylaunch::Handle helper,eventBackend;
  std::atomic<unsigned>uses=0,starts=0,reads=0,refreshes=0,invalidations=0,rebinds=0;
+ std::atomic<unsigned>readyModeUnconfirmed=0;
+ static constexpr std::array<DWORD,3> readyDelays{2,10,20};
  std::atomic<bool>confirmed=false,blocked=false,editing=false,refreshAccepted=true,invalidateAccepted=true;
  std::atomic<steamcss::UiMode>mode=steamcss::UiMode::BigPicture;
+ bool traceSleep;
+ std::mutex traceMutex;
+ std::vector<std::string> sleepTrace;
+ void trace(const std::string& event){
+  if(!traceSleep)return;
+  std::lock_guard lock(traceMutex);
+  if(sleepTrace.size()<64)sleepTrace.push_back(std::to_string(GetTickCount64())+" "+event+" refreshes="+std::to_string(refreshes.load())+
+   " mode="+std::to_string(static_cast<int>(mode.load()))+" uses="+std::to_string(uses.load())+" starts="+std::to_string(starts.load()));
+ }
  steamcss::Runtime runtime;DWORD delay;
- Scene(const std::filesystem::path&root,const wchar_t*name,DWORD ms=180):dir(root/name),link(dir/L"links/backend.path"),image(dir/L"CssLoader-Standalone-Headless.exe"),delay(ms){
+ Scene(const std::filesystem::path&root,const wchar_t*name,DWORD ms=180):dir(root/name),link(dir/L"links/backend.path"),image(dir/L"CssLoader-Standalone-Headless.exe"),traceSleep(std::wstring(name)==L"sleep"),delay(ms){
   std::filesystem::create_directories(link.parent_path());std::filesystem::copy_file(self(),image);std::ofstream(link)<<"C:\\owned-css\\CssLoader-Standalone-Headless.exe";
   helper.value=CreateEventW(nullptr,TRUE,FALSE,nullptr);if(!helper.value)throw std::runtime_error("fixture helper event");
   g_steamSettingsObserver.value=session;g_powerLifecycle=PowerLifecycle::Ready;g_exitRequested=false;g_aiFanMockSession.isolated=false;
-  g_steamCssUse.port=[this](const auto&){++invalidations;if(!invalidateAccepted)return false;confirmed=false;return true;};
-  g_steamModeObserver.port=[this](const auto&){++refreshes;mode=steamcss::UiMode::Unknown;return refreshAccepted.load();};
+  g_steamCssUse.port=[this](const auto&){++invalidations;if(!invalidateAccepted)return false;confirmed=false;trace("invalidate-backend");return true;};
+  g_steamModeObserver.port=[this](const auto&){++refreshes;mode=steamcss::UiMode::Unknown;trace("refresh-invalidates-mode");return refreshAccepted.load();};
  }
- ~Scene(){runtime.shutdown();g_steamCssUse.port={};g_steamModeObserver.port={};}
+ ~Scene(){runtime.shutdown();g_steamCssUse.port={};g_steamModeObserver.port={};for(const auto& event:sleepTrace)std::cout<<"CSS_SLEEP "<<event<<std::endl;}
  HANDLE launch(){auto child=std::make_unique<Child>();auto command=L"\""+image.wstring()+L"\" --inert";STARTUPINFOW si{sizeof(si)};PROCESS_INFORMATION pi{};if(!CreateProcessW(image.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&si,&pi))throw std::runtime_error("owned inert launch");CloseHandle(pi.hThread);child->p=pi.hProcess;++ownedCreated;const auto p=child->p;children.push_back(std::move(child));active=p;return p;}
  steamcss::Result probe(){if(blocked)return{nullptr,0,"blocked","fixture-port-conflict"};const auto p=active.load();if(live(p))return{copy(p,true),GetProcessId(p),"running",{},false};return{nullptr,0,"missing",{},false};}
  void start(bool fakeHandle=false){
   if(fakeHandle){eventBackend.value=CreateEventW(nullptr,TRUE,FALSE,nullptr);active=eventBackend.value;}else launch();
-  steamcss::Config c;c.linkFile=link.wstring();c.delays={2,5,8};c.modeDelays={2,10,20};c.crashDelayMs=delay;c.resumeDelays={2,10,20}; // Only this isolated fixture compresses the Ready settle delay.
+  steamcss::Config c;c.linkFile=link.wstring();c.delays={2,5,8};c.modeDelays={2,10,20};c.crashDelayMs=delay;c.resumeDelays=readyDelays; // Only this isolated fixture compresses the Ready settle delay.
   c.mayLaunch=[] {return !g_exitRequested&&!g_aiFanMockSession.isolated&&g_powerLifecycle==PowerLifecycle::Ready;};
   c.readMode=[this](const auto&){return steamcss::ModeSample{mode.load(),"same-document:1"};};
   c.invalidateBackend=productionExitInvalidation;c.refreshMode=productionExitRefresh;
+  if(traceSleep)c.changed=[this](const auto& state){
+   trace(state.phase+" "+state.reason+" crash-waves="+std::to_string(state.automaticRecoveries));
+   if(state.reason=="unconfirmed-mode")readyModeUnconfirmed=refreshes.load();
+  };
   c.ensure=[this,fakeHandle](const auto&,const auto&,const auto&){++reads;if(mode!=steamcss::UiMode::BigPicture||g_powerLifecycle!=PowerLifecycle::Ready)return steamcss::Result{nullptr,0,"waiting-steam-ui","unconfirmed-mode"};if(fakeHandle&&active==eventBackend.value)return steamcss::Result{copy(eventBackend.value,false),900,"running",{},false};return probe();};
   c.confirmIdle=[this](const auto&,bool missing,bool){++uses;ResetEvent(helper.value);if(editing){SetEvent(helper.value);return copy(helper.value,false);}if(missing){if(blocked||live(active))throw std::runtime_error("duplicate fixture start");++starts;launch();}confirmed=true;SetEvent(helper.value);return copy(helper.value,false);};
   c.probeExisting=[this,fakeHandle]{++rebinds;if(fakeHandle&&active==eventBackend.value)return steamcss::Result{copy(eventBackend.value,false),900,"running",{},false};return probe();};
@@ -53,8 +68,21 @@ struct Scene {
   check(runtime.initialize(c),"actual CSS Runtime initialized");runtime.observeSteam(session);check(until([&]{return runtime.snapshot().phase=="ready";}),"initial actual resident confirmation is ready");
  }
  void stop(DWORD code=0xc0000005UL){auto p=active.load();if(!p||!live(p)||!TerminateProcess(p,code)||WaitForSingleObject(p,2000)!=WAIT_OBJECT_0)throw std::runtime_error("owned inert exit");}
- void fresh(){mode=steamcss::UiMode::BigPicture;runtime.observeMode(session,{mode.load(),"same-document:1"});}
- void recover(unsigned count){check(until([&]{return refreshes>=count;}),"abnormal exit reaches one delayed fresh-mode request");check(!confirmed,"old successful receipt is revoked before recovery");const auto n=uses.load();Sleep(25);check(uses==n,"unknown fresh mode cannot create a recovery helper");fresh();check(until([&]{return runtime.snapshot().phase=="ready"&&starts==count;}),"one fresh Big Picture result restores one missing backend");}
+ void fresh(){mode=steamcss::UiMode::BigPicture;trace("publish-fresh-bigpicture");runtime.observeMode(session,{mode.load(),"same-document:1"});}
+ void recover(unsigned count){
+  const auto originalUses=uses.load();
+  check(until([&]{return refreshes>=count;}),"abnormal exit reaches one delayed fresh-mode request");
+  check(!confirmed,"old successful receipt is revoked before recovery");
+  // Each Ready slot invalidates the synthetic cache. Reply once to the last
+  // observed miss rather than guessing when the worker's timers have drained.
+  if(traceSleep)check(until([&]{return readyModeUnconfirmed==readyDelays.size();}),"last Ready refresh explicitly reports the mode unconfirmed");
+  else Sleep(25);
+  check(uses==originalUses,"unknown fresh mode cannot create a recovery helper");
+  fresh();
+  check(until([&]{return runtime.snapshot().phase=="ready"&&starts==count;}),"one fresh Big Picture result restores one missing backend");
+  if(traceSleep)check(refreshes==readyDelays.size()&&uses==originalUses+1&&runtime.snapshot().automaticRecoveries==count,
+    "one Ready reply starts only one helper and consumes no extra crash wave");
+ }
 };
 int wmain(int argc,wchar_t**argv){try{
  if(argc>1&&std::wstring(argv[1])==L"--inert"){Sleep(INFINITE);return 0;}

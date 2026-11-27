@@ -531,6 +531,7 @@ static void fullPipePsCancelDuringProbe(const std::string& kind){
   }else if(kind=="exit"){
    inputHostRaiseExitFence("offline-exit-during-query");check(inputHostExitFenceRaised(),"actual exit-fence producer raises terminal fence during endpoint query");
   }else if(kind=="power"){
+   ++g_sharedPowerSuspendSerial;
    g_powerLifecycle=PowerLifecycle::Suspended;g_inputReady=false;inputHostRequestPowerRelease(generation,"offline-suspend-during-query");inputHostConsumePowerRequests();
    check(g_inputHostPowerAdmissionRevoked.load()&&!sgVirtualWriterAllowedNow(),"actual power request consumer revokes publication during endpoint query");
   }else if(kind=="persona"){
@@ -601,6 +602,39 @@ static void fullPipePsCancelDuringProbe(const std::string& kind){
  }else if(kind!="refresh"&&kind!="target")check(!g_psWakeRearmRequested.load()&&g_psWakeRebuiltGeneration.load()!=generation,"cancelled query cannot mark rebuilt or rearm its retired request");
  check(fullPipeSpawnCount==spawns,"late PS query cannot spawn another Host after cancellation");
  cases.back()["psWakeCancellation"]={{"kind",kind},{"requestIdBefore",requestBefore},{"requestIdAfter",g_virtualStartProtection.view(startProtectionClock).requestId},{"publicationRevisionBefore",publicationRevisionBefore},{"requestedMatchesBound",g_inputHostRequestedPersonaMatchesBound.load()},{"requestedPersonaAfter",inputHostConfiguredPersona()},{"boundPersonaAfter",inputHostBoundPersonaValue()},{"intentRevisionAfter",g_inputHostVirtualIntentRevision.load()},{"unboundFrameAfterOff",unboundFrameAfterOff},{"unboundCommandsAdded",unboundCommandsAdded},{"newerRequestPreserved",newerRequestPreserved},{"newerRequestCompleted",newerRequestCompleted},{"normalFrameResult",frameAfterCancellation},{"frameCommandsAdded",frameCommandsAdded},{"actualSettingsOffDuringQuery",kind=="off"&&committed.value("ok",false)},{"callbackExecuted",callback},{"directRecreateReturned",directRecreate},{"generation",generation},{"probeCalls",fixturePsOpenCalls-opens},{"recreateCommandsAdded",fullPipeRecreateCommands()-before},{"processesAdded",fullPipeSpawnCount-spawns},{"effectiveTargetEnabled",g_realStickTest.virtualTargetEnabled},{"rearmRequested",g_psWakeRearmRequested.load()},{"markedRebuilt",g_psWakeRebuiltGeneration.load()==generation},{"afterWorker",state()}};
+ if(kind=="power"){
+  const auto suspend=g_sharedPowerSuspendSerial.load();
+  const auto oldArm=g_psWakeRearmArmTick.load();
+  g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;
+  inputHostRequestPowerRearm(generation,"offline-ready-after-ps-query");fullPipeDeliverSharedPowerReady();
+  inputHostConsumePowerRequests();fullPipeDrainQueuedLifecycle();fullPipeAssertSharedRearmClaim(generation);
+  inputHostRequestPsWakeRearm(generation,"offline-late-kept-completion",suspend-1);
+  check(!g_psWakeRearmRequested.load()&&g_psWakeRearmArmTick.load()==oldArm,
+    "old kept-target completion cannot arm PS recovery under a newer public suspend");
+  inputHostRequestPsWakeRearm(generation,"offline-same-generation-ps-ready");
+  const auto arm=g_psWakeRearmArmTick.load();const auto resumedOpens=fixturePsOpenCalls;
+  check(g_psWakeRearmRequested.load()&&g_psWakeRearmAttempts.load()==0&&
+    g_psWakeExhaustedGeneration.load()!=generation&&g_psWakeRebuiltGeneration.load()!=generation,
+    "new public suspend scope starts a fresh PS budget within the same generation");
+  bool delivered=false;
+  fixturePsReadConfig({});
+  fixturePsBeforeRead=[&]{
+   const auto tick=GetTickCount64();const auto notice=g_sleepPowerDispatch.window(PBT_APMRESUMEAUTOMATIC,tick);
+   delivered=static_cast<bool>(notice);g_sleepPowerDispatch.complete(notice,tick);
+  };
+  fullPipePsWakeStep();
+  check(delivered&&g_sharedPowerSuspendSerial.load()==suspend&&g_psWakeRearmRequested.load()&&
+    g_psWakeRearmAttempts.load()==0&&g_psWakeRearmArmTick.load()==arm&&fullPipeRecreateCommands()==before,
+    "transient public notification discards the PS read but retains the original bounded demand");
+  inputHostRequestPsWakeRearm(generation,"offline-duplicate-ps-ready");
+  fixturePsReadConfig({L"HID#VID_054C&PID_0DF2#HIDMAESTRO-OWN"});fullPipePsWakeStep();
+  auto fresh=fullPipeReadNow(1);const auto resumed=fullPipeSubmitSource(fresh,true,false);
+  check(!g_psWakeRearmRequested.load()&&g_psWakeRearmArmTick.load()==arm&&fixturePsOpenCalls==resumedOpens+2&&
+    fullPipeRecreateCommands()==before&&fullPipeSpawnCount==spawns&&resumed.value("hostSubmission","")=="frame-accepted",
+    "same-generation successor takes its own fresh read and resumes frames through the retained Host");
+  cases.back()["psWakeSameGenerationSuccessor"]={{"suspendSerial",suspend},{"transientNoticeDelivered",delivered},
+    {"queries",fixturePsOpenCalls-resumedOpens},{"sameArmTick",g_psWakeRearmArmTick.load()==arm},{"resumedFrame",resumed}};
+ }
  if(kind=="reentry"){
   const auto ticket=g_virtualStartProtection.view(startProtectionClock).requestId;check(inputHostStart()&&fullPipeSpawnCount==spawns,"fresh same-persona intent reuses current owned Host after old query is rejected");
   auto fresh=fullPipeReadNow(1);const auto frame=fullPipeSubmitSource(fresh,true,false);const auto protectedNow=g_virtualStartProtection.view(startProtectionClock);
@@ -1341,8 +1375,8 @@ static void fullPipePsProtectedCycleCase(const std::string& variant="central",co
  check(finals()==std::make_pair(1u,0u),"protected PS cleanup cannot add an opposite or duplicate final for the ON request");
  cases.back()["afterStop"]=state();cases.back()["nativeEvents"]=fixtureEvents;fixtureFullPipe=false;
 }
-static void fullPipeBeginReadonlyPsOwner(){
- seed();fixtureFullPipe=true;fullPipeFault="none";fixturePsProbeActive=false;fixturePsSameInstanceNames=false;
+static void fullPipeBeginReadonlyPsOwner(const char* fault="none",bool expectOwnership=true){
+ seed();fixtureFullPipe=true;fullPipeFault=fault;fixturePsProbeActive=false;fixturePsSameInstanceNames=false;
  g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;g_sleepRecoveryOutputWanted=true;
  g_machineIdentity.family=YmccFamily::AsusRogAllyX;g_machineIdentity.manufacturer="ASUSTEK COMPUTER INC.";g_machineIdentity.product="ROG Ally X";
  g_msiDinput.enabled=false;g_msiDinputSourceValid=false;g_msiMainSourceRevision=1;g_msiFeedbackModeGeneration=1;g_xinputAdmittedMask=1;
@@ -1356,11 +1390,121 @@ static void fullPipeBeginReadonlyPsOwner(){
  ULONG client=0;
  check(GetNamedPipeClientProcessId(g_inputHostServerPipe,&client)&&client==GetProcessId(g_inputHostProcess),"PS readonly setup binds the actual private managed pipe client");
  fixturePsLastAuthority=g_psEndpointOwnership.snapshot();fixturePsLastSdkSerial=fullPipeRecreateCommands()+1;
- check(fixturePsLastAuthority.valid&&fixturePsLastAuthority.capable&&fixturePsLastAuthority.revision&&fixturePsLastAuthority.generation&&!fixturePsLastAuthority.rootInstanceId.empty()&&!fixturePsLastAuthority.hidInstanceIds.empty(),"PS readonly setup obtains complete actual accepted PS ownership");
- if(!fixturePsLastAuthority.valid)throw std::logic_error("PS-readonly-real-PS-ownership-missing");
+ if(expectOwnership){
+  check(fixturePsLastAuthority.valid&&fixturePsLastAuthority.capable&&fixturePsLastAuthority.revision&&fixturePsLastAuthority.generation&&!fixturePsLastAuthority.rootInstanceId.empty()&&!fixturePsLastAuthority.hidInstanceIds.empty(),"PS readonly setup obtains complete actual accepted PS ownership");
+  if(!fixturePsLastAuthority.valid)throw std::logic_error("PS-readonly-real-PS-ownership-missing");
+ }
  const auto& p=fixturePsLastAuthority;
  cases.back()["readonlySetup"]={{"source","actual-private-Host-HELLO-PREPARE-State.snapshot"},{"pid",GetProcessId(g_inputHostProcess)},{"hostEpoch",g_inputHostEpoch},{"runId",g_inputHostRunId},{"capable",p.capable},{"valid",p.valid},{"generation",p.generation},{"revision",p.revision},{"rootInstanceId",p.rootInstanceId},{"hidInstanceIds",p.hidInstanceIds},{"reason",p.reason},{"sdkSerial",fixturePsLastSdkSerial}};
 }
+#ifdef YMCC_FIXTURE_PS_EXIT_RECEIPT
+struct FixturePsExitSignals {
+ HANDLE held=nullptr,release=nullptr;
+ static HANDLE create(const std::wstring& name){
+  const auto handle=CreateEventW(nullptr,TRUE,FALSE,name.c_str());const auto error=GetLastError();
+  if(!handle||error==ERROR_ALREADY_EXISTS){if(handle)CloseHandle(handle);throw std::logic_error("private PS exit event required");}
+  return handle;
+ }
+ explicit FixturePsExitSignals(const std::wstring& pipe){
+  held=create(L"Local\\YMCC-fixture-exit-held-"+pipe);
+  try{release=create(L"Local\\YMCC-fixture-exit-release-"+pipe);}catch(...){CloseHandle(held);throw;}
+ }
+ ~FixturePsExitSignals(){if(release){SetEvent(release);CloseHandle(release);}if(held)CloseHandle(held);}
+};
+static FixturePsExitSignals* fixturePsExitSignals=nullptr;
+static json fixturePsExitQuery,fixturePsExitAck;
+static HWND fixturePsExitWindow(){return reinterpret_cast<HWND>(std::uintptr_t{1});}
+static void fixturePsExitWire(bool write,const void* data,DWORD bytes){
+ if(!fixturePsExitSignals||!bytes)return;
+ const auto msg=json::parse(std::string_view(static_cast<const char*>(data),bytes),nullptr,false);
+ if(!msg.is_object()||msg.value("command",std::string{})!="QUERY_TARGET_OWNERSHIP")return;
+ if(write){
+  if(!fixturePsExitQuery.is_null()||WaitForSingleObject(fixturePsExitSignals->held,1250)!=WAIT_OBJECT_0)
+   throw std::logic_error("exact child must hold the produced ownership reply");
+  fixturePsExitQuery=msg;
+  beginAsyncExit(fixturePsExitWindow(),0,"fixture-ps-held-ownership");
+  if(!fixturePsExitWorkerRequested||!g_exitRequested||!inputHostExitFenceRaised()||g_exitSessionId.empty())
+   throw std::logic_error("actual exit entry did not raise its fence before reply release");
+  if(!SetEvent(fixturePsExitSignals->release))throw std::logic_error("could not release held ownership reply");
+ }else{
+  if(!inputHostExitFenceRaised()||!fixturePsExitAck.is_null())throw std::logic_error("ownership reply was not unique and after exit");
+  fixturePsExitAck=msg;
+ }
+}
+static void fullPipePsExitHeldReceipt(bool skipPostProbeAdmission){
+ const auto failuresBefore=failures.size();
+ cases.push_back({{"name",skipPostProbeAdmission?"ROG/ps-wake/exit-held-ownership-receipt/skip-post-probe-admission":"ROG/ps-wake/exit-held-ownership-receipt"}});
+ fullPipeBeginReadonlyPsOwner("ps-exit-held-ownership-receipt",false);
+ check(!fixturePsLastAuthority.valid&&fixturePsLastAuthority.capable,"original PREPARE leaves a real missing ownership observation");
+ const auto before=fullPipeProtectionState();const auto spawns=fullPipeSpawnCount,recreates=fullPipeRecreateCommands(),hides=fixtureWakeHideCalls;
+ check(before.value("requestId",0ull)!=0&&before.value("locked",false),"actual settings consumer established a live nonzero player ticket");
+ const auto pipeName=W2U(g_inputHostPipeName);const auto pid=GetProcessId(g_inputHostProcess);
+ const auto generation=currentPowerGeneration()+1;g_powerGeneration=generation;
+ FixturePsExitSignals signals(g_inputHostPipeName);fixturePsExitSignals=&signals;
+ inputHostRequestPsWakeRearm(generation,"offline-held-managed-ownership");
+ check(g_psWakeRearmRequested.load(),"the original PS wake request is armed before crossing the pipe");
+ {FixturePsReadScope read;fixturePsExitSkipPostProbeAdmission=skipPostProbeAdmission;fullPipePsWakeStep();fixturePsExitSkipPostProbeAdmission=false;}fixturePsExitSignals=nullptr;
+ const auto query=fixturePsExitQuery,ack=fixturePsExitAck;
+ check(query.is_object()&&ack.is_object()&&ack.value("ok",false)&&ack.value("status",std::string{})=="target-ownership"&&
+   query.contains("requestId")&&query["requestId"]==ack.value("requestId",json{})&&query.contains("sequence")&&query["sequence"]==ack.value("sequence",json{}),
+   "complete valid ownership ACK for the actual outstanding request crosses the private pipe after exit");
+ const bool receiptAdmitted=g_psEndpointOwnership.snapshot().valid;
+ bool deferred=false;for(const auto& e:fixtureEvents)if(e.value("event",std::string{})=="ps-wake-rearm-deferred"){
+  const auto& detail=e.at("detail");
+  if(detail.value("reason",std::string{})!="admission-changed-during-probe"||detail.value("queryRequestId",0ull)!=before.value("requestId",0ull))continue;
+#ifdef YMCC_FIXTURE_PS_EXIT_RECEIPT_RECHECK
+  deferred=!receiptAdmitted&&!detail.value("probeComplete",true)&&detail.value("probeKind",std::string{})=="unknown"&&detail.value("probeReadError",0ul)==ERROR_NOT_READY;
+#else
+  deferred=detail.value("probeComplete",false);
+#endif
+  if(deferred)break;
+ }
+ bool decisionReached=false,downstreamRefused=false;
+ for(const auto& e:fixtureEvents){
+  const auto event=e.value("event",std::string{});
+  if(event!="ps-wake-rearm-attempt"&&event!="ps-wake-rearm-deferred")continue;
+  const auto& detail=e.at("detail");
+  if(detail.value("queryRequestId",0ull)!=before.value("requestId",0ull))continue;
+  if(event=="ps-wake-rearm-attempt"&&detail.value("ownershipComplete",false)&&detail.value("probeKind",std::string{})=="absent")decisionReached=true;
+  if(event=="ps-wake-rearm-deferred"&&detail.value("reason",std::string{})=="admission-changed-before-rebuild")downstreamRefused=true;
+ }
+ check(deferred&&fullPipeSpawnCount==spawns&&fullPipeRecreateCommands()==recreates&&fixtureWakeHideCalls==hides&&!g_psWakeRearmRequested.load(),
+   "actual PS wake consumer rejects the late observation without spawn, recreate, hide or rearm");
+ check(fullPipeProtectionState()==before,"late ownership response cannot advance or renew the original player ticket");
+ cases.back()["query"]=query;cases.back()["lateAck"]=ack;cases.back()["playerProtectionBefore"]=before;
+ check(exitCleanupThreadProc(fixturePsExitWindow())==0,"original controller worker sequence reaches its terminal return");
+ const auto child=fullPipeChildOutcome();
+ check(child.value("nativeObservedProcessExit",false)&&child.value("nativeObservedExitCode",999)==0&&child.value("finalCleanupOk",false)&&
+   !child.value("hasController",true)&&!child.value("hasContext",true)&&child.value("nativeObserverCloseSucceeded",false)&&
+   child.value("processId",0u)==pid&&child.value("pipeName",std::string{})==pipeName&&child.value("faultTriggered",false),
+   "the same managed Host releases its objects and exits naturally");
+ std::vector<std::string> stages;
+ for(const auto& e:child.value("observations",json::array()))if(e.contains("command")&&e.at("command")=="QUERY_TARGET_OWNERSHIP"&&
+   e.value("sequence",json{})==query.value("sequence",json{})){
+  const auto kind=e.value("kind",std::string{});
+  if(kind=="handle-end"||kind=="exit-receipt-held"||kind=="exit-receipt-released"||kind=="pipe-write-begin"||kind=="pipe-write-end")stages.push_back(kind);
+ }
+ check(stages==std::vector<std::string>{"handle-end","exit-receipt-held","exit-receipt-released","pipe-write-begin","pipe-write-end"},
+   "the actual child handles the same query and writes its held reply exactly once after release");
+ const auto power=child.value("powerOwnershipAfterFinalCleanup",json::object());
+ bool powerReturned=power.value("bound",false)&&power.value("terminal",false);
+ for(const auto* k:{"currentSlots","retiredSlots","currentBorrowers","retiredBorrowers","pendingLocalReturns","localReturnFailures","admissionFailures","cancelFailures","settlementExceptions","settlementRejected","settlementUnknown"})powerReturned=powerReturned&&power.value(k,1)==0;
+ for(const auto* k:{"importInFlight","commandBorrower","closeRefreshBorrower","originalHasBorrowers","originalLocalReturnPending"})powerReturned=powerReturned&&!power.value(k,true);
+ check(powerReturned,"the same managed Host exits with no current or retired power leases, borrowers, or unsettled returns");
+ check(inputCaptureExitOwnershipReleased()&&inputHostExitLocalOwnershipReleased()&&!g_inputHostProcess&&!g_inputHostPrimaryThread&&
+   !g_inputHostServerPipe&&fullPipeChildObservers.empty()&&g_inputHostLifecycleWorkQueue.empty()&&!g_inputHostLifecycleWorkRequested.load()&&
+   !g_inputHostLifecycleWorkInFlight.load()&&std::strcmp(g_exitCleanupStage.load(),"finished")==0,
+   "controller exit sequence returns its tracked producer, Host, pipe, observers and queue");
+ cases.back()["managedReceipt"]=child;
+ cases.back()["exitSessionId"]=g_exitSessionId;cases.back()["deferredAfterLateAck"]=deferred;
+ cases.back()["receiptAdmittedAfterExit"]=receiptAdmitted;
+ cases.back()["postProbeDecisionReached"]=decisionReached;cases.back()["downstreamRebuildRefused"]=downstreamRefused;
+ cases.back()["observedManagedStages"]=stages;
+ cases.back()["addedSpawns"]=fullPipeSpawnCount-spawns;cases.back()["addedRecreates"]=fullPipeRecreateCommands()-recreates;
+ cases.back()["afterStop"]=state();cases.back()["nativeEvents"]=fixtureEvents;
+ cases.back()["passed"]=failures.size()==failuresBefore;fixtureFullPipe=false;
+}
+#endif
 static void fullPipeEndReadonlyPsOwner(){
  fixturePsProbeActive=false;
  if(g_inputHostProcess){
@@ -1704,8 +1848,52 @@ struct WakeKeptSourceFamilyControl { const char* family;const char* variant;int 
 static constexpr WakeKeptSourceFamilyControl wakeKeptSourceFamilyControls[]={
  {"GPD","current",2},{"GPD","pending-then-current",2},
  {"MSI","current",0},{"MSI","pending-then-current",0},{"PC","source-free",3},
- {"GPD","expired-then-current",2,true}
+ {"GPD","expired-then-current",2,true},{"ROG","public-ready",1,true}
 };
+static void fullPipeDispatchPublicReady(unsigned long long generation){
+ namespace power=ymcc::sleeppower;
+ namespace rearm=ymcc::inputHost::msiPowerWork;
+ const auto deliver=[] {
+  // Controlled publication ingress. The projection, Reader, revocations and
+  // Input delivery belong to the original Native owner.
+  g_sharedPowerPublicationRevision.fetch_add(1);
+  g_sharedPowerProjectionPending.store(true);
+  projectSharedPowerLifecycle(nullptr);
+ };
+ inputHostRequestPowerRearm(generation,"offline-source-wake-resume");
+ const auto original=rearm::first;
+ const auto sequence=g_inputHostSequence;
+ check(original.bound&&!original.deliveryAuthorized&&!original.queued&&original.deadline>original.signal&&
+  original.power==generation&&g_inputHostPowerRearmRequested.load()&&g_inputHostPowerAdmissionRevoked.load(),
+  "original Input work is retained without permission before public Ready delivery");
+ const auto tick=GetTickCount64();
+ const auto pending=g_sleepPowerDispatch.window(PBT_APMSUSPEND,tick);
+ g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;
+ deliver();inputHostConsumePowerRequests();
+ check(pending&&g_sleepPowerDispatch.pendingSuspend()&&rearm::first.wire==original.wire&&
+  !rearm::first.deliveryAuthorized&&!rearm::consumed&&g_inputHostLifecycleWorkQueue.empty()&&g_inputHostSequence==sequence,
+  "pending public suspend does not deliver or consume Input rearm and sends no pipe command");
+ g_sleepPowerDispatch.complete(pending,tick);
+ deliver();
+ power::SharedPowerV1 ready;
+ const bool known=captureSharedPowerLifecycle(ready);
+ const auto delivered=rearm::first;
+ check(known&&ready.observedNotificationSequence>original.origin.observedNotificationSequence&&
+  power::samePowerRevocation(delivered.admitted,ready)&&delivered.admitted.publicationRevision==ready.publicationRevision&&
+  delivered.deliveryAuthorized&&delivered.wire==original.wire&&delivered.request==original.request&&
+  delivered.deadline==original.deadline&&delivered.epoch==original.epoch&&g_inputHostPowerAdmissionRevoked.load(),
+  "same Reader and original dispatcher deliver the exact Ready tuple without renewing Input work");
+ inputHostConsumePowerRequests();projectSharedPowerLifecycle(nullptr);inputHostConsumePowerRequests();
+ check(rearm::first.queued&&!rearm::consumed&&g_inputHostLifecycleWorkQueue.size()==1&&
+  g_inputHostSequence==sequence&&g_inputHostPowerAdmissionRevoked.load(),
+  "same publication admits one original queue item and no writer before the lifecycle claim");
+ fullPipeDrainQueuedLifecycle();fullPipeAssertSharedRearmClaim(generation);
+ check(rearm::first.wire==original.wire&&rearm::first.deadline==original.deadline,
+  "actual final claim consumes the retained request at its original deadline");
+ cases.back()["publicReady"]={{"known",known},{"generation",ready.generation},{"suspendSerial",ready.suspendSerial},
+  {"notification",ready.observedNotificationSequence},{"publication",ready.publicationRevision},{"phase",ready.phase},{"flags",ready.flags},
+  {"requestId",original.request},{"signal",original.signal},{"deadline",original.deadline},{"hostEpoch",original.epoch}};
+}
 static bool fixtureWakeSourceSelectionKnown(const std::string& only){
  if(only.empty())return true;
  for(const auto* variant:wakeKeptSourceVariants)if(only==std::string("ROG:")+variant)return true;
@@ -1721,6 +1909,7 @@ static void fullPipeWakeKeptSourceSelectedCases(const std::string& only={}){
  for(const auto& parameter:selected){const int family=parameter.index;const bool sourceFree=family==3;const std::string variant=parameter.variant;
   if(only.empty()?parameter.directedOnly:only!=std::string(parameter.family)+":"+variant)continue;
   const bool lateRecovery=variant=="expired-then-current";
+  const bool publicReady=variant=="public-ready";
   const auto lateStage=[&](const char* stage){if(lateRecovery)std::cerr<<"GPD_WAKE_LATE_STAGE "<<stage<<'\n';};
   const auto failureBefore=failures.size();
   seed();fixtureFullPipe=true;fullPipeFault="none";g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;
@@ -1766,7 +1955,8 @@ static void fullPipeWakeKeptSourceSelectedCases(const std::string& only={}){
   if(lateRecovery)g_sharedPowerSuspendSerial.fetch_add(1,std::memory_order_acq_rel);
   lateStage("suspend-rearm");
   inputHostRequestPowerRelease(generation,"offline-source-wake-suspend");inputHostConsumePowerRequests();fullPipeDrainQueuedLifecycle();
-  g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;inputHostRequestPowerRearm(generation,"offline-source-wake-resume");fullPipeDeliverSharedPowerReady();inputHostConsumePowerRequests();fullPipeDrainQueuedLifecycle();
+  if(publicReady)fullPipeDispatchPublicReady(generation);
+  else {g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;inputHostRequestPowerRearm(generation,"offline-source-wake-resume");fullPipeDeliverSharedPowerReady();inputHostConsumePowerRequests();fullPipeDrainQueuedLifecycle();}
   const auto publishSample=[&](bool live,bool stable,bool stale){
    auto sample=fullPipeReadNow(family);sample.live=live;sample.readContextStable=stable;
    if(stale){sample.readStartedTick=sample.readCompletedTick=GetTickCount64()-ymcc::kVirtualOutputSourceWindowMaxAgeMs-1;}
@@ -1897,7 +2087,7 @@ static void fullPipeWakeKeptSourceSelectedCases(const std::string& only={}){
   {FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
   fixtureWakeBeforeHideReturn={};
   fixtureWakeAfterSourceQuery={};
-  const bool positive=sourceFree||lateRecovery||variant=="current"||variant=="publication-only";
+  const bool positive=sourceFree||lateRecovery||publicReady||variant=="current"||variant=="publication-only";
   const bool completed=runtime::episode.completed&&g_wakeKeptTargetGeneration.load()==generation&&!g_wakeHoldPhysicalUnhide.load();
   check(positive?completed:(!completed&&g_wakeKeptTargetGeneration.load()==priorKept&&g_wakeHoldPhysicalUnhide.load()),
    "only current fresh source and current owner/power may publish kept wake completion");
@@ -1918,6 +2108,18 @@ static void fullPipeWakeKeptSourceSelectedCases(const std::string& only={}){
   if(notification)g_sleepPowerDispatch.complete(notification,GetTickCount64());
   check(g_inputHostProcess&&GetProcessId(g_inputHostProcess)==pid&&g_inputHostEpoch==epoch&&g_inputHostRunId==run&&fullPipeSpawnCount==spawns&&fullPipeRecreateCommands()==recreates,
    "source proof and cancellation cannot recreate or replace the original Host");
+  if(publicReady){
+   auto fresh=publishSample(true,true,false);const auto before=g_inputHostSequence;
+   const auto ack=fullPipeSubmitSource(fresh,true,false);
+   check(ack.value("hostSubmission","")=="frame-accepted"&&!ack.value("focusIsolationSemanticNeutral",true)&&
+    fresh.readPowerGeneration==generation&&fresh.sharedPower.generation==generation&&sharedPowerLifecycleCurrent(fresh.sharedPower)&&
+    fresh.sharedPower.publicationRevision==cases.back()["publicReady"]["publication"].get<uint64_t>()&&g_inputHostSequence==before+1,
+    "current frame after public Ready crosses the original managed pipe on the same generation");
+   cases.back()["publicReadyFrame"]=ack;
+   cases.back()["publicReadyFrame"]["pipeSequence"]=g_inputHostSequence;
+   cases.back()["publicReadyFrame"]["sessionRunId"]=run;
+   cases.back()["publicReadyFrame"]["sessionEpoch"]=epoch;
+  }
   if(lateRecovery){
    fullPipeVerificationStep();const auto terminal=g_virtualStartProtection.view(startProtectionClock);
    json final=nullptr,wake=nullptr;unsigned finals=0,lateCompletions=0;std::size_t finalAt=0,wakeAt=0;
@@ -1952,6 +2154,29 @@ static void fullPipeWakeKeptSourceSelectedCases(const std::string& only={}){
   fullPipeWaitForPlayerLock(current,closing);check(writeTarget(current,closing).value("ok",false),"source-wake cleanup commits actual private OFF");inputCaptureRefreshRealStickSettings(true);
   inputHostStop("virtual-target-disabled");fullPipeDrainQueuedLifecycle();cases.back()["managedReceipt"]=fullPipeChildOutcome();
   check(fullPipeChildObservers.empty()&&!g_inputHostProcess,"source-wake returns all owned managed observers and Host handle");
+  if(publicReady){
+   const auto& child=cases.back()["managedReceipt"];
+   const auto& frame=cases.back()["publicReadyFrame"];
+   const auto seq=frame.value("pipeSequence",0ULL);
+   unsigned received=0,replied=0;
+   for(const auto& observation:child.value("observations",json::array())){
+    if(observation.value("command",json())!="SUBMIT_FRAME"||observation.value("sequence",json())!=seq)continue;
+    if(observation.value("kind",json())=="command-decoded"){
+     const auto data=observation.value("data",json());
+     if(data.is_object()&&data.value("runId",json())==frame.at("sessionRunId")&&data.value("epoch",json())==frame.at("sessionEpoch"))++received;
+    }
+    if(observation.value("kind",json())=="pipe-write-end")++replied;
+   }
+   check(seq&&received==1&&replied==1,"managed receipt decodes and answers the exact Native frame sequence on the retained session");
+   check(child.value("nativeObservedProcessExit",false)&&child.value("nativeObservedExitCode",999)==0&&
+    child.value("finalCleanupOk",false)&&!child.value("hasController",true)&&!child.value("hasContext",true),
+    "actual OFF disposes managed controller and context and privately exits without force");
+   g_sharedPowerPublicationRevision.fetch_add(1);g_sharedPowerProjectionPending.store(true);
+   projectSharedPowerLifecycle(nullptr);inputHostConsumePowerRequests();fullPipeDrainQueuedLifecycle();
+   check(fullPipeSpawnCount==spawns&&fullPipeRecreateCommands()==recreates&&!g_inputHostProcess&&!g_inputHostPrepared&&
+    !g_realStickTest.virtualTargetEnabled&&fullPipeChildObservers.empty()&&g_inputHostLifecycleWorkQueue.empty(),
+    "a later public Ready projection cannot revive the returned explicit OFF owner");
+  }
   cases.back()["passed"]=failures.size()==failureBefore;fixtureFullPipe=false;
  }
 }
@@ -1961,9 +2186,12 @@ static constexpr const char* gpdExpiredFirstOnFullCycleTerminals[]={"off","exit"
 #ifdef YMCC_FIXTURE_GPD_NATIVE_WRITER_RETURN
 #include "gpd_native_writer_return.inc"
 #endif
-static void fullPipeGpdExpiredFirstOnSelectedCases(bool nativeWriterReturn=false){
+static void fullPipeGpdExpiredFirstOnSelectedCases(bool nativeWriterReturn=false,bool settledFirstOn=false){
 #ifndef YMCC_FIXTURE_GPD_NATIVE_WRITER_RETURN
  if(nativeWriterReturn)throw std::runtime_error("gpd-native-writer-return-not-compiled");
+#endif
+#ifndef YMCC_FIXTURE_GPD_SETTLED_FIRST_ON
+ if(settledFirstOn)throw std::runtime_error("gpd-settled-first-on-not-compiled");
 #endif
  namespace wake=ymcc::inputHost::wakeExecutionRuntime;
  for(const std::string terminal:gpdExpiredFirstOnFullCycleTerminals){
@@ -1971,13 +2199,14 @@ static void fullPipeGpdExpiredFirstOnSelectedCases(bool nativeWriterReturn=false
   g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;
   g_sleepRecoveryOutputWanted=true;g_machineIdentity.family=YmccFamily::Gpd;
   g_machineIdentity.manufacturer="GPD";g_machineIdentity.product="G1618-05";
+  if(settledFirstOn)g_machineIdentity.deviceClass="HandheldCompanion.Devices.GPDWin5";
   g_msiDinput.enabled=false;g_msiDinputSourceValid=false;g_msiMainSourceRevision=1;
   g_msiFeedbackModeGeneration=1;g_inputShortcutRuntime.clear();
   g_externalPriorityVirtualSuspended=false;g_inputCaptureStop=false;reg_fs();
   {std::lock_guard<std::mutex> observation(fixtureGpdFullCycleObservationMx);fixtureGpdFullCycleSourceReads=json::array();}
   fixtureGpdFullCycleObserving.store(true,std::memory_order_release);
-  cases.push_back({{"name","GPD/first-on-expired-full-cycle/"+terminal},{"terminal",terminal},
-    {"realManagedPipe",true},{"completeCycleProven",false},{"selectedParameter","gpd-expired-first-on-full-cycle"},
+  cases.push_back({{"name",(settledFirstOn?"GPD/first-on-settled-full-cycle/":"GPD/first-on-expired-full-cycle/")+terminal},{"terminal",terminal},
+    {"realManagedPipe",true},{"completeCycleProven",false},{"selectedParameter",settledFirstOn?"gpd-settled-first-on-full-cycle":"gpd-expired-first-on-full-cycle"},
     {"controlledModel","G1618-05"},{"physicalSdkAndStandardReadmission","existing controlled fixture leaves"}});
   const auto spawns=fullPipeSpawnCount;const auto receipts=fullPipeReceipts.size();
   const auto queueDepth=[](){std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);return g_inputHostLifecycleWorkQueue.size();};
@@ -1989,6 +2218,8 @@ static void fullPipeGpdExpiredFirstOnSelectedCases(bool nativeWriterReturn=false
   check(sgWriteFileAtomic(YM_SETTINGS_FILE,base.dump()),"GPD full cycle seeds only its private disabled input document");
   auto original=g_virtualStartProtection.view(startProtectionClock);
   auto generation=currentPowerGeneration();auto armed=wake::episode;bool initialSourceObserved=false;
+  std::shared_ptr<ymcc::nativeRefreshWriter::Session> donor;
+  std::uint64_t firstDeadline=0;
 #ifdef YMCC_FIXTURE_GPD_NATIVE_WRITER_RETURN
   std::unique_ptr<FullPipeGpdNativeWriterReturn> nativeWriter;
   if(nativeWriterReturn){
@@ -2004,6 +2235,59 @@ static void fullPipeGpdExpiredFirstOnSelectedCases(bool nativeWriterReturn=false
   check(original.requestId&&original.phase=="pending"&&original.remainingMs==fullPipeUserMaxMs&&
     inputHostConfiguredPersona()=="elite"&&g_realStickTest.virtualTargetEnabled,
     "GPD original first ON owns one real unchanged thirty-second player ticket");
+#ifdef YMCC_FIXTURE_GPD_SETTLED_FIRST_ON
+  if(settledFirstOn){
+   namespace queued=ymcc::inputHost::queuedPlayerStart;
+   namespace writer=ymcc::nativeRefreshWriter;
+   const auto require=[](bool ok,const char* why){check(ok,why);if(!ok)throw std::runtime_error(why);};
+   firstDeadline=playerDeadline;
+   fixtureGpdPostHideFullStart=true;fixtureGpdHandoffTransferred=fixtureGpdHandoffReturnProven=false;
+   g_startupInputState=ymcc::StartupInputState::Ready;g_hardwareWriteGate=true;
+   g_wakeHoldPhysicalUnhide=true;g_hidHideLastStartAttemptTick=0;
+   const std::wstring foreign=L"HID\FOREIGN-PREHIDDEN\OTHER-PORT";
+   require(!g_msiNativeForegroundLease.active&&!g_msiNativeForegroundCyclePending,"settled replay has no unrelated foreground owner");
+   auto& lease=g_msiNativeForegroundLease;
+   lease.active=true;lease.profile=ymcc::nativeForeground::Profile::Gpd;
+   lease.power=generation;lease.suspendSerial=g_sharedPowerSuspendSerial.load();
+   lease.root=fixtureGpdPostHideRoot();lease.locations={fixtureGpdPostHideLocation()};
+   lease.owned={U2W(lease.root),U2W(fixtureGpdPostHideGame())};
+   lease.before.valid=true;lease.before.cloaking=true;lease.before.inverseRaw="off";
+   lease.before.hidden={foreign};lease.before.applications={hidHideCurrentModulePath()};
+   lease.diagnosticSelectedPathsComplete=true;lease.virtualHandoffHeld=true;lease.virtualHandoffRequest=original.requestId;
+   lease.cycleIssued=lease.cycleAccepted=true;lease.helperExitCode=0;lease.helperGameTarget=fixtureGpdPostHideGame();
+   lease.retiredNativeWriterAttempt="fixture-replayed-settled-writer";
+   g_msiForegroundTestIo.locations=[](const std::string& root){return root==fixtureGpdPostHideRoot()?
+    std::vector<std::wstring>{fixtureGpdPostHideLocation()}:std::vector<std::wstring>{};};
+   donor=std::make_shared<writer::Session>(writer::Session::open(nativeRefreshWriterRecordPath(),inputHostTargetReturnMachineBinding()));
+   const auto parent=ymcc::targetReturn::process::capture(GetCurrentProcess());
+   require(donor->ready()&&parent&&!donor->record()->nativeVisibility&&!donor->record()->active,"current private native visibility Session opens with no inherited duty");
+   writer::Visibility duty;duty.transactionId="settled-first-on-"+terminal;duty.parent=*parent;
+   duty.physicalRoot=lease.root;duty.locationPaths={W2U(fixtureGpdPostHideLocation())};
+   duty.paths={{lease.root,writer::VisibilityPathPhase::Reserved},{fixtureGpdPostHideGame(),writer::VisibilityPathPhase::Reserved}};
+   require(donor->reserveVisibility(donor->record()->revision,duty),"replayed native donor owns its actual durable hide record");
+   for(const auto& leaf:duty.paths)require(donor->markVisibilityMayHaveIssued(donor->record()->revision,duty.transactionId,leaf.instanceId),"replayed settled donor records each owned path");
+   lease.nativeVisibilitySession=donor;lease.nativeVisibilityTransaction=duty.transactionId;
+   fixtureXinputSourceLive=true;
+   cases.back()["preBusSource"]=fullPipeReadPhysicalSourceForElite(true);
+   fixtureGpdTransferSourceAtEnsure=[&](){initialSourceObserved=true;
+    cases.back()["initialSourceDiscovery"]=fullPipeReadPhysicalSourceForElite(false,true);};
+   fixtureGpdOriginalBusAdmission();
+   std::string wire;
+   {std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);
+    if(g_inputHostLifecycleWorkQueue.size()==1)wire=fixtureLifecycleWorkReason(g_inputHostLifecycleWorkQueue.front());}
+   queued::Work work;
+   cases.back()["firstOnBus"]={{"wire",wire},{"requestId",original.requestId},{"originalDeadline",firstDeadline},{"power",generation},
+    {"wakeHoldBeforeWorker",g_wakeHoldPhysicalUnhide.load()},{"queueDepth",queueDepth()},{"hostSpawnsBeforeWorker",fullPipeSpawnCount-spawns}};
+   require(queued::decode(wire,work)&&work.bound&&work.request==original.requestId&&work.deadline==firstDeadline&&
+    work.power==generation&&work.persona=="elite"&&work.reason=="initial-target-admission"&&
+    g_wakeHoldPhysicalUnhide&&g_inputHostLifecycleWorkRequested&&fullPipeSpawnCount==spawns,
+    "actual BUS enqueues exactly one original live ON without clearing hold or creating Host");
+   fixtureGpdOriginalBusAdmission();
+   require(queueDepth()==1,"another BUS pass cannot duplicate the original queued ON");
+   {FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
+  }else
+#endif
+  {
   advance(original.remainingMs+1);
   const auto expired=g_virtualStartProtection.view(startProtectionClock);
   check(expired.requestId==original.requestId&&expired.phase=="expired"&&!expired.locked&&!expired.remainingMs&&
@@ -2026,9 +2310,10 @@ static void fullPipeGpdExpiredFirstOnSelectedCases(bool nativeWriterReturn=false
   check(g_inputHostLifecycleWorkRequested.load(),"GPD ordinary wake consumer reaches the actual serialized lifecycle queue");
   {FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
   }
+  }
   const bool started=g_inputHostProcess&&g_inputHostHello&&g_inputHostPrepared&&g_inputHostNeutralized;
   check(started&&initialSourceObserved&&fullPipeSpawnCount==spawns+1&&fullPipeChildObservers.size()==1,
-    "GPD expired first ON starts exactly one real managed Host through ordinary wake and actual Start");
+    settledFirstOn?"GPD original live ON starts exactly one SDK-free managed Host through the real worker":"GPD expired first ON starts exactly one real managed Host through ordinary wake and actual Start");
   if(!started){cases.back()["afterStart"]=state();cases.back()["nativeEvents"]=fixtureEvents;
     cases.back()["trace"]=g_startEntrySeam.trace;fixtureGpdFullCycleObserving=false;fixtureFullPipe=false;
     throw std::runtime_error("gpd-expired-first-on-full-managed-start-failed");}
@@ -2054,6 +2339,19 @@ static void fullPipeGpdExpiredFirstOnSelectedCases(bool nativeWriterReturn=false
     "GPD actual post-hide consumer reads fresh current-generation source after HELLO and before target PREPARE");
   unsigned attempts=0;for(const auto& event:fixtureEvents)if(event.value("event","")=="input-host-wake-execution"&&event["detail"].value("stage","")=="start-attempt")++attempts;
   const auto afterStart=g_virtualStartProtection.view(startProtectionClock);
+  if(settledFirstOn){
+   const auto boundTicket=g_inputHostStartProtectionBoundTicket.load(std::memory_order_acquire);
+   const bool originalOwner=afterStart.requestId==original.requestId&&boundTicket==original.requestId&&
+    startProtectionClock<firstDeadline&&startProtectionClock+afterStart.remainingMs==firstDeadline&&
+    !afterStart.fallbackAttempts&&!attempts&&!g_inputHostRecoveryEpisodeAttempts.load();
+   const bool transferred=fixtureGpdHandoffTransferred&&donor&&donor->ready()&&!donor->record()->nativeVisibility&&
+    !g_hidHideVisibilityJournal.nativeHandoffCycleRequest&&!g_msiNativeForegroundLease.active&&!g_postHideCycleOwned;
+   cases.back()["sameLiveFirstOn"]={{"originalOwner",originalOwner},{"transferred",transferred},{"requestId",afterStart.requestId},
+    {"boundTicket",boundTicket},{"power",generation},{"originalDeadline",firstDeadline},
+    {"remainingMs",afterStart.remainingMs},{"fallbackAttempts",afterStart.fallbackAttempts}};
+   check(originalOwner&&transferred,"the original queue ticket owns Host and completed durable native handoff without wake or fallback");
+   donor.reset();
+  }else
 #ifdef YMCC_FIXTURE_GPD_NATIVE_WRITER_RETURN
   if(nativeWriterReturn){
    const auto recovery=ymcc::inputHost::runtimeRecovery::state.recoveryRequestId;
@@ -2088,10 +2386,11 @@ static void fullPipeGpdExpiredFirstOnSelectedCases(bool nativeWriterReturn=false
   cases.back()["completeCycleProven"]=started&&exactPipe&&freshPostHide&&sameHost&&accepted.value("hostSubmission","")=="frame-accepted";
   std::uint64_t closingRequest=0;
   if(terminal=="off"){
+    if(settledFirstOn)fullPipeWaitForPlayerLock(on,off);
 #ifdef YMCC_FIXTURE_GPD_NATIVE_WRITER_RETURN
     if(nativeWriterReturn)fullPipeWaitForPlayerLock(on,off);
 #endif
-    check(writeTarget(on,off).value("ok",false),"GPD actual user OFF is admitted after its original first ON expired");
+    check(writeTarget(on,off).value("ok",false),settledFirstOn?"GPD actual OFF is admitted as a distinct closing ticket":"GPD actual user OFF is admitted after its original first ON expired");
     inputCaptureRefreshRealStickSettings(true);closingRequest=g_virtualStartProtection.view(startProtectionClock).requestId;
     check(closingRequest!=original.requestId&&!g_realStickTest.virtualTargetEnabled&&g_inputHostLifecycleWorkRequested.load(),
       "GPD OFF creates only its own closing ticket and actual cleanup queue");
@@ -2119,6 +2418,16 @@ static void fullPipeGpdExpiredFirstOnSelectedCases(bool nativeWriterReturn=false
     !g_inputHostStartBlocked&&!g_hidHideVisibilityJournal.active&&fullPipeChildObservers.empty()&&
     !g_inputHostLifecycleWorkRequested.load()&&!g_inputHostLifecycleWorkInFlight.load()&&queueDepth()==0;
   check(released&&forbiddenIo==0,"GPD full cycle returns all native ownership and queued work without real physical SDK IO");
+  if(settledFirstOn){
+   const auto fresh=ymcc::nativeRefreshWriter::Session::open(nativeRefreshWriterRecordPath(),inputHostTargetReturnMachineBinding());
+   const bool writerReleased=fresh.ready()&&!fresh.record()->nativeVisibility&&!fresh.record()->active;
+   bool durableEmpty=false;
+   {std::lock_guard<InputHostMutex> lock(g_inputHostMx);auto& target=ymcc::inputHost::targetReturnRuntime::state;
+    durableEmpty=ymcc::inputHost::targetReturnRuntime::open()&&target.session->record()->obligations.empty();}
+   cases.back()["handoffReturn"]={{"visibilitySettled",fixtureGpdHandoffReturnProven},{"writerReleased",writerReleased},{"durableEmpty",durableEmpty}};
+   check(fixtureGpdHandoffReturnProven&&writerReleased&&durableEmpty,"terminal returns the same visibility responsibilities and private writer Session");
+   fixtureGpdPostHideFullStart=false;
+  }
   cases.back()["lateWork"]={{"resurrected",resurrected},{"ownedStateReleased",released},{"spawnCountBefore",lateSpawns},{"spawnCountAfter",fullPipeSpawnCount}};
   cases.back()["afterStop"]=state();cases.back()["nativeEvents"]=fixtureEvents;cases.back()["trace"]=g_startEntrySeam.trace;
 #ifdef YMCC_FIXTURE_GPD_NATIVE_WRITER_RETURN

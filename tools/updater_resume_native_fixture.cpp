@@ -3,6 +3,9 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#ifdef YMCC_MANIFEST_LOOPBACK
+#include <winsock2.h>
+#endif
 #include <windows.h>
 #include <winhttp.h>
 #include <winioctl.h>
@@ -15,6 +18,8 @@
 #include "update_install_recovery.h"
 #include "version.h"
 #include "shared_game_media_capacity.h"
+#include "sleep_power_state.h"
+#include "sleep_power_revocation.h"
 #include <algorithm>
 #include <atomic>
 #include <cstring>
@@ -61,6 +66,7 @@ struct Scenario {
     bool cancelAtFailure = false;
     bool gameAfterFirstRead = false;
     bool stallHeaders = false, stallBody = false, failCallbackRegistration = false, failCallbackContext = false;
+    size_t stallBodyAfter=SIZE_MAX;
     size_t chunkLimit=SIZE_MAX;
     ULONGLONG readTickMs=0;
 };
@@ -72,12 +78,13 @@ static std::atomic<bool> g_poolCancel{false};
 static std::mutex g_updateOperationMtx;
 static ymcc::update_download::Control g_updateDownloadControl;
 static std::atomic<bool> g_updateBackgroundAllowed{true},g_updateGameDetected{false};
-static ULONGLONG fixtureTick = 1000;
+static std::atomic<ULONGLONG> fixtureTick{1000};
 static std::atomic<ULONGLONG> g_updateGameObservationTick{1000};
 static fspath::path fixtureRoot, dataRoot;
 static std::vector<json> progressEvents;
 static int metadataWrites = 0, failMetadataWrite = 0;
 static HANDLE fixtureHeadersEvent=nullptr;
+static HANDLE fixtureSyncManifestRelease=nullptr;
 static int fixtureClosedHandles=0;
 static WINHTTP_STATUS_CALLBACK fixtureCallback=nullptr;
 static DWORD_PTR fixtureCallbackContext=0;
@@ -103,7 +110,11 @@ static BOOL fakeWinHttpSendRequest(HINTERNET handle,LPCWSTR,DWORD,LPVOID,DWORD,D
     if(fixtureCallback&&context)fixtureCallback(handle,context,WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE,nullptr,0);return TRUE;
 }
 static BOOL fakeWinHttpReceiveResponse(HINTERNET handle,LPVOID) {
-    if(current.stallHeaders){if(fixtureHeadersEvent)SetEvent(fixtureHeadersEvent);return TRUE;}
+    if(current.stallHeaders){
+        if(fixtureHeadersEvent)SetEvent(fixtureHeadersEvent);
+        if(fixtureSyncManifestRelease&&!fixtureCallbackContext&&WaitForSingleObject(fixtureSyncManifestRelease,3000)!=WAIT_OBJECT_0){SetLastError(ERROR_WINHTTP_TIMEOUT);return FALSE;}
+        return TRUE;
+    }
     if(fixtureCallback&&fixtureCallbackContext)fixtureCallback(handle,fixtureCallbackContext,WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE,nullptr,0);return TRUE;
 }
 static BOOL fakeWinHttpCloseHandle(HINTERNET handle) {
@@ -131,7 +142,7 @@ static BOOL fakeWinHttpQueryDataAvailable(HINTERNET, LPDWORD available) {
     return TRUE;
 }
 static BOOL fakeWinHttpReadData(HINTERNET, LPVOID output, DWORD wanted, LPDWORD read) {
-    if(current.stallBody){if(fixtureHeadersEvent)SetEvent(fixtureHeadersEvent);return TRUE;}
+    if(current.stallBody||cursor>=current.stallBodyAfter){if(fixtureHeadersEvent)SetEvent(fixtureHeadersEvent);return TRUE;}
     if(cursor>=current.failAfter){if(current.cancelAtFailure)g_poolCancel=true;SetLastError(ERROR_WINHTTP_CONNECTION_ERROR);return FALSE;}
     const DWORD bytes=static_cast<DWORD>((std::min)({static_cast<size_t>(wanted),current.body.size()-cursor,current.failAfter-cursor,current.chunkLimit}));
     fixtureTick+=current.readTickMs;
@@ -141,6 +152,40 @@ static BOOL fakeWinHttpReadData(HINTERNET, LPVOID output, DWORD wanted, LPDWORD 
 }
 static ULONGLONG fakeGetTickCount64() { return ++fixtureTick; }
 static void fakeSleep(DWORD ms) { fixtureTick += ms; }
+#ifdef YMCC_MANIFEST_LOOPBACK
+static INTERNET_PORT fixtureLoopbackPort=0;
+static std::atomic<unsigned> fixtureRealHeaderWaits=0,fixtureRealBodyWaits=0,fixtureRealCloses=0,fixtureRealFinalCallbacks=0;
+static std::atomic<unsigned> fixtureRealHeaderStarts=0,fixtureRealSendReturns=0,fixtureRealSendCallbacks=0;
+static std::atomic<WINHTTP_STATUS_CALLBACK> fixtureRealCallback=nullptr;
+static HINTERNET fixtureRealOpen(LPCWSTR agent,DWORD,LPCWSTR,LPCWSTR,DWORD flags){
+    return ::WinHttpOpen(agent,WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,flags);
+}
+static HINTERNET fixtureRealConnect(HINTERNET session,LPCWSTR host,INTERNET_PORT port,DWORD reserved){
+    if(wcscmp(host,L"127.0.0.1")!=0||!fixtureLoopbackPort||port!=fixtureLoopbackPort)throw std::runtime_error("FIXTURE_FORBIDS_NONLOOPBACK");
+    return ::WinHttpConnect(session,host,port,reserved);
+}
+static void CALLBACK fixtureRealStatus(HINTERNET handle,DWORD_PTR context,DWORD status,LPVOID data,DWORD size){
+    if(context&&status==WINHTTP_CALLBACK_STATUS_SENDREQUEST_COMPLETE)++fixtureRealSendCallbacks;
+    if(const auto callback=fixtureRealCallback.load())callback(handle,context,status,data,size);
+    if(context&&status==WINHTTP_CALLBACK_STATUS_HANDLE_CLOSING)++fixtureRealFinalCallbacks;
+}
+static WINHTTP_STATUS_CALLBACK fixtureRealSetCallback(HINTERNET handle,WINHTTP_STATUS_CALLBACK callback,DWORD flags,DWORD_PTR reserved){
+    fixtureRealCallback=callback;return ::WinHttpSetStatusCallback(handle,fixtureRealStatus,flags,reserved);
+}
+static BOOL fixtureRealSend(HINTERNET handle,LPCWSTR headers,DWORD headSize,LPVOID body,DWORD bodySize,DWORD totalSize,DWORD_PTR context){
+    const auto ok=::WinHttpSendRequest(handle,headers,headSize,body,bodySize,totalSize,context);++fixtureRealSendReturns;return ok;
+}
+static BOOL fixtureRealHeaders(HINTERNET handle,LPVOID reserved){++fixtureRealHeaderStarts;const auto ok=::WinHttpReceiveResponse(handle,reserved);++fixtureRealHeaderWaits;return ok;}
+static BOOL fixtureRealRead(HINTERNET handle,LPVOID data,DWORD size,LPDWORD read){const auto ok=::WinHttpReadData(handle,data,size,read);++fixtureRealBodyWaits;return ok;}
+static BOOL fixtureRealClose(HINTERNET handle){const auto ok=::WinHttpCloseHandle(handle);if(ok)++fixtureRealCloses;return ok;}
+#define WinHttpOpen fixtureRealOpen
+#define WinHttpConnect fixtureRealConnect
+#define WinHttpSetStatusCallback fixtureRealSetCallback
+#define WinHttpSendRequest fixtureRealSend
+#define WinHttpReceiveResponse fixtureRealHeaders
+#define WinHttpReadData fixtureRealRead
+#define WinHttpCloseHandle fixtureRealClose
+#else
 #define WinHttpOpen fakeWinHttpOpen
 #define WinHttpConnect fakeWinHttpConnect
 #define WinHttpOpenRequest fakeWinHttpOpenRequest
@@ -155,6 +200,7 @@ static void fakeSleep(DWORD ms) { fixtureTick += ms; }
 #define WinHttpReadData fakeWinHttpReadData
 #define GetTickCount64 fakeGetTickCount64
 #define Sleep fakeSleep
+#endif
 #include "http_request_deadline.h"
 static constexpr DWORD DEFAULT_HTTP_TIMEOUT_MS = 5000;
 static constexpr DWORD UPDATE_HTTP_IO_TIMEOUT_MS = 120000;
@@ -163,18 +209,35 @@ static std::wstring U2W(const std::string& s) { return std::wstring(s.begin(), s
 static std::string W2U(const std::wstring& s) { return std::string(s.begin(), s.end()); }
 static std::string trim_ascii(const std::string& s) { return ymcc::update_download::trimHeader(s); }
 static std::string ascii_lower(std::string s) { for (char& c : s) if (c >= 'A' && c <= 'Z') c += 'a' - 'A'; return s; }
-static void setHttpTimeouts(HINTERNET, DWORD) {}
+#ifdef YMCC_MANIFEST_LOOPBACK
+//__PRODUCTION_MANIFEST_SETUP__
+#else
+static void setHttpTimeouts(HINTERNET, DWORD = DEFAULT_HTTP_TIMEOUT_MS) {}
+#endif
 static std::string downloadWinHttpError(const char* api, DWORD error) { return std::string(api) + ':' + std::to_string(error); }
 static bool isSteamHostName(const wchar_t*) { return false; }
+#ifdef YMCC_MANIFEST_LOOPBACK
+//__PRODUCTION_MANIFEST_CRACK_URL__
+#else
 static bool crackHttpUrl(const std::string& url, URL_COMPONENTS& uc, wchar_t* host, wchar_t*, wchar_t*, std::wstring& objectPath) {
     if (url.rfind("https://", 0) != 0) return false;
     uc.nScheme = INTERNET_SCHEME_HTTPS; uc.nPort = 443; std::wcscpy(host, L"fixture.invalid"); objectPath = L"/YeManCC.zip"; return true;
 }
+#endif
 //__PRODUCTION_ACTIVITY_ADMISSION__
 //__PRODUCTION_RESULT_DECLARATION__
 //__PRODUCTION_TRANSPORT__
 static std::string sha256File(const std::wstring& path);
+static void fixtureCoalescedReady();
+static bool revokeAtHash=false;
+static BOOL fixtureCryptHashData(HCRYPTHASH hash,const BYTE* bytes,DWORD count,DWORD flags){
+    const auto ok=::CryptHashData(hash,bytes,count,flags);
+    if(revokeAtHash){revokeAtHash=false;fixtureCoalescedReady();}
+    return ok;
+}
+#define CryptHashData fixtureCryptHashData
 //__PRODUCTION_SHA256__
+#undef CryptHashData
 static std::wstring app_data_dir() { return dataRoot.wstring(); }
 static std::wstring fixtureExe,POWER_CONTROL_DIR;
 static json fixtureRecoveryJournal=json::object();
@@ -196,9 +259,23 @@ static void writeText(const fspath::path& path, const std::string& bytes) {
 }
 static std::string readText(const fspath::path& path) { std::ifstream file(path, std::ios::binary); return {std::istreambuf_iterator<char>(file), {}}; }
 
-static bool ioShortWrite=false,ioFailFlush=false,ioFailPublish=false,ioCorruptAfterPublish=false;
+static ymcc::sleeppower::SharedPowerV1 fixturePower;
+static std::mutex fixturePowerMutex;
+static ymcc::sleeppower::RevocationMirrors fixturePowerRevocations;
+static void fixtureCoalescedReady(){
+    {std::lock_guard lock(fixturePowerMutex);++fixturePower.suspendSerial;++fixturePower.publicationRevision;}
+    fixturePowerRevocations.revoke();
+}
+static void resetFixturePower(){fixturePower={};fixturePower.generation=61;fixturePower.publicationRevision=1;fixturePower.observedNotificationSequence=3;fixturePower.flags=3;}
+static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,uint32_t size){if(size<sizeof(fixturePower))return 0;std::lock_guard lock(fixturePowerMutex);*out=fixturePower;return 1;}
+[[maybe_unused]] static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& out){return ymcc::sleeppower::capturePower(readSharedSystemPower,out);}
+[[maybe_unused]] static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& value){return ymcc::sleeppower::powerCurrent(readSharedSystemPower,value);}
+[[maybe_unused]] static auto observeSharedPowerRevocation(const ymcc::sleeppower::SharedPowerV1& value){return fixturePowerRevocations.observe(readSharedSystemPower,value);}
+static json fixtureTarget(const json& args){return {{"version",args.at("version")},{"sha256",args.at("sha256")},
+    {"power",{{"generation",fixturePower.generation},{"suspendSerial",fixturePower.suspendSerial},{"observedNotificationSequence",fixturePower.observedNotificationSequence}}}};}
+static bool ioShortWrite=false,ioFailFlush=false,ioFailPublish=false,ioCorruptAfterPublish=false,ioSuspendAtFlush=false;
 static BOOL fixtureAtomicWrite(HANDLE file,LPCVOID data,DWORD count,LPDWORD written,LPOVERLAPPED over){return ::WriteFile(file,data,ioShortWrite&&count>1?count/2:count,written,over);}
-static BOOL fixtureAtomicFlush(HANDLE file){if(ioFailFlush){SetLastError(ERROR_WRITE_FAULT);return FALSE;}return ::FlushFileBuffers(file);}
+static BOOL fixtureAtomicFlush(HANDLE file){if(ioFailFlush){SetLastError(ERROR_WRITE_FAULT);return FALSE;}const auto result=::FlushFileBuffers(file);if(ioSuspendAtFlush){ioSuspendAtFlush=false;++fixturePower.suspendSerial;++fixturePower.publicationRevision;}return result;}
 static BOOL fixtureAtomicMove(LPCWSTR from,LPCWSTR to,DWORD flags){check(belowRoot(from)&&belowRoot(to),"atomic move remains in owned root");if(ioFailPublish){SetLastError(ERROR_ACCESS_DENIED);return FALSE;}const auto result=::MoveFileExW(from,to,flags);if(result&&ioCorruptAfterPublish)writeText(to,"{external-publication-corruption");return result;}
 static BOOL fixtureAtomicReplace(LPCWSTR to,LPCWSTR from,LPCWSTR backup,DWORD flags,LPVOID exclude,LPVOID reserved){check(belowRoot(from)&&belowRoot(to),"atomic replacement remains in owned root");if(ioFailPublish){SetLastError(ERROR_ACCESS_DENIED);return FALSE;}return ::ReplaceFileW(to,from,backup,flags,exclude,reserved);}
 #define WriteFile fixtureAtomicWrite
@@ -210,12 +287,14 @@ static BOOL fixtureAtomicReplace(LPCWSTR to,LPCWSTR from,LPCWSTR backup,DWORD fl
 #undef FlushFileBuffers
 #undef MoveFileExW
 #undef ReplaceFileW
-static bool sgWriteFileAtomic(const std::wstring& path, const std::string& text) {
+static bool fixtureDownloadAtomicFlags(const std::wstring& path,const std::string& text,bool durable,
+    const std::function<void()>& prepare={},const std::function<bool()>& current={}) {
     ++metadataWrites;
     if (failMetadataWrite > 0 && metadataWrites == failMetadataWrite) return false;
     check(belowRoot(path),"actual atomic writer path belongs to fixture");
-    return fixtureAtomicFlags(path,text,true);
+    return fixtureAtomicFlags(path,text,durable,prepare,current);
 }
+static bool sgWriteFileAtomic(const std::wstring& path, const std::string& text) {return fixtureDownloadAtomicFlags(path,text,true);}
 static std::string sgReadFile(const std::wstring& path) { return readText(path); }
 static void updateProgressPost(const json& record) { progressEvents.push_back(record); }
 namespace ymcc::dedicatedmemory { static std::string bootIdentity() { return "fixture-boot-A"; } }
@@ -229,36 +308,45 @@ static constexpr UINT WM_UPDATE_PROGRESS=WM_USER+17;
 //__PRODUCTION_CONFIG_WRITER__
 //__PRODUCTION_CONFIG_READERS__
 
+#define sgWriteFileAtomicFlags fixtureAtomicFlags
 //__PRODUCTION_PREDOWNLOAD_POLICY__
+#undef sgWriteFileAtomicFlags
 static json fixtureTransaction=json::object();
 static json updateStateReadWithTransaction(){return fixtureTransaction.empty()?(progressEvents.empty()?json::object():progressEvents.back()):fixtureTransaction;}
 static std::map<std::string,std::function<json(const json&)>> policyHandlers;
 static void ipc_on(const std::string& name,std::function<json(const json&)> handler) { policyHandlers[name]=std::move(handler); }
-static std::atomic<int> manifestHttpCalls{0};
-static std::promise<void> manifestEntered,manifestRelease;
-static json httpGet(const std::string& url) {
-    ++manifestHttpCalls;
-    if(url=="fixture-held") {
-        manifestEntered.set_value();
-        if(manifestRelease.get_future().wait_for(std::chrono::seconds(5))!=std::future_status::ready)
-            throw std::runtime_error("fixture terminal did not release the old HTTP request");
-    }
-    if(url=="fixture-failure")throw std::runtime_error("fixture HTTP failure");
-    return {{"source",url}};
+//__PRODUCTION_MANIFEST_TRANSPORT__
+static json stampManifest(json args){
+    //__PRODUCTION_MANIFEST_STAMP__
+    return args;
 }
 static void fixtureRegisterPredownload() {
 //__PRODUCTION_PREDOWNLOAD_REGISTRATION__
 //__PRODUCTION_MANIFEST_REGISTRATION__
 //__PRODUCTION_CACHE_REGISTRATION__
 }
-static json fixtureDownloadUpdate(const json& a) {
-//__PRODUCTION_UPDATE_HANDLER__
+static json stampDownload(json args){
+    //__PRODUCTION_DOWNLOAD_STAMP__
+    return args;
 }
+static json fixtureDownloadUpdateReceived(const json& a) {
+#define sgWriteFileAtomicFlags fixtureDownloadAtomicFlags
+//__PRODUCTION_UPDATE_HANDLER__
+#undef sgWriteFileAtomicFlags
+}
+static json fixtureDownloadUpdate(const json& args){return fixtureDownloadUpdateReceived(stampDownload(args));}
 static void reset(const std::string& name, std::vector<Scenario> responses) {
+    resetFixturePower();ioSuspendAtFlush=false;
     dataRoot = fixtureRoot / name; fspath::create_directories(dataRoot / "update");
     POWER_CONTROL_DIR=(dataRoot/"PowerControl").wstring();fixtureRecoveryJournal=json::object();
     scenarios = std::move(responses); requestCount = cursor = 0; requestHeaders.clear(); progressEvents.clear(); fixtureClosedHandles=0;
-    g_poolCancel = false; g_updateBackgroundAllowed=true;g_updateGameDetected=false; g_updateGameObservationTick=fixtureTick; metadataWrites = failMetadataWrite = 0;
+    g_poolCancel = false; g_updateBackgroundAllowed=true;g_updateGameDetected=false;
+#ifdef YMCC_MANIFEST_LOOPBACK
+    g_updateGameObservationTick=GetTickCount64();
+#else
+    g_updateGameObservationTick=fixtureTick.load();
+#endif
+    metadataWrites = failMetadataWrite = 0;
 }
 static Scenario full(const std::string& body, const std::string& etag = "\"A\"") {
     Scenario s; s.body = body; s.headers = {{WINHTTP_QUERY_CONTENT_LENGTH,std::to_string(body.size())},{WINHTTP_QUERY_ETAG,etag}}; return s;
@@ -286,6 +374,21 @@ static int updaterConfigStorm(const std::string& selected = {}) {
     });
     test("future disposable policy cannot block replacement",[&]{reset("storm-policy-future",{});auto document=valid;document["schemaVersion"]=99;putPolicy(document.dump());auto policy=updatePredownloadPolicyRead();policy["enabled"]=true;updatePredownloadPolicyWrite(policy);check(updatePredownloadPolicyRead().at("enabled")==true&&json::parse(policyFile()).at("schemaVersion")==1,"future old policy blocked a valid replacement");});
     test("source read sharing fault returns inactive then retry",[&]{reset("storm-policy-lock",{});putPolicy(valid.dump());HANDLE held=CreateFileW(updatePredownloadPolicyPath().c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);check(held!=INVALID_HANDLE_VALUE,"fixture lock setup");bool safe=false;try{const auto policy=updatePredownloadPolicyRead();safe=policy.at("enabled")==false;}catch(...){safe=false;}CloseHandle(held);check(safe,"read fault throws or opens background");check(updatePredownloadPolicyRead().at("failureCount")==2,"released fault does not reload current policy");});
+    test("successor power scope before atomic publication",[&]{
+        reset("storm-successor-power",{});fixtureRegisterPredownload();
+        auto policy=valid;policy["enabled"]=true;putPolicy(policy.dump());const auto before=policyFile();
+        const auto save=policyHandlers.at("app.updatePredownloadTarget");
+        const json args={{"version",std::to_string(APP_VER_MAJOR+1)+".0.0"},{"sha256",std::string(64,'a')}};
+        const auto queued=fixtureTarget(args);++fixturePower.suspendSerial;++fixturePower.publicationRevision;
+        check(save(queued)==false&&policyFile()==before,"queued successor from previous suspend serial changed the durable policy");
+        check(save(args)==false&&policyFile()==before,"successor without complete public scope was admitted");
+        ioSuspendAtFlush=true;const auto writing=fixtureTarget(args);
+        check(save(writing)==false&&!ioSuspendAtFlush&&policyFile()==before,"successor revoked after flush replaced the previous policy");
+        for(const auto& entry:fspath::directory_iterator(dataRoot/"update"))
+            check(entry.path().filename()=="predownload-policy.json","revoked successor retained a temporary image");
+        const auto current=fixtureTarget(args);++fixturePower.publicationRevision;
+        check(save(current)==true&&updatePredownloadPolicyRead().at("targetVersion")==args.at("version"),"current successor could not persist after revocation");
+    });
     const auto progressFile=[&](const json& document){writeText(updateProgressPath(),document.dump());g_updateProgress=json::object();};
     test("uncommitted started marker is never completion",[&]{reset("storm-started",{});fixtureRecoveryJournal=json::object();progressFile({{"phase","installing"},{"stage","install"},{"version","0.0.99"}});writeText(updateTransactionStatePath(),"{\"phase\":\"started\",\"pid\":1}");const auto value=fixtureActualStateRead();check(value.value("phase",std::string())!="completed","started marker became completed without commit proof");});
     test("writable committed state is not protected completion",[&]{reset("storm-committed",{});fixtureRecoveryJournal=json::object();progressFile({{"phase","installing"},{"version","0.0.99"}});writeText(updateTransactionStatePath(),"{\"phase\":\"committed\",\"version\":\"0.0.99\",\"pid\":1}");check(fixtureActualStateRead().value("phase",std::string())!="completed","unprotected state fabricated completed install");});
@@ -367,7 +470,7 @@ static int updaterWeakNetwork(){
  const json args={{"url","https://fixture.invalid/YeManCC.zip"},{"version",version},{"sha256",hash},{"operationId","weak-network"}};
  json records=json::array();const auto pass=[&](const char* name){records.push_back({{"name",name},{"pass",true}});};
  reset("slow-progressing-body",{});auto slow=full(payload);slow.chunkLimit=1;slow.readTickMs=10000;scenarios={slow};
- const auto began=fixtureTick;fixtureDownloadUpdate(args);
+ const auto began=fixtureTick.load();fixtureDownloadUpdate(args);
  check(requestCount==1&&fixtureTick-began>120000&&readText(dataRoot/"update/package.zip")==payload,"slow progressing transfer restarts at a total deadline or loses bytes");
  check(fixtureClosedHandles==3&&g_updateDownloadControl.status().operation.empty(),"slow success retains transport or operation owner");pass("slow progress survives total duration above per-IO idle timeout");
  for(bool exit:{false,true}){
@@ -388,41 +491,208 @@ static int updaterWeakNetwork(){
  check(exhausted&&requestCount==3&&g_updateDownloadControl.status().operation.empty(),"offline background round does not release ownership after bounded retries");
  scenarios={full(payload)};requestCount=0;cursor=0;requestHeaders.clear();fixtureDownloadUpdate(background);
  check(requestCount==1&&readText(dataRoot/"update/package.zip")==payload,"released network outage cannot self-heal on next admitted round");pass("three offline attempts release ownership and next healthy round recovers");
+ reset("power-revoked-partial",{});
+ auto held=full(payload);held.chunkLimit=4;held.stallBodyAfter=4;scenarios={held,partial(4,payload)};
+ const auto oldRequest=stampDownload(background);
+ fixtureHeadersEvent=CreateEventW(nullptr,TRUE,FALSE,nullptr);check(fixtureHeadersEvent!=nullptr,"owned power-stalled body event setup");
+ std::promise<std::string> retired;auto outcome=retired.get_future();
+ std::jthread old([&]{try{fixtureDownloadUpdateReceived(oldRequest);retired.set_value("success");}catch(const std::exception& e){retired.set_value(e.what());}});
+ const bool entered=WaitForSingleObject(fixtureHeadersEvent,2000)==WAIT_OBJECT_0;
+ fixtureCoalescedReady();
+ const bool returned=outcome.wait_for(std::chrono::milliseconds(650))==std::future_status::ready;
+ if(!returned)g_poolCancel=true;
+ old.join();CloseHandle(fixtureHeadersEvent);fixtureHeadersEvent=nullptr;g_poolCancel=false;
+ const auto terminal=outcome.get();
+ check(entered&&returned&&terminal=="Background download paused for power transition","public power revocation returns pending package transport without renderer cancellation");
+ check(g_updateBackgroundAllowed&&!g_updateGameDetected&&requestCount==1&&fixtureClosedHandles==3&&!fixtureCallbackContext&&g_updateDownloadControl.status().operation.empty(),"background remains idle and old transfer returns every transport owner");
+ check(readText(dataRoot/"update/package.zip.part")==payload.substr(0,4)&&!fspath::exists(dataRoot/"update/package.zip")&&updateProgressRead().value("phase","")=="interrupted","power pause retains exact partial and publishes no ready package");
+ const auto checkpoint=readText(dataRoot/"update/package.zip.part.json");
+ bool oldQueueRejected=false;try{fixtureDownloadUpdateReceived(oldRequest);}catch(const std::exception& e){oldQueueRejected=std::string(e.what())==terminal;}
+ check(oldQueueRejected&&requestCount==1&&readText(dataRoot/"update/package.zip.part.json")==checkpoint,"queued old power request reaches neither download nor sidecar write");
+ const auto sidecar=dataRoot/"update/package.zip.part.json";
+ const auto attributes=GetFileAttributesW(sidecar.c_str());
+ check(attributes!=INVALID_FILE_ATTRIBUTES&&SetFileAttributesW(sidecar.c_str(),attributes|FILE_ATTRIBUTE_READONLY),"mark retained sidecar read-only before fresh admission");
+ auto next=background;next["operationId"]="weak-network-next";fixtureDownloadUpdate(next);
+ check(requestCount==2&&requestHeaders.back().find(L"Range: bytes=4-")!=std::wstring::npos&&readText(dataRoot/"update/package.zip")==payload,"current operation resumes exact accepted range and verifies SHA");
+ pass("coalesced public Ready retires package transfer then resumes retained range with a read-only checkpoint");
+ reset("power-revoked-cache-hash",{});writeText(dataRoot/"update/package.zip.part",payload);
+ auto cache=background;cache["cacheOnly"]=true;revokeAtHash=true;
+ bool hashPaused=false;try{fixtureDownloadUpdate(cache);}catch(const std::exception& e){hashPaused=std::string(e.what())==terminal;}
+ check(hashPaused&&!revokeAtHash&&requestCount==0&&g_updateDownloadControl.status().operation.empty()&&!fspath::exists(dataRoot/"update/package.zip")&&readText(dataRoot/"update/package.zip.part")==payload,"cache-only SHA revocation preserves the unpromoted package");
+ fixtureDownloadUpdate(cache);
+ check(requestCount==0&&readText(dataRoot/"update/package.zip")==payload&&!fspath::exists(dataRoot/"update/package.zip.part"),"current cache-only verification self-heals with no transport");
+ pass("cache-only SHA returns on public revocation and recovers offline");
  const json report={{"status","PASS"},{"records",records},{"checks",checks},{"networkIo",false},{"installedOperation",false},{"actualExtractedConsumer",true}};
  writeText(fixtureRoot/"weak-network.json",report.dump(2));std::cout<<"UPDATER_WEAK_NETWORK "<<report.dump()<<"\n";return 0;
 }
 
 static int updaterManifestSerialization(){
-    reset("manifest-serialization",{});fixtureRegisterPredownload();
+    const std::string payload=R"({"version":"99.0.0","sha256":"fixture-value"})";
+    auto held=full(payload);held.stallHeaders=true;
+    auto bad=full("not-json");
+    reset("manifest-serialization",{held,bad,full(payload)});fixtureRegisterPredownload();
     const auto probe=policyHandlers.at("app.checkUpdate");
-    auto entered=manifestEntered.get_future();
+    const json foreground={{"url","https://fixture.invalid/manifest"}},background={{"url","https://fixture.invalid/manifest"},{"background",true}};
+    const auto openFixtureWait=[] {
+        fixtureHeadersEvent=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+        fixtureSyncManifestRelease=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+        check(fixtureHeadersEvent&&fixtureSyncManifestRelease,"fixture transport events exist");
+    };
+    const auto closeFixtureWait=[] {
+        CloseHandle(fixtureHeadersEvent);CloseHandle(fixtureSyncManifestRelease);
+        fixtureHeadersEvent=fixtureSyncManifestRelease=nullptr;
+    };
+    openFixtureWait();
     json first;
     std::exception_ptr firstError;
-    std::jthread old([&]{try{first=probe({{"url","fixture-held"},{"background",true}});}catch(...){firstError=std::current_exception();}});
-    const bool started=entered.wait_for(std::chrono::seconds(3))==std::future_status::ready;
+    std::jthread old([&]{try{first=probe(stampManifest(background));}catch(...){firstError=std::current_exception();}});
+    const bool started=WaitForSingleObject(fixtureHeadersEvent,2000)==WAIT_OBJECT_0;
     bool declined=false;
-    if(started){try{probe({{"url","fixture-parallel"}});}catch(const std::exception& e){declined=std::string(e.what())=="Update manifest check already running";}}
-    const int heldCalls=manifestHttpCalls.load();
-    manifestRelease.set_value();old.join();
-    check(started&&!firstError&&first.value("source",std::string{})=="fixture-held","background manifest completes after explicit release");
+    if(started){try{probe(stampManifest(foreground));}catch(const std::exception& e){declined=std::string(e.what())=="Update manifest check already running";}}
+    const auto heldCalls=requestCount;
+    if(started&&fixtureCallback&&fixtureCallbackContext)fixtureCallback(reinterpret_cast<HINTERNET>(3),fixtureCallbackContext,WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE,nullptr,0);
+    SetEvent(fixtureSyncManifestRelease);old.join();closeFixtureWait();
+    check(started&&!firstError&&first==json::parse(payload),"background manifest completes after explicit release");
     check(declined&&heldCalls==1,"foreground and background callers share one native manifest slot");
-    bool failed=false;try{probe({{"url","fixture-failure"}});}catch(const std::exception& e){failed=std::string(e.what())=="fixture HTTP failure";}
+    bool failed=false;try{probe(stampManifest(foreground));}catch(const json::parse_error&){failed=true;}
     check(failed,"native slot allows another request after old completion");
-    check(probe({{"url","fixture-current"},{"background",true}}).value("source",std::string{})=="fixture-current"&&manifestHttpCalls==3,
+    check(probe(stampManifest(background))==json::parse(payload)&&requestCount==3&&fixtureClosedHandles==9&&!fixtureCallbackContext,
         "HTTP error returns the native slot and next admitted request succeeds");
-    const json report={{"status","PASS"},{"checks",checks},{"httpCalls",manifestHttpCalls.load()},{"realNetwork",false},{"actualCheckUpdateHandler",true}};
+    for(const bool stallBody:{false,true}) {
+        auto stalled=full(payload);stalled.stallHeaders=!stallBody;stalled.stallBody=stallBody;
+        reset(stallBody?"manifest-stalled-body":"manifest-stalled-headers",{stalled,full(payload)});
+        openFixtureWait();const auto args=stampManifest(stallBody?foreground:background);
+        std::promise<std::string> completion;auto completed=completion.get_future();
+        std::jthread worker([&]{try{probe(args);completion.set_value("success");}catch(const std::exception& e){completion.set_value(e.what());}});
+        const bool pending=WaitForSingleObject(fixtureHeadersEvent,2000)==WAIT_OBJECT_0;
+        const auto queuedBeforeSleep=stampManifest(background);
+        {std::lock_guard lock(fixturePowerMutex);++fixturePower.suspendSerial;++fixturePower.publicationRevision;}
+        fixturePowerRevocations.revoke();
+        const bool settled=completed.wait_for(std::chrono::milliseconds(650))==std::future_status::ready;
+        SetEvent(fixtureSyncManifestRelease);worker.join();closeFixtureWait();const auto result=completed.get();
+        check(pending&&settled&&result=="Update manifest check retired by power transition",
+              stallBody?"public power retirement releases stalled manifest body":"public power retirement releases stalled manifest headers");
+        check(requestCount==1&&fixtureClosedHandles==3&&!fixtureCallbackContext,"retired manifest releases each handle and callback context once");
+        bool queueRetired=false;try{probe(queuedBeforeSleep);}catch(const std::exception& e){queueRetired=std::string(e.what())=="Update manifest check retired by power transition";}
+        check(queueRetired&&requestCount==1,"sleep-retired queued manifest reaches no transport");
+        check(probe(stampManifest(background))==json::parse(payload)&&requestCount==2&&fixtureClosedHandles==6&&!fixtureCallbackContext,
+              "new Ready reuses manifest slot and closes its own transport");
+    }
+    const auto expired=stampManifest(foreground);fixtureTick+=40001;
+    bool deadline=false;try{probe(expired);}catch(const std::exception& e){deadline=std::string(e.what()).find("deadline exceeded (phase=queue)")!=std::string::npos;}
+    check(deadline&&requestCount==2,"manifest uses one native deadline including queue wait");
+    const json report={{"status","PASS"},{"checks",checks},{"realNetwork",false},{"actualCheckUpdateHandler",true},{"actualManifestTransport",true}};
     writeText(fixtureRoot/"manifest-serialization.json",report.dump(2));
     std::cout<<"UPDATER_MANIFEST_SERIALIZATION "<<report.dump()<<"\n";return 0;
 }
 
+#ifdef YMCC_MANIFEST_LOOPBACK
+struct ManifestFixtureSocket {
+    SOCKET value=INVALID_SOCKET;
+    explicit ManifestFixtureSocket(SOCKET owned):value(owned){}
+    ~ManifestFixtureSocket(){reset();}
+    ManifestFixtureSocket(const ManifestFixtureSocket&)=delete;
+    void reset(){if(value!=INVALID_SOCKET){closesocket(value);value=INVALID_SOCKET;}}
+};
+static SOCKET manifestAccept(SOCKET listener) {
+    fd_set readable;FD_ZERO(&readable);FD_SET(listener,&readable);timeval bound{2,0};
+    return select(0,&readable,nullptr,nullptr,&bound)==1?accept(listener,nullptr,nullptr):INVALID_SOCKET;
+}
+static bool manifestReadRequest(SOCKET peer){
+    if(peer==INVALID_SOCKET)return false;
+    DWORD timeout=1000;setsockopt(peer,SOL_SOCKET,SO_RCVTIMEO,reinterpret_cast<const char*>(&timeout),sizeof(timeout));
+    setsockopt(peer,SOL_SOCKET,SO_SNDTIMEO,reinterpret_cast<const char*>(&timeout),sizeof(timeout));
+    char buffer[512];std::string request;const auto deadline=GetTickCount64()+2000;
+    while(request.size()<4096&&GetTickCount64()<deadline){
+        const int count=recv(peer,buffer,sizeof(buffer),0);if(count<=0)return false;
+        request.append(buffer,static_cast<size_t>(count));
+        if(request.find("\r\n\r\n")!=std::string::npos)return request.starts_with("GET /manifest HTTP/");
+    }
+    return false;
+}
+static bool manifestSend(SOCKET peer,const std::string& value){
+    for(size_t offset=0;offset<value.size();){
+        const int count=send(peer,value.data()+offset,static_cast<int>(value.size()-offset),0);
+        if(count<=0)return false;
+        offset+=static_cast<size_t>(count);
+    }
+    return true;
+}
+static int updaterManifestLoopback(){
+    WSADATA socketData{};check(WSAStartup(MAKEWORD(2,2),&socketData)==0,"Winsock start");
+    const struct SocketCleanup {~SocketCleanup(){WSACleanup();}} sockets;
+    const std::string payload=R"({"version":"99.0.0","sha256":"fixture-value"})";
+    json records=json::array();
+    for(const bool stalledBody:{false,true}){
+        reset(stalledBody?"real-async-body":"real-async-headers",{});fixtureRegisterPredownload();
+        ManifestFixtureSocket listener(socket(AF_INET,SOCK_STREAM,IPPROTO_TCP));
+        sockaddr_in bound{};bound.sin_family=AF_INET;bound.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
+        check(listener.value!=INVALID_SOCKET&&bind(listener.value,reinterpret_cast<const sockaddr*>(&bound),sizeof(bound))==0&&
+              listen(listener.value,1)==0,"fixture listener binds only to loopback");
+        int size=sizeof(bound);check(getsockname(listener.value,reinterpret_cast<sockaddr*>(&bound),&size)==0,"fixture listener identity");
+        fixtureLoopbackPort=ntohs(bound.sin_port);
+        const json input={{"url","http://127.0.0.1:"+std::to_string(fixtureLoopbackPort)+"/manifest"},{"background",!stalledBody}};
+        const auto probe=policyHandlers.at("app.checkUpdate");
+        const auto headersBefore=fixtureRealHeaderWaits.load(),bodyBefore=fixtureRealBodyWaits.load();
+        const auto headerStartsBefore=fixtureRealHeaderStarts.load(),sendsBefore=fixtureRealSendReturns.load(),callbacksBefore=fixtureRealSendCallbacks.load();
+        const auto closesBefore=fixtureRealCloses.load(),finalBefore=fixtureRealFinalCallbacks.load();
+        std::promise<std::string> completion;auto done=completion.get_future();
+        std::jthread worker([&]{try{probe(stampManifest(input));completion.set_value("success");}catch(const std::exception& e){completion.set_value(e.what());}});
+        ManifestFixtureSocket peer(manifestAccept(listener.value));
+        bool reached=manifestReadRequest(peer.value);
+        if(reached&&stalledBody)reached=manifestSend(peer.value,"HTTP/1.1 200 OK\r\nContent-Length: 1024\r\nConnection: close\r\n\r\nx");
+        // A peer can receive the wire request before WinHTTP finishes its send callback.
+        const auto phase=[&]{return stalledBody?fixtureRealBodyWaits.load()>bodyBefore:fixtureRealSendReturns.load()>sendsBefore;};
+        const auto stageDeadline=GetTickCount64()+2000;
+        while(reached&&!phase()&&GetTickCount64()<stageDeadline)Sleep(5);
+        const bool pending=reached&&phase()&&done.wait_for(std::chrono::milliseconds(100))==std::future_status::timeout;
+        const auto began=GetTickCount64();
+        {std::lock_guard lock(fixturePowerMutex);++fixturePower.suspendSerial;++fixturePower.publicationRevision;}
+        fixturePowerRevocations.revoke();
+        const bool retired=done.wait_for(std::chrono::milliseconds(650))==std::future_status::ready;
+        const auto elapsed=GetTickCount64()-began;
+        // The server stays connected through the measurement and only then falls back to close.
+        peer.reset();worker.join();
+        const auto result=done.get();
+        const auto finalDeadline=GetTickCount64()+2000;
+        while(fixtureRealFinalCallbacks.load()==finalBefore&&GetTickCount64()<finalDeadline)Sleep(5);
+        std::cout<<"UPDATER_MANIFEST_LOOPBACK_STAGE "<<json{{"phase",stalledBody?"body":"headers"},{"peerAccepted",reached},
+            {"phaseEntered",phase()},{"pending",pending},{"retired",retired},{"elapsedMs",elapsed},{"terminal",result},
+            {"headerStarts",fixtureRealHeaderStarts.load()-headerStartsBefore},{"headerReturns",fixtureRealHeaderWaits.load()-headersBefore},
+            {"sendReturns",fixtureRealSendReturns.load()-sendsBefore},
+            {"sendCallbacks",fixtureRealSendCallbacks.load()-callbacksBefore},
+            {"handleCloses",fixtureRealCloses.load()-closesBefore},{"finalCallbacks",fixtureRealFinalCallbacks.load()-finalBefore}}.dump()<<'\n';
+        check(pending&&retired&&result=="Update manifest check retired by power transition","real pending request retires while peer is still connected");
+        check(fixtureRealCloses.load()==closesBefore+3&&fixtureRealFinalCallbacks.load()==finalBefore+1,"real request, connection, session and terminal callback returned");
+        std::promise<json> current;auto resultNow=current.get_future();
+        g_updateGameObservationTick=GetTickCount64();
+        std::jthread successor([&]{try{current.set_value(probe(stampManifest(input)));}catch(...){current.set_exception(std::current_exception());}});
+        ManifestFixtureSocket next(manifestAccept(listener.value));
+        const bool served=manifestReadRequest(next.value)&&manifestSend(next.value,"HTTP/1.1 200 OK\r\nContent-Length: "+std::to_string(payload.size())+"\r\nConnection: close\r\n\r\n"+payload);
+        next.reset();successor.join();
+        check(served&&resultNow.get()==json::parse(payload),"current Ready reuses slot with real loopback transport");
+        records.push_back({{"phase",stalledBody?"body":"headers"},{"retiredMs",elapsed},{"terminal",result},{"realHandleCloses",3},{"realFinalCallbacks",1},{"currentManifest",true}});
+    }
+    const json report={{"status","PASS"},{"checks",checks},{"realWinHttp",true},{"syntheticPowerInput",true},{"peer","loopback-only"},{"records",records}};
+    writeText(fixtureRoot/"manifest-loopback.json",report.dump(2));std::cout<<"UPDATER_MANIFEST_LOOPBACK "<<report.dump()<<"\n";return 0;
+}
+#endif
+
 int wmain(int argc, wchar_t** argv) {
     try {
+#ifdef YMCC_MANIFEST_LOOPBACK
+        if(argc!=3||std::wstring(argv[2])!=L"--manifest-loopback")throw std::runtime_error("LOOPBACK_MODE_REQUIRED");
+#else
         if (argc<2 || argc>4 || (argc>=3 && std::wstring(argv[2])!=L"--config-storm" && !(argc==3&&(std::wstring(argv[2])==L"--weak-network"||std::wstring(argv[2])==L"--manifest-serialization"))))
             throw std::runtime_error("UNIQUE_FIXTURE_ROOT_REQUIRED");
+#endif
         fixtureRoot = fspath::absolute(argv[1]);
         wchar_t ownExe[32768]{};if(!GetModuleFileNameW(nullptr,ownExe,32768))throw std::runtime_error("FIXTURE_EXE_IDENTITY_MISSING");fixtureExe=ownExe;
         if (fspath::exists(fixtureRoot)) throw std::runtime_error("FIXTURE_ROOT_ALREADY_EXISTS");
         fspath::create_directories(fixtureRoot);
+#ifdef YMCC_MANIFEST_LOOPBACK
+        return updaterManifestLoopback();
+#else
         if((argc==3||argc==4)&&std::wstring(argv[2])==L"--config-storm")return updaterConfigStorm(argc==4?W2U(argv[3]):std::string{});
         if(argc==3&&std::wstring(argv[2])==L"--weak-network")return updaterWeakNetwork();
         if(argc==3&&std::wstring(argv[2])==L"--manifest-serialization")return updaterManifestSerialization();
@@ -619,7 +889,7 @@ int wmain(int argc, wchar_t** argv) {
         check(policyHandlers.at("app.updatePredownloadNotified")(notifyArgs)==true && readPolicy()["lastNotifiedBoot"]=="fixture-boot-A","accepted notice boot receipt persists alongside disabled preference");
         notifyArgs["bootId"]="another-boot";
         check(policyHandlers.at("app.updatePredownloadNotified")(notifyArgs)==false,"late receipt for another boot cannot overwrite deduplication");
-        policyHandlers.at("app.updatePredownloadTarget")({{"version",args["version"]},{"sha256",args["sha256"]}});
+        policyHandlers.at("app.updatePredownloadTarget")(fixtureTarget(args));
         check(readPolicy()["targetVersion"]==args["version"] && readPolicy()["nextCheckAt"]==0 && readPolicy()["lastNotifiedBoot"]=="fixture-boot-A","successor identity is durable before cancellation and preserves boot receipt");
         bool disabledBlocked=false;try{fixtureDownloadUpdate(backgroundArgs);}catch(const std::exception&){disabledBlocked=true;}
         check(disabledBlocked&&requestCount==0,"persisted disabled policy rejects late queued background work");
@@ -651,7 +921,7 @@ int wmain(int argc, wchar_t** argv) {
         auto cacheRoot=dataRoot/"update";fspath::create_directories(cacheRoot/"staging");fspath::create_directories(cacheRoot/"rollback");
         writeText(cacheRoot/"staging/keep","staging");writeText(cacheRoot/"rollback/keep","rollback");writeText(cacheRoot/"transaction.json","transaction");
         policyHandlers.at("app.updatePredownloadSet")({{"enabled",false}});
-        policyHandlers.at("app.updatePredownloadTarget")({{"version",args["version"]},{"sha256",args["sha256"]}});
+        policyHandlers.at("app.updatePredownloadTarget")(fixtureTarget(args));
         writeText(cacheRoot/"package.zip","123456");writeText(cacheRoot/"package.zip.part","1234");writeText(cacheRoot/"package.zip.part.json","12");
         const auto clearArgs=json{{"operationId","maintenance-owner"}};
         {std::unique_lock<std::mutex> lease(g_updateOperationMtx);const auto busy=policyHandlers.at("app.clearUpdateCache")(clearArgs);
@@ -664,7 +934,7 @@ int wmain(int argc, wchar_t** argv) {
         check(readText(cacheRoot/"staging/keep")=="staging"&&readText(cacheRoot/"rollback/keep")=="rollback"&&readText(cacheRoot/"transaction.json")=="transaction","staging rollback and journal remain unchanged");
         const auto savedClear=readPolicy();
         check(savedClear["enabled"]==false&&!savedClear.contains("targetVersion")&&!savedClear.contains("targetSha256")&&savedClear["nextCheckAt"].get<int64_t>()>static_cast<int64_t>(time(nullptr))*1000+590000,"cleanup preserves enabled preference and starts ten minute quiet window");
-        check(policyHandlers.at("app.updatePredownloadTarget")({{"version",args["version"]},{"sha256",args["sha256"]}})==false&&!readPolicy().contains("targetVersion"),"late successor hint cannot revive cleared cache within quiet window");
+        check(policyHandlers.at("app.updatePredownloadTarget")(fixtureTarget(args))==false&&!readPolicy().contains("targetVersion"),"late successor hint cannot revive cleared cache within quiet window");
         check(policyHandlers.at("app.clearUpdateCache")(clearArgs)["bytesFreed"]==0,"empty cache clear is idempotent");
         policyHandlers.at("app.updatePredownloadSet")({{"enabled",true}});
         auto unknownQueued=backgroundArgs;unknownQueued["operationId"]="queued-before-renderer-loss";
@@ -703,5 +973,6 @@ int wmain(int argc, wchar_t** argv) {
         writeText(fixtureRoot/"result.json",report.dump(2));
         std::cout<<"UPDATER_RESUME_NATIVE_SELFTEST_OK checks="<<checks<<"\n";
         return 0;
+#endif
     } catch(const std::exception& error) {std::cerr<<error.what()<<"\n";return 1;}
 }

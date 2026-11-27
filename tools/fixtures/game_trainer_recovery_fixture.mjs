@@ -13,7 +13,7 @@ const mocks={
  'gamePolicyTarget.ts': `const f=globalThis.fx;export const getPolicyGame=()=>f.game;export const subscribePolicyGameStatus=cb=>{f.listeners.add(cb);cb(f.game);return()=>f.listeners.delete(cb)};`,
  'settingsRepository.ts': `export const getSettingsGeneration=()=>globalThis.fx.generation;`,
  'frontendDiagnostics.ts': `export const reportFrontendError=(where,error)=>globalThis.fx.errors.push({where,error:String(error)});`,
- 'uiSettings.ts': `export const getUiSetting=()=>globalThis.fx.autoEnabled;export const loadUiSettings=async()=>{};`,
+ 'uiSettings.ts': `const f=globalThis.fx;export const getUiSetting=()=>f.autoEnabled;export const uiSettingsLoaded=()=>f.trainerPreferencesLoaded===true;export const loadUiSettings=async()=>{await f.trainerPreferencesHook?.();f.trainerPreferencesLoaded=true;};`,
 };
 export async function createTrainerRecoveryFixture({ownerSource=null,recoverySource=null,powerSource=null,lifecycleSource=null,realGameDetection=false,separatePowerClock=false,storage=new Map()}={}) {
  const bundle=await build({stdin:{contents:`export * as trainer from './src/bridge/gameTrainer';export * as recovery from './src/bridge/gameTrainerRecovery';export * as lifecycle from './src/bridge/trainerLifecycle';export * as auto from './src/bridge/gameTrainerAuto';export * as sharedPower from './src/bridge/powerLifecycleState';${realGameDetection?"export * as detector from './src/bridge/gamedetect';export * as policy from './src/bridge/gamePolicyTarget';":''}`,resolveDir:root,loader:'ts'},bundle:true,format:'cjs',platform:'node',write:false,metafile:true,plugins:[{name:'inert-trainer-recovery',setup(b){b.onLoad({filter:/[\\/](api|gamedetect|gamePolicyTarget|settingsRepository|frontendDiagnostics|uiSettings)\.ts$/},a=>{const name=path.basename(a.path);if(realGameDetection&&(name==='gamedetect.ts'||name==='gamePolicyTarget.ts'))return;return {contents:mocks[name],loader:'ts'};});
@@ -65,7 +65,7 @@ export async function createTrainerRecoveryFixture({ownerSource=null,recoverySou
 
 // Original trainer consumer composition: same-generation public notification scope.
 export async function runTrainerNotificationSequenceCases({test,caseOnly=null}) {
- const kinds=['scope','read-newer','read-missing','held-launch','held-recovery','cycles'];
+ const kinds=['scope','read-newer','read-missing','read-suspended','read-merged-ready','held-launch','held-recovery','cycles','reentrant'];
  assert(caseOnly===null||kinds.includes(caseOnly),'Unknown trainer notification case');
  for(const kind of caseOnly?[caseOnly]:kinds)await test('trainer notification: '+kind,async()=>{
   const f=await createTrainerRecoveryFixture(),events=[];
@@ -84,11 +84,17 @@ export async function runTrainerNotificationSequenceCases({test,caseOnly=null}) 
     assert.equal(await f.lifecycle.assertTrainerPowerReady(f.lifecycle.getTrainerLifecycleEpoch(),8),8);
     const after=f.lifecycle.getTrainerLifecycleEpoch();for(let i=0;i<100;i++)await emit({...f.fx.power});assert.equal(f.lifecycle.getTrainerLifecycleEpoch(),after);
     const mergedReady={...f.fx.power,publicationRevision:13,suspendSerial:5};
+    f.fx.powerReadHook=()=>new Promise(resolve=>release=resolve);
     f.fx.power=mergedReady;
     await assert.rejects(f.lifecycle.assertTrainerPowerReady(after,8),/电源|取消/,'a fresh read with a newer suspend serial cannot admit an old trainer ticket');
-    assert.equal(f.lifecycle.getTrainerLifecycleEpoch(),after,'a direct read cannot impersonate a public lifecycle event');
+    const fenced=f.lifecycle.getTrainerLifecycleEpoch();
+    assert.equal(fenced,after+1,'the direct read only cancels the previous scope');
+    assert.equal(f.sharedPower.getSharedPowerLifecycle().suspendSerial,4,'a direct read cannot publish the replacement scope');
+    assert.equal(f.sharedPower.getSharedPowerLifecycle().hardwareWritesAllowed,false);
+    await assert.rejects(f.lifecycle.assertTrainerPowerReady(fenced,8),/电源|取消/,'the replacement is not admitted while its public confirmation is held');
     await emit(mergedReady);
-    const current=f.lifecycle.getTrainerLifecycleEpoch();assert.equal(current,after+1,'same-generation Ready with only a new suspend serial must retire the old scope');
+    release(mergedReady);f.fx.powerReadHook=null;await flush();
+    const current=f.lifecycle.getTrainerLifecycleEpoch();assert.equal(current,fenced+1,'an authoritative same-generation Ready admits the replacement once');
     await assert.rejects(f.lifecycle.assertTrainerPowerReady(after,8),/电源|取消/);
     assert.equal(await f.lifecycle.assertTrainerPowerReady(current,8),8);
     await emit({...mergedReady,publicationRevision:14,suspendSerial:4});
@@ -96,10 +102,71 @@ export async function runTrainerNotificationSequenceCases({test,caseOnly=null}) 
     assert.equal(f.lifecycle.getTrainerLifecycleEpoch(),current,'a late old suspend scope cannot retire the current ticket');
    }else if(kind==='read-newer'||kind==='read-missing'){
     const read={...ready,publicationRevision:11,observedNotificationSequence:22};if(kind==='read-missing')delete read.observedNotificationSequence;
+    const reads=f.fx.nativeReads.length;
+    f.fx.powerReadHook=()=>new Promise(resolve=>release=resolve);
     f.fx.power=read;
     await assert.rejects(f.lifecycle.assertTrainerPowerReady(initial,8),/电源|取消/,'fresh API read with another notification scope accepted an old trainer ticket');
-    assert.equal(f.lifecycle.getTrainerLifecycleEpoch(),initial,'read cannot invent a lifecycle event');
-    await emit({...ready,publicationRevision:12,observedNotificationSequence:22});assert.equal(await f.lifecycle.assertTrainerPowerReady(f.lifecycle.getTrainerLifecycleEpoch(),8),8);
+    await flush();
+    const known=kind==='read-newer',current=f.sharedPower.getSharedPowerLifecycle();
+    assert.equal(f.lifecycle.getTrainerLifecycleEpoch(),initial+Number(known),'only an ordered newer receipt can retire the prior scope');
+    assert.equal(current.observedNotificationSequence,21,'neither private response can establish new authority');
+    assert.equal(current.hardwareWritesAllowed,!known);
+    assert.equal(f.fx.nativeReads.length,reads+Number(known),'an incomplete receipt must not request a new shared read');
+    const confirmed={...ready,publicationRevision:12,observedNotificationSequence:22};
+    await emit(confirmed);release?.(confirmed);f.fx.powerReadHook=null;await flush();
+    assert.equal(await f.lifecycle.assertTrainerPowerReady(f.lifecycle.getTrainerLifecycleEpoch(),8),8);
+   }else if(kind==='read-merged-ready'){
+    let releasePublic,retired=false;
+    const held=new Promise(resolve=>release=resolve),heldPublic=new Promise(resolve=>releasePublic=resolve);
+    f.fx.powerHook=()=>held;
+    pending=assert.rejects(f.lifecycle.assertTrainerPowerReady(initial,8),/电源|取消/).then(()=>{retired=true;});
+    f.fx.powerHook=null;f.fx.powerReadHook=()=>heldPublic;
+    f.sharedPower.requestSharedPowerLifecycleReconcile('fixture-old-public-read');await flush();
+    const reads=f.fx.nativeReads.length;
+    const merged={...ready,publicationRevision:11,observedNotificationSequence:22,suspendSerial:5};
+    f.fx.powerReadHook=()=>ready;f.fx.power=merged;
+    try{
+     await assert.rejects(f.lifecycle.assertTrainerPowerReady(initial,8),/电源|取消/);
+     await flush();
+     assert(retired,'a scoped Ready hint must release old trainer work before its read replies');
+     assert.equal(f.fx.nativeReads.length,reads+1,'the scoped hint must replace the old public read');
+     const denied=f.sharedPower.getSharedPowerLifecycle();
+     assert.equal(denied.scopeReadbackPending,true,'private Ready cannot grant the newer scope');
+     assert.equal(denied.hardwareWritesAllowed,false);
+     assert.equal(denied.suspendSerial,4,'the private read does not advance authoritative scope');
+     assert.deepEqual(events,['ipc:power.pending']);
+     assert.equal(f.fx.timers.size,1,'old public readback must retain demand for current scope');
+     f.fx.powerReadHook=()=>merged;await f.fx.advance(1000);
+     assert.deepEqual(events,['ipc:power.pending','ipc:power.resumed']);
+     assert.equal(f.sharedPower.getSharedPowerLifecycle().suspendSerial,5);
+     assert.equal(await f.lifecycle.assertTrainerPowerReady(f.lifecycle.getTrainerLifecycleEpoch(),8),8);
+     releasePublic(ready);release();await flush();
+     assert.deepEqual(events,['ipc:power.pending','ipc:power.resumed']);
+     assert.equal(f.fx.workers.length+f.fx.launches.length+f.fx.writes.length,0);
+    }finally{releasePublic(ready);}
+   }else if(kind==='read-suspended'){
+    const suspended={...ready,phase:'suspended',hardwareWritesAllowed:false,publicationRevision:11,observedNotificationSequence:22,suspendSerial:5};
+    f.fx.power={...suspended};delete f.fx.power.suspendSerial;
+    await assert.rejects(f.lifecycle.assertTrainerPowerReady(initial,8),/电源|取消/);
+    assert.equal(f.sharedPower.getSharedPowerLifecycle().phase,'ready','unordered read cannot replace public authority');
+    const held=new Promise(resolve=>release=resolve);
+    f.fx.powerHook=()=>held;
+    let retired=false;
+    pending=assert.rejects(f.lifecycle.assertTrainerPowerReady(initial,8),/电源|取消/).then(()=>{retired=true;});
+    f.fx.powerHook=null;f.fx.power=suspended;
+    await assert.rejects(f.lifecycle.assertTrainerPowerReady(initial,8),/电源|取消/);
+    await flush();
+    assert.equal(f.sharedPower.getSharedPowerLifecycle().suspendSerial,5,'direct receipt must hand the new suspend to the public source');
+    assert(retired,'public suspend must retire another old trainer read before its reply');
+    assert.deepEqual(events,['ipc:power.suspended']);
+    assert.equal(f.fx.timers.size,1,'the public retry owns recovery when both notifications are missing');
+    f.fx.power={...ready,publicationRevision:12,observedNotificationSequence:23,suspendSerial:5};
+    await f.fx.advance(1000);
+    assert.deepEqual(events,['ipc:power.suspended','ipc:power.resumed']);
+    assert.equal(await f.lifecycle.assertTrainerPowerReady(f.lifecycle.getTrainerLifecycleEpoch(),8),8);
+    f.fx.power=suspended;release();await flush();
+    assert.equal(f.sharedPower.getSharedPowerLifecycle().phase,'ready','retired result cannot reintroduce suspend');
+    assert.equal(f.fx.workers.length+f.fx.launches.length+f.fx.writes.length,0);
    }else if(kind==='held-launch'){
     f.fx.seedIndex();const game=structuredClone(field.game);f.fx.select(game);
     assert(await f.trainer.restoreReadyGameTrainer(game.title,game.path,{processTarget:game,isTargetCurrent:()=>true}));
@@ -118,6 +185,26 @@ export async function runTrainerNotificationSequenceCases({test,caseOnly=null}) 
     await emit({...ready,publicationRevision:11,observedNotificationSequence:22});assert(f.lifecycle.getTrainerLifecycleEpoch()>initial,'notification did not retire actual Recovery work');
     release();await flush();f.fx.readHook=null;await f.fx.advance(5000);await flush();
     assert(f.trainer.getReadyGameTrainer(game.title,game.path,game),'original bounded Recovery did not heal after the retired local read returned');assert.equal(f.fx.workers.length,0);
+   }else if(kind==='reentrant'){
+    let trigger=null;const after=[];
+    const suspend={...ready,generation:9,phase:'suspending',hardwareWritesAllowed:false,publicationRevision:12,observedNotificationSequence:23,suspendSerial:5};
+    const first=f.lifecycle.subscribeTrainerLifecycle(event=>{if(event==='ipc:power.resumed'&&trigger==='invalidation'){trigger=null;void emit(suspend);}},()=>{
+     if(trigger==='ready'){trigger=null;void emit({...suspend,generation:10,publicationRevision:15,observedNotificationSequence:26,suspendSerial:6});}
+    });
+    const later=f.lifecycle.subscribeTrainerLifecycle(event=>after.push(event),()=>after.push('confirmed-ready'));
+    try{
+     await flush();after.length=0;trigger='invalidation';
+     await emit({...ready,generation:9,publicationRevision:11,observedNotificationSequence:22});
+     assert.deepEqual(after,['ipc:power.suspending'],'nested suspend must stop the old invalidation and Ready fanout');
+     await emit({...ready,generation:10,suspendSerial:5,publicationRevision:13,observedNotificationSequence:24});
+     assert.deepEqual(after,['ipc:power.suspending','ipc:power.resumed','confirmed-ready'],'the next actual Ready must still reach the retained owner');
+     await flush();after.length=0;trigger='ready';
+     await emit({...ready,generation:10,suspendSerial:5,publicationRevision:14,observedNotificationSequence:25});
+     assert.deepEqual(after,['ipc:power.observationChanged','ipc:power.suspending'],'nested suspend must stop active Ready fanout to later owners');
+     await emit({...ready,generation:11,suspendSerial:6,publicationRevision:16,observedNotificationSequence:27});
+     assert.deepEqual(after,['ipc:power.observationChanged','ipc:power.suspending','ipc:power.resumed','confirmed-ready']);
+     assert.equal(f.fx.workers.length,0);assert.equal(f.fx.writes.length,0);
+    }finally{later();first();}
    }else if(kind==='cycles'){
     let sequence=21,revision=10;
     for(let n=0;n<32;n++){
@@ -208,8 +295,15 @@ export async function runTrainerReadyAdmissionCase({test,powerSource=null}) {
   const reply=async state=>{assert(pending.length,'owned read expected');pending.shift()(state);await flush();};
   try{
    await flush();await reply(ready);
-   assert([...f.fx.timers.values()].some(t=>t.at-f.fx.now===30000),'controller absence does not hold Auto');
+   const catalogDueAt=f.fx.now+30000;
+   assert([...f.fx.timers.values()].some(t=>t.at===catalogDueAt),'controller absence does not hold Auto');
    f.fx.emit('ipc:webview.recovering');await flush();
+   let directReads=0;f.fx.powerHook=()=>{directReads++;};
+   const recoveryEpoch=f.lifecycle.getTrainerLifecycleEpoch();
+   assert.equal(f.sharedPower.getSharedPowerLifecycle().phase,'ready','the previous Ready is still cached');
+   await assert.rejects(f.lifecycle.assertTrainerPowerReady(recoveryEpoch,8),/电源|取消/,
+     'a new trainer action must wait for the current WebView recovery confirmation');
+   assert.equal(directReads,0,'a blocked action does not issue its own Ready read');
    f.fx.seedIndex();f.fx.select(structuredClone(field.game));await flush();
    const blocked={...ready,publicationRevision:11,hardwareWritesAllowed:false,notificationPending:true};
    await reply(blocked);assert.equal(f.fx.reads.length,0,'trainer must not consume cache before public admission');
@@ -219,7 +313,10 @@ export async function runTrainerReadyAdmissionCase({test,powerSource=null}) {
     await f.fx.advance(delay);await reply(blocked);assert.equal(f.fx.reads.length,0);
    }
    await f.fx.advance(30000);await reply({...ready,publicationRevision:12});
-   assert([...f.fx.timers.values()].some(t=>t.at-f.fx.now===30000),'Auto resumes without inputReady');
+   assert.equal(await f.lifecycle.assertTrainerPowerReady(f.lifecycle.getTrainerLifecycleEpoch(),8),8,
+     'the shared confirmation reopens the same manual admission path');
+   assert([...f.fx.timers.values()].some(t=>t.at===Math.max(catalogDueAt,f.fx.now)),
+     'Auto resumes without inputReady and preserves the original catalog deadline');
    assert(f.fx.reads.some(r=>r.p===f.fx.indexPath),'actual Recovery resumes after public admission');
   }finally{
    stop();while(pending.length)pending.shift()(ready);await flush();

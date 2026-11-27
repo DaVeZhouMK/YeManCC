@@ -3,7 +3,7 @@
   "caseId": "sleep.startup-exit-consumer",
   "fixture": {
     "path": "tools/ymcc_sim/global/sleep-startup-exit-consumer/fixture.cpp.in",
-    "sha256": "55b0ba416417426197cdc3df311fcc929c88b1d6f5c94054c81f5d9089e8a2c7",
+    "sha256": "618639fec138bdc966abae477b5a2a7929165a78bb7360c82e16e4b275c22e38",
     "positiveGroups": 27
   },
   "productSources": [
@@ -15,6 +15,8 @@
     "native/sleep_recovery_record_name.h"
   ],
   "sharedLeaves": [
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/shared-leaf-successor.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/shared-leaf-successor.json",
     "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
     "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
     "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
@@ -73,7 +75,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
-      "sha256": "b82c1b62fa2ed9bfea3ae5e7170d921ea9d3c626c6db759df94a6805113f6192"
+      "sha256": "7bf29e5ebb68f01a385757982b0b63b7be2f422d023108c853d9dab25dd2cd37"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
@@ -125,7 +127,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-review.mjs",
-      "sha256": "de30cde09750df4d5333888d776d49fc48300e3877d0fb5de07bc59bf4dd900b"
+      "sha256": "924b1957aad0def5eeb8032549416b5d92696a341cd35a1077431352a9914710"
     }
   ],
   "reviewedFunctions": [

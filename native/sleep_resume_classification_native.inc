@@ -4,7 +4,7 @@
 struct SgResumeClassificationState {
     std::atomic<unsigned long long> generation{0},observedGeneration{0};
     std::atomic<ULONGLONG> retrySuspendBoundary{0};
-    ULONGLONG origin=0,attemptTick=0,firstReceiptTick=0,deadlineTick=0,interactiveReceiptTick=0;
+    ULONGLONG origin=0,attemptTick=0,firstReceiptTick=0,deadlineTick=0,interactiveReceiptTick=0,retrySuspendSequence=0;
     bool entryObservation=false; // UI-only, original short window after resource recovery
     ULONGLONG entryExitFileTime=0;
     int entryExitReason=-1;
@@ -21,7 +21,12 @@ static bool sharedSleepWakeClassified(unsigned long long generation) noexcept {
         generation==g_powerGeneration.load(std::memory_order_acquire);
 }
 static void sgBlockSharedWakeClassification(unsigned long long generation) {
-    if(generation)g_sgWakeClassificationBlockedGeneration.store(generation,std::memory_order_release);
+    if(generation && g_sgWakeClassificationBlockedGeneration.exchange(generation,std::memory_order_acq_rel)!=generation)
+        g_recoveryPowerBoundary.revoke();
+}
+static void sgHoldSharedWakeClassification(unsigned long long generation) {
+    g_sgResumeClassification.generation.store(generation,std::memory_order_release);
+    g_recoveryPowerBoundary.revoke();
 }
 static void sgCompleteSharedWakeClassification(unsigned long long generation) {
     if(!generation||generation!=currentPowerGeneration()||g_exitRequested.load(std::memory_order_acquire)||
@@ -393,8 +398,9 @@ static bool sgDeferModernResume(ULONG type,ULONGLONG receiptTick) {
     g_sgResumeClassification.deadlineTick=first+SG_NON_USER_WAKE_CLASSIFY_MS;
     g_sgResumeClassification.interactiveReceiptTick=type==PBT_APMRESUMESUSPEND?receiptTick:0;
     g_sgResumeClassification.retrySuspendBoundary.store(retrySuspendBoundary,std::memory_order_release);
+    g_sgResumeClassification.retrySuspendSequence=retrySuspendBoundary?suspend.sequence:0;
     g_sgResumeClassification.observedGeneration.store(generation,std::memory_order_release);
-    g_sgResumeClassification.generation.store(generation,std::memory_order_release);
+    sgHoldSharedWakeClassification(generation);
     const auto tick=GetTickCount64();
     const auto delay=tick<g_sgResumeClassification.deadlineTick?g_sgResumeClassification.deadlineTick-tick:1ULL;
     if(!g_hwnd||!SetTimer(g_hwnd,SG_RESUME_CLASSIFY_TIMER_ID,static_cast<UINT>(delay),nullptr)){

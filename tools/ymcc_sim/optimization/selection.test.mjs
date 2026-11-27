@@ -6,6 +6,7 @@ import {createHash} from 'node:crypto';
 import {selectCases,parseOptions,writeFreshJson} from './cli.mjs';
 import {missingCatalogTools} from '../global/cli.mjs';
 import {commonHidProducerBudget} from '../../lib/common_hid_runtime_fixture.mjs';
+import {bindWin5BusDiscovery} from '../../fixtures/input_coordinator_lifecycle/win5_quarantine_projection.mjs';
 
 const resumeChoice=['--test','controller.unified-standard-input','--input-resume-only','--input-resume-case','keep-resubscription'];
 const win5Choice=['--test','controller.unified-standard-input','--common-hid-runtime-only','--common-hid-runtime-case','win5-kept-wake'];
@@ -268,6 +269,24 @@ test('optimized receipt writer preserves existing bytes and flushes fresh JSON b
 });
 
 // Existing coordinator cases must stay selectable without the full prerequisite factory.
+test('explicit prepared coordinator plan and replay retain the same refusal and selection',async()=>{
+ const env='YMCC_SIM_CURRENT29_LIFECYCLE_PREPARATIONS',previous=process.env[env],id='controller.coordinator-lifecycle';
+ try{
+  process.env[env]=import.meta.filename;
+  const plan=await selectCases(parseOptions(['--test',id,'--mode','plan']));
+  const replay=await selectCases(parseOptions(['--test',id,'--mode','run','--rerun']));
+  assert.deepEqual(plan.selectedIds,[id]);assert.deepEqual(plan.deferred,[]);assert.equal(plan.adapters.length,1);
+  assert.deepEqual(replay.coordinatorSelection,plan.coordinatorSelection);
+  assert.equal(plan.coordinatorSelection.route,'prepared-current29');
+  assert.match(plan.coordinatorSelection.blockedReason,/registered lifecycle input escaped core Workspace/);
+  assert.equal(plan.adapters[0].timeoutMs,90000);
+  const ordinary=await selectCases(parseOptions(['--mode','plan']));
+  assert(!ordinary.adapters.some(a=>a.id===id));assert.equal(ordinary.coordinatorSelection,undefined);
+  const optional=await selectCases(parseOptions(['--test',id,'--coordinator-case','prehost-writer','--mode','plan']));
+  assert.equal(optional.coordinatorSelection.caseName,'prehost-writer');
+ }finally{if(previous===undefined)delete process.env[env];else process.env[env]=previous;}
+});
+
 test('coordinator explicit plans select each original optional case with no external reads',async()=>noExternalReads(async()=>{
  for(const caseName of ['prehost-writer','late-terminal']){
   const selected=await selectCases(parseOptions(['--test','controller.coordinator-lifecycle','--coordinator-case',caseName,'--mode','plan']));
@@ -411,6 +430,80 @@ test('coordinator cold PREPARE rejection run binds prerequisites and rejects amb
 }));
 
 const gpdCycleChoice=['--test','controller.coordinator-lifecycle','--coordinator-case','gpd-expired-first-on-full-cycle'];
+const gpdSettledCycleChoice=[...gpdCycleChoice.slice(0,-1),'gpd-settled-first-on-full-cycle'];
+const win5QuarantineChoice=['--test','controller.coordinator-lifecycle','--coordinator-case','gpd-win5-elite-quarantine-then-on'];
+test('Win5 quarantine discovery binds only the extracted BUS publication parameter',()=>{
+ const source='    const bool win5GuideDemand = publishUi && win5MenuBoard() &&\n      guideDemand();\n';
+ const {text,receipt}=bindWin5BusDiscovery(source);
+ assert.equal(text,'static_assert(probeSrc == kGpReadBus);\nconstexpr bool publishUi = false;\n'+source);
+ assert.equal(receipt.publishUi,false);
+ assert.deepEqual(bindWin5BusDiscovery('legacy_scan();'),{text:'legacy_scan();',receipt:null});
+ assert.throws(()=>bindWin5BusDiscovery(source+'publishUi = true;'),/WIN5_XINPUT_PUBLICATION_SCOPE_CHANGED/);
+ assert.throws(()=>bindWin5BusDiscovery('other(publishUi);'),/WIN5_XINPUT_PUBLICATION_SCOPE_CHANGED/);
+});
+test('Win5 quarantine plans one original managed full-pipe case, never a default',async()=>noExternalReads(async()=>{
+ const selected=await selectCases(parseOptions([...win5QuarantineChoice,'--mode','plan']));
+ assert.deepEqual(selected.selectedIds,['controller.coordinator-lifecycle']);
+ assert.equal(selected.adapters.length,1);assert.deepEqual(selected.deferred,[]);
+ const [adapter]=selected.adapters;
+ assert.equal(adapter.path,'tools/fixtures/input_coordinator_lifecycle/win5_quarantine_loader.mjs');
+ assert.deepEqual(adapter.args,['--out','{outDir}/p','--suite','lifecycle-directed','--case',win5QuarantineChoice.at(-1)]);
+ assert.deepEqual(adapter.artifactInputs,[]);assert.equal(adapter.cacheAcceptance,false);assert.equal(adapter.timeoutMs,420000);
+ assert.deepEqual(adapter.resultFiles,['p/RESULT.json','p/win5-selection-observed.json','p/full-pipe-core/fixture-result.json']);
+ assert(adapter.evidenceInputs.includes('tools/input_coordinator_lifecycle_selftest.mjs'));
+ assert.deepEqual(selected.coordinatorSelection.expectedCases,['GPD/Win5/elite-quarantine-then-explicit-on/exit']);
+ assert.deepEqual(selected.coordinatorSelection.requestedModes,['full-pipe-core']);
+ assert.equal(selected.coordinatorSelection.defaultCoordinatorDispatched,false);
+ const ordinary=await selectCases(parseOptions(['--test','controller.coordinator-lifecycle','--mode','plan']));
+ assert(!ordinary.adapters.some(row=>row.path===adapter.path));
+}));
+
+test('Win5 quarantine refuses missing inputs, missing deadline and widened or unknown selection',async t=>noExternalReads(async()=>{
+ const dir=ownedControl(t),dll=path.join(dir,'Fixture.dll'),dotnet=path.join(dir,'dotnet.exe');
+ const run=[...win5QuarantineChoice,'--mode','run'],inputs=['--coordinator-managed-dll',dll,'--coordinator-dotnet',dotnet];
+ const deadline=Date.now()+20000,select=args=>selectCases({...parseOptions(args),coordinatorDeadlineEpochMs:deadline});
+ await assert.rejects(()=>select(run),/GPD_EXPLICIT_MANAGED_DLL_AND_DOTNET_REQUIRED/);
+ await assert.rejects(()=>select([...run,...inputs.slice(0,2)]),/GPD_EXPLICIT_MANAGED_DLL_AND_DOTNET_REQUIRED/);
+ await assert.rejects(()=>selectCases(parseOptions([...run,...inputs])),/INHERITED_FUTURE_DEADLINE_REQUIRED/);
+ await assert.rejects(()=>selectCases(parseOptions([...win5QuarantineChoice.slice(0,-1),'gpd-win5-elite-quarantine-unknown','--mode','plan'])),/UNKNOWN_COORDINATOR_CASE/);
+ assert.throws(()=>parseOptions([...run,'--test','fan.curve']),/COORDINATOR_CASE_REQUIRES_ONE_EXPLICIT_ORIGINAL_TEST/);
+ assert.throws(()=>parseOptions([...win5QuarantineChoice,'--mode','full','--full-acceptance']),/COORDINATOR_CASE_REQUIRES_ONE_EXPLICIT_ORIGINAL_TEST/);
+ const {adapters:[adapter]}=await select([...run,...inputs]);
+ assert.deepEqual(adapter.args.slice(-4),['--managed-dll',dll,'--dotnet',dotnet]);
+ assert.deepEqual(adapter.artifactInputs,[dll,path.join(dir,'fixture-manifest.json'),path.join(dir,'Fixture.deps.json'),path.join(dir,'Fixture.runtimeconfig.json'),dotnet]);
+}));
+
+test('coordinator GPD settled first ON plans only OFF and app exit without external reads',async()=>noExternalReads(async()=>{
+ const result=await selectCases(parseOptions([...gpdSettledCycleChoice,'--mode','plan','--coordinator-managed-dll','G:/unused/Fixture.dll','--coordinator-dotnet','G:/unused/dotnet.exe']));
+ assert.deepEqual(result.selectedIds,['controller.coordinator-lifecycle']);assert.deepEqual(result.deferred,[]);
+ assert.equal(result.adapters.length,1);
+ const [adapter]=result.adapters;
+ assert.deepEqual(adapter.args,['--out','{outDir}/p','--suite','lifecycle-directed','--case',gpdSettledCycleChoice.at(-1)]);
+ assert.equal(adapter.path,'tools/input_coordinator_lifecycle_selftest.mjs');
+ assert.deepEqual(adapter.artifactInputs,[]);assert.equal(adapter.cacheAcceptance,false);
+ assert.deepEqual(adapter.resultFiles,['p/RESULT.json','p/full-pipe-core/fixture-result.json']);
+ assert(adapter.evidenceInputs.includes('tools/gpd-idle-wake.mjs'));
+ assert(!adapter.evidenceInputs.some(file=>file.endsWith('/gpd_native_writer_return.inc')));
+ assert.deepEqual(result.coordinatorSelection.expectedCases,['GPD/first-on-settled-full-cycle/off','GPD/first-on-settled-full-cycle/exit']);
+ assert.equal(result.coordinatorSelection.defaultCoordinatorDispatched,false);
+ assert.equal(result.coordinatorSelection.settledFirstOn,true);
+ assert.equal(result.coordinatorSelection.nativeWriterReturn,false);
+}));
+
+test('coordinator GPD settled first ON run requires the same explicit managed artifact and inherited deadline',async t=>noExternalReads(async()=>{
+ const dir=ownedControl(t),dll=path.join(dir,'Fixture.dll'),dotnet=path.join(dir,'dotnet.exe');
+ const run=[...gpdSettledCycleChoice,'--mode','run','--rerun'];
+ const inputs=['--coordinator-managed-dll',dll,'--coordinator-dotnet',dotnet];
+ const deadline=Date.now()+20000,select=args=>selectCases({...parseOptions(args),coordinatorDeadlineEpochMs:deadline});
+ await assert.rejects(()=>select(run),/GPD_EXPLICIT_MANAGED_DLL_AND_DOTNET_REQUIRED/);
+ await assert.rejects(()=>select([...run,...inputs.slice(0,2)]),/GPD_EXPLICIT_MANAGED_DLL_AND_DOTNET_REQUIRED/);
+ await assert.rejects(()=>selectCases(parseOptions([...run,...inputs])),/INHERITED_FUTURE_DEADLINE_REQUIRED/);
+ assert.throws(()=>parseOptions([...gpdSettledCycleChoice,'--mode','full','--full-acceptance']),/COORDINATOR_CASE_REQUIRES_ONE_EXPLICIT_ORIGINAL_TEST/);
+ const {adapters:[adapter]}=await select([...run,...inputs]);
+ assert.deepEqual(adapter.args,['--out','{outDir}/p','--suite','lifecycle-directed','--case',gpdSettledCycleChoice.at(-1),'--managed-dll',dll,'--dotnet',dotnet]);
+ assert.deepEqual(adapter.artifactInputs,[dll,path.join(dir,'fixture-manifest.json'),path.join(dir,'Fixture.deps.json'),path.join(dir,'Fixture.runtimeconfig.json'),dotnet]);
+}));
+
 test('coordinator GPD late wake routes one explicit managed case without adding a default',async t=>noExternalReads(async()=>{
  const name='wake-kept-source:GPD:expired-then-current';
  const choice=['--test','controller.coordinator-lifecycle','--coordinator-case',name];
@@ -421,6 +514,9 @@ test('coordinator GPD late wake routes one explicit managed case without adding 
  assert.deepEqual(plan.adapters[0].args,['--out','{outDir}/p','--suite','lifecycle-directed','--case',name]);
  assert.deepEqual(plan.adapters[0].artifactInputs,[]);assert.equal(plan.adapters[0].cacheAcceptance,false);
  assert.deepEqual(plan.adapters[0].resultFiles,['p/RESULT.json','p/source-wake-selection-observed.json','p/full-pipe-core/fixture-result.json']);
+ for(const input of ['tools/fixtures/input_coordinator_lifecycle/gpd_settled_first_on_inputs.mjs','native/virtual_controller_ui_output_runtime.h']){
+  assert.equal(plan.adapters[0].evidenceInputs.filter(file=>file===input).length,1);
+ }
 
  const dir=ownedControl(t),dll=path.join(dir,'Fixture.dll'),dotnet=path.join(dir,'dotnet.exe');
  const inputs=['--coordinator-managed-dll',dll,'--coordinator-dotnet',dotnet];

@@ -20,6 +20,7 @@ export function fixedArtifactOuterRegistration(view,repo,role){
  const artifactInputs=union([
   profile.descriptor.path,profile.expectations.path,q.receipt.path,q.raw.path,n.native.exe.path,n.native.sourceManifest.path,n.compilerLedger.path,n.preparation.path,
   preparation.layout.path,preparation.managed.manifestPath,profile.node.path,profile.powershell.path,
+  ...(view.metadata.historicalArchive?[view.metadata.historicalArchive.path]:[]),
  ]);
  assert(artifactInputs.every(file=>path.isAbsolute(file)&&fs.statSync(file).isFile()),'FIXED_CPP_OUTER_ROOT_PIN_MISSING');
  assert(artifactInputs.length<=640&&sources.length<=640,'FIXED_CPP_EXISTING_REGISTRATION_LIMIT');
@@ -42,7 +43,7 @@ export function getFixedArtifactPipeAdapters({repo,specs,selectedIds}={}){
   }else{
    try{
     // One source-context inspection feeds both outer input lists.
-    const context=openTerminal26ArtifactContext(spec.key,repo),view=terminal26ArtifactInputs(context);
+    const context=openTerminal26ArtifactContext(spec.key,repo,{useConfiguredArchive:true}),view=terminal26ArtifactInputs(context);
     registration=fixedArtifactOuterRegistration(view,repo,spec.key);leafBudgetMs=view.metadata.profile.leafBudgetMs;
    }catch(error){
     registration={evidenceInputs:[MODULE+'/r3-terminal26-artifact-adapter.mjs',MODULE+'/r3-terminal26-artifact-inputs.mjs',MODULE+'/r3-terminal26-artifact-prerequisites.json'],artifactInputs:[],

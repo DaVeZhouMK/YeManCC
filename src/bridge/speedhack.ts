@@ -2,7 +2,7 @@
 // transaction, while the target DLL stays injected for the lifetime of the
 // target process. Changing a factor must not be treated as a new injection.
 import { fs, shell, proc, powerLifecycle, type ShellIntentAdmission } from './api';
-import { getSharedPowerLifecycle, onSharedPowerLifecycle, isSharedPowerLifecycleAdmitted, type SharedPowerLifecycleSnapshot } from './powerLifecycleState';
+import { beginSharedPowerLifecycleReadback, getSharedPowerLifecycle, onSharedPowerLifecycle, isSharedPowerLifecycleAdmitted, type SharedPowerLifecycleSnapshot } from './powerLifecycleState';
 import { detectGame, getCurrentGame, isGameStatusCurrent, subscribeGameStatus, subscribeGameTargetReadiness, type DetectedGame } from './gamedetect';
 
 export const OPENSPEEDY_DIR = 'C:\\SOFT\\YeMan\\PowerControl\\OpenSpeedy';
@@ -283,16 +283,28 @@ let speedSession: SpeedSession | null = null;
 // Ownership of a possibly-dispatched transaction is not a successful speed state.
 type SpeedCleanupLease = {id:number;target:SpeedTargetIdentity;resetConfirmed?:boolean};
 type SpeedCleanupWake = {lease:SpeedCleanupLease|SpeedSession;generation:number;sequence?:number;suspendSerial?:number};
+type InterruptedSpeedCleanupWake = SpeedCleanupWake & {requiresNewSuspend:boolean};
 let speedCleanupLease:SpeedCleanupLease|null=null;
 let speedCleanupTask:Promise<SpeedResult>|null=null;
 let stopSpeedGame:(()=>void)|null=null,stopSpeedWake:(()=>void)|null=null,stopSpeedReadiness:(()=>void)|null=null;
 let automaticCleanupAttempted=false,lastCleanupWakeGeneration=0;
-let pendingCleanupWake:SpeedCleanupWake|null=null, interruptedCleanupWake:SpeedCleanupWake|null=null;
+let pendingCleanupWake:SpeedCleanupWake|null=null, interruptedCleanupWake:InterruptedSpeedCleanupWake|null=null;
+let activeCleanupRead:{wake:SpeedCleanupWake;controller:AbortController}|null=null;
 const retiredCleanupWake = Symbol('retired-cleanup-wake-before-dispatch');
+const unknownCleanupInventory = Symbol('unknown-cleanup-inventory-before-dispatch');
 const retiredManualSpeedPower = Symbol('retired-manual-speed-power-before-dispatch');
 const speedPowerUnavailable = (): SpeedResult => ({ok:false,reason:'unconfirmed',msgs:['等待电源就绪后重试变速操作']});
 async function captureManualSpeedPower(): Promise<SpeedOperationAdmission|null> {
-  const read = () => powerLifecycle.get().catch(() => null);
+  const read = async () => {
+    const acceptReadback = beginSharedPowerLifecycleReadback();
+    const state = await powerLifecycle.get().catch(() => null);
+    acceptReadback(state);
+    const current = getSharedPowerLifecycle();
+    if (state && current && (!isSharedPowerLifecycleAdmitted(current) ||
+        current.generation !== state.generation || current.suspendSerial !== state.suspendSerial ||
+        current.observedNotificationSequence !== state.observedNotificationSequence)) return null;
+    return state;
+  };
   const power = await read();
   if (!power || !isSharedPowerLifecycleAdmitted(power) || !Number.isSafeInteger(power.generation) || power.generation <= 0) return null;
   const {generation, observedNotificationSequence: notificationSequence, suspendSerial} = power;
@@ -308,13 +320,25 @@ function releaseSpeedObservations(){if(currentSpeedCleanupTarget())return;stopSp
 function cleanupWakeCurrent(wake:SpeedCleanupWake,power:SharedPowerLifecycleSnapshot|null):boolean {
  return isSharedPowerLifecycleAdmitted(power)&&power?.generation===wake.generation&&power.observedNotificationSequence===wake.sequence&&power.suspendSerial===wake.suspendSerial;
 }
+async function readCleanupWake<T>(wake:SpeedCleanupWake,read:(signal:AbortSignal)=>Promise<T>):Promise<T>{
+ if(!cleanupWakeCurrent(wake,getSharedPowerLifecycle()))throw retiredCleanupWake;
+ const owner={wake,controller:new AbortController()};
+ activeCleanupRead=owner;
+ try{return await read(owner.controller.signal);}
+ finally{
+  if(activeCleanupRead===owner)activeCleanupRead=null;
+  if(owner.controller.signal.aborted||!cleanupWakeCurrent(wake,getSharedPowerLifecycle()))throw retiredCleanupWake;
+ }
+}
 function captureCleanupWake(lease:SpeedCleanupWake['lease'],power:SharedPowerLifecycleSnapshot):SpeedCleanupWake {
  return {lease,generation:power.generation,sequence:power.observedNotificationSequence,suspendSerial:power.suspendSerial};
 }
-function laterCleanupWake(next:SpeedCleanupWake,prior:SpeedCleanupWake):boolean {
- return next.generation>prior.generation||next.generation===prior.generation&&(
-  prior.sequence!==undefined&&next.sequence!==undefined&&next.sequence>prior.sequence||
-  next.suspendSerial!==undefined&&(prior.suspendSerial===undefined||next.suspendSerial>prior.suspendSerial));
+function laterCleanupWake(next:SpeedCleanupWake,prior:InterruptedSpeedCleanupWake):boolean {
+ if(next.generation!==prior.generation)return next.generation>prior.generation;
+ const newerSuspend=next.suspendSerial!==undefined&&prior.suspendSerial!==undefined&&next.suspendSerial>prior.suspendSerial;
+ if(prior.requiresNewSuspend)return newerSuspend;
+ return newerSuspend||next.suspendSerial!==undefined&&prior.suspendSerial===undefined||
+  prior.sequence!==undefined&&next.sequence!==undefined&&next.sequence>prior.sequence;
 }
 function queueConfirmedCleanupWake(){
  const prior=interruptedCleanupWake,session=speedSession,power=getSharedPowerLifecycle();
@@ -340,15 +364,23 @@ function drainCleanupWake(){
 }
 function retainSpeedObservations(){
  if(stopSpeedGame)return;
-  // Reuse the existing shared target and power facts, with no timer.
+ // Reconcile a target change once both the shared target and power are known.
+ const reconcileTarget=()=>{
+  const target=currentSpeedCleanupTarget();
+  if(!target||!isGameStatusCurrent())return;
+  const game=getCurrentGame();
+  if(!game||!sameSpeedLease(target,game))void cleanupOwnedSpeedTarget(true).catch(()=>{});
+ };
  stopSpeedGame=()=>{};
- const release=subscribeGameStatus(game=>{const target=currentSpeedCleanupTarget();if(target&&(!game||!sameSpeedLease(target,game)))void cleanupOwnedSpeedTarget(true).catch(()=>{});});
+ const release=subscribeGameStatus(reconcileTarget);
  stopSpeedGame=release;
- stopSpeedReadiness=subscribeGameTargetReadiness(current=>{if(current)queueConfirmedCleanupWake();});
+ stopSpeedReadiness=subscribeGameTargetReadiness(current=>{if(current){queueConfirmedCleanupWake();reconcileTarget();}});
  let observedPower=false,previousReady=false,previousGeneration=0,previousSequence:number|undefined,previousSuspendSerial:number|undefined;
  stopSpeedWake=onSharedPowerLifecycle(snapshot=>{
+  if(activeCleanupRead&&!cleanupWakeCurrent(activeCleanupRead.wake,snapshot))activeCleanupRead.controller.abort();
   const ready=isSharedPowerLifecycleAdmitted(snapshot);
-  const resumed=observedPower&&ready&&(!previousReady||snapshot.generation!==previousGeneration);
+  const mergedSuspend=previousSuspendSerial!==undefined&&snapshot.suspendSerial!==undefined&&snapshot.suspendSerial>previousSuspendSerial;
+  const resumed=observedPower&&ready&&(!previousReady||snapshot.generation!==previousGeneration||mergedSuspend);
   const changedScope=observedPower&&ready&&(previousSequence!==snapshot.observedNotificationSequence||previousSuspendSerial!==snapshot.suspendSerial);
   observedPower=true;previousReady=ready;previousGeneration=snapshot.generation;
   previousSequence=snapshot.observedNotificationSequence;
@@ -358,17 +390,19 @@ function retainSpeedObservations(){
    pendingCleanupWake=captureCleanupWake(speedCleanupLease,snapshot);
    drainCleanupWake();
   }
-  if(ready)queueConfirmedCleanupWake();
+  if(ready){queueConfirmedCleanupWake();reconcileTarget();}
  },{observeNotificationSequence:true,observeSuspendSerial:true});
 }
 export function cleanupOwnedSpeedTarget(automatic=false):Promise<SpeedResult>{return runOwnedSpeedCleanup(automatic);}
 async function runOwnedSpeedCleanup(automatic:boolean,wake?:SpeedCleanupWake):Promise<SpeedResult>{ if(speedCleanupTask)return speedCleanupTask;
- const target=currentSpeedCleanupTarget();if(!target)return {ok:true,skipped:true,msgs:['No owned speed cleanup target']};
+ const lease=speedCleanupLease??speedSession;
+ if(!lease)return {ok:true,skipped:true,msgs:['No owned speed cleanup target']};
+ const target=lease.target;
  if(automatic&&automaticCleanupAttempted)return {ok:false,reason:'unconfirmed',msgs:['自动清理已尝试，保留原目标等待明确重试']};
- if(automatic&&!wake&&!speedCleanupLease&&speedSession){
+ if(automatic&&!wake){
   const power=getSharedPowerLifecycle();
   if(!power||!isSharedPowerLifecycleAdmitted(power)||!isGameStatusCurrent())return {ok:false,reason:'unconfirmed',msgs:['等待游戏和电源就绪后清理']};
-  wake=captureCleanupWake(speedSession,power);
+  wake=captureCleanupWake(lease,power);
  }
  if(automatic)automaticCleanupAttempted=true;
  const work=(async():Promise<SpeedResult>=>{
@@ -384,9 +418,10 @@ async function runOwnedSpeedCleanup(automatic:boolean,wake?:SpeedCleanupWake):Pr
     if(wake)wake={...wake,lease:remaining};
     return await clear(remaining.target.pid);
    }catch(error){
-    if(error!==retiredCleanupWake||!wake)throw error;
-    if(wake.lease===(speedCleanupLease??speedSession))interruptedCleanupWake=wake;
-    return {ok:false,reason:'unconfirmed',msgs:['等待电源就绪后清理原变速目标']};
+    if(!wake||(error!==retiredCleanupWake&&error!==unknownCleanupInventory))throw error;
+    const requiresNewSuspend=error===unknownCleanupInventory;
+    if(wake.lease===(speedCleanupLease??speedSession))interruptedCleanupWake={...wake,requiresNewSuspend};
+    return {ok:false,reason:'unconfirmed',msgs:[requiresNewSuspend?'原变速目标不可确认，保留清理归属':'等待电源就绪后清理原变速目标']};
    }
  })();speedCleanupTask=work;
  void work.finally(()=>{if(speedCleanupTask===work)speedCleanupTask=null;releaseSpeedObservations();queueConfirmedCleanupWake();drainCleanupWake();}).catch(()=>{});return work;
@@ -1072,14 +1107,12 @@ async function clearGameSpeedInternal(
   if(cleanupOldTarget){
     const name=sessionTarget.path?.replace(/\\/g,'/').split('/').slice(-1)[0]||sessionTarget.name;
     if(!name)return {ok:false,reason:'unconfirmed',msgs:['原变速目标路径缺失，未清理']};
-    let observation: Awaited<ReturnType<typeof proc.identities>>;
-    try { observation = await proc.identities([name]); }
-    finally {
-      // The read can fail or report absence after a new suspend fence. No
-      // cleanup command has been submitted: retain the exact owner for Ready.
-      if (wake && !cleanupWakeCurrent(wake, getSharedPowerLifecycle())) throw retiredCleanupWake;
+    const observation = await (wake ? readCleanupWake(wake, signal => proc.identities([name],signal)) : proc.identities([name]));
+    if(!observation.known){
+      // No DISABLE was submitted. A later suspend can retry the read once.
+      if(wake)throw unknownCleanupInventory;
+      return {ok:false,reason:'unconfirmed',msgs:['原变速目标不可确认，保留清理归属']};
     }
-    if(!observation.known)return {ok:false,reason:'unconfirmed',msgs:['原变速目标不可确认，保留清理归属']};
     const alive=observation.processes.some(p=>p.pid===sessionTarget.pid&&p.processCreated===sessionTarget.processCreated&&normalizedSpeedPath(p.path)===normalizedSpeedPath(sessionTarget.path));
     if(!alive){if(speedCleanupLease===capturedCleanup)speedCleanupLease=null;if(sameSpeedLease(speedSession?.target||null,sessionTarget))speedSession=null;releaseSpeedObservations();return {ok:true,msgs:['原变速进程已结束，清理归属已归还']};}
     if(speedCleanupLease!==capturedCleanup)return {ok:false,reason:'unconfirmed',msgs:['变速清理归属已变化']};
@@ -1111,12 +1144,18 @@ async function clearGameSpeedInternal(
       const requireCurrent=(fresh:SharedPowerLifecycleSnapshot)=>{
         if(!cleanupWakeCurrent(wake,fresh)||!cleanupWakeCurrent(wake,getSharedPowerLifecycle()))throw retiredCleanupWake;
       };
-      requireCurrent(await powerLifecycle.get());
+      const readPower=async()=>{
+        const acceptReadback=beginSharedPowerLifecycleReadback();
+        const state=await readCleanupWake(wake,signal=>powerLifecycle.get(undefined,signal));
+        acceptReadback(state);
+        return state;
+      };
+      requireCurrent(await readPower());
       // The pre-dispatch checkpoint can prove no action. Once shell.run is
       // invoked, an interrupted or missing receipt cannot reopen this wake.
       return speedOp(clearTarget.pid,{kind:'clear'},clearTarget,{...request,admission:{
         generation:wake.generation,notificationSequence:wake.sequence,suspendSerial:wake.suspendSerial,
-        checkpoint:async()=>requireCurrent(await powerLifecycle.get()),
+        checkpoint:async()=>requireCurrent(await readPower()),
       }});
     }
     const cleanupAdmission=resetAdmission??await captureManualSpeedPower();

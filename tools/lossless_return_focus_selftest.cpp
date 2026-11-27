@@ -181,7 +181,7 @@ static bool focusLosslessSharedPowerChanged(const ymcc::sleeppower::SharedPowerV
 static bool taskViewSharedPowerChanged(const ymcc::sleeppower::SharedPowerV1&){return true;}
 static void focusEndIsolationOnUi(){g_focusIsolationPrepared=false;}
 static void focusPrepareIsolationBeforeShow(){g_focusIsolationPrepared=true;g_focusIsolationPowerPeriod={powerGeneration,suspendSerial};}
-static bool focusLightIsolationBegin(){return false;}
+static unsigned long long focusLightIsolationBegin(){return 0;}
 static bool focusLightIsolationCurrent(){return false;}
 static bool focusLightReturnTick(ULONGLONG){return true;}
 static FocusTargetSnapshot focusCaptureTarget(HWND){return {};}

@@ -12,7 +12,7 @@ struct ModeCacheMiss {
 // Time until the existing read slot is eligible, not predicted read latency.
 struct ConnectionRefreshQueue {
     std::uint32_t slotWaitMs = 0;
-    bool coalesced = false, inFlight = false;
+    bool coalesced = false, inFlight = false, reusedHealthy = false;
 };
 // Diagnostic provenance only. Neither the timestamps nor this copy of the
 // public lifecycle receipt can authorize reading or changing Steam.

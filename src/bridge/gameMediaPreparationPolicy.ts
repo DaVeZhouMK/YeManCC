@@ -15,7 +15,7 @@ export function subscribeGameMediaResume(handler:(event:MediaResumeEvent)=>void,
 }
 export interface MediaPreparationSnapshot {blockedReason?:string;batterySaver?:boolean;lowBattery?:boolean;}
 interface Ports {
-  read:()=>Promise<MediaPreparationSnapshot>;
+  read:(signal:AbortSignal)=>Promise<MediaPreparationSnapshot>;
   apply:(state:{backgroundBlocked:boolean;storageBlocked:boolean;reason:string;playback30Idle:boolean})=>void;
   queued:()=>number;
   enabled?:()=>boolean;
@@ -28,7 +28,8 @@ interface Ports {
 export class GameMediaPreparationPolicy {
   private port:Ports;
   private stopped=false;private suspended=false;private gameRunning:boolean|null=null;private snapshot:MediaPreparationSnapshot={};
-  private epoch=0;private known=false;private reading:number|null=null;private recovering:number|null=null;private again=false;
+  private epoch=0;private known=false;private reading:AbortController|null=null;private recovering:number|null=null;private again=false;
+  private retryResumeRead=false;
   private timer:ReturnType<typeof setTimeout>|null=null;private retry:ReturnType<typeof setTimeout>|null=null;
   constructor(port:Omit<Ports,'schedule'|'cancel'>&Partial<Pick<Ports,'schedule'|'cancel'>>){this.port={schedule:(...args)=>globalThis.setTimeout(...args),cancel:(timer)=>globalThis.clearTimeout(timer),...port};this.apply();}
   private apply(){if(!this.stopped){
@@ -39,12 +40,20 @@ export class GameMediaPreparationPolicy {
   game(running:boolean){if(this.stopped||this.gameRunning===running)return;this.gameRunning=running;this.apply();}
   private current(epoch:number){return !this.stopped&&!this.suspended&&epoch===this.epoch;}
   private retirePending(){
-    ++this.epoch;this.reading=this.recovering=null;this.again=false;
+    const read=this.reading;
+    ++this.epoch;this.reading=null;this.recovering=null;this.again=this.retryResumeRead=false;
     if(this.timer!==null)this.port.cancel(this.timer);if(this.retry!==null)this.port.cancel(this.retry);
     this.timer=this.retry=null;
+    read?.abort();
   }
   suspend(){if(this.stopped)return;this.suspended=true;this.retirePending();this.apply();}
-  resume(){if(this.stopped)return;this.suspended=false;this.retirePending();this.known=false;this.apply();this.request();}
+  resume(){if(this.stopped)return;this.suspended=false;this.retirePending();this.retryResumeRead=true;this.known=false;this.apply();this.request();}
+  notificationAdvanced(){
+    const read=this.reading;
+    if(!read||this.stopped||this.suspended)return;
+    // Only replace the in-flight capacity read. Keep the wake and health budgets.
+    this.reading=null;this.again=false;this.request();read.abort();
+  }
   request(){
     if(this.stopped||this.suspended)return;
     if(this.reading!==null){this.again=true;return;}if(this.timer!==null)return;
@@ -55,11 +64,19 @@ export class GameMediaPreparationPolicy {
     },250);this.timer=timer;
   }
   private async read(epoch:number){
-    if(!this.current(epoch))return;this.reading=epoch;
-    try{const value=await this.port.read();if(this.current(epoch)){this.snapshot=value;this.known=true;}}
-    catch{if(this.current(epoch))this.known=false;}
-    finally{if(this.current(epoch)&&this.reading===epoch){
-      this.reading=null;this.apply();this.demand();if(this.again){this.again=false;this.request();}
+    if(!this.current(epoch))return;const read=this.reading=new AbortController();
+    const current=()=>this.current(epoch)&&this.reading===read;
+    let failed=false;
+    try{const value=await this.port.read(read.signal);if(current()){this.snapshot=value;this.known=true;}}
+    catch{if(current()){this.known=false;failed=true;}}
+    finally{if(current()){
+      const retryResumeRead=this.retryResumeRead;this.retryResumeRead=false;
+      this.reading=null;this.apply();
+      if(this.current(epoch)){
+        this.demand();
+        // A lost wake read can leave admission closed before any work queues.
+        if(this.again||failed&&retryResumeRead){this.again=false;this.request();}
+      }
     }}
   }
   demand(){if(this.stopped||this.suspended)return;const retry=(this.port.enabled?.()??true)&&this.port.queued()>0;

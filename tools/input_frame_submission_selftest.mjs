@@ -70,7 +70,8 @@ function block(text,label,a,b){
   const s=text.slice(i,j);bindings.push({symbol:label,sha256:sha(s),exact:true});return s;
 }
 const submit=fn('inputHostSubmitPad'),request=fn('inputHostRequestPreparedLocked');
-const readState=fn('gamepadReadStateUnlocked'),evaluate=fn('gamepadEval');
+const readState=fn('gamepadReadStateUnlocked');
+const evaluate=fn(main.includes('static void gamepadEvalImpl(')?'gamepadEvalImpl':'gamepadEval');
 const context=struct('InputFrameSubmission')+'\nstatic thread_local InputFrameSubmission* t_inputFrameSubmission=nullptr;\n'+
   struct('InputFrameSubmissionScope')+'\n'+struct('GameFeedbackFrameDispatchScope')+'\n'+struct('InputHostRequestPowerScope');
 const current=fn('inputHostFrameSubmissionCurrent');

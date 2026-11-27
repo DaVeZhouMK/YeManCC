@@ -72,7 +72,7 @@ try{
   await m.checkForUpdate(APP_VERSION,true);
   const task=m.prepareUpdate({background:true});await flush();assert.ok(pending);
   if(mode==='cleanup-probe'){
-   holdProbe=true;const probing=m.probeBackgroundSuccessor();await flush();assert.ok(manifestRequest);
+   holdProbe=true;const probing=m.probeBackgroundSuccessor({generation:1,suspendSerial:0,observedNotificationSequence:0});await flush();assert.ok(manifestRequest);
    receive({data:{id:pending.id,result:'package'}});await flush();
    let finished=false;void task.then(()=>finished=true);await flush();assert.equal(finished,false);
    assert.equal(await m.clearUpdateCache(),true);assert.equal(await task,false);

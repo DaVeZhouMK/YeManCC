@@ -9,29 +9,32 @@ static int64_t nativeShortcutUnixMs() {
 static bool nativeShortcutUiDispatch(const NativeKeyboardShortcutRule& rule,uint64_t sourceEpoch,
     uint64_t wmiGeneration,uint64_t wmiSequence,bool keyboardWmiFallback,OemProducerTokens producerTokens) {
     const auto action=rule.uiAction;const auto params=rule.uiParams;
-    const auto generation=currentPowerGeneration();
+    ymcc::sleeppower::SharedPowerV1 power;
+    if(!captureSharedPowerLifecycle(power))return false;
     const auto actionRevision=GamepadSerialEvent::captureRevision();
     const auto revision=ymSettingsSection("input").value("revision",0ll);
     // Issue, claim and verification copy this guard. Once any copy observes
     // invalidation, the same request stays revoked; a new press owns new state.
     const auto revoked=std::make_shared<std::atomic<bool>>(false);
-    const auto current=[generation,revision,actionRevision,sourceEpoch,wmiGeneration,keyboardWmiFallback,producerTokens,revoked] {
+    const auto current=[power,revision,actionRevision,sourceEpoch,wmiGeneration,keyboardWmiFallback,producerTokens,revoked] {
         if(revoked->load(std::memory_order_acquire))return false;
         bool allowed=false;
         try { allowed=GamepadSerialEvent::currentRevision(actionRevision) && !g_exitRequested.load(std::memory_order_acquire) && !g_shortcutRecordingActive.load(std::memory_order_acquire) &&
-            g_inputReady.load(std::memory_order_acquire) && sgVirtualWriterAllowedNow() && currentPowerGeneration()==generation &&
+            g_inputReady.load(std::memory_order_acquire) && sgVirtualWriterAllowedNow() &&
             ymSettingsSection("input").value("revision",0ll)==revision && oemProducerTokensCurrent(producerTokens) &&
             (sourceEpoch==kOemShortcutUnboundEpoch || sourceEpoch==g_oemShortcutEdgeEpoch.load(std::memory_order_acquire)) &&
             (!wmiGeneration || msiWmiGenerationCurrent(wmiGeneration)) && (!keyboardWmiFallback || !msiWmiShortcutAuthoritative()) &&
             !radialHasInputOwner() && ((producerTokens.requiredMask & ((1ull << 20) - 1)) == 0 ||
-                (!g_inputReleaseRequired.load(std::memory_order_acquire) && !customSteamLibraryInputSuppressed()));
+                (!g_inputReleaseRequired.load(std::memory_order_acquire) && !customSteamLibraryInputSuppressed())) &&
+            sharedPowerLifecycleCurrent(power);
         } catch(...) {} // A failed current-source read cannot revive this request.
         if(!allowed)revoked->store(true,std::memory_order_release);
         return allowed&&!revoked->load(std::memory_order_acquire);
     };
-    return nativeYmccShortcutSubmit([action,params,generation,revision,current] {
+    return nativeYmccShortcutSubmit([action,params,power,revision,current] {
         if(!current())return;
-        const auto request=g_shortcutActionMailbox.issue(action,params,generation,static_cast<uint64_t>(revision),
+        const auto request=g_shortcutActionMailbox.issue(action,params,
+            {power.generation,power.suspendSerial,power.observedNotificationSequence},static_cast<uint64_t>(revision),
             GetTickCount64(),nativeShortcutUnixMs(),current);
         if(request.empty()) {
             appendNativeLifecycleLog("shortcut-action-request",{{"actionId",action},{"status","not-issued"}});return;
@@ -40,18 +43,35 @@ static bool nativeShortcutUiDispatch(const NativeKeyboardShortcutRule& rule,uint
         ipc_emit("input.shortcutAction",request);
     },SerialJobKind::YmccOwn,sourceEpoch,wmiGeneration,wmiSequence,keyboardWmiFallback,producerTokens);
 }
-static json nativeShortcutTdpEvent(int delta) {
-    const auto generation=currentPowerGeneration();const auto revision=ymSettingsSection("input").value("revision",0ll);
+static json nativeShortcutTdpEvent(int delta,const ymcc::sleeppower::SharedPowerV1& power) {
+    if(!sharedPowerLifecycleCurrent(power))return {{"delta",0}};
+    const auto revision=ymSettingsSection("input").value("revision",0ll);
     const auto epoch=g_oemShortcutEdgeEpoch.load(std::memory_order_acquire);
     const auto actionRevision=GamepadSerialEvent::captureRevision();
-    const auto current=[generation,revision,epoch,actionRevision] {return GamepadSerialEvent::currentRevision(actionRevision) && currentPowerGeneration()==generation && g_inputReady.load(std::memory_order_acquire) &&
+    const auto current=[power,revision,epoch,actionRevision] {return GamepadSerialEvent::currentRevision(actionRevision) && g_inputReady.load(std::memory_order_acquire) &&
         sgVirtualWriterAllowedNow() && !g_exitRequested.load(std::memory_order_acquire) && !g_shortcutRecordingActive.load(std::memory_order_acquire) &&
-        g_oemShortcutEdgeEpoch.load(std::memory_order_acquire)==epoch && ymSettingsSection("input").value("revision",0ll)==revision;};
+        g_oemShortcutEdgeEpoch.load(std::memory_order_acquire)==epoch && ymSettingsSection("input").value("revision",0ll)==revision &&
+        sharedPowerLifecycleCurrent(power);};
     json event={{"delta",delta}};
-    const auto ticket=g_shortcutActionMailbox.issueResultTicket("power.tdpAdjust",generation,static_cast<uint64_t>(revision),GetTickCount64(),nativeShortcutUnixMs(),current);
-    if(!ticket.empty())event["feedbackId"]=ticket["id"];
+    if(!sharedPowerLifecycleCurrent(power))return {{"delta",0}};
+    const auto ticket=g_shortcutActionMailbox.issueResultTicket("power.tdpAdjust",
+        {power.generation,power.suspendSerial,power.observedNotificationSequence},static_cast<uint64_t>(revision),
+        GetTickCount64(),nativeShortcutUnixMs(),current);
+    if(!ticket.empty()) {
+        event["feedbackId"]=ticket["id"];
+        event["powerScope"]=ticket["powerScope"];
+    }
     else event["delta"]=0; // bounded admission: never enqueue an untracked duplicate burst
     return event;
+}
+static std::function<void()> nativeShortcutTdpJob(int delta) {
+    ymcc::sleeppower::SharedPowerV1 power;
+    if(!captureSharedPowerLifecycle(power))return {};
+    return [delta,power] {
+        if(!g_inputReady.load(std::memory_order_acquire))return;
+        const auto event=nativeShortcutTdpEvent(delta,power);
+        if(event.contains("feedbackId"))gamepadSerialPostEvent("gamepad.tdp-delta",event);
+    };
 }
 static void nativeShortcutActionRegisterIpc() {
     ipc_on("input.shortcutAction.claim",[](const json& args)->json {

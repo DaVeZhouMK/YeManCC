@@ -16,7 +16,7 @@ struct XINPUT_GAMEPAD { std::uint16_t wButtons=0; std::uint8_t bLeftTrigger=0,bR
     short sThumbLX=0,sThumbLY=0,sThumbRX=0,sThumbRY=0; };
 struct Settings {
     std::string steeringAxis="roll",motionInput="local-space",aimingSightsTrigger,velocityMode="position",outputAxis="both";
-    bool motionActionEnabled=true,targetGyroEnabled=true,motionTriggerResolved=true,invertHorizontal=false,invertVertical=false;
+    bool steamControlled=false,motionActionEnabled=true,targetGyroEnabled=true,motionTriggerResolved=true,invertHorizontal=false,invertVertical=false;
     double gyroMultiplier=1,accelerometerMultiplier=1,gyroThreshold=1;
     double steeringMaxAngle=45,steeringPower=1,steeringDeadzone=0,aimingSightsMultiplier=1;
     double motionSensitivityX=0.001,motionSensitivityY=0.001,velocityScale=1;
@@ -33,12 +33,12 @@ static void check(bool ok,const char* expression,int line) {
 static bool near(double a,double b){return std::abs(a-b)<0.000001;}
 static bool same(const Settings& a,const Settings& b){
     return std::tie(a.steeringAxis,a.motionInput,a.aimingSightsTrigger,a.velocityMode,a.outputAxis,
-        a.motionActionEnabled,a.targetGyroEnabled,a.motionTriggerResolved,a.invertHorizontal,a.invertVertical,
+        a.steamControlled,a.motionActionEnabled,a.targetGyroEnabled,a.motionTriggerResolved,a.invertHorizontal,a.invertVertical,
         a.gyroMultiplier,a.accelerometerMultiplier,a.gyroThreshold,a.steeringMaxAngle,a.steeringPower,a.steeringDeadzone,
         a.aimingSightsMultiplier,a.motionSensitivityX,a.motionSensitivityY,a.velocityScale,
         a.velocityAccumulatedX,a.velocityAccumulatedY,a.motionSensitivityArray)==
       std::tie(b.steeringAxis,b.motionInput,b.aimingSightsTrigger,b.velocityMode,b.outputAxis,
-        b.motionActionEnabled,b.targetGyroEnabled,b.motionTriggerResolved,b.invertHorizontal,b.invertVertical,
+        b.steamControlled,b.motionActionEnabled,b.targetGyroEnabled,b.motionTriggerResolved,b.invertHorizontal,b.invertVertical,
         b.gyroMultiplier,b.accelerometerMultiplier,b.gyroThreshold,b.steeringMaxAngle,b.steeringPower,b.steeringDeadzone,
         b.aimingSightsMultiplier,b.motionSensitivityX,b.motionSensitivityY,b.velocityScale,
         b.velocityAccumulatedX,b.velocityAccumulatedY,b.motionSensitivityArray);

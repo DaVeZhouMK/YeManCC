@@ -45,11 +45,26 @@ for (const readyFirst of [false, true]) {
   assert.equal(timers.size, 0);
 }
 for (const reply of [accepted(10), defer(9), { ...defer(10), submitted: true },
-  { generation: 10, ok: false, reason: 'launch-request-failed', submitted: false }, undefined]) {
+  { ...defer(10), reason: 'launch-request-failed' },
+  { ...defer(9), reason: 'startup-state-unavailable' },
+  { ...defer(10), reason: 'process-state-unavailable', submitted: true }, undefined]) {
   const { scheduler, schedule, requests, timers, fire } = fixture();
   schedule(10); fire(); scheduler.cancel(); schedule(10);
   requests[0].resolve(reply); await Promise.resolve();
   assert.equal(timers.size, 0);
+}
+for (const reason of ['startup-state-unavailable', 'process-state-unavailable']) {
+  const { scheduler, schedule, requests, timers, fire } = fixture();
+  schedule(10, 2); fire(); scheduler.cancel();
+  const unavailable = { ...defer(10, 2), reason };
+  requests[0].resolve(unavailable); await Promise.resolve();
+  assert.equal(timers.size, 0, 'unavailable state cannot reopen a closed power gate');
+  schedule(10, 2); schedule(10, 2);
+  assert.equal(timers.size, 1, reason + ' before launch must not consume the continuation');
+  fire();
+  requests[1].resolve(unavailable); await Promise.resolve();
+  schedule(10, 2);
+  assert.equal(timers.size, 0, 'same generation still has a two-attempt budget');
 }
 {
   const { scheduler, schedule, requests, timers, fire } = fixture();
@@ -102,4 +117,4 @@ for (const rejects of [false, true]) {
   schedule(10, 0); fire();
   assert.equal(requests[0].suspendSerial, 0);
 }
-console.log('network acceleration wake scheduler: 13 cases passed');
+console.log('network acceleration wake scheduler: 17 cases passed');

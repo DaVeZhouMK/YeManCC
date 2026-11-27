@@ -19,6 +19,7 @@
 #include "native/desktop_function_shortcut.h"
 #include "native/input_frame_submission.h"
 #include "native/sleep_power_state.h"
+#include "native/win5_menu_shortcut_policy.h"
 using json=nlohmann::json;
 #include "current-native-types.inc"
 // Current startup identity supplied in memory, never read from the host machine.

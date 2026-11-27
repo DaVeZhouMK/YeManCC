@@ -852,8 +852,7 @@ class Worker {
     Store store(queue_.root());
     auto requestTarget = target;
     requestTarget["demandConsumer"] = "background";
-    const auto intent=queue_.snapshot();
-    const auto manualRequest=intent.value("session",std::string{})==token_&&manualRun(intent)&&manualTarget(intent,stringField(target,"key"))?stringField(intent,"manualRequestId"):std::string{};
+    const auto manualRequest=queue_.workerManualRequest(token_,stringField(target,"key"));
     Json lease=Json::object();bool acquired=false,staticUnavailable=false,videoUnavailable=false;
     try {
     lease = store.begin(requestTarget,manualRequest);acquired=lease.value("acquired",false);

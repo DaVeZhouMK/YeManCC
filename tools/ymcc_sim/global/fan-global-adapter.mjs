@@ -1,5 +1,13 @@
 /** Reviewed unchanged fan tests and exact compiler/source evidence. */
-export function getFanGlobalAdapter(){return {
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {BUNDLED_AUTHORITY_SOURCES,lockBundledNodeTools} from './bundled-node-tool-authority.mjs';
+
+const defaultRepo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
+const key=file=>path.resolve(file).toLowerCase();
+export function getFanGlobalAdapter(repoRoot=defaultRepo){
+ const adapter={
   "id": "fan.lifecycle-wake-display",
   "domain": "fan",
   "title": "Original real-product fan lifecycle, wake progress and display evidence regressions",
@@ -141,4 +149,17 @@ export function getFanGlobalAdapter(){return {
     "tools/fan_wake_open_progress_selftest.ts",
     "tools/fan_control_display_evidence_selftest.ts"
   ]
-};}
+ };
+ const reviewed=adapter.evidenceInputs.filter(file=>file.startsWith('node_modules/'));
+ adapter.evidenceInputs=[...new Set([...adapter.evidenceInputs.filter(file=>!file.startsWith('node_modules/')),...BUNDLED_AUTHORITY_SOURCES])];
+ try{
+  const authority=lockBundledNodeTools(repoRoot);
+  const tools=new Set(authority.tools.map(row=>key(row.path)));
+  for(const file of reviewed){
+   if(!tools.has(key(fs.realpathSync(path.join(repoRoot,file)))))throw Error('FAN_REVIEWED_DEPENDENCY_NOT_IN_TOOL_GRAPH:'+file);
+  }
+  adapter.artifactInputs=authority.tools.map(row=>row.path);
+  adapter.args.push('--expected-tool-graph',authority.graphSha256);
+ }catch(error){adapter.blockedReason='FAN_NODE_TOOL_AUTHORITY_UNAVAILABLE:'+String(error.message).slice(0,500);}
+ return adapter;
+}

@@ -279,16 +279,759 @@ static void fixturePlanCommitPublication(const fs::path& root,bool planFirst){
     check(reachedWait&&secondBlocked&&ordered,"Concurrent plan publication did not retain committed ownership ordering");
 }
 static json fixtureDelete(Fixture& f) { return commitSteamLibraryDeletePlan(f.data,fixtureScanState(f),f.target,f.data/L"state"/L"delete.json",true,{canonicalPathKey(f.root/L"Game")}); }
+struct ArtworkRepairFixture : Fixture {
+    explicit ArtworkRepairFixture(const fs::path& path, bool seedLegacy = true) : Fixture(path) {
+        const auto exe = root / L"Game" / L"Game.exe";
+        textFile(exe, "fixture executable");
+        plan["items"][0]["primaryExecutable"] = toUtf8(exe.wstring());
+        if (!seedLegacy) return;
+        auto before = BinaryVdfDocument::emptySteamShortcuts();
+        vdfFindObject(before.root(), "shortcuts")->objectValue.push_back({"0", steamShortcutNode(-1073741823,
+            "Legacy artwork card", quotedSteamPath(exe), quotedSteamPath(exe.parent_path()), 21)});
+        writeAtomic(target.path, before.serialize());
+    }
+};
+static void writeRepairArtwork(const fs::path& file, BYTE shade = 42, bool jpeg = false) {
+    (void)artworkInspectionGdiPlusToken();
+    Gdiplus::Bitmap image(4, 4, PixelFormat32bppARGB);
+    {
+        Gdiplus::Graphics graphics(&image);
+        check(graphics.Clear(Gdiplus::Color(255, shade, 90, 50)) == Gdiplus::Ok, "Fixture artwork draw failed");
+    }
+    const CLSID jpegEncoder{0x557cf401, 0x1a04, 0x11d3, {0x9a, 0x73, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e}};
+    check(image.Save(file.c_str(), jpeg ? &jpegEncoder : &pngEncoderClsid(), nullptr) == Gdiplus::Ok, "Fixture artwork encoding failed");
+}
+static void verifyManualArtworkCacheWrite(const fs::path& path, std::string_view mode) {
+    const bool adding = mode.starts_with("add-");
+    ArtworkRepairFixture f(path, !adding);
+    const auto game=path/L"Game", exe=game/L"Game.exe", original=path/L"original.png", portable=path/L"bad.png";
+    const auto art=f.data/L"artwork"/toWide(gameDataId(game));
+    const auto manifest=art/L"manifest.json";
+    const auto recovered=(mode=="repair-foreign-cache"?path:art)/L"tall.png";
+    fs::create_directories(art);
+    writeRepairArtwork(recovered, 80);
+    textFile(portable,"broken portable original");
+    const auto text=[](const fs::path& value){return toUtf8(value.wstring());};
+    const json choice={{"file",text(original)},{"portableFile",text(portable)},{"updatedAt",42}};
+    json row={{"type","tall"},{"steamSuffix","p"},{"provider","manual-override"},{"ok",true},
+        {"file",text(original)},{"portableFile",text(recovered)},{"sha256",sha256(readBinaryFile(recovered))},{"manualRecovery",choice}};
+    if(mode=="repair-altered-bytes"){fs::remove(recovered);writeRepairArtwork(recovered,92);}
+    if(mode=="repair-live-original")writeRepairArtwork(original,61);
+    if(mode=="repair-preview-only")row["previewOnlyManualFallback"]=true;
+    const auto manifestExe=mode=="add-foreign-game"?path/L"Other.exe":exe;
+    writeJsonAtomic(manifest,{{"exe",text(manifestExe)},{"artwork",json::array({row})}});
+    json saved={{"cover",choice},{"artworkProtection",{{"cover","manual"}}}};
+    if(mode=="repair-reselected")saved["cover"]["updatedAt"]=43;
+    if(mode=="repair-deleted")saved["artworkProtection"]["cover"]="deleted";
+    if(mode.ends_with("cleared"))saved=json::object();
+    const auto config=f.data/L"config"/L"manual-overrides.json";
+    writeJsonAtomic(config,{{"items",{{canonicalPathKey(exe),saved}}}});
+    const auto originalConfig=readBinaryFile(config);
+    const auto grid=f.target.path.parent_path()/L"grid", portrait=grid/L"3221225473p.png";
+    const bool useRecovery=mode=="add-recovery"||mode=="repair-recovery";
+    if(adding){
+        f.plan["items"][0]["gameDirectory"]=text(game);
+        f.plan["items"][0]["artworkManifest"]=text(manifest);
+        const auto result=f.commit();
+        const auto shortcuts=readShortcuts(f.target.path,f.target.accountId);
+        check(result.value("committed",false)&&shortcuts.size()==1&&shortcuts[0].exe==quotedSteamPath(exe)&&
+            shortcuts[0].launchOptions.empty(),"Static recovery affected ordinary launch or commit");
+        check(useRecovery?(fs::exists(portrait)&&readBinaryFile(portrait)==readBinaryFile(recovered)):!fs::exists(portrait),
+            "First addition lost the verified manual recovery or imported stale/foreign artwork");
+    }else{
+        textFile(portrait,"old portrait bytes");
+        const auto oldPortrait=readBinaryFile(portrait), oldCard=readBinaryFile(f.target.path);
+        const auto state=fixtureScanState(f);
+        const auto result=refreshExistingSteamArtwork(f.data,state,f.target,f.data/L"state"/L"repair.json",true,{canonicalPathKey(game)});
+        const bool usingLiveOriginal=mode=="repair-live-original";
+        const auto expected=useRecovery||usingLiveOriginal?readBinaryFile(usingLiveOriginal?original:recovered):oldPortrait;
+        writeJsonAtomic(path/L"observed.json",result);
+        check(readBinaryFile(portrait)==expected&&readBinaryFile(f.target.path)==oldCard,
+            "Same-card recovery lost or replaced the portrait without current authority");
+        const auto& verified=result.at("items").at(0);
+        check(!verified.value("verifiedStaticArtworkWrites",json::array()).empty()==(useRecovery||usingLiveOriginal),
+            "Readback misreported which portrait was published");
+    }
+    check(readBinaryFile(config)==originalConfig&&fileText(portable)=="broken portable original","Repair rewrote the manual selection or source");
+}
 static json fixtureRefresh(Fixture& f) {
-    const auto cover=f.root/L"new-cover.png";textFile(cover,"new cover");
+    const auto cover=f.root/L"new-cover.png";writeRepairArtwork(cover);
     writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(f.root/L"Game"/L"Game.exe"),{{"cover",{{"file",toUtf8(cover.wstring())}}}}}}}});
     return refreshExistingSteamArtwork(f.data,fixtureScanState(f),f.target,f.data/L"state"/L"refresh.json",true,{canonicalPathKey(f.root/L"Game")});
 }
+
+static void fixtureSteamArtworkPreimage(const fs::path& path, std::string_view variant) {
+    ArtworkRepairFixture f(path);
+    const auto grid=f.target.path.parent_path()/L"grid";
+    const bool caseVariant=variant.starts_with("case-");
+    if(caseVariant)variant.remove_prefix(5);
+    const auto original=grid/(caseVariant?L"3221225473p.PNG":L"3221225473p.jpg"), replacement=grid/L"3221225473p.png";
+    const auto dynamic=grid/L"3221225473p.webm";
+    textFile(original,"old Steam portrait bytes");
+    const auto wantedSize=caseVariant?static_cast<size_t>(fs::file_size(original)):
+        variant=="above-backup-limit" ? (64u<<20)+1 : MAX_IMAGE_BYTES+1;
+    fs::resize_file(original,wantedSize);
+    textFile(dynamic,"untouched dynamic preview");
+    const auto originalHash=sha256(readBinaryFile(original,wantedSize));
+    const auto shortcut=readBinaryFile(f.target.path);
+    const auto originalIntact=[&]{return fs::file_size(original)==wantedSize&&sha256(readBinaryFile(original,wantedSize))==originalHash;};
+    if(variant=="replace") {
+        const auto result=fixtureRefresh(f);
+        check(result["artworkFilesActivated"]==1&&(caseVariant||!fs::exists(original))&&
+            readBinaryFile(replacement)==readBinaryFile(path/L"new-cover.png"),"Old cover blocked replacement");
+        if(caseVariant)check(existingArtworkForStem(grid,"3221225473p")==std::vector<fs::path>{original},
+            "Case-only replacement did not keep one canonical grid file");
+        const auto backup=fs::path(toWide(jsonStringOr(result,"backup")))/L"grid-before"/original.filename();
+        check(sha256(readBinaryFile(backup,wantedSize))==originalHash,"Large original was not backed up byte-for-byte");
+    } else if(variant=="above-backup-limit") {
+        mustThrow([&]{fixtureRefresh(f);});
+        check(originalIntact()&&!fs::exists(replacement),"Too-large original was not left alone");
+    } else if(variant=="oversize-new-source") {
+        const auto source=path/L"new-source.png";
+        writeRepairArtwork(source);fs::resize_file(source,MAX_IMAGE_BYTES+1);
+        writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(path/L"Game"/L"Game.exe"),
+            {{"cover",{{"file",toUtf8(source.wstring())}}}}}}}});
+        const auto result=refreshExistingSteamArtwork(f.data,fixtureScanState(f),f.target,
+            f.data/L"state"/L"refresh.json",true,{canonicalPathKey(path/L"Game")});
+        check(result["artworkFilesActivated"]==0&&originalIntact()&&!fs::exists(replacement),"New image size admission was relaxed");
+    } else {
+        bool completionReached=false, recoveryWriteBlocked=false;
+        selftestMoveFault=[&](const auto&,const auto& to)->DWORD{
+            if(to.ends_with(L"transaction.complete.json")){completionReached=true;return ERROR_WRITE_FAULT;}
+            if(variant=="recover"&&completionReached&&fs::path(to).filename()==original.filename()&&
+                to.find(L"\\config\\grid\\")!=std::wstring::npos){recoveryWriteBlocked=true;return ERROR_WRITE_FAULT;}
+            return ERROR_SUCCESS;
+        };
+        mustThrow([&]{fixtureRefresh(f);});selftestMoveFault={};
+        check(completionReached,"Repair did not reach activation and completion");
+        if(variant=="recover") {
+            check(recoveryWriteBlocked&&!pendingJournals(f.data).empty(),"Rollback failure lost the large original's journal");
+            if(caseVariant) {
+                const auto newBytes=readBinaryFile(path/L"new-cover.png");
+                check(readBinaryFile(original)==newBytes,"Failed rollback removed the live same-path replacement");
+                bool retryWriteBlocked=false;
+                selftestMoveFault=[&](const auto&,const auto& to)->DWORD{
+                    if(fs::path(to)==original){retryWriteBlocked=true;return ERROR_WRITE_FAULT;}
+                    return ERROR_SUCCESS;
+                };
+                cleanupInterruptedSteamTransactions(f.data);selftestMoveFault={};
+                check(retryWriteBlocked&&readBinaryFile(original)==newBytes&&!pendingJournals(f.data).empty(),
+                    "Failed recovery removed the live same-path replacement or lost its journal");
+                fs::remove(original);
+                cleanupInterruptedSteamTransactions(f.data);
+                check(!fs::exists(original)&&!pendingJournals(f.data).empty(),"External deletion was mistaken for an incomplete write");
+                writeAtomic(original,newBytes);
+            }
+            cleanupInterruptedSteamTransactions(f.data);
+        }
+        check(originalIntact()&&(caseVariant||!fs::exists(replacement)),"Original was not restored byte-for-byte");
+    }
+    check(readBinaryFile(f.target.path)==shortcut&&fileText(dynamic)=="untouched dynamic preview"&&
+        pendingJournals(f.data).empty()&&!hasStages(path),"Artwork repair touched unrelated data or left debt");
+}
+
+static void fixtureSteamArtworkAliasRecovery(const fs::path& p, std::string_view variant) {
+    ArtworkRepairFixture f(p, false);
+    const auto game = p/L"Game", directory = game/L"bin", primary = directory/L"Game.exe", scan = fixtureScanState(f);
+    const auto text = [](const fs::path& path) { return toUtf8(path.wstring()); };
+    textFile(primary, "isolated primary executable");
+    json inventory{{"games",json::array({{{"gameDirectory",text(directory)},{"primaryExecutable",text(primary)},
+        {"status","ready"},{"alternateGameDirectories",json::array({text(game)})}}})}};
+    if (variant=="recovered-scan") inventory["libraryScanRecovery"]={{"schemaVersion",1},{"requiresFreshScan",true}};
+    writeJsonAtomic(scan,inventory);
+    auto document = BinaryVdfDocument::emptySteamShortcuts();
+    vdfFindObject(document.root(),"shortcuts")->objectValue.push_back({"0",steamShortcutNode(-1073741823,
+        "Existing game",quotedSteamPath(primary),quotedSteamPath(directory),21)});
+    const auto before = document.serialize();
+    writeAtomic(f.target.path,before);
+    const auto grid = f.target.path.parent_path()/L"grid";
+    const auto cover = p/L"old-good-portrait.png", hero = p/L"old-good-hero.png", horizontal = p/L"current-good-horizontal.png";
+    const auto currentHero = p/L"current-good-hero.png", broken = p/L"current-broken.png";
+    writeRepairArtwork(cover,40); writeRepairArtwork(hero,41); writeRepairArtwork(horizontal,42); writeRepairArtwork(currentHero,43);
+    textFile(broken,"bad current portrait");
+    textFile(grid/L"3221225473p.jpg","broken Steam portrait");
+    const auto row = [&](const char* type, const char* suffix, const fs::path& file) {
+        return json{{"type",type},{"steamSuffix",suffix},{"ok",true},{"file",text(file)}};
+    };
+    const auto currentPath = f.data/L"artwork"/toWide(gameDataId(directory))/L"manifest.json";
+    const auto oldPath = f.data/L"artwork"/toWide(gameDataId(game))/L"manifest.json";
+    auto currentRows = json::array({row("long","",horizontal),row("tall","p",broken)});
+    if (variant=="current-priority") currentRows.push_back(row("hero","_hero",currentHero));
+    writeJsonAtomic(currentPath,{{"exe",text(primary)},{"match",{{"appId",1091500}}},{"artwork",currentRows}});
+    writeJsonAtomic(oldPath,{{"exe",text(variant=="foreign-exe"?game/L"Other.exe":primary)},
+        {"match",{{"appId",variant=="different-store"||variant=="conflicting-cache-id"?2400700:1091500}}},
+        {"artwork",json::array({row("tall","p",cover),row("hero","_hero",hero)})}});
+    if (variant=="deleted-and-handpicked" || variant=="different-store") {
+        const auto item = variant=="different-store" ? json{{"steamId",1091500}} :
+            json{{"wallpaper",{{"file",text(currentHero)}}},{"artworkProtection",{{"cover","deleted"}}}};
+        writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(primary),item}}}});
+    }
+    if (variant=="cleared-identity") writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",
+        {{"items",{{canonicalPathKey(primary),{{"idCleared",true}}}}}});
+    const auto result = refreshExistingSteamArtwork(f.data,scan,f.target,f.data/L"state"/L"refresh.json",true,{canonicalPathKey(directory)});
+    check(readBinaryFile(f.target.path)==before && readBinaryFile(grid/L"3221225473.png")==readBinaryFile(horizontal),
+        "Alias recovery changed the original card or discarded current artwork");
+    const bool recovered = variant=="partial-current" || variant=="current-priority";
+    if (recovered) {
+        check(result["artworkFilesActivated"]==4 && !fs::exists(grid/L"3221225473p.jpg") &&
+            readBinaryFile(grid/L"3221225473p.png")==readBinaryFile(cover),"Current manifest stranded the same EXE's historic portrait");
+        check(readBinaryFile(grid/L"3221225473_hero.png")==readBinaryFile(variant=="current-priority"?currentHero:hero),
+            "Alias did not fill a missing background or displaced a valid current background");
+    } else {
+        check(fileText(grid/L"3221225473p.jpg")=="broken Steam portrait" && !fs::exists(grid/L"3221225473p.png"),
+            "Alias overrode a deleted choice or took artwork from an unrelated EXE or store selection");
+        if (variant=="deleted-and-handpicked")
+            check(result["artworkFilesActivated"]==3 && readBinaryFile(grid/L"3221225473_hero.png")==readBinaryFile(currentHero),
+                "Alias overrode the manually chosen background");
+        else check(result["artworkFilesActivated"]==2 && !fs::exists(grid/L"3221225473_hero.png"),"Foreign alias wrote a background");
+    }
+}
+
+static void fixtureSteamScriptCardIdentity(const fs::path& p, std::string_view variant) {
+    namespace launch = custom_steam_library::launch_file;
+    ArtworkRepairFixture f(p, false);
+    const auto game = p / L"Game", primary = game / L"bin" / L"Game.exe";
+    const bool update = variant.starts_with("update-");
+    if (update) variant.remove_prefix(7);
+    const bool aliasReverse = variant.ends_with("-alias");
+    const bool unrelated = variant == "legacy-unrelated-alias";
+    const auto directory = variant == "reverse" || aliasReverse || update ? primary.parent_path() : game;
+    const auto oldDirectory = unrelated ? p / L"Other Game" : game;
+    const auto scan = fixtureScanState(f), script = launch::wrapperPath(oldDirectory);
+    const auto utf8Path = [](const fs::path& path) { return toUtf8(path.wstring()); };
+    textFile(primary, "isolated primary executable; never launched");
+    auto state = loadJsonDocument(scan);
+    auto& gameRow = state["games"][0];
+    gameRow["gameDirectory"] = utf8Path(directory);
+    gameRow["primaryExecutable"] = utf8Path(primary);
+    gameRow["status"] = "ready";
+    if (aliasReverse) gameRow["alternateGameDirectories"] = json::array({utf8Path(oldDirectory)});
+    const bool exactOwnerConflict = variant == "legacy-exact-contested" || variant == "legacy-exact-unresolved";
+    if (variant == "legacy-contested-alias" || exactOwnerConflict) {
+        const auto other = game / L"Other.exe";
+        textFile(other, "independent game under the old directory; never launched");
+        const bool unresolved = variant == "legacy-exact-unresolved";
+        state["games"].push_back({{"gameDirectory", utf8Path(game)}, {"primaryExecutable", unresolved ? "" : utf8Path(other)},
+            {"status", unresolved ? "needs-primary" : "ready"}});
+    }
+    writeJsonAtomic(scan, state);
+
+    const bool direct = variant == "direct", legacy = variant.starts_with("legacy");
+    const uint32_t id = 3221225473u;
+    auto start = oldDirectory;
+    if (!legacy && !direct) {
+        const auto observedPrimary = variant == "wrong-primary" ? game / L"Other.exe" : primary;
+        const json binding{{"schemaVersion", 1}, {"accountId", variant.starts_with("wrong-account") ? "89250578" : f.target.accountId},
+            {"shortcutAppId", id}, {"shortcutsVdf", utf8Path(f.target.path)}, {"script", utf8Path(script)},
+            {"primaryExecutable", utf8Path(observedPrimary)}};
+        const auto bytes = binding.dump();
+        start = launch::bindingRoot(f.data) / toWide(sha256(std::vector<unsigned char>(bytes.begin(), bytes.end())));
+        textFile(start / L"binding.json", bytes);
+    }
+    auto cards = BinaryVdfDocument::emptySteamShortcuts();
+    auto& rows = vdfFindObject(cards.root(), "shortcuts")->objectValue;
+    rows.push_back({"0", steamShortcutNode(-1073741823, "Original Steam card",
+        quotedSteamPath(direct ? primary : launch::systemFile(L"wscript.exe")),
+        quotedSteamPath(direct ? primary.parent_path() : start), 21, {}, direct ? (update ? "--original" : "") : toUtf8(launch::steamOptions(script)))});
+    if (variant == "duplicate") rows.push_back({"1", steamShortcutNode(-1073741822, "Other Steam card",
+        quotedSteamPath(primary), quotedSteamPath(primary.parent_path()), 22)});
+    const bool duplicateStoredId = variant.starts_with("stored-id-");
+    if (duplicateStoredId) rows.push_back({"1", steamShortcutNode(-1073741823,
+        variant == "stored-id-hidden" ? "" : "Other Steam card",
+        quotedSteamPath(game / L"Other.exe"), quotedSteamPath(game), 22)});
+    const auto original = cards.serialize();
+    writeAtomic(f.target.path, original);
+    const std::set<std::string> selected{canonicalPathKey(directory)};
+    if (update) {
+        const bool toDirect = direct || variant == "to-direct";
+        const bool missing = variant == "missing", unavailable = variant == "unavailable";
+        const std::string scriptContent = unavailable ? "" : "' existing script; preserve its exact bytes\r\n";
+        if (!direct && !missing) textFile(script, scriptContent);
+        writeJsonAtomic(f.data / L"config" / L"manual-overrides.json", {{"items", {{canonicalPathKey(primary),
+            {{"launchConfiguration", {{"mode", toDirect ? "direct" : "auto"}}}}}}}});
+        const auto commit = [&] { return commitSteamLibraryAddPlan(f.data, scan, f.target, f.planFile, true, selected, true, true); };
+        if (variant.starts_with("wrong-account")) {
+            mustThrow(commit);
+            check(readBinaryFile(f.target.path) == original && fileText(script) == scriptContent && !fs::exists(launch::wrapperPath(directory)),
+                "Conflicting account modified a script or Steam card");
+            return;
+        }
+        const auto result = commit();
+        const auto after = readBinaryFile(f.target.path);
+        const auto shortcuts = shortcutsFromBytes(after, f.target.path, f.target.accountId);
+        check(shortcuts.size() == 1 && static_cast<uint32_t>(shortcuts[0].storedAppId) == id, "Launch update changed the original card ID");
+        const auto& row = shortcuts[0];
+        if (missing || unavailable) {
+            check(!result.value("committed", false) && result["summary"]["launchFailures"] == 1 && after == original &&
+                (missing ? !fs::exists(script) : fs::exists(script) && fileText(script).empty()), "Missing or unusable original script was replaced");
+        } else if (toDirect) {
+            check(row.exe == quotedSteamPath(primary) && row.launchOptions == (direct ? "--original" : "") &&
+                (direct ? after == original : result.value("committed", false) && fileText(script) == scriptContent),
+                "Ordinary launch was modified without opt-in or did not restore the real EXE");
+        } else {
+            const auto target = toWide(row.exe), startIn = toWide(row.startDir), options = toWide(row.launchOptions);
+            check(launch::samePath(launch::steamScriptOperand(target, options), script) && fileText(script) == scriptContent,
+                "Update switched away from the original script");
+            check(launch::samePath(launch::readPrimaryBinding(f.data, f.target.path, f.target.accountId, id, target, startIn, options, toWide), primary),
+                "Original script no longer maps to the game's real EXE");
+            check(result.value("committed", false) == legacy, "An already current managed card was rewritten or a legacy binding not repaired");
+        }
+        check(!fs::exists(launch::wrapperPath(directory)), "Launch update generated a second wrapper under bin");
+        check(!commit().value("committed", false) && readBinaryFile(f.target.path) == after, "Repeating launch update wrote Steam again");
+        return;
+    }
+    const auto grid = f.target.path.parent_path() / L"grid", cover = p / L"cover.png";
+    const auto old = grid / L"3221225473p.jpg", fresh = grid / L"3221225473p.png";
+    textFile(old, "original grid file");
+    writeRepairArtwork(cover);
+    writeJsonAtomic(f.data / L"config" / L"manual-overrides.json", {{"items", {{canonicalPathKey(primary),
+        {{"cover", {{"file", utf8Path(cover)}}}}}}}});
+    const auto add = buildSteamLibraryAddPlan(f.data, scan, f.target, f.planFile, selected, true);
+    const auto refreshed = refreshExistingSteamArtwork(f.data, scan, f.target, f.data / L"state" / L"refresh.json", true, selected);
+    const auto deletionPath = f.data / L"state" / L"delete.json";
+    const auto remove = buildSteamLibraryDeletePlan(f.data, scan, f.target, deletionPath, selected);
+    const auto addStatus = jsonStringOr(add.at("items").at(0), "status");
+    const auto refreshStatus = jsonStringOr(refreshed.at("items").at(0), "status");
+    const auto deleteStatus = jsonStringOr(remove.at("items").at(0), "status");
+    if (duplicateStoredId) {
+        bool deleteRejected = false;
+        try { commitSteamLibraryDeletePlan(f.data, scan, f.target, deletionPath, true, selected, true); }
+        catch (const std::runtime_error&) { deleteRejected = true; }
+        const bool shortcutsPreserved = readBinaryFile(f.target.path) == original;
+        const bool coverPreserved = fs::is_regular_file(old) && fileText(old) == "original grid file" && !fs::exists(fresh);
+        writeJsonAtomic(p / L"lookup.json", {{"add", addStatus}, {"refresh", refreshStatus}, {"delete", deleteStatus},
+            {"deleteRejected", deleteRejected}, {"shortcutsPreserved", shortcutsPreserved}, {"coverPreserved", coverPreserved}});
+        check(addStatus == "shortcut-id-conflict" && refreshStatus == "ambiguous-card" && deleteStatus == "ambiguous" &&
+            deleteRejected && shortcutsPreserved && coverPreserved && !hasStages(p),
+            "An aliased stored app ID authorized membership, repair or delete");
+        // Simulate the source being corrected externally; no sticky quarantine.
+        rows.pop_back();
+        const auto corrected = cards.serialize();
+        writeAtomic(f.target.path, corrected);
+        const auto recovered = buildSteamLibraryAddPlan(f.data, scan, f.target, f.planFile, selected, true);
+        const auto repaired = refreshExistingSteamArtwork(f.data, scan, f.target, f.data / L"state" / L"refresh.json", true, selected);
+        const auto recoveredDelete = buildSteamLibraryDeletePlan(f.data, scan, f.target, deletionPath, selected);
+        check(recovered["items"][0]["status"] == "already-in-steam" && recovered["items"][0]["shortAppId"] == std::to_string(id) &&
+            repaired["artworkFilesActivated"] == 1 && readBinaryFile(fresh) == readBinaryFile(cover) &&
+            recoveredDelete["summary"]["readyToDelete"] == 1 && readBinaryFile(f.target.path) == corrected,
+            "Resolving the duplicate did not recover the same original card");
+        if (variant == "stored-id-hidden") {
+            rows.clear();
+            writeAtomic(f.target.path, cards.serialize());
+            const auto clean = buildSteamLibraryAddPlan(f.data, scan, f.target, f.planFile, selected, true);
+            const auto& proposed = clean["items"][0];
+            check(proposed["status"] == "ready-to-add", "Fixture cannot derive the proposed ordinary-launch ID");
+            rows.push_back({"0", steamShortcutNode(proposed.at("storedAppId").get<int32_t>(), "",
+                quotedSteamPath(game / L"Other.exe"), quotedSteamPath(game), 22)});
+            const auto occupied = cards.serialize();
+            writeAtomic(f.target.path, occupied);
+            const auto refused = buildSteamLibraryAddPlan(f.data, scan, f.target, f.planFile, selected, true);
+            check(refused["items"][0]["status"] == "shortcut-id-collision", "Hidden row did not reserve the proposed ID");
+            mustThrow([&] { commitSteamLibraryAddPlan(f.data, scan, f.target, f.planFile, true, selected, true); });
+            check(readBinaryFile(f.target.path) == occupied && !hasStages(p), "Conflicting add changed the hidden row");
+        }
+        return;
+    }
+    const bool conflict = variant == "wrong-primary" || variant.starts_with("wrong-account") || variant == "duplicate" ||
+        variant == "legacy-contested-alias" || exactOwnerConflict;
+    const bool originalPreserved = readBinaryFile(f.target.path) == original;
+    writeJsonAtomic(p / L"lookup.json", {{"add", addStatus}, {"refresh", refreshStatus}, {"delete", deleteStatus},
+        {"filesActivated", refreshed.value("artworkFilesActivated", 0)}, {"shortcutsPreserved", originalPreserved}});
+    check(originalPreserved, "Planning or static repair rewrote shortcut bytes");
+    if (unrelated) {
+        check(addStatus == "ready-to-add" && refreshStatus == "not-in-steam" && deleteStatus == "not-found" &&
+            fileText(old) == "original grid file" && !fs::exists(fresh), "An alias outside the real EXE's directory matched a foreign card");
+    } else if (conflict) {
+        check(addStatus == "shortcut-id-conflict" && refreshStatus == "ambiguous-card" && deleteStatus == "ambiguous",
+            "Add/repair/delete disagree about an ambiguous or invalid binding");
+        mustThrow([&] { commitSteamLibraryDeletePlan(f.data, scan, f.target, deletionPath, true, selected, true); });
+        check(readBinaryFile(f.target.path) == original && fileText(old) == "original grid file" && !fs::exists(fresh),
+            "Binding conflict allowed a Steam write");
+        if (exactOwnerConflict) {
+            state["games"].erase(1);
+            writeJsonAtomic(scan, state);
+            const auto recovered = buildSteamLibraryAddPlan(f.data, scan, f.target, f.planFile, selected, true);
+            const auto& item = recovered.at("items").at(0);
+            check(item["status"] == "already-in-steam" && item["shortAppId"] == std::to_string(id) &&
+                readBinaryFile(f.target.path) == original, "Unique inventory did not recover the same original card");
+        }
+    } else {
+        check(addStatus == "already-in-steam" && remove["summary"]["readyToDelete"] == 1 &&
+            add["items"][0]["shortAppId"] == std::to_string(id) && remove["items"][0]["shortAppId"] == std::to_string(id) &&
+            refreshed.value("artworkFilesActivated", 0) == 1 && !fs::exists(old) && readBinaryFile(fresh) == readBinaryFile(cover),
+            "Expected the same original Steam card in add/repair/delete");
+        const auto result = commitSteamLibraryDeletePlan(f.data, scan, f.target, deletionPath, true, selected);
+        check(result.value("deletedCount", 0) == 1 && readShortcuts(f.target.path, f.target.accountId).empty(),
+            "Explicit deletion did not delete the verified original card");
+    }
+}
+
+static void fixtureSteamProspectiveLaunchOwner(const fs::path& root, bool update) {
+    namespace launch = custom_steam_library::launch_file;
+    Fixture f(root);
+    const auto game = root/L"Game", scan = fixtureScanState(f), primary = game/L"Game.exe", script = launch::wrapperPath(game);
+    const auto text = [](const fs::path& p){return toUtf8(p.wstring());};
+    auto inventory = loadJsonDocument(scan);
+    inventory["games"][0]["status"] = "ready";
+    const auto other = game/L"Other.exe";
+    textFile(other,"second game; never launched");
+    inventory["games"].push_back({{"gameDirectory",text(game)},{"primaryExecutable",update ? "" : text(other)},
+        {"status",update ? "needs-primary" : "ready"}});
+    writeJsonAtomic(scan,inventory);
+    const auto config = f.data/L"config"/L"manual-overrides.json";
+    const auto save = [&](const char* mode){writeJsonAtomic(config,{{"items",{{canonicalPathKey(primary),{{"launchConfiguration",{{"mode",mode}}}}}}}});};
+    const auto commit = [&]{return commitSteamLibraryAddPlan(f.data,scan,f.target,f.planFile,true,{canonicalPathKey(game)},true,true);};
+    uint32_t originalId = 0;
+    std::vector<unsigned char> before;
+    if (update) {
+        save("direct");
+        check(commit().value("committed",false)&&!fs::exists(script),"Ordinary card could not be added while VBS owner was ambiguous");
+        before = readBinaryFile(f.target.path);
+        originalId = static_cast<uint32_t>(shortcutsFromBytes(before,f.target.path,f.target.accountId).at(0).storedAppId);
+        textFile(script,"WScript.Quit 7\r\n");
+    }
+    save("auto");
+    const auto denied = commit();
+    writeJsonAtomic(root/L"attempt.json",denied);
+    check(!denied.value("committed",false)&&denied["summary"]["launchFailures"]==1&&
+        !fs::exists(launch::bindingRoot(f.data))&&
+        (update ? readBinaryFile(f.target.path)==before&&fileText(script)=="WScript.Quit 7\r\n" :
+            !fs::exists(f.target.path)&&!fs::exists(script)),"Worker used an unowned wrapper and changed Steam or launch files");
+    inventory["games"].erase(1);
+    writeJsonAtomic(scan,inventory);
+    check(commit().value("committed",false)&&fs::is_regular_file(script),"Unique owner could not publish its VBS card on retry");
+    const auto active = readBinaryFile(f.target.path);
+    const auto cards = shortcutsFromBytes(active,f.target.path,f.target.accountId);
+    check(cards.size()==1&&(!update||static_cast<uint32_t>(cards[0].storedAppId)==originalId)&&
+        launch::samePath(launch::steamScriptOperand(toWide(cards[0].exe),toWide(cards[0].launchOptions)),script),
+        "VBS retry duplicated the card, changed the original ID, or used the wrong script");
+    inventory["games"].push_back({{"gameDirectory",text(game)},{"primaryExecutable",text(other)},{"status","ready"}});
+    writeJsonAtomic(scan,inventory);
+    const auto steady = commit();
+    check(!steady.value("committed",false)&&steady["summary"]["launchFailures"]==0&&
+        steady["items"][0].value("launchAlreadyCurrent",false)&&readBinaryFile(f.target.path)==active,
+        "Trusted existing card lost its binding after an ambiguous scan");
+}
+
+static void fixtureSteamLauncherCardOverlap(const fs::path& root) {
+    Fixture f(root);
+    const auto game = root/L"Game", scan = fixtureScanState(f), primary = game/L"Game.exe", launcher = game/L"Launcher.exe";
+    textFile(launcher, "fixture launcher executable");
+    auto inventory = loadJsonDocument(scan);
+    inventory["schemaVersion"] = 1;
+    auto& item = inventory["games"][0];
+    item.update({{"status","ready"},{"primaryRole","main-game"},{"contentType","game"},{"scanComplete",true},
+        {"candidateLimitReached",false},{"uniquePrimaryInvariant",true},{"unrecognizedTool",false},
+        {"candidates",json::array({{{"path",toUtf8(primary.wstring())},{"role","main-game"},{"selected",true}},
+            {{"path",toUtf8(launcher.wstring())},{"role","launcher"},{"selected",false}}})}});
+    writeJsonAtomic(scan,inventory);
+    LibraryScanObservation observed;
+    const auto links = libraryLauncherPrimaryLinks(loadLibraryScanState(scan,&observed));
+    check(observed.complete&&links.size()==1&&links.at(canonicalPathKey(launcher))==toUtf8(primary.wstring()),"Fixture launcher link not confirmed");
+
+    const auto cards = [&](bool direct, bool wrapped) {
+        auto document=BinaryVdfDocument::emptySteamShortcuts();
+        auto& rows=vdfFindObject(document.root(),"shortcuts")->objectValue;
+        if(direct)rows.push_back({"0",steamShortcutNode(-1073741823,"Ordinary card",quotedSteamPath(primary),quotedSteamPath(game),21)});
+        if(wrapped)rows.push_back({"1",steamShortcutNode(-1073741822,"Launcher card",quotedSteamPath(launcher),quotedSteamPath(game),22,{"original tag"},"--original")});
+        return document.serialize();
+    };
+    const auto both=cards(true,true);
+    writeAtomic(f.target.path,both);
+    const std::set<std::string> selected{canonicalPathKey(game)};
+    const auto plan=[&]{return buildSteamLibraryAddPlan(f.data,scan,f.target,f.planFile,selected,true);};
+    const auto selectFirst=[](const json& result){return result.at("items").at(0);};
+    const auto add=selectFirst(plan());
+    const auto remove=selectFirst(buildSteamLibraryDeletePlan(f.data,scan,f.target,f.data/L"state"/L"delete.json",selected));
+    const auto repair=refreshExistingSteamArtwork(f.data,scan,f.target,f.data/L"state"/L"refresh.json",true,selected);
+    const auto grid=f.target.path.parent_path()/L"grid";
+    const auto cover=root/L"cover.png";
+    writeRepairArtwork(cover);
+    const auto config=f.data/L"config"/L"manual-overrides.json";
+    writeJsonAtomic(config,{{"items",{{canonicalPathKey(primary),{{"launchConfiguration",{{"mode","auto"}}},
+        {"cover",{{"file",toUtf8(cover.wstring())}}}}}}}});
+    const auto repairWithCover=refreshExistingSteamArtwork(f.data,scan,f.target,f.data/L"state"/L"refresh-cover.json",true,selected);
+    bool updateRejected=false;
+    try { commitSteamLibraryAddPlan(f.data,scan,f.target,f.planFile,true,selected,true,true); }
+    catch(const std::runtime_error&){updateRejected=true;}
+    const auto unchanged=readBinaryFile(f.target.path)==both;
+    const auto hasScript=fs::exists(libLaunch::wrapperPath(game));
+    writeJsonAtomic(root/L"overlap.json",{{"add",add},{"delete",remove},{"repair",selectFirst(repair)},
+        {"repairWithCover",selectFirst(repairWithCover)},{"updateRejected",updateRejected},{"unchanged",unchanged},{"scriptCreated",hasScript}});
+    check(add["status"]=="shortcut-id-conflict"&&remove["status"]=="ambiguous"&&selectFirst(repair)["status"]=="ambiguous-card"&&
+        selectFirst(repairWithCover)["status"]=="ambiguous-card"&&updateRejected&&unchanged&&!hasScript&&
+        !fs::exists(grid/L"3221225473p.png")&&!fs::exists(grid/L"3221225474p.png"),"Two confirmed cards authorized a launch update or lost their conflict status");
+
+    writeAtomic(f.target.path,cards(true,false));
+    const auto direct=selectFirst(plan());
+    writeAtomic(f.target.path,cards(false,true));
+    const auto viaLauncher=selectFirst(plan());
+    const auto healedRepair=refreshExistingSteamArtwork(f.data,scan,f.target,f.data/L"state"/L"healed-repair.json",true,selected);
+    const auto healedDelete=selectFirst(buildSteamLibraryDeletePlan(f.data,scan,f.target,f.data/L"state"/L"healed-delete.json",selected));
+    writeJsonAtomic(root/L"recovered.json",{{"direct",direct},{"launcher",viaLauncher},{"repair",selectFirst(healedRepair)},{"delete",healedDelete}});
+    check(direct["status"]=="already-in-steam"&&direct["shortAppId"]=="3221225473"&&viaLauncher["status"]=="already-in-steam"&&
+        viaLauncher["shortAppId"]=="3221225474"&&viaLauncher["steamMembershipSource"]=="confirmed-library-launcher"&&
+        healedRepair["artworkFilesActivated"]==1&&readBinaryFile(grid/L"3221225474p.png")==readBinaryFile(cover)&&
+        healedDelete["shortAppId"]=="3221225474"&&readBinaryFile(f.target.path)==cards(false,true)&&!hasStages(root),
+        "Resolving the overlap failed to recover the unique card and artwork slot");
+}
+
+static void fixtureSteamOrdinaryLaunchRoundtrip(const fs::path& root, bool twoAccounts, bool staleAlias = false) {
+    namespace launch = custom_steam_library::launch_file;
+    Fixture f(root);
+    const auto game = root/L"Game", scan = fixtureScanState(f), primary = game/L"Game.exe";
+    auto inventory = loadJsonDocument(scan);
+    inventory["games"][0]["status"] = "ready";
+    writeJsonAtomic(scan, inventory);
+    const auto config = f.data/L"config"/L"manual-overrides.json";
+    const auto writeMode = [&](const char* mode) {
+        json items = {{canonicalPathKey(primary),{{"launchConfiguration",{{"mode",mode}}}}}};
+        if (staleAlias) {
+            auto mixedCase=toUtf8(primary.wstring());
+            mixedCase.front()=static_cast<char>(std::toupper(static_cast<unsigned char>(mixedCase.front())));
+            check(mixedCase < canonicalPathKey(primary),"Legacy alias must sort before the saved record");
+            items[mixedCase]={{"launchConfiguration",{{"mode","auto"}}},{"name","legacy metadata to keep"}};
+        }
+        writeJsonAtomic(config, {{"items",items}});
+    };
+    const std::set<std::string> selected{canonicalPathKey(game)};
+    const auto commit = [&](const SteamShortcutTarget& target) {
+        return commitSteamLibraryAddPlan(f.data, scan, target, f.planFile, true, selected, true, true);
+    };
+    constexpr uint32_t id = 3221225473u;
+    const auto secondary = SteamShortcutTarget{f.target.path.parent_path().parent_path().parent_path()/L"22202"/L"config"/L"shortcuts.vdf", "22202"};
+    std::vector<SteamShortcutTarget> targets{f.target};
+    if (twoAccounts) targets.push_back(secondary);
+    std::vector<SteamShortcut> originals;
+    std::vector<std::vector<unsigned char>> enabled;
+    writeMode("auto");
+    for (const auto& target : targets) {
+        auto document = BinaryVdfDocument::emptySteamShortcuts();
+        auto& rows = vdfFindObject(document.root(), "shortcuts")->objectValue;
+        const auto workingDirectory = game/toWide("Install Data "+target.accountId);
+        fs::create_directories(workingDirectory);
+        rows.push_back({"0", steamShortcutNode(-1073741823, "Original name", quotedSteamPath(primary),
+            target.accountId == "22202" ? "" : quotedSteamPath(workingDirectory), 21, {"original tag"},
+            "--profile=\"user "+target.accountId+"\" --original")});
+        writeAtomic(target.path, document.serialize());
+        originals.push_back(readShortcuts(target.path,target.accountId).at(0));
+        const auto update = commit(target);
+        const auto row = readShortcuts(target.path,target.accountId).at(0);
+        check(update["summary"]["launchUpdates"] == 1 && static_cast<uint32_t>(row.storedAppId) == id &&
+            launch::samePath(launch::steamScriptOperand(toWide(row.exe),toWide(row.launchOptions)),launch::wrapperPath(game)),
+            "VBS opt-in did not update the original Steam card");
+        enabled.push_back(readBinaryFile(target.path));
+        check(!commit(target).value("committed", false) && readBinaryFile(target.path) == enabled.back(),
+            "A repeated VBS update rewrote the original card");
+    }
+    if (!twoAccounts && !staleAlias) {
+        const auto script=launch::wrapperPath(game);
+        check(fs::remove(script),"Fixture could not remove the VBS");
+        writeMode("obsolete-launch-mode");
+        const auto before=readBinaryFile(config);
+        const auto denied=commit(f.target);
+        writeJsonAtomic(root/L"missing-legacy-vbs-attempt.json",denied);
+        check(!denied.value("committed",false)&&denied["summary"]["launchFailures"]==1&&
+            readBinaryFile(f.target.path)==enabled.front()&&readBinaryFile(config)==before&&!fs::exists(script),
+            "Unknown mode implicitly replaced the broken VBS or original card");
+    }
+    writeMode("direct");
+    const auto savedConfig=readBinaryFile(config);
+    for (size_t i=0;i<targets.size();++i) {
+        const auto& target=targets[i];
+        const auto result=commit(target);
+        const auto rows=readShortcuts(target.path,target.accountId);
+        check(result["summary"]["launchUpdates"] == 1 && rows.size() == 1 && static_cast<uint32_t>(rows[0].storedAppId) == id,
+            "Returning to ordinary launch did not update the original card");
+        const auto& before=originals[i];
+        const auto& after=rows[0];
+        writeJsonAtomic(root/toWide("ordinary-readback-"+target.accountId+".json"), {{"id",id},{"beforeExe",before.exe},{"afterExe",after.exe},
+            {"beforeStartIn",before.startDir},{"afterStartIn",after.startDir},{"beforeOptions",before.launchOptions},{"afterOptions",after.launchOptions}});
+        check(after.appName==before.appName && after.exe==before.exe && after.startDir==before.startDir && after.launchOptions==before.launchOptions,
+            "Returning from VBS discarded or borrowed ordinary launch fields");
+        for (size_t j=i+1;j<targets.size();++j)
+            check(readBinaryFile(targets[j].path)==enabled[j],"Restoring one account modified another account's card");
+        check(!commit(target).value("committed",false),"Repeating ordinary restore rewrote Steam again");
+    }
+    check(readBinaryFile(config)==savedConfig,"Steam write changed the legacy manual overrides");
+    if (!twoAccounts && !staleAlias) check(!fs::exists(launch::wrapperPath(game)),"Restoring ordinary launch recreated the missing VBS");
+}
+
+static void fixtureSteamConflictingLaunchAliases(const fs::path& root) {
+    ArtworkRepairFixture f(root, false);
+    const auto game=root/L"Game", exe=game/L"Game.exe";
+    const auto alias1=toUtf8((game/L"."/L"Game.exe").wstring());
+    const auto alias2=toUtf8((game/L"unused"/L".."/L"Game.exe").wstring());
+    check(alias1!=alias2&&alias1!=canonicalPathKey(exe)&&alias2!=canonicalPathKey(exe),"Fixture keys are not independent aliases");
+    fs::create_directory(game/L"unused");
+    const auto path=f.data/L"config"/L"manual-overrides.json";
+    writeJsonAtomic(path,{{"items",{
+        {alias1,{{"launchConfiguration",{{"mode","auto"}}}}},
+        {alias2,{{"launchConfiguration",{{"mode","direct"}}}}}}}});
+    f.plan["items"][0]["gameDirectory"]=toUtf8(game.wstring());
+    const auto original=readBinaryFile(path);
+    check(f.commit().value("committed",false),"Conflicting aliases blocked ordinary import");
+    const auto cards=readShortcuts(f.target.path,f.target.accountId);
+    check(cards.size()==1&&cards[0].exe==quotedSteamPath(exe)&&cards[0].launchOptions.empty()&&
+        !fs::exists(libLaunch::wrapperPath(game))&&readBinaryFile(path)==original,
+        "Conflicting legacy aliases activated VBS or rewrote settings");
+}
+
+static void fixtureSteamLaunchBindingRepair(const fs::path& root, std::string_view variant) {
+    namespace launch = custom_steam_library::launch_file;
+    ArtworkRepairFixture f(root);
+    const auto game=root/L"Game", primary=game/L"Game.exe", scan=fixtureScanState(f);
+    auto inventory=loadJsonDocument(scan);
+    inventory["games"][0]["status"]="ready";
+    writeJsonAtomic(scan,inventory);
+    const auto config=f.data/L"config"/L"manual-overrides.json";
+    const std::set<std::string> selection{canonicalPathKey(game)};
+    const auto setMode=[&](const char* mode) {
+        writeJsonAtomic(config,{{"items",{{canonicalPathKey(primary),{{"launchConfiguration",{{"mode",mode}}}}}}}});
+    };
+    const auto commit=[&] { return commitSteamLibraryAddPlan(f.data,scan,f.target,f.planFile,true,selection,true,true); };
+    auto original=BinaryVdfDocument::emptySteamShortcuts();
+    vdfFindObject(original.root(),"shortcuts")->objectValue.push_back({"0",steamShortcutNode(-1073741823,"Original card",
+        quotedSteamPath(primary),"",21,{"original tag"},"--profile=\"custom one\"")});
+    writeAtomic(f.target.path,original.serialize());
+    const auto direct=readShortcuts(f.target.path,f.target.accountId).at(0);
+    setMode("auto");
+    check(commit()["summary"]["launchUpdates"]==1,"Fixture could not enable VBS on the original card");
+    const auto enabled=readShortcuts(f.target.path,f.target.accountId).at(0);
+    const auto script=launch::steamScriptOperand(toWide(enabled.exe),toWide(enabled.launchOptions));
+    const auto binding=fs::path(launch::unquoted(toWide(enabled.startDir)))/L"binding.json";
+    const auto clean=readBinaryFile(binding), scriptBytes=readBinaryFile(script);
+    setMode("direct");
+    check(commit()["summary"]["launchUpdates"]==1,"Fixture could not restore the original ordinary card");
+    const auto ordinary=readBinaryFile(f.target.path);
+    const auto fault=variant=="empty"?std::string{}:variant=="foreign"?R"({"schemaVersion":1,"accountId":"89250578"})":R"({"schemaVersion":)";
+    const bool shouldRepair=variant=="empty"||variant=="truncated";
+    textFile(binding,fault);
+    setMode("auto");
+    bool editInjected=false;
+    const auto backupDir=f.data/L"backups"/L"corrupt";
+    const std::string newer=R"({"other":"newer write"})";
+    if(variant=="backup-race")selftestMoveFault=[&](const auto&,const auto& to)->DWORD {
+        const fs::path path(to);
+        if(!editInjected&&path.parent_path()==backupDir&&path.filename().native().starts_with(L"steam-launch-binding-")) {
+            editInjected=true;
+            textFile(binding,newer);
+        }
+        return ERROR_SUCCESS;
+    };
+    json outcome;
+    if(variant=="denied")withConfigReadDenied(binding,[&]{mustThrow([&]{readBinaryFile(binding);});outcome=commit();});
+    else outcome=commit();
+    selftestMoveFault={};
+    size_t backups=0;
+    if(fs::exists(backupDir))for(const auto& entry:fs::directory_iterator(backupDir)) {
+        if(entry.path().filename().native().starts_with(L"steam-launch-binding-")) {
+            check(fileText(entry.path())==fault,"Binding recovery did not retain the exact invalid bytes");
+            ++backups;
+        }
+    }
+    writeJsonAtomic(root/L"binding-observed.json",{{"outcome",outcome},{"editInjected",editInjected},{"backupCount",backups},
+        {"localBindingRecovered",readBinaryFile(binding)==clean},{"ordinaryCardPreserved",readBinaryFile(f.target.path)==ordinary}});
+    check(readBinaryFile(script)==scriptBytes,"Binding repair rewrote the existing script");
+    if(shouldRepair) {
+        const auto row=readShortcuts(f.target.path,f.target.accountId).at(0);
+        check(outcome["summary"]["launchUpdates"]==1&&outcome["items"][0]["launchBindingRecovered"]==true&&backups==1&&
+            row.storedAppId==direct.storedAppId&&row.startDir==enabled.startDir&&readBinaryFile(binding)==clean,
+            "Corrupt binding blocked recoverable VBS reactivation or changed the card identity");
+        check(!commit().value("committed",false),"Repeated reactivation rewrote the verified card");
+        setMode("direct");
+        check(commit()["summary"]["launchUpdates"]==1,"Recovered binding did not support the reverse transition");
+        const auto restored=readShortcuts(f.target.path,f.target.accountId).at(0);
+        check(restored.storedAppId==direct.storedAppId&&restored.exe==direct.exe&&restored.startDir==direct.startDir&&
+            restored.launchOptions==direct.launchOptions,"Binding recovery lost the ordinary launch fields");
+    } else {
+        check(outcome["summary"]["launchFailures"]==1&&readBinaryFile(f.target.path)==ordinary,
+            "An unverified binding changed the Steam shortcut");
+        check(variant=="backup-race"?(editInjected&&backups==1&&fileText(binding)==newer):(backups==0&&fileText(binding)==fault),
+            "Foreign, unreadable or externally replaced binding was not preserved");
+    }
+    check(!hasStages(root)&&pendingJournals(f.data).empty(),"Binding repair leaked Steam transaction state");
+}
+
+static void fixtureSteamLaunchBindingMirror(const fs::path& root, std::string_view variant) {
+    namespace launch=custom_steam_library::launch_file;
+    ArtworkRepairFixture f(root);
+    const auto game=root/L"Game", primary=game/L"Game.exe", scan=fixtureScanState(f);
+    auto inventory=loadJsonDocument(scan);
+    inventory["games"][0]["status"]="ready";
+    writeJsonAtomic(scan,inventory);
+    const auto config=f.data/L"config"/L"manual-overrides.json";
+    const std::set<std::string> selection{canonicalPathKey(game)};
+    const auto setMode=[&](const char* mode) {
+        writeJsonAtomic(config,{{"items",{{canonicalPathKey(primary),{{"launchConfiguration",{{"mode",mode}}}}}}}});
+    };
+    const auto commit=[&]{return commitSteamLibraryAddPlan(f.data,scan,f.target,f.planFile,true,selection,true,true);};
+    auto cards=BinaryVdfDocument::emptySteamShortcuts();
+    vdfFindObject(cards.root(),"shortcuts")->objectValue.push_back({"0",steamShortcutNode(-1073741823,"Original card",
+        quotedSteamPath(primary),"",21,{"original tag"},"--profile=\"custom one\"")});
+    writeAtomic(f.target.path,cards.serialize());
+    const auto direct=readShortcuts(f.target.path,f.target.accountId).at(0);
+    setMode("auto");
+    check(commit()["summary"]["launchUpdates"]==1,"Fixture could not enable VBS");
+    const auto originalVdf=readBinaryFile(f.target.path);
+    const auto row=readShortcuts(f.target.path,f.target.accountId).at(0);
+    const auto start=fs::path(launch::unquoted(toWide(row.startDir)));
+    const auto binding=start/L"binding.json", fallback=start/L"binding.recovery.json";
+    const auto exact=readBinaryFile(binding);
+    const bool created=fs::is_regular_file(fallback) && readBinaryFile(fallback)==exact;
+    if(variant=="healthy") {
+        if(fs::exists(fallback))fs::remove(fallback);
+        const auto result=commit();
+        check(created && fs::is_regular_file(fallback) && readBinaryFile(fallback)==exact &&
+            result["items"][0]["launchAlreadyCurrent"]==true && readBinaryFile(f.target.path)==originalVdf,
+            "Verified opt-in or explicit update did not retain a read-back binding copy");
+        return;
+    }
+    // Seed a known valid copy to isolate the reader on older builds as well.
+    writeAtomic(fallback,exact);
+    if(variant=="wrong-mirror")textFile(fallback,R"({"schemaVersion":1,"accountId":"89250578"})");
+    if(variant=="missing"||variant=="wrong-mirror")fs::remove(binding);
+    else if(variant=="foreign")textFile(binding,R"({"schemaVersion":1,"accountId":"89250578"})");
+    else textFile(binding,R"({"schemaVersion":)");
+    const bool primaryExists=fs::exists(binding);
+    const auto originalBinding=primaryExists?readBinaryFile(binding):std::vector<unsigned char>{};
+    const bool shouldRecover=variant=="missing"||variant=="truncated";
+    const auto lookup=[&](const std::string& account) {
+        return launch::readPrimaryBinding(f.data,f.target.path,account,static_cast<uint32_t>(row.storedAppId),
+            toWide(row.exe),toWide(row.startDir),toWide(row.launchOptions),toWide);
+    };
+    fs::path resolved;
+    if(variant=="denied")withConfigReadDenied(binding,[&]{mustThrow([&]{readBinaryFile(binding);});resolved=lookup(f.target.accountId);});
+    else resolved=lookup(f.target.accountId);
+    const auto planned=buildSteamLibraryAddPlan(f.data,scan,f.target,f.planFile,selection,true);
+    writeJsonAtomic(root/L"mirror-observed.json",{{"bindingCopyCreated",created},{"resolved",toUtf8(resolved.wstring())},
+        {"planStatus",planned["items"][0]["status"]},{"originalVdfSame",readBinaryFile(f.target.path)==originalVdf}});
+    check(lookup("89250578").empty(),"Wrong account reused a binding copy");
+    check(fs::exists(binding)==primaryExists&&(!primaryExists||readBinaryFile(binding)==originalBinding)&&
+        readBinaryFile(f.target.path)==originalVdf,"A read-only lookup or plan wrote the primary binding or shortcut");
+    if(!shouldRecover) {
+        check(resolved.empty(),"An invalid primary or mirror admitted a game identity");
+        return;
+    }
+    check(launch::samePath(resolved,primary)&&planned["items"][0]["status"]=="already-in-steam",
+        "Active VBS card could not be recognized from the exact binding copy");
+    const auto result=commit();
+    check(result["items"][0]["launchBindingRecovered"]==true&&readBinaryFile(binding)==exact&&
+        readBinaryFile(f.target.path)==originalVdf,"Explicit binding recovery rewrote the card or failed read-back");
+    setMode("direct");
+    // Prove the reverse transition still works from verified evidence if the primary is lost again.
+    fs::remove(binding);
+    check(commit()["summary"]["launchUpdates"]==1,"Cannot return to ordinary launch from the verified copy");
+    const auto restored=readShortcuts(f.target.path,f.target.accountId).at(0);
+    check(restored.storedAppId==direct.storedAppId&&restored.exe==direct.exe&&restored.startDir==direct.startDir&&
+        restored.launchOptions==direct.launchOptions&&!fs::exists(binding),"Reverse transition lost original fields or rewrote the unused binding");
+}
+
 static fs::path fixtureAutomaticIcon(Fixture& f) {
     const auto executable = f.root/L"Game"/L"Game.exe";
     textFile(executable, "fixture executable");
     const auto icon = f.root/L"automatic-icon.png";
-    textFile(icon, "automatic icon bytes");
+    writeRepairArtwork(icon, 93);
     const auto manifest = f.data/L"artwork"/toWide(gameDataId(executable.parent_path()))/L"manifest.json";
     writeJsonAtomic(manifest, {{"exe",toUtf8(executable.wstring())},{"match",json::object()},
         {"artwork",json::array({{{"type","icon"},{"steamSuffix","_icon"},{"ok",true},
@@ -389,7 +1132,32 @@ int wmain(int argc,wchar_t** argv) {
         const std::vector<std::string> factsNames={"steamfacts-owned-installation-nesting","steamfacts-legacy-bool-and-owned-installation","steamfacts-absent-commits-real-files","steamfacts-unknown-first-preserves-original","steamfacts-final-unknown-preserves-original","steamfacts-final-running-preserves-original","steamfacts-hook-exception-is-unavailable","steamfacts-missing-whitelist-recovery","delete-success-keeps-backup-receipt","rollback-first-shortcut-restores-absence","rollback-existing-shortcuts-restores-bytes","real-target-guard-does-not-trust-plan-flag"};
         std::string factsSelected;
         if(factsOnly){factsSelected=toUtf8(argv[3]);if(factsSelected.empty()||std::find(factsNames.begin(),factsNames.end(),factsSelected)==factsNames.end())return 2;}
-        check(factsOnly || argc==2 || (argc==3 && (std::wstring(argv[2])==L"--config-storm" || std::wstring(argv[2])==L"--transaction-storm" || std::wstring(argv[2])==L"--data-root-storm" || std::wstring(argv[2])==L"--identity-storm" || std::wstring(argv[2])==L"--membership-storm" || std::wstring(argv[2])==L"--rule-text-storm" || std::wstring(argv[2])==L"--publisher-text-storm" || std::wstring(argv[2])==L"--discovery-storm")),"Pass new isolated fixture root"); const auto root=fs::absolute(argv[1]);
+        const bool artworkGridRace=argc==4 && std::wstring_view(argv[2])==L"--artwork-repair" && std::wstring_view(argv[3])==L"alias-grid-race";
+        const bool artworkHorizontalSuffix=argc==4 && std::wstring_view(argv[2])==L"--artwork-repair" && std::wstring_view(argv[3])==L"horizontal-suffix";
+        const bool artworkManualAlias=argc==4 && std::wstring_view(argv[2])==L"--artwork-repair" && std::wstring_view(argv[3])==L"manual-alias";
+        const bool artworkManualWrite=argc==4 && std::wstring_view(argv[2])==L"--artwork-repair" && std::wstring_view(argv[3])==L"manual-write";
+        const bool artworkManualCache=argc==4 && std::wstring_view(argv[2])==L"--artwork-repair" && std::wstring_view(argv[3])==L"manual-cache";
+        const bool artworkManualScrape=argc==4 && std::wstring_view(argv[2])==L"--artwork-repair" && std::wstring_view(argv[3])==L"manual-scrape";
+        const bool artworkSlotRace=argc==4 && std::wstring_view(argv[2])==L"--artwork-repair" && std::wstring_view(argv[3])==L"slot-grid-race";
+        const bool artworkSlotVariants=(argc==4||argc==5) && std::wstring_view(argv[2])==L"--artwork-repair" && std::wstring_view(argv[3])==L"slot-variants";
+        const auto artworkSlotCase=artworkSlotVariants&&argc==5?toUtf8(argv[4]):std::string{};
+        if(artworkSlotVariants&&argc==5&&artworkSlotCase.empty())return 2;
+        const bool artworkAlias=artworkGridRace||(argc==4 && std::wstring_view(argv[2])==L"--artwork-repair" && std::wstring_view(argv[3])==L"alias");
+        const bool artworkPreimageCase=argc==4 && std::wstring_view(argv[2])==L"--artwork-repair" && std::wstring_view(argv[3])==L"preimage-case";
+        const bool artworkPreimageIsolation=argc==4 && std::wstring_view(argv[2])==L"--artwork-repair" && std::wstring_view(argv[3])==L"preimage-isolation";
+        const bool artworkPreimage=artworkPreimageCase||artworkPreimageIsolation||(argc==4 && std::wstring_view(argv[2])==L"--artwork-repair" && std::wstring_view(argv[3])==L"preimage");
+        const bool artworkRepair=artworkAlias||artworkHorizontalSuffix||artworkManualAlias||artworkManualWrite||artworkManualCache||artworkManualScrape||artworkSlotRace||artworkSlotVariants||artworkPreimage||(argc==3 && std::wstring_view(argv[2])==L"--artwork-repair");
+        const bool scriptCardUpdate=argc==4 && std::wstring_view(argv[2])==L"--script-card-identity" && std::wstring_view(argv[3])==L"update";
+        const bool scriptCardRoundtrip=argc==4 && std::wstring_view(argv[2])==L"--script-card-identity" && std::wstring_view(argv[3])==L"roundtrip";
+        const bool scriptBindingRepair=argc==4 && std::wstring_view(argv[2])==L"--script-card-identity" && std::wstring_view(argv[3])==L"binding-repair";
+        const bool scriptBindingMirror=argc==4 && std::wstring_view(argv[2])==L"--script-card-identity" && std::wstring_view(argv[3])==L"binding-mirror";
+        const bool scriptLegacyOwner=argc==4 && std::wstring_view(argv[2])==L"--script-card-identity" && std::wstring_view(argv[3])==L"legacy-owner";
+        const bool scriptProspectiveOwner=argc==4 && std::wstring_view(argv[2])==L"--script-card-identity" && std::wstring_view(argv[3])==L"prospective-owner";
+        const bool scriptLauncherOverlap=argc==4 && std::wstring_view(argv[2])==L"--script-card-identity" && std::wstring_view(argv[3])==L"launcher-overlap";
+        const bool scriptCardIdentity=scriptCardUpdate||scriptCardRoundtrip||scriptBindingRepair||scriptBindingMirror||scriptLegacyOwner||scriptProspectiveOwner||scriptLauncherOverlap||(argc==3 && std::wstring_view(argv[2])==L"--script-card-identity");
+        const bool snapshotDebt=argc==4 && std::wstring_view(argv[2])==L"--transaction-storm" && std::wstring_view(argv[3])==L"snapshot-debt";
+        const bool snapshots=snapshotDebt||(argc==4 && std::wstring_view(argv[2])==L"--transaction-storm" && std::wstring_view(argv[3])==L"snapshot");
+        check(artworkRepair || scriptCardIdentity || factsOnly || snapshots || argc==2 || (argc==3 && (std::wstring(argv[2])==L"--config-storm" || std::wstring(argv[2])==L"--transaction-storm" || std::wstring(argv[2])==L"--data-root-storm" || std::wstring(argv[2])==L"--identity-storm" || std::wstring(argv[2])==L"--membership-storm" || std::wstring(argv[2])==L"--rule-text-storm" || std::wstring(argv[2])==L"--publisher-text-storm" || std::wstring(argv[2])==L"--discovery-storm")),"Pass new isolated fixture root"); const auto root=fs::absolute(argv[1]);
         const auto build=fs::absolute(fs::path(__FILE__).parent_path()/L".."/L".."/L".."/L"Build").lexically_normal();
         const auto evidence=fs::absolute(fs::path(__FILE__).parent_path()/L".."/L".."/L".."/L".."/L"Testing"/L"YMCC"/L"Evidence").lexically_normal();
         check((pathWithin(root,build)||pathWithin(root,evidence))&&!fs::exists(root),"Unsafe or reused fixture root"); fs::create_directories(root);g_workerDataRoot=root;SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",root.c_str());
@@ -404,9 +1172,36 @@ int wmain(int argc,wchar_t** argv) {
         const bool identities=argc==3 && std::wstring(argv[2])==L"--identity-storm";identityCallerActive=factsOnly||identities||memberships||ruleTexts||publisherTexts||discoveries;
         const bool dataRoots=argc==3 && std::wstring(argv[2])==L"--data-root-storm";
         const bool transactions=argc==3 && std::wstring(argv[2])==L"--transaction-storm";
+        if (artworkManualScrape) { discoveryProducerPorts=true; identityCallerActive=true; }
         json reports=json::array(); size_t failures=0;
         auto run=[&](const char* name,const std::function<void(const fs::path&)>& fn) {
             const std::string label=name;
+            if(snapshots&&!label.starts_with("snapshot-")&&!label.starts_with("txstorm-snapshot-"))return;
+            if(snapshotDebt&&label!="txstorm-snapshot-restore-cannot-erase-pending-debt")return;
+            if(scriptCardIdentity&&!label.starts_with("script-card-identity-"))return;
+            if(scriptCardUpdate&&!label.starts_with("script-card-identity-update-"))return;
+            if(scriptCardRoundtrip&&!label.starts_with("script-card-identity-roundtrip-"))return;
+            if(scriptBindingRepair&&!label.starts_with("script-card-identity-binding-repair-"))return;
+            if(scriptBindingMirror&&!label.starts_with("script-card-identity-binding-mirror-"))return;
+            if(scriptProspectiveOwner&&!label.starts_with("script-card-identity-prospective-owner-"))return;
+            if(scriptLauncherOverlap&&label!="script-card-identity-launcher-overlap")return;
+            if(scriptLegacyOwner&&!label.starts_with("script-card-identity-legacy-exact-")&&label!="script-card-identity-legacy-contested-alias"&&
+                label!="script-card-identity-legacy"&&label!="script-card-identity-direct")return;
+            if(artworkAlias&&!label.starts_with("refresh-artwork-alias-"))return;
+            if(artworkManualAlias&&!label.starts_with("refresh-artwork-manual-alias-")&&label!="artwork-add-preserves-existing-grid-and-deleted-selection")return;
+            if(artworkManualWrite&&!label.starts_with("artwork-add-manual-write-")&&label!="refresh-artwork-manual-write-recover")return;
+            if(artworkManualCache&&!label.starts_with("artwork-slot-manual-cache-"))return;
+            if(artworkManualScrape&&!label.starts_with("artwork-slot-manual-scrape-"))return;
+            if(artworkGridRace&&!label.starts_with("refresh-artwork-alias-grid-race-"))return;
+            if(artworkHorizontalSuffix&&!label.starts_with("refresh-artwork-alias-horizontal-suffix-"))return;
+            if(artworkSlotRace&&!label.starts_with("refresh-artwork-slot-grid-race-"))return;
+            if(artworkSlotVariants&&(!label.starts_with("refresh-artwork-slot-variants-")||
+                (!artworkSlotCase.empty()&&label!=artworkSlotCase)))return;
+            if(artworkPreimage&&!label.starts_with("refresh-artwork-preimage-"))return;
+            if(artworkPreimageCase&&!label.starts_with("refresh-artwork-preimage-case-"))return;
+            if(artworkPreimageIsolation&&!label.starts_with("refresh-artwork-preimage-isolation-"))return;
+            if(artworkRepair&&!label.starts_with("refresh-")&&!label.starts_with("automatic-icon-")&&!label.starts_with("artwork-slot-")&&!label.starts_with("artwork-add-")&&
+                label!="failure-before-journal-cleans-localconfig-stage"&&label!="partial-artwork-staging-cleans-earlier-files"&&label!="three-manual-artwork-slots-stage-independently")return;
             if(factsOnly&&label!=factsSelected)return;
             if(discoveries&&!label.starts_with("discovery-"))return;
             if(discoveries&&producerOnly&&!label.starts_with("discovery-producer-"))return;
@@ -423,7 +1218,7 @@ int wmain(int argc,wchar_t** argv) {
             if(dataRoots && !label.starts_with("dataroot-"))return;
             if(dataRoots){wchar_t selected[256]{};const auto size=GetEnvironmentVariableW(L"YMCC_DATA_ROOT_SELFTEST_CASE",selected,256);if(size&&size<256&&label!=toUtf8(selected))return;}
             if(transactions && !label.starts_with("txstorm-") && !label.starts_with("rollback-") && !label.starts_with("recovery-") && !label.starts_with("snapshot-") && !label.starts_with("pending-recovery-") && label!="failed-rollback-retains-recovery-journal" && label!="delete-failed-rollback-keeps-journal" && label!="refresh-failed-rollback-keeps-journal" && label!="completion-marker-failure-rolls-back")return;
-            if(argc==3 && !transactions && !dataRoots && !identities && !memberships && !ruleTexts && !publisherTexts && !discoveries && !std::string(name).starts_with("storm-") && !std::string(name).starts_with("config-") &&
+            if(argc==3 && !artworkRepair && !scriptCardIdentity && !transactions && !dataRoots && !identities && !memberships && !ruleTexts && !publisherTexts && !discoveries && !std::string(name).starts_with("storm-") && !std::string(name).starts_with("config-") &&
                 std::string(name)!="manual-overrides-invalid-items-recovers-backup" && std::string(name)!="initialization-restores-missing-config-before-defaults" &&
                 std::string(name)!="empty-root-first-run-scan-is-retryable") return;
             if(factsOnly){selftestSteamFactsAvailable=true;selftestSteamPresenceOverride=-2;selftestSteamFactsReads=selftestSteamPresenceReads=0;selftestSteamFactsBeforeRead={};}
@@ -560,10 +1355,31 @@ int wmain(int argc,wchar_t** argv) {
         run("failed-rollback-retains-recovery-journal",[](const fs::path& p){Fixture f(p,true);const auto original=readBinaryFile(f.target.path);textFile(f.local,validLocal);
             selftestMoveFault=[](const auto& from,const auto& to){return (to.ends_with(L"localconfig.vdf")&&from.find(L".yeman-stage-")!=std::wstring::npos)||(to.ends_with(L"shortcuts.vdf")&&from.find(L".yeman-stage-")==std::wstring::npos)?ERROR_WRITE_FAULT:0;};
             mustThrow([&]{f.commit();});check(!pendingJournals(p).empty(),"Rollback failure discarded the only recovery journal");selftestMoveFault={};cleanupInterruptedSteamTransactions(f.data);check(readBinaryFile(f.target.path)==original,"Next-open recovery failed");check(pendingJournals(p).empty(),"Recovered journal not consumed");});
-        run("failure-before-journal-cleans-localconfig-stage",[](const fs::path& p){Fixture f(p);textFile(f.local,validLocal);const auto manifest=p/L"bad-artwork.json";textFile(manifest,"invalid JSON");f.plan["items"][0]["artworkManifest"]=toUtf8(manifest.wstring());
-            mustThrow([&]{f.commit();});check(!hasStages(p),"Preparation failure leaked localconfig stage");check(!fs::exists(f.target.path),"Preparation wrote shortcuts");});
-        run("partial-artwork-staging-cleans-earlier-files",[](const fs::path& p){Fixture f(p);const auto cover=p/L"cover.png", manifest=p/L"bad-artwork.json";textFile(cover,"fixture image");textFile(manifest,"bad JSON");f.plan["items"][0]["manualCoverPath"]=toUtf8(cover.wstring());f.plan["items"][0]["artworkManifest"]=toUtf8(manifest.wstring());
-            mustThrow([&]{f.commit();});check(!hasStages(p),"Earlier artwork stage leaked after later source failure");});
+        run("script-card-identity-prospective-owner-new",[](const fs::path& p){fixtureSteamProspectiveLaunchOwner(p,false);});
+        run("script-card-identity-prospective-owner-update",[](const fs::path& p){fixtureSteamProspectiveLaunchOwner(p,true);});
+        run("script-card-identity-launcher-overlap",fixtureSteamLauncherCardOverlap);
+        for (const auto* variant : {"direct", "legacy", "valid", "reverse", "wrong-primary", "wrong-account", "duplicate",
+                "legacy-confirmed-alias", "wrong-account-reverse-alias", "legacy-contested-alias", "legacy-unrelated-alias",
+                "stored-id-visible", "stored-id-hidden", "legacy-exact-contested", "legacy-exact-unresolved"})
+            run((std::string("script-card-identity-") + variant).c_str(), [variant](const fs::path& p) { fixtureSteamScriptCardIdentity(p, variant); });
+        for (const auto* variant : {"update-reverse", "update-legacy-confirmed-alias", "update-missing", "update-unavailable",
+                "update-wrong-account-reverse-alias", "update-direct", "update-to-direct"})
+            run((std::string("script-card-identity-") + variant).c_str(), [variant](const fs::path& p) { fixtureSteamScriptCardIdentity(p, variant); });
+        run("script-card-identity-roundtrip-single", [](const fs::path& p) { fixtureSteamOrdinaryLaunchRoundtrip(p, false); });
+        run("script-card-identity-roundtrip-two-accounts", [](const fs::path& p) { fixtureSteamOrdinaryLaunchRoundtrip(p, true); });
+        run("script-card-identity-roundtrip-stale-alias", [](const fs::path& p) { fixtureSteamOrdinaryLaunchRoundtrip(p, false, true); });
+        run("script-card-identity-roundtrip-conflicting-aliases", fixtureSteamConflictingLaunchAliases);
+        for(const auto* variant:{"empty","truncated","foreign","denied","backup-race"})
+            run((std::string("script-card-identity-binding-repair-")+variant).c_str(),[variant](const fs::path& p){fixtureSteamLaunchBindingRepair(p,variant);});
+        for(const auto* variant:{"healthy","missing","truncated","foreign","wrong-mirror","denied"})
+            run((std::string("script-card-identity-binding-mirror-")+variant).c_str(),[variant](const fs::path& p){fixtureSteamLaunchBindingMirror(p,variant);});
+        run("failure-before-journal-cleans-localconfig-stage",[](const fs::path& p){ArtworkRepairFixture f(p,false);textFile(f.local,validLocal);
+            bool hit=false;selftestMoveFault=[&](const auto&,const auto& to){if(to.find(L"shortcuts.vdf.yeman-stage-")==std::wstring::npos)return DWORD{0};hit=true;return DWORD{ERROR_WRITE_FAULT};};
+            mustThrow([&]{f.commit();});check(hit&&!hasStages(p),"Preparation failure leaked localconfig stage");check(!fs::exists(f.target.path)&&fileText(f.local)==validLocal,"Preparation modified Steam files");});
+        run("partial-artwork-staging-cleans-earlier-files",[](const fs::path& p){ArtworkRepairFixture f(p,false);const auto cover=p/L"cover.png", hero=p/L"hero.png";writeRepairArtwork(cover);writeRepairArtwork(hero);
+            f.plan["items"][0]["manualCoverPath"]=toUtf8(cover.wstring());f.plan["items"][0]["manualWallpaperPath"]=toUtf8(hero.wstring());
+            bool coverStaged=false, hit=false;selftestMoveFault=[&](const auto&,const auto& to){if(to.find(L"3221225473p.png.yeman-stage-")!=std::wstring::npos)coverStaged=true;if(to.find(L"3221225473_hero.png.yeman-stage-")==std::wstring::npos)return DWORD{0};hit=true;return DWORD{ERROR_WRITE_FAULT};};
+            mustThrow([&]{f.commit();});check(hit&&coverStaged&&!hasStages(p)&&!fs::exists(f.target.path),"Earlier artwork stage leaked after later write failure");});
         run("completion-marker-failure-rolls-back",[](const fs::path& p){Fixture f(p);selftestMoveFault=[](const auto&,const auto& to){return to.ends_with(L"transaction.complete.json")?ERROR_WRITE_FAULT:0;};
             mustThrow([&]{f.commit();});check(!fs::exists(f.target.path),"Completion marker failure left an empty shortcut file");});
         run("recovery-keeps-journal-if-backup-missing",[](const fs::path& p){Fixture f(p,true);const auto journal=f.data/L"backups"/L"steam-shortcuts"/L"19627"/L"1"/L"transaction.pending.json";
@@ -589,6 +1405,36 @@ int wmain(int argc,wchar_t** argv) {
             check(loadNetworkRetryQueue(p)["jobs"].contains("retained"),"Invalid retry jobs silently discarded backup queue");});
         run("retry-null-entry-is-quarantined",[](const fs::path& p){writeJsonAtomic(networkRetryQueuePath(p),{{"jobs",{{"bad",nullptr},{"good",{{"status","pending"}}}}}});const auto q=loadNetworkRetryQueue(p);check(!q["jobs"].contains("bad")&&q["jobs"].contains("good"),"Malformed retry job breaks later wake processing");});
         run("snapshot-roundtrip-retains-config-and-assets",[](const fs::path& p){textFile(p/L"config"/L"a.json","old");textFile(p/L"artwork"/L"image.png","asset");const auto snap=createPortableBackupSnapshot(p,L"snapshots","test");check(verifyPortableBackupSnapshot(snap)["verifiedFiles"]==2,"Incorrect backup inventory");textFile(p/L"config"/L"a.json","new");restorePortableBackupSnapshot(p,snap);check(fileText(p/L"config"/L"a.json")=="old","Restore did not recover original config");});
+        run("snapshot-legacy-preserves-live-steam-state",[](const fs::path& p){
+            const auto binding=libLaunch::bindingRoot(p)/L"current", receipt=p/L"state"/L"last-steam-add.json", note=p/L"state"/L"note.json";
+            textFile(note,"old");
+            const auto snap=createPortableBackupSnapshot(p,L"snapshots","legacy-no-authorization");
+            textFile(note,"new");textFile(receipt,"current receipt");
+            textFile(binding/L"binding.json","primary bytes");
+            textFile(binding/libLaunch::bindingRecoveryFileName,"mirror bytes");
+            restorePortableBackupSnapshot(p,snap);
+            check(fileText(note)=="old","Ordinary state was not restored");
+            check(fs::exists(binding/L"binding.json") && fs::exists(binding/libLaunch::bindingRecoveryFileName),"Legacy backup erased current VBS binding or its recovery copy");
+            check(fileText(binding/L"binding.json")=="primary bytes" && fileText(binding/libLaunch::bindingRecoveryFileName)=="mirror bytes","Legacy backup altered current VBS binding or its recovery copy");
+            check(fileText(receipt)=="current receipt","Legacy backup erased a current Steam receipt");
+        });
+        for (const bool current : {false,true}) run(current?"snapshot-stale-binding-cannot-replace-current":"snapshot-stale-binding-cannot-resurrect",[current](const fs::path& p){
+            const auto data=p/L"data",binding=libLaunch::bindingRoot(data)/L"game";
+            textFile(binding/L"binding.json","old primary");
+            textFile(binding/libLaunch::bindingRecoveryFileName,"old mirror");
+            textFile(data/L"config"/L"a.json","old config");
+            const auto snap=createPortableBackupSnapshot(data,L"snapshots","historical-binding");
+            textFile(data/L"config"/L"a.json","new config");
+            fs::remove(binding/L"binding.json");
+            if(current)textFile(binding/libLaunch::bindingRecoveryFileName,"current mirror");
+            else {fs::remove(binding/libLaunch::bindingRecoveryFileName);fs::remove(binding);fs::remove(binding.parent_path());}
+            restorePortableBackupSnapshot(data,snap);
+            check(fileText(data/L"config"/L"a.json")=="old config","Portable config was not restored");
+            check(!fs::exists(binding/L"binding.json"),"Restore revived a historical primary binding");
+            if(current)check(fileText(binding/libLaunch::bindingRecoveryFileName)=="current mirror","Current recoverable state was overwritten");
+            else check(!fs::exists(binding.parent_path()),"Restore adopted a historical Steam binding on an unbound installation");
+            check(fileText(libLaunch::bindingRoot(snap)/L"game"/L"binding.json")=="old primary","Restore edited the archive");
+        });
         run("snapshot-rejects-tampered-content",[](const fs::path& p){textFile(p/L"config"/L"a.json","original");const auto snap=createPortableBackupSnapshot(p,L"snapshots","test");textFile(snap/L"config"/L"a.json","tampered");mustThrow([&]{verifyPortableBackupSnapshot(snap);});});
         run("snapshot-rejects-inconsistent-count",[](const fs::path& p){textFile(p/L"config"/L"a.json","original");const auto snap=createPortableBackupSnapshot(p,L"snapshots","test");auto m=loadJsonDocument(snap/L"snapshot-manifest.json");m["fileCount"]=99;writeJsonAtomic(snap/L"snapshot-manifest.json",m);mustThrow([&]{verifyPortableBackupSnapshot(snap);});});
         run("snapshot-rejects-duplicate-path",[](const fs::path& p){textFile(p/L"config"/L"a.json","original");const auto snap=createPortableBackupSnapshot(p,L"snapshots","test");auto m=loadJsonDocument(snap/L"snapshot-manifest.json");m["files"].push_back(m["files"][0]);m["fileCount"]=2;m["totalBytes"]=16;writeJsonAtomic(snap/L"snapshot-manifest.json",m);mustThrow([&]{verifyPortableBackupSnapshot(snap);});});
@@ -608,10 +1454,10 @@ int wmain(int argc,wchar_t** argv) {
             mustThrow([&]{fixtureDelete(f);});check(!pendingJournals(f.data).empty(),"Deletion lost its recovery journal");selftestMoveFault={};cleanupInterruptedSteamTransactions(f.data);check(readBinaryFile(f.target.path)==original,"Deletion did not recover on reopen");});
         run("import-result-publication-failure-is-not-false-failure",[](const fs::path& p){Fixture f(p);selftestMoveFault=[](const auto&,const auto& to){return to.ends_with(L"last-steam-add.json")?ERROR_WRITE_FAULT:0;};
             const auto result=f.commit();check(result.value("committed",false),"Durable commit was reported as failure");check(readShortcuts(f.target.path,f.target.accountId).size()==1,"Committed shortcut missing");});
-        run("refresh-completion-failure-restores-old-image",[](const fs::path& p){Fixture f(p);f.commit();const auto old=f.target.path.parent_path()/L"grid"/L"3221225473p.jpg";textFile(old,"old cover");
+        run("refresh-completion-failure-restores-old-image",[](const fs::path& p){ArtworkRepairFixture f(p);const auto old=f.target.path.parent_path()/L"grid"/L"3221225473p.jpg";textFile(old,"old cover");
             selftestMoveFault=[](const auto&,const auto& to){return to.ends_with(L"transaction.complete.json")?ERROR_WRITE_FAULT:0;};mustThrow([&]{fixtureRefresh(f);});
             check(fs::exists(old)&&fileText(old)=="old cover","Image replacement did not roll back");check(!fs::exists(old.parent_path()/L"3221225473p.png"),"Failed replacement left new image");});
-        run("refresh-failed-rollback-keeps-journal",[](const fs::path& p){Fixture f(p);f.commit();const auto old=f.target.path.parent_path()/L"grid"/L"3221225473p.jpg";textFile(old,"old cover");
+        run("refresh-failed-rollback-keeps-journal",[](const fs::path& p){ArtworkRepairFixture f(p);const auto old=f.target.path.parent_path()/L"grid"/L"3221225473p.jpg";textFile(old,"old cover");
             selftestMoveFault=[](const auto&,const auto& to){return to.ends_with(L"transaction.complete.json")||(to.ends_with(L"3221225473p.jpg")&&to.find(L"\\config\\grid\\")!=std::wstring::npos)?ERROR_WRITE_FAULT:0;};mustThrow([&]{fixtureRefresh(f);});
             check(!pendingJournals(f.data).empty(),"Image refresh lost recovery journal");selftestMoveFault={};cleanupInterruptedSteamTransactions(f.data);check(fileText(old)=="old cover","Interrupted image refresh did not restore old image");});
 
@@ -624,15 +1470,648 @@ int wmain(int argc,wchar_t** argv) {
         run("scan-manual-unavailable-is-not-missing",[](const fs::path& p){const auto dir=p/L"Game";auto config=defaultLibraryConfig();config["manualGameDirectories"]=json::array({{{"path",toUtf8(dir.wstring())}}});const json report{{"roots",json::array()},{"skippedDirectories",json::array({{{"path",toUtf8(dir.wstring())},{"reason","manual-game-scan-unavailable"}}})}};check(!libraryScanCoversGame(report,config,dir),"Unavailable manual directory would be marked missing");});
         run("pending-recovery-blocks-second-import",[](const fs::path& p){Fixture f(p,true);textFile(f.local,validLocal);selftestMoveFault=[](const auto& from,const auto& to){return (to.ends_with(L"localconfig.vdf")&&from.find(L".yeman-stage-")!=std::wstring::npos)||(to.ends_with(L"shortcuts.vdf")&&from.find(L".yeman-stage-")==std::wstring::npos)?ERROR_WRITE_FAULT:0;};mustThrow([&]{f.commit();});selftestMoveFault={};const auto before=readBinaryFile(f.target.path);mustThrow([&]{f.commit();});check(readBinaryFile(f.target.path)==before,"New import overwrote unresolved recovery");});
         run("rapid-transactions-use-distinct-directories",[](const fs::path& p){std::set<std::string> seen;for(int n=0;n<100;n++)check(seen.insert(toUtf8(steamTransactionDirectory(p,"19627").wstring())).second,"Same-millisecond backup collision");});
-        run("refresh-success-replaces-extension",[](const fs::path& p){Fixture f(p);f.commit();const auto old=f.target.path.parent_path()/L"grid"/L"3221225473p.jpg";textFile(old,"old cover");const auto shortcuts=readBinaryFile(f.target.path);const auto result=fixtureRefresh(f);check(result.value("committed",false),"Refresh not committed");check(!fs::exists(old)&&fileText(old.parent_path()/L"3221225473p.png")=="new cover","Old extension was not replaced");check(readBinaryFile(f.target.path)==shortcuts,"Artwork refresh rewrote shortcut bytes");});
-        run("refresh-manual-horizontal-cover-is-independent",[](const fs::path& p){Fixture f(p);f.commit();const auto state=fixtureScanState(f),image=p/L"long.png";textFile(image,"manual long");writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(p/L"Game"/L"Game.exe"),{{"long",{{"file",toUtf8(image.wstring())}}}}}}}});const auto result=refreshExistingSteamArtwork(f.data,state,f.target,f.data/L"state"/L"refresh.json",true,{canonicalPathKey(p/L"Game")});check(result.value("artworkFilesActivated",0)==2,"Horizontal cover did not populate both Steam IDs");check(fileText(f.target.path.parent_path()/L"grid"/L"3221225473.png")=="manual long","Manual horizontal cover ignored");});
+        run("refresh-success-replaces-extension",[](const fs::path& p){ArtworkRepairFixture f(p);const auto old=f.target.path.parent_path()/L"grid"/L"3221225473p.jpg";textFile(old,"old cover");const auto shortcuts=readBinaryFile(f.target.path);const auto result=fixtureRefresh(f);check(result.value("committed",false),"Refresh not committed");check(!fs::exists(old)&&readBinaryFile(old.parent_path()/L"3221225473p.png")==readBinaryFile(p/L"new-cover.png"),"Old extension was not replaced");check(readBinaryFile(f.target.path)==shortcuts,"Artwork refresh rewrote shortcut bytes");});
+        run("refresh-manual-horizontal-cover-is-independent",[](const fs::path& p){ArtworkRepairFixture f(p);const auto state=fixtureScanState(f),image=p/L"long.png";writeRepairArtwork(image);writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(p/L"Game"/L"Game.exe"),{{"long",{{"file",toUtf8(image.wstring())}}}}}}}});const auto result=refreshExistingSteamArtwork(f.data,state,f.target,f.data/L"state"/L"refresh.json",true,{canonicalPathKey(p/L"Game")});check(result.value("artworkFilesActivated",0)==2,"Horizontal cover did not populate both Steam IDs");check(readBinaryFile(f.target.path.parent_path()/L"grid"/L"3221225473.png")==readBinaryFile(image),"Manual horizontal cover ignored");});
+        run("refresh-vbs-legacy-card-and-direct-card-use-their-own-ids",[](const fs::path& p) {
+            Fixture f(p); f.commit();
+            const auto state=fixtureScanState(f), cover=p/L"saved-cover.png", portable=p/L"broken-portable.png";
+            const auto grid=f.target.path.parent_path()/L"grid", old=grid/L"3221225473p.jpg";
+            const auto script=libLaunch::wrapperPath(p/L"Game");
+            auto before=BinaryVdfDocument::emptySteamShortcuts();
+            vdfFindObject(before.root(),"shortcuts")->objectValue.push_back({"0",steamShortcutNode(-1073741823,"old card",
+                quotedSteamPath(libLaunch::systemFile(L"wscript.exe")),quotedSteamPath(p),17,{"retain"},toUtf8(libLaunch::steamOptions(script)))});
+            writeAtomic(f.target.path,before.serialize());
+            textFile(old,"corrupt old jpg");textFile(grid/L"3221225473p.png","conflicting old png");
+            textFile(grid/L"4258967860p.jpg","another card");
+            writeRepairArtwork(cover);textFile(portable,"corrupt choice copy");
+            writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(p/L"Game"/L"Game.exe"),
+                {{"cover",{{"file",toUtf8(cover.wstring())},{"portableFile",toUtf8(portable.wstring())}}}}}}}});
+            const auto output=f.data/L"state"/L"refresh.json";
+            const std::set<std::string> selected{canonicalPathKey(p/L"Game")};
+            const auto repaired=refreshExistingSteamArtwork(f.data,state,f.target,output,true,selected);
+            check(repaired.value("artworkFilesActivated",0)==1&&!fs::exists(old)&&readBinaryFile(grid/L"3221225473p.png")==readBinaryFile(cover),"VBS card kept stale artwork or did not recover saved selection");
+            check(fileText(grid/L"4258967860p.jpg")=="another card"&&readBinaryFile(f.target.path)==before.serialize(),"Repair changed another card or launch settings");
+            const SteamShortcutTarget secondary{p/L"secondary"/L"userdata"/L"42"/L"config"/L"shortcuts.vdf","42"};
+            auto direct=BinaryVdfDocument::emptySteamShortcuts();
+            vdfFindObject(direct.root(),"shortcuts")->objectValue.push_back({"0",steamShortcutNode(-1073741822,"direct card",
+                quotedSteamPath(p/L"Game"/L"Game.exe"),quotedSteamPath(p/L"Game"),0)});
+            writeAtomic(secondary.path,direct.serialize());
+            const auto filled=refreshExistingSteamArtwork(f.data,state,secondary,output,true,selected);
+            check(filled.value("artworkFilesActivated",0)==1&&readBinaryFile(secondary.path.parent_path()/L"grid"/L"3221225474p.png")==readBinaryFile(cover),"Second account was not repaired with its real card ID");
+            check(readBinaryFile(secondary.path)==direct.serialize(),"Ordinary card launch configuration changed");
+        });
+        run("refresh-empty-account-does-not-block-other-accounts",[](const fs::path& p) {
+            ArtworkRepairFixture f(p);const auto scan=fixtureScanState(f), output=f.data/L"state"/L"refresh.json";
+            const SteamShortcutTarget absent{p/L"secondary"/L"userdata"/L"42"/L"config"/L"shortcuts.vdf","42"};
+            const std::set<std::string> selected{canonicalPathKey(p/L"Game")};
+            const auto skipped=refreshExistingSteamArtwork(f.data,scan,absent,output,true,selected);
+            check(skipped["items"][0]["status"]=="not-in-steam"&&skipped.value("artworkFilesActivated",-1)==0&&!fs::exists(absent.path.parent_path()),"Empty account was not safely skipped");
+            check(fixtureRefresh(f).value("artworkFilesActivated",0)==1,"Repair did not reach another account");
+        });
+        for (const auto* variant : {"saved-replacement", "saved-deletion", "legacy-only", "split-metadata", "split-conflict"})
+            run((std::string("refresh-artwork-manual-alias-")+variant).c_str(),[variant](const fs::path& p){
+                ArtworkRepairFixture f(p);
+                const auto game=p/L"Game", exe=game/L"Game.exe", scan=fixtureScanState(f);
+                const auto key=canonicalPathKey(exe), alias=toUtf8(exe.wstring());
+                check(alias<key&&canonicalPathKey(fs::path(toWide(alias)))==key,"Fixture legacy alias must sort before its canonical key");
+                const auto old=p/L"old.png", newer=p/L"new.png", hero=p/L"hero.png";
+                writeRepairArtwork(old,12);writeRepairArtwork(newer,72);writeRepairArtwork(hero,93);
+                const auto file=[](const auto& path){return json{{"file",toUtf8(path.wstring())}};};
+                const std::string_view mode(variant);
+                json items={{alias,{{"cover",file(old)},{"wallpaper",file(hero)}}}};
+                if(mode!="legacy-only"){
+                    items[key]={{"name","Current name"}};
+                    if(mode=="split-conflict"){
+                        const auto peer=key.substr(0,key.size()-8)+"GAME.exe";
+                        items[peer]={{"cover",file(newer)}};
+                        items[key]["wallpaper"]=file(hero);
+                    }
+                    if(mode=="saved-deletion")items[key]["artworkProtection"]={{"cover","deleted"}};
+                    if(mode=="saved-replacement")items[key]["cover"]=file(newer);
+                }
+                const auto config=f.data/L"config"/L"manual-overrides.json";
+                writeJsonAtomic(config,{{"items",items}});
+                const auto configBefore=readBinaryFile(config), vdf=readBinaryFile(f.target.path);
+                const auto grid=f.target.path.parent_path()/L"grid", portrait=grid/L"3221225473p.png";
+                const auto result=refreshExistingSteamArtwork(f.data,scan,f.target,f.data/L"state"/L"refresh.json",true,{canonicalPathKey(game)});
+                writeJsonAtomic(p/L"observed.json",result);
+                if(mode=="saved-deletion"||mode=="split-conflict")check(!fs::exists(portrait),"Deleted or ambiguous legacy portrait was restored");
+                else check(readBinaryFile(portrait)==readBinaryFile(mode=="saved-replacement"?newer:old),"Repair used the wrong portrait for this alias state");
+                check(readBinaryFile(grid/L"3221225473_hero.png")==readBinaryFile(hero)&&readBinaryFile(f.target.path)==vdf&&
+                    readBinaryFile(config)==configBefore,"Repair disturbed another slot, original card or configuration");
+            });
+        run("refresh-invalid-new-image-does-not-replace-good-grid",[](const fs::path& p) {
+            ArtworkRepairFixture f(p);const auto state=fixtureScanState(f);
+            const auto old=f.target.path.parent_path()/L"grid"/L"3221225473p.png", bad=p/L"invalid.png";
+            fs::create_directories(old.parent_path());writeRepairArtwork(old);textFile(bad,"not an image");
+            const auto before=readBinaryFile(old), shortcuts=readBinaryFile(f.target.path);
+            writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(p/L"Game"/L"Game.exe"),{{"cover",{{"file",toUtf8(bad.wstring())}}}}}}}});
+            const auto result=refreshExistingSteamArtwork(f.data,state,f.target,f.data/L"state"/L"refresh.json",true,{canonicalPathKey(p/L"Game")});
+            check(result.value("artworkFilesActivated",-1)==0&&result["items"][0]["unusableArtworkSlots"]==json::array({"cover"})&&readBinaryFile(old)==before&&readBinaryFile(f.target.path)==shortcuts,"Invalid image was not safely rejected");
+        });
+        for (const auto* variant : {"full-to-short", "short-to-full", "ambiguous", "held", "covered"})
+            run((std::string("refresh-artwork-alias-grid-") + variant).c_str(), [variant](const fs::path& p) {
+                ArtworkRepairFixture f(p);
+                const std::string_view mode(variant);
+                const auto game=p/L"Game", exe=game/L"Game.exe", grid=f.target.path.parent_path()/L"grid";
+                const auto shortGrid=grid/L"3221225473.png", longGrid=grid/L"13835058059610685440.png";
+                const auto donor=mode=="short-to-full"?shortGrid:longGrid, peer=donor==shortGrid?longGrid:shortGrid;
+                fs::create_directories(grid);writeRepairArtwork(donor,71);
+                const auto original=readBinaryFile(f.target.path), donorBytes=readBinaryFile(donor);
+                const auto dynamic=grid/L"3221225473p.webm", background=grid/L"3221225473_hero.png";
+                textFile(dynamic,"unchanged-video");
+                if(mode=="short-to-full")textFile(peer,"corrupt alternate filename");
+                if(mode=="ambiguous")textFile(grid/L"13835058059610685440.jpg","ambiguous alternate file");
+                if(mode=="covered")writeRepairArtwork(background,90);
+                const auto cover=p/L"new-cover.png";writeRepairArtwork(cover);
+                json choice={{"cover",{{"file",toUtf8(cover.wstring())}}}};
+                if(mode=="held")choice["artworkProtection"]={{"long","deleted"},{"wallpaper","deleted"}};
+                writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(exe),choice}}}});
+                const auto result=refreshExistingSteamArtwork(f.data,fixtureScanState(f),f.target,
+                    f.data/L"state"/L"refresh.json",true,{canonicalPathKey(game)});
+                const auto& row=result["items"][0];
+                const bool restored=mode=="short-to-full"||mode=="full-to-short"||mode=="covered";
+                writeJsonAtomic(p/L"grid-observed.json",{{"row",row},{"peerExists",fs::exists(peer)},
+                    {"activated",result["artworkFilesActivated"]}});
+                check(result["artworkFilesActivated"]==(restored?2:1)&&fs::exists(peer)==restored,
+                    "Horizontal peer was not restored, or an unqualified donor was used");
+                if(restored)check(readBinaryFile(peer)==donorBytes&&row["recoveredArtworkSlots"]==json::array({"long"}),"Horizontal peer has wrong bytes or no recovery receipt");
+                const auto expected=mode=="covered"||mode=="held"?json::array():json::array({"wallpaper"});
+                check(row.value("unresolvedRequiredArtworkSlots",json::array())==expected,"Missing, existing or explicitly deleted hero was misreported");
+                check(readBinaryFile(donor)==donorBytes&&readBinaryFile(f.target.path)==original&&fileText(dynamic)=="unchanged-video",
+                    "Peer recovery modified its donor, dynamic preview or shortcut");
+            });
+        for (const auto* variant : {"wrong-short-corrupt-full", "wrong-full-missing-short", "different-valid-images", "second-activation-fails",
+                "corrupt-full-variants", "corrupt-short-variants", "valid-peer-variant", "unsupported-peer-variant"})
+            run((std::string("refresh-artwork-alias-horizontal-suffix-") + variant).c_str(), [variant](const fs::path& p) {
+                ArtworkRepairFixture f(p);
+                const std::string_view mode(variant);
+                const auto state=fixtureScanState(f), output=f.data/L"state"/L"refresh.json";
+                const auto game=p/L"Game", grid=f.target.path.parent_path()/L"grid";
+                const auto shortPng=grid/L"3221225473.png", fullPng=grid/L"13835058059610685440.png";
+                const auto shortJpg=grid/L"3221225473.jpg", fullJpg=grid/L"13835058059610685440.jpg";
+                if(mode=="corrupt-full-variants"||mode=="corrupt-short-variants"||mode=="valid-peer-variant"||mode=="unsupported-peer-variant"){
+                    const bool fullDonor=mode=="corrupt-short-variants", usablePeer=mode=="valid-peer-variant", unknownPeer=mode=="unsupported-peer-variant";
+                    const auto donor=fullDonor?fullPng:shortPng, peer=fullDonor?shortPng:fullPng;
+                    auto alternate=fullDonor?shortJpg:fullJpg;
+                    if(unknownPeer)alternate.replace_extension(L".tga");
+                    fs::create_directories(grid);
+                    writeRepairArtwork(donor,11);
+                    textFile(peer,"corrupt main PNG");
+                    if(usablePeer)writeRepairArtwork(alternate,51,true);else textFile(alternate,"old competing variant");
+                    const auto dynamic=grid/L"3221225473p.webm";
+                    textFile(dynamic,"unchanged preview video");
+                    const auto original=readBinaryFile(f.target.path), originalPeer=readBinaryFile(peer), originalAlternate=readBinaryFile(alternate);
+                    const auto donorBytes=readBinaryFile(donor);
+                    const auto refresh=[&]{return refreshExistingSteamArtwork(f.data,state,f.target,output,true,{canonicalPathKey(game)});};
+                    const auto result=refresh();
+                    const auto& row=result.at("items").at(0);
+                    writeJsonAtomic(p/L"observed.json",result);
+                    if(usablePeer||unknownPeer){
+                        check(result.at("artworkFilesActivated")==0&&readBinaryFile(peer)==originalPeer&&readBinaryFile(alternate)==originalAlternate,
+                            "A usable or unsupported peer variant was erased");
+                    }else{
+                        check(result.at("artworkFilesActivated")==1&&row.at("recoveredArtworkSlots")==json::array({"long"})&&
+                            row.at("verifiedStaticArtworkWrites").size()==1&&readBinaryFile(peer)==donorBytes&&!fs::exists(alternate),
+                            "Confirmed corrupt peer variants blocked horizontal repair");
+                        const auto backup=fs::path(toWide(result.at("backup").get<std::string>()))/L"grid-before";
+                        check(readBinaryFile(backup/peer.filename())==originalPeer&&readBinaryFile(backup/alternate.filename())==originalAlternate,
+                            "A corrupt peer variant was not backed up");
+                        check(refresh().at("artworkFilesActivated")==0,"Peer repair rewrote healthy horizontal artwork");
+                    }
+                    check(readBinaryFile(f.target.path)==original&&readBinaryFile(donor)==donorBytes&&fileText(dynamic)=="unchanged preview video"&&
+                        !hasStages(p)&&pendingJournals(f.data).empty(),"Peer repair disturbed the original card, donor or dynamic artwork");
+                    return;
+                }
+                const bool shortDonor=mode!="wrong-full-missing-short", different=mode=="different-valid-images", rollback=mode=="second-activation-fails";
+                const auto wrong=shortDonor?shortJpg:fullJpg, corrected=shortDonor?shortPng:fullPng, peer=shortDonor?fullPng:shortPng;
+                fs::create_directories(grid);
+                writeRepairArtwork(wrong,42);
+                if(different)writeRepairArtwork(peer,92);
+                else if(shortDonor)textFile(peer,"corrupt horizontal peer");
+                const auto donorBytes=readBinaryFile(wrong), peerBytes=fs::exists(peer)?readBinaryFile(peer):std::vector<unsigned char>{};
+                const auto vdf=readBinaryFile(f.target.path);
+                const auto refresh=[&]{return refreshExistingSteamArtwork(f.data,state,f.target,output,true,{canonicalPathKey(game)});};
+                if(rollback){
+                    bool injected=false;
+                    selftestMoveFault=[&](const auto& source,const auto& destination)->DWORD{
+                        if(!injected&&destination==corrected.wstring()&&source.find(L".yeman-stage-")!=std::wstring::npos){injected=true;return ERROR_WRITE_FAULT;}
+                        return ERROR_SUCCESS;
+                    };
+                    std::string error;
+                    try{refresh();}catch(const std::exception& e){error=e.what();}
+                    selftestMoveFault={};
+                    writeJsonAtomic(p/L"observed.json",{{"injected",injected},{"error",error},{"receipt",fs::exists(output)}});
+                    check(injected&&!error.empty()&&!fs::exists(output)&&fs::is_regular_file(wrong)&&readBinaryFile(wrong)==donorBytes&&
+                        !fs::exists(corrected)&&readBinaryFile(peer)==peerBytes,"Second horizontal activation did not roll back both filenames");
+                } else {
+                    const auto result=refresh();
+                    writeJsonAtomic(p/L"observed.json",result);
+                    const auto& row=result.at("items").at(0);
+                    const auto expected=different?1:2;
+                    check(result.at("artworkFilesActivated")==expected&&row.at("recoveredArtworkSlots")==json::array({"long"})&&
+                        row.at("verifiedStaticArtworkWrites").size()==expected&&!fs::exists(wrong)&&readBinaryFile(corrected)==donorBytes&&
+                        readBinaryFile(peer)==(different?peerBytes:donorBytes),"Horizontal file was not normalized independently of its peer");
+                    const auto backup=fs::path(toWide(result.at("backup").get<std::string>()))/L"grid-before";
+                    check(readBinaryFile(backup/wrong.filename())==donorBytes&&
+                        (peerBytes.empty()||different||readBinaryFile(backup/peer.filename())==peerBytes),"Original horizontal image bytes lost during repair");
+                    check(refresh().at("artworkFilesActivated")==0,"Healthy horizontal filenames were written again");
+                }
+                check(readBinaryFile(f.target.path)==vdf&&!hasStages(p)&&pendingJournals(f.data).empty(),"Horizontal repair changed its original card or left transaction debt");
+            });
+        for (const auto* variant : {"stage-new-target", "pending-alternate-extension", "pending-changed-donor", "pending-changed-peer", "unreadable-peer"})
+            run((std::string("refresh-artwork-alias-grid-race-") + variant).c_str(), [variant](const fs::path& p) {
+                ArtworkRepairFixture f(p);
+                const std::string_view mode(variant);
+                const auto state=fixtureScanState(f), output=f.data/L"state"/L"refresh.json";
+                const auto game=p/L"Game", exe=game/L"Game.exe", grid=f.target.path.parent_path()/L"grid";
+                const auto donor=grid/L"13835058059610685440.png", peer=grid/L"3221225473.png";
+                const auto alternate=grid/L"3221225473.jpg", portrait=grid/L"3221225473p.png";
+                const auto newCover=p/L"new-cover.png", externalImage=p/L"external.png";
+                fs::create_directories(grid);writeRepairArtwork(donor,71);writeRepairArtwork(newCover,80);writeRepairArtwork(externalImage,91);
+                const auto oldVdf=readBinaryFile(f.target.path), donorBytes=readBinaryFile(donor), externalBytes=readBinaryFile(externalImage);
+                const bool hadPeer=mode=="pending-changed-peer"||mode=="unreadable-peer";
+                if(hadPeer)textFile(peer,"corrupt horizontal preimage");
+                writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(exe),
+                    {{"cover",{{"file",toUtf8(newCover.wstring())}}}}}}}});
+                const auto refresh=[&]{return refreshExistingSteamArtwork(f.data,state,f.target,output,true,{canonicalPathKey(game)});};
+                if(mode=="unreadable-peer") {
+                    withConfigReadDenied(peer,[&]{
+                        mustThrow([&]{readBinaryFile(peer);});
+                        const auto first=refresh();
+                        check(first["artworkFilesActivated"]==1&&!first["items"][0].contains("recoveredArtworkSlots"),"Unreadable peer was treated as corrupt or blocked unrelated portrait repair");
+                    });
+                    check(fileText(peer)=="corrupt horizontal preimage","Unreadable peer did not survive unmodified");
+                    const auto retry=refresh();
+                    check(retry["artworkFilesActivated"]==2&&readBinaryFile(peer)==donorBytes&&readBinaryFile(portrait)==readBinaryFile(newCover),"Repair did not recover after read permission returned");
+                } else {
+                    const auto edited=mode=="pending-alternate-extension"?alternate:mode=="pending-changed-donor"?donor:peer;
+                    bool injected=false;
+                    selftestMoveFault=[&](const auto&,const auto& destination)->DWORD {
+                        const bool atPeerStage=destination.starts_with(peer.wstring()+L".yeman-stage-");
+                        if(!injected&&(mode=="stage-new-target"?atPeerStage:destination.ends_with(L"transaction.pending.json"))) {
+                            injected=true;
+                            writeAtomic(edited,externalBytes);
+                        }
+                        return ERROR_SUCCESS;
+                    };
+                    std::string error;
+                    try { refresh(); } catch(const std::exception& e) { error=e.what(); }
+                    selftestMoveFault={};
+                    writeJsonAtomic(p/L"grid-race-observed.json",{{"injected",injected},{"rejected",!error.empty()},{"error",error},
+                        {"externalKept",fs::exists(edited)&&readBinaryFile(edited)==externalBytes},{"portraitExists",fs::exists(portrait)}});
+                    check(injected&&!error.empty(),"Late grid change did not abort the pending repair");
+                    check(!fs::exists(portrait)&&!fs::exists(output)&&readBinaryFile(edited)==externalBytes,"Repair published or committed after an external edit");
+                    if(edited!=peer)check(!fs::exists(peer),"Repair created a conflicting copy");
+                    if(edited!=donor)check(readBinaryFile(donor)==donorBytes,"Repair changed the original donor");
+                }
+                check(readBinaryFile(f.target.path)==oldVdf&&!hasStages(p)&&pendingJournals(f.data).empty(),"Grid repair changed shortcut or leaked staging debt");
+            });
+        for (const auto* variant : {"portrait", "hero", "unchanged"})
+            run((std::string("refresh-artwork-slot-grid-race-") + variant).c_str(), [variant](const fs::path& p) {
+                ArtworkRepairFixture f(p);
+                const std::string_view mode(variant);
+                const auto game=p/L"Game", grid=f.target.path.parent_path()/L"grid";
+                const auto scan=fixtureScanState(f), output=f.data/L"state"/L"refresh.json";
+                const auto portrait=grid/L"3221225473p.png", hero=grid/L"3221225473_hero.png";
+                const auto alternate=grid/(mode=="hero"?L"3221225473_hero.jpg":L"3221225473p.jpg");
+                const auto coverSource=p/L"new-cover.png", heroSource=p/L"new-hero.png", external=p/L"external.png", video=p/L"video.mp4";
+                fs::create_directories(grid);
+                writeRepairArtwork(portrait,23); writeRepairArtwork(hero,26);
+                writeRepairArtwork(coverSource,34); writeRepairArtwork(heroSource,38); writeRepairArtwork(external,43);
+                textFile(video,"unchanged dynamic source");
+                const auto oldVdf=readBinaryFile(f.target.path), oldPortrait=readBinaryFile(portrait), oldHero=readBinaryFile(hero), externalBytes=readBinaryFile(external);
+                writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(game/L"Game.exe"),{
+                    {"cover",{{"file",toUtf8(coverSource.wstring())}}},{"wallpaper",{{"file",toUtf8(heroSource.wstring())}}}
+                }}}}});
+                const auto refresh=[&]{return refreshExistingSteamArtwork(f.data,scan,f.target,output,true,{canonicalPathKey(game)});};
+                if(mode!="unchanged") {
+                    bool injected=false;
+                    selftestMoveFault=[&](const auto&,const auto& destination)->DWORD {
+                        if(!injected&&destination.ends_with(L"transaction.pending.json")) { injected=true; writeAtomic(alternate,externalBytes); }
+                        return ERROR_SUCCESS;
+                    };
+                    std::string error;
+                    try { refresh(); } catch(const std::exception& e) { error=e.what(); }
+                    selftestMoveFault={};
+                    writeJsonAtomic(p/L"grid-race-observed.json",{{"injected",injected},{"error",error},{"receipt",fs::exists(output)},
+                        {"portraitUnchanged",readBinaryFile(portrait)==oldPortrait},{"heroUnchanged",readBinaryFile(hero)==oldHero}});
+                    check(injected&&!error.empty()&&!fs::exists(output),"Refresh accepted a new competing static extension");
+                    check(readBinaryFile(alternate)==externalBytes&&readBinaryFile(portrait)==oldPortrait&&readBinaryFile(hero)==oldHero,
+                        "Aborted refresh modified the external image or original static artwork");
+                }
+                const auto result=refresh();
+                check(result["artworkFilesActivated"]==2&&!fs::exists(alternate)&&readBinaryFile(portrait)==readBinaryFile(coverSource)&&
+                    readBinaryFile(hero)==readBinaryFile(heroSource),"Explicit stable refresh did not restore both static slots");
+                check(readBinaryFile(f.target.path)==oldVdf&&fileText(video)=="unchanged dynamic source"&&
+                    !hasStages(p)&&pendingJournals(f.data).empty(),"Refresh changed shortcut, dynamic source or left a pending transaction");
+            });
+        for (const auto* variant : {"portrait", "hero", "competing-valid", "unreadable", "manual-choice", "deleted", "late-edit"})
+            run((std::string("refresh-artwork-slot-variants-")+variant).c_str(), [variant](const fs::path& p) {
+                ArtworkRepairFixture f(p);
+                const std::string_view mode(variant);
+                const auto scan=fixtureScanState(f), game=p/L"Game", output=f.data/L"state"/L"refresh.json";
+                const auto grid=f.target.path.parent_path()/L"grid";
+                const bool hero=mode=="hero", canRepair=hero||mode=="portrait";
+                const std::string slot=hero?"wallpaper":"cover";
+                const auto good=grid/(hero?L"3221225473_hero.png":L"3221225473p.png");
+                const auto older=grid/(hero?L"3221225473_hero.jpg":L"3221225473p.jpg");
+                const auto other=grid/(hero?L"3221225473p.png":L"3221225473_hero.png");
+                fs::create_directories(grid);
+                writeRepairArtwork(good,23);writeRepairArtwork(other,51);
+                if(mode=="competing-valid")writeRepairArtwork(older,75,true);else textFile(older,"broken duplicate");
+                const auto before=readBinaryFile(f.target.path), goodBytes=readBinaryFile(good), olderBytes=readBinaryFile(older), otherBytes=readBinaryFile(other);
+                if(mode=="manual-choice"||mode=="deleted"){
+                    const json selection=mode=="manual-choice"?json{{slot,{{"file",toUtf8((p/L"missing.png").wstring())}}}}:
+                        json{{"artworkProtection",{{slot,"deleted"}}}};
+                    writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(game/L"Game.exe"),selection}}}});
+                }
+                const auto refresh=[&]{return refreshExistingSteamArtwork(f.data,scan,f.target,output,true,{canonicalPathKey(game)});};
+                if(mode=="late-edit") {
+                    const auto external=p/L"external.jpg";writeRepairArtwork(external,87,true);const auto externalBytes=readBinaryFile(external);
+                    bool injected=false;
+                    selftestMoveFault=[&](const auto&,const auto& destination)->DWORD {
+                        if(!injected&&destination.ends_with(L"transaction.pending.json")){injected=true;writeAtomic(older,externalBytes);}
+                        return ERROR_SUCCESS;
+                    };
+                    std::string error;
+                    try{refresh();}catch(const std::exception& e){error=e.what();}
+                    selftestMoveFault={};
+                    writeJsonAtomic(p/L"observed.json",{{"injected",injected},{"error",error},{"receipt",fs::exists(output)}});
+                    check(injected&&!error.empty()&&!fs::exists(output)&&readBinaryFile(older)==externalBytes,"Race did not preserve the externally edited slot and refuse completion");
+                } else {
+                    json result;
+                    if(mode=="unreadable")withConfigReadDenied(older,[&]{result=refresh();});else result=refresh();
+                    writeJsonAtomic(p/L"observed.json",result);
+                    const auto row=result.at("items").at(0);
+                    if(canRepair) {
+                        check(result.at("artworkFilesActivated")==1&&row.at("recoveredArtworkSlots")==json::array({slot})&&
+                            !fs::exists(older),"Did not recover a unique good image competing with a corrupt legacy file");
+                        const auto backup=fs::path(toWide(result.at("backup").get<std::string>()))/L"grid-before"/older.filename();
+                        check(readBinaryFile(backup)==olderBytes,"Lost the corrupt original instead of preserving it in the transaction backup");
+                        check(refresh().at("artworkFilesActivated")==0,"A now-healthy slot kept needing repair");
+                    } else {
+                        check(result.at("artworkFilesActivated")==0&&readBinaryFile(older)==olderBytes,"Ambiguous, locked or user-protected slot was overwritten");
+                        const auto unresolved=row.value("unresolvedRequiredArtworkSlots",json::array());
+                        check(mode=="deleted"?unresolved.empty():unresolved==json::array({slot}),"Ambiguous slot was reported as usable or overrode intentional deletion");
+                    }
+                }
+                check(readBinaryFile(good)==goodBytes&&readBinaryFile(other)==otherBytes&&readBinaryFile(f.target.path)==before&&
+                    !hasStages(p)&&pendingJournals(f.data).empty(),"Repair changed the donor, an unrelated slot or the shortcut, or left pending work");
+            });
+        for (const auto* variant : {"suffix-portrait", "suffix-hero", "suffix-handpicked", "suffix-late-peer", "suffix-rollback", "unchanged",
+                "mixed-portrait", "mixed-hero", "mixed-handpicked", "mixed-competing", "mixed-unreadable", "mixed-late-peer", "mixed-rollback"})
+            run((std::string("refresh-artwork-slot-variants-")+variant).c_str(), [variant](const fs::path& p) {
+                ArtworkRepairFixture f(p);
+                const std::string_view mode(variant);
+                const auto scan=fixtureScanState(f), game=p/L"Game", output=f.data/L"state"/L"refresh.json";
+                const auto grid=f.target.path.parent_path()/L"grid";
+                const bool mixed=mode.starts_with("mixed-"), hero=mode=="suffix-hero"||mode=="mixed-hero", unchanged=mode=="unchanged";
+                const bool handpicked=mode.ends_with("-handpicked"), latePeer=mode.ends_with("-late-peer"), rollback=mode.ends_with("-rollback");
+                const std::string slot=hero?"wallpaper":"cover";
+                const auto correct=grid/(hero?L"3221225473_hero.png":L"3221225473p.jpg");
+                const auto old=unchanged?correct:grid/(hero?L"3221225473_hero.jpg":L"3221225473p.png");
+                const auto other=grid/(hero?L"3221225473p.png":L"3221225473_hero.png");
+                fs::create_directories(grid);
+                writeRepairArtwork(old,29,!hero);writeRepairArtwork(other,51);
+                if (mixed) {
+                    if (mode=="mixed-competing") writeRepairArtwork(correct,72,!hero);
+                    else textFile(correct,"corrupt file with the expected suffix");
+                }
+                const auto oldPeer=mixed?readBinaryFile(correct):std::vector<unsigned char>{};
+                const auto before=readBinaryFile(f.target.path), original=readBinaryFile(old), otherBytes=readBinaryFile(other);
+                if(handpicked)
+                    writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(game/L"Game.exe"),
+                        {{slot,{{"file",toUtf8((p/L"missing.png").wstring())}}}}}}}});
+                const auto refresh=[&]{return refreshExistingSteamArtwork(f.data,scan,f.target,output,true,{canonicalPathKey(game)});};
+                if(latePeer||rollback) {
+                    const auto external=p/L"external.jpg";
+                    writeRepairArtwork(external,87,true);
+                    const auto externalBytes=readBinaryFile(external);
+                    bool injected=false;
+                    selftestMoveFault=[&](const auto& source,const auto& destination)->DWORD {
+                        if(!injected&&latePeer&&destination.ends_with(L"transaction.pending.json")){
+                            injected=true;writeAtomic(correct,externalBytes);
+                        }
+                        if(!injected&&rollback&&destination==correct.wstring()&&source.find(L".yeman-stage-")!=std::wstring::npos){
+                            injected=true;return ERROR_WRITE_FAULT;
+                        }
+                        return ERROR_SUCCESS;
+                    };
+                    std::string error;
+                    try{refresh();}catch(const std::exception& e){error=e.what();}
+                    selftestMoveFault={};
+                    writeJsonAtomic(p/L"observed.json",{{"injected",injected},{"error",error},{"receipt",fs::exists(output)}});
+                    check(injected&&!error.empty()&&!fs::exists(output)&&readBinaryFile(old)==original,
+                        "Filename repair did not refuse the race or roll back the original image");
+                    check(latePeer?readBinaryFile(correct)==externalBytes:mixed?readBinaryFile(correct)==oldPeer:!fs::exists(correct),
+                        "Failed filename repair touched a competing image or left a new file");
+                } else {
+                    json result;
+                    if(mode=="mixed-unreadable") withConfigReadDenied(correct,[&]{result=refresh();});
+                    else result=refresh();
+                    writeJsonAtomic(p/L"observed.json",result);
+                    const auto& item=result.at("items").at(0);
+                    if(unchanged){
+                        check(result.at("artworkFilesActivated")==0&&item.at("status")=="no-artwork-change"&&
+                            !item.contains("verifiedStaticArtworkWrites")&&readBinaryFile(old)==original,
+                            "Verified required artwork was reported missing or rewritten");
+                    } else if(handpicked||mode=="mixed-competing"||mode=="mixed-unreadable"){
+                        check(result.at("artworkFilesActivated")==0&&readBinaryFile(old)==original&&
+                            (mixed?readBinaryFile(correct)==oldPeer:!fs::exists(correct))&&
+                            item.at("unresolvedRequiredArtworkSlots")==json::array({slot}),"Filename repair wrote an ambiguous, unreadable or handpicked slot");
+                    } else {
+                        const auto verified=json::array({{{"slot",slot},{"fileName",toUtf8(correct.filename().wstring())},{"sha256",sha256(original)}}});
+                        check(result.at("artworkFilesActivated")==1&&item.at("recoveredArtworkSlots")==json::array({slot})&&
+                            item.at("verifiedStaticArtworkWrites")==verified&&
+                            !fs::exists(old)&&readBinaryFile(correct)==original,"Valid image with wrong suffix was not recovered byte for byte");
+                        const auto backup=fs::path(toWide(result.at("backup").get<std::string>()))/L"grid-before"/old.filename();
+                        check(readBinaryFile(backup)==original,"Wrong-suffix image was not backed up");
+                        if (mixed) check(readBinaryFile(backup.parent_path()/correct.filename())==oldPeer,"Corrupt peer was not backed up");
+                        const auto repeated=refresh();
+                        check(repeated.at("artworkFilesActivated")==0&&repeated.at("items").at(0).at("status")=="no-artwork-change",
+                            "Second repair wrote a verified image or reported it missing");
+                    }
+                }
+                check(readBinaryFile(other)==otherBytes&&readBinaryFile(f.target.path)==before&&
+                    !hasStages(p)&&pendingJournals(f.data).empty(),"Filename repair changed another slot or the original card, or left pending work");
+            });
+        for (const auto* variant : {"partial-current","current-priority","foreign-exe","different-store","deleted-and-handpicked",
+                "recovered-scan","conflicting-cache-id","cleared-identity"})
+            run((std::string("refresh-artwork-alias-")+variant).c_str(),[variant](const fs::path& p){fixtureSteamArtworkAliasRecovery(p,variant);});
+        for (const auto* variant : {"replace","rollback","recover","above-backup-limit","oversize-new-source","case-replace","case-rollback","case-recover"})
+            run((std::string("refresh-artwork-preimage-")+variant).c_str(),[variant](const fs::path& p){fixtureSteamArtworkPreimage(p,variant);});
+        for (const auto* variant : {"portrait-with-hero", "linked-horizontal", "zero-writes"})
+            run((std::string("refresh-artwork-preimage-isolation-")+variant).c_str(),[variant](const fs::path& p){
+                ArtworkRepairFixture f(p);
+                const std::string_view mode(variant);
+                const auto grid=f.target.path.parent_path()/L"grid", game=p/L"Game", output=f.data/L"state"/L"refresh.json";
+                const auto scan=fixtureScanState(f);
+                const auto originalVdf=readBinaryFile(f.target.path);
+                const bool horizontal=mode=="linked-horizontal", wantHero=mode!="zero-writes";
+                const auto blocked=grid/(horizontal?L"13835058059610685440.jpg":L"3221225473p.jpg");
+                const auto replacement=grid/(horizontal?L"13835058059610685440.png":L"3221225473p.png");
+                const auto otherHorizontal=grid/L"3221225473.png", background=grid/L"3221225473_hero.png";
+                const auto chosen=p/L"chosen.png", hero=p/L"chosen-hero.png";
+                writeRepairArtwork(chosen,51);writeRepairArtwork(hero,82);textFile(blocked,"old unreadable artwork");
+                if(horizontal)writeRepairArtwork(otherHorizontal,99);
+                const auto otherBefore=horizontal?readBinaryFile(otherHorizontal):std::vector<unsigned char>{};
+                const auto slot=horizontal?"long":"cover";
+                json selection={{slot,{{"file",toUtf8(chosen.wstring())}}}};
+                if(wantHero)selection["wallpaper"]={{"file",toUtf8(hero.wstring())}};
+                writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(game/L"Game.exe"),selection}}}});
+                const auto refresh=[&]{return refreshExistingSteamArtwork(f.data,scan,f.target,output,true,{canonicalPathKey(game)});};
+                json first;
+                withConfigReadDenied(blocked,[&]{
+                    mustThrow([&]{readBinaryFile(blocked);});
+                    first=refresh();
+                });
+                check(first["committed"]==true&&first["artworkFilesActivated"]==(wantHero?1:0)&&first["items"][0]["blockedArtworkSlots"]==json::array({slot}),"Unreadable slot did not return a truthful partial receipt");
+                check(fileText(blocked)=="old unreadable artwork"&&!fs::exists(replacement),"Unreadable preimage was touched");
+                if(horizontal)check(readBinaryFile(otherHorizontal)==otherBefore,"Blocked full ID writes changed the short ID copy");
+                if(wantHero)check(readBinaryFile(background)==readBinaryFile(hero),"An unrelated background did not repair");
+                const auto retry=refresh();
+                check(!retry["items"][0].contains("blockedArtworkSlots")&&!fs::exists(blocked)&&readBinaryFile(replacement)==readBinaryFile(chosen),"Explicit retry did not recover the unblocked slot");
+                if(horizontal)check(readBinaryFile(otherHorizontal)==readBinaryFile(chosen),"The horizontal pair did not recover together");
+                check(readBinaryFile(f.target.path)==originalVdf&&!hasStages(p)&&pendingJournals(f.data).empty(),"Partial repair modified card identity or leaked staging debt");
+                writeJsonAtomic(p/L"blocked-slot-observed.json",{{"first",first},{"retry",retry}});
+            });
+        run("refresh-automatic-source-falls-back-to-same-record",[](const fs::path& p) {
+            ArtworkRepairFixture f(p);
+            const auto game=p/L"Game", exe=game/L"Game.exe", scan=fixtureScanState(f);
+            const auto manifest=f.data/L"artwork"/toWide(gameDataId(game))/L"manifest.json";
+            const auto original=p/L"auto-original.png", portable=p/L"auto-broken.png", automaticHero=p/L"auto-hero.png";
+            writeRepairArtwork(original);writeRepairArtwork(automaticHero,71);textFile(portable,"unreadable portable copy");
+            writeJsonAtomic(manifest,{{"exe",toUtf8(exe.wstring())},{"artwork",json::array({
+                {{"type","tall"},{"steamSuffix","p"},{"ok",true},{"portableFile",toUtf8(portable.wstring())},{"file",toUtf8(original.wstring())}},
+                {{"type","hero"},{"steamSuffix","_hero"},{"ok",true},{"file",toUtf8(automaticHero.wstring())}}
+            })}});
+            const auto grid=f.target.path.parent_path()/L"grid", before=grid/L"3221225473p.jpg";
+            textFile(before,"stale portrait");
+            const auto originalVdf=readBinaryFile(f.target.path), originalManifest=readBinaryFile(manifest);
+            const auto refreshed=refreshExistingSteamArtwork(f.data,scan,f.target,f.data/L"state"/L"refresh.json",true,{canonicalPathKey(game)});
+            check(refreshed["artworkFilesActivated"]==2&&!fs::exists(before),"Existing bad portable copy stranded a usable automatic portrait");
+            check(readBinaryFile(grid/L"3221225473p.png")==readBinaryFile(original)&&readBinaryFile(grid/L"3221225473_hero.png")==readBinaryFile(automaticHero),"Recovered wrong source or slot");
+            check(readBinaryFile(f.target.path)==originalVdf&&readBinaryFile(manifest)==originalManifest&&fileText(portable)=="unreadable portable copy","Steam repair mutated the launch data or local source records");
+        });
+        run("refresh-bad-automatic-rows-do-not-clobber-manual-or-block-other-slots",[](const fs::path& p) {
+            ArtworkRepairFixture f(p);
+            const auto game=p/L"Game", exe=game/L"Game.exe", scan=fixtureScanState(f);
+            const auto manifest=f.data/L"artwork"/toWide(gameDataId(game))/L"manifest.json";
+            const auto valid=p/L"automatic.png", broken=p/L"bad.png", chosen=p/L"chosen.png";
+            writeRepairArtwork(valid);textFile(broken,"bad image");writeRepairArtwork(chosen,70);
+            const auto asset=[&](const char* type,const char* suffix,const fs::path& file) {
+                return json{{"type",type},{"steamSuffix",suffix},{"ok",true},{"file",toUtf8(file.wstring())}};
+            };
+            writeJsonAtomic(manifest,{{"exe",toUtf8(exe.wstring())},{"artwork",json::array({
+                asset("tall","p",valid), asset("logo","../escaped",valid), asset("hero","_hero",broken),
+                asset("hero","_hero",valid), asset("long","",valid)
+            })}});
+            writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(exe),{
+                {"cover",{{"file",toUtf8(chosen.wstring())}}},{"artworkProtection",{{"long","deleted"}}}
+            }}}}});
+            const auto refreshed=refreshExistingSteamArtwork(f.data,scan,f.target,f.data/L"state"/L"refresh.json",true,{canonicalPathKey(game)});
+            const auto grid=f.target.path.parent_path()/L"grid";
+            check(refreshed["artworkFilesActivated"]==2&&!fs::exists(grid/L"3221225473.png"),"Invalid row blocked valid slots or deleted horizontal art returned");
+            check(readBinaryFile(grid/L"3221225473p.png")==readBinaryFile(chosen)&&readBinaryFile(grid/L"3221225473_hero.png")==readBinaryFile(valid),"Automatic recovery displaced the manual portrait or missed an eligible background");
+            check(!fs::exists(grid/L"3221225473_logo.png")&&!fs::exists(grid/L"escaped.png"),"Corrupt suffix wrote outside its slot");
+        });
+        run("artwork-slot-add-manual-image-wins-across-extensions",[](const fs::path& p) {
+            ArtworkRepairFixture f(p, false);const auto manual=p/L"manual.png", automatic=p/L"automatic.jpg", manifest=p/L"art.json";
+            writeRepairArtwork(manual);writeRepairArtwork(automatic, 76);
+            writeJsonAtomic(manifest,{{"artwork",json::array({{{"ok",true},{"type","tall"},{"steamSuffix","p"},{"file",toUtf8(automatic.wstring())}}})}});
+            f.plan["items"][0]["manualCoverPath"]=toUtf8(manual.wstring());f.plan["items"][0]["artworkManifest"]=toUtf8(manifest.wstring());f.commit();
+            const auto grid=f.target.path.parent_path()/L"grid";
+            check(readBinaryFile(grid/L"3221225473p.png")==readBinaryFile(manual)&&!fs::exists(grid/L"3221225473p.jpg"),"A single Steam slot has competing extensions");
+        });
         run("delete-success-keeps-backup-receipt",[](const fs::path& p){Fixture f(p);f.commit();const auto original=readBinaryFile(f.target.path);const auto result=fixtureDelete(f);check(result.value("committed",false)&&readShortcuts(f.target.path,f.target.accountId).empty(),"Deletion did not commit");const auto backup=fs::path(toWide(result.value("backup",std::string{})));check(readBinaryFile(backup)==original&&fs::is_regular_file(backup.parent_path()/L"transaction.complete.json"),"Deletion receipt missing");});
         run("recovery-does-not-touch-steam-while-running",[](const fs::path& p){Fixture f(p,true);textFile(f.local,validLocal);selftestMoveFault=[](const auto& from,const auto& to){return (to.ends_with(L"localconfig.vdf")&&from.find(L".yeman-stage-")!=std::wstring::npos)||(to.ends_with(L"shortcuts.vdf")&&from.find(L".yeman-stage-")==std::wstring::npos)?ERROR_WRITE_FAULT:0;};mustThrow([&]{f.commit();});selftestMoveFault={};selftestSteamRunning=true;const auto before=readBinaryFile(f.target.path);cleanupInterruptedSteamTransactions(f.data);check(readBinaryFile(f.target.path)==before&&!pendingJournals(f.data).empty(),"Recovery bypassed Steam guard");});
         run("sequential-account-failure-preserves-first-commit",[](const fs::path& p){Fixture first(p/L"a"),second(p/L"b");first.commit();const auto before=readBinaryFile(first.target.path);selftestMoveFault=[&](const auto& from,const auto& to){return to==second.target.path.wstring()&&from.find(L".yeman-stage-")!=std::wstring::npos?ERROR_WRITE_FAULT:0;};mustThrow([&]{second.commit();});check(readBinaryFile(first.target.path)==before,"Failed account rewrote successful account");check(!fs::exists(second.target.path),"Failed account left shortcut file");});
 
-        run("three-manual-artwork-slots-stage-independently",[](const fs::path& p){Fixture f(p);textFile(p/L"cover.png","cover");textFile(p/L"long.png","long");textFile(p/L"hero.png","hero");f.plan["items"][0]["manualCoverPath"]=toUtf8((p/L"cover.png").wstring());f.plan["items"][0]["manualLongPath"]=toUtf8((p/L"long.png").wstring());f.plan["items"][0]["manualWallpaperPath"]=toUtf8((p/L"hero.png").wstring());f.commit();const auto grid=f.target.path.parent_path()/L"grid";check(fileText(grid/L"3221225473p.png")=="cover","Vertical cover ignored");check(fileText(grid/L"3221225473.png")=="long","Wallpaper overwrote horizontal cover");check(fileText(grid/L"3221225473_hero.png")=="hero","Wallpaper did not populate hero slot");});
+        run("three-manual-artwork-slots-stage-independently",[](const fs::path& p){ArtworkRepairFixture f(p,false);writeRepairArtwork(p/L"cover.png",36);writeRepairArtwork(p/L"long.png",69);writeRepairArtwork(p/L"hero.png",97);f.plan["items"][0]["manualCoverPath"]=toUtf8((p/L"cover.png").wstring());f.plan["items"][0]["manualLongPath"]=toUtf8((p/L"long.png").wstring());f.plan["items"][0]["manualWallpaperPath"]=toUtf8((p/L"hero.png").wstring());f.commit();const auto grid=f.target.path.parent_path()/L"grid";check(readBinaryFile(grid/L"3221225473p.png")==readBinaryFile(p/L"cover.png"),"Vertical cover ignored");check(readBinaryFile(grid/L"3221225473.png")==readBinaryFile(p/L"long.png"),"Wallpaper overwrote horizontal cover");check(readBinaryFile(grid/L"3221225473_hero.png")==readBinaryFile(p/L"hero.png"),"Wallpaper did not populate hero slot");});
+        run("artwork-add-malformed-cache-ordinary-card-survives",[](const fs::path& p){
+            ArtworkRepairFixture f(p,false);const auto manifest=p/L"art.json";textFile(manifest,"invalid JSON");
+            f.plan["items"][0]["artworkManifest"]=toUtf8(manifest.wstring());
+            const auto result=f.commit();const auto cards=readShortcuts(f.target.path,f.target.accountId);
+            check(result.value("committed",false)&&cards.size()==1&&cards[0].exe==quotedSteamPath(p/L"Game"/L"Game.exe")&&cards[0].launchOptions.empty()&&!hasStages(p),"Optional broken artwork blocked or changed ordinary import");
+        });
+        run("artwork-add-ignores-bad-rows-and-falls-back-within-slot",[](const fs::path& p){
+            ArtworkRepairFixture f(p,false);const auto manifest=p/L"art.json", image=p/L"good.jpg", bad=p/L"bad.png", wrong=p/L"wrong.png";
+            writeRepairArtwork(image);textFile(bad,"bad cache");writeRepairArtwork(wrong,149);
+            const auto str=[](const fs::path& path){return toUtf8(path.wstring());};
+            writeJsonAtomic(manifest,{{"artwork",json::array({
+                {{"ok",true},{"type","tall"},{"steamSuffix","p"},{"portableFile",str(bad)},{"file",str(image)}},
+                {{"ok",true},{"type","hero"},{"steamSuffix","_hero"},{"file",str(bad)}},
+                {{"ok",true},{"type","long"},{"steamSuffix","_unexpected"},{"file",str(image)}},
+                {{"ok",true},{"type","long"},{"steamSuffix",nullptr},{"file",str(wrong)}},
+                {{"ok",true},{"type","long"},{"steamSuffix",""},{"file",str(image)}}})}});
+            f.plan["items"][0]["artworkManifest"]=str(manifest);
+            const auto result=f.commit();const auto grid=f.target.path.parent_path()/L"grid";
+            check(result.value("committed",false)&&!fs::exists(grid/L"3221225473_hero.png")&&!fs::exists(grid/L"3221225473_unexpected.png"),"Invalid sources were not isolated");
+            for(const auto& file:{L"3221225473p.png",L"3221225473.png",L"13835058059610685440.png"})
+                check(readBinaryFile(grid/file)==readBinaryFile(image),"Valid static fallback bytes not staged under the correct name");
+        });
+        run("artwork-add-preserves-existing-grid-and-deleted-selection",[](const fs::path& p){
+            ArtworkRepairFixture f(p,false);const auto exe=p/L"Game"/L"Game.exe",manifest=p/L"art.json",image=p/L"good.png";
+            const auto grid=f.target.path.parent_path()/L"grid";textFile(grid/L"3221225473p.jpg","existing Steam portrait");writeRepairArtwork(image);
+            f.plan["items"][0]["artworkManifest"]=toUtf8(manifest.wstring());
+            f.plan["items"][0]["manualWallpaperPath"]=toUtf8(image.wstring());
+            writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{
+                {toUtf8(exe.wstring()),{{"wallpaper",{{"file",toUtf8(image.wstring())}}}}},
+                {canonicalPathKey(exe),{{"artworkProtection",{{"wallpaper","deleted"}}}}}}}});
+            writeJsonAtomic(manifest,{{"artwork",json::array({{{"ok",true},{"type","tall"},{"steamSuffix","p"},{"file",toUtf8(image.wstring())}},
+                {{"ok",true},{"type","hero"},{"steamSuffix","_hero"},{"file",toUtf8(image.wstring())}}})}});
+            f.commit();check(fileText(grid/L"3221225473p.jpg")=="existing Steam portrait"&&!fs::exists(grid/L"3221225473p.png")&&!fs::exists(grid/L"3221225473_hero.png"),"Import overwrote an existing slot or restored manually deleted art");
+        });
+        for (const auto* mode : {"split-record", "missing-choice"})
+            run((std::string("artwork-add-manual-write-")+mode).c_str(),[mode](const fs::path& p){
+                ArtworkRepairFixture f(p,false);
+                const auto exe=p/L"Game"/L"Game.exe", source=p/L"manual.png", automatic=p/L"auto.png", manifest=p/L"art.json";
+                writeRepairArtwork(source,10);writeRepairArtwork(automatic,90);
+                const auto text=[](const auto& path){return toUtf8(path.wstring());};
+                const auto key=canonicalPathKey(exe), alias=text(exe);
+                check(key!=alias,"Fixture needs an alternate spelling of the same executable");
+                const bool split=std::string_view(mode)=="split-record";
+                json items={{key,{{"name","Current name"}}}};
+                if(split) items[alias]={{"cover",{{"file",text(source)}}},{"artworkProtection",{{"wallpaper","deleted"}}}};
+                else items[key]["artworkProtection"]={{"cover","manual"}};
+                const auto config=f.data/L"config"/L"manual-overrides.json";
+                writeJsonAtomic(config,{{"items",items}});
+                const auto configBefore=readBinaryFile(config);
+                writeJsonAtomic(manifest,{{"artwork",json::array({{{"ok",true},{"type","tall"},{"steamSuffix","p"},{"file",text(automatic)}},
+                    {{"ok",true},{"type","hero"},{"steamSuffix","_hero"},{"file",text(automatic)}}})}});
+                f.plan["items"][0]["artworkManifest"]=text(manifest);
+                f.plan["items"][0][split?"manualWallpaperPath":"manualCoverPath"]=text(automatic);
+                const auto result=f.commit();const auto grid=f.target.path.parent_path()/L"grid";
+                const auto portrait=grid/L"3221225473p.png",hero=grid/L"3221225473_hero.png";
+                const auto cards=readShortcuts(f.target.path,f.target.accountId);
+                const bool coverCorrect=split?(fs::exists(portrait)&&readBinaryFile(portrait)==readBinaryFile(source)):!fs::exists(portrait);
+                const bool heroCorrect=split?!fs::exists(hero):(fs::exists(hero)&&readBinaryFile(hero)==readBinaryFile(automatic));
+                writeJsonAtomic(p/L"observed.json",{{"result",result},{"coverCorrect",coverCorrect},{"heroCorrect",heroCorrect}});
+                check(result.value("committed",false)&&cards.size()==1&&cards[0].exe==quotedSteamPath(exe)&&cards[0].launchOptions.empty()&&
+                    coverCorrect&&heroCorrect&&readBinaryFile(config)==configBefore,"Steam import ignored the saved static-slot choice or changed ordinary launch");
+            });
+        run("refresh-artwork-manual-write-recover",[](const fs::path& p){
+            ArtworkRepairFixture f(p);
+            const auto exe=p/L"Game"/L"Game.exe", source=p/L"manual.png", automatic=p/L"auto.png", state=fixtureScanState(f);
+            writeRepairArtwork(source,10);writeRepairArtwork(automatic,90);
+            const auto text=[](const auto& path){return toUtf8(path.wstring());};
+            const auto manifest=f.data/L"artwork"/toWide(gameDataId(p/L"Game"))/L"manifest.json";
+            writeJsonAtomic(manifest,{{"exe",text(exe)},{"artwork",json::array({
+                {{"ok",true},{"type","tall"},{"steamSuffix","p"},{"file",text(automatic)}},
+                {{"ok",true},{"type","hero"},{"steamSuffix","_hero"},{"file",text(automatic)}}})}});
+            const auto grid=f.target.path.parent_path()/L"grid",portrait=grid/L"3221225473p.png",hero=grid/L"3221225473_hero.png";
+            textFile(portrait,"old portrait bytes");
+            const auto before=readBinaryFile(portrait),vdf=readBinaryFile(f.target.path);
+            const auto config=f.data/L"config"/L"manual-overrides.json", output=f.data/L"state"/L"repair.json";
+            const auto key=canonicalPathKey(exe);
+            json entry={{"artworkProtection",{{"cover","manual"}}}};
+            const auto select=[&]{writeJsonAtomic(config,{{"items",{{key,entry}}}});};
+            const auto refresh=[&]{return refreshExistingSteamArtwork(f.data,state,f.target,output,true,{canonicalPathKey(p/L"Game")});};
+            select();const auto result=refresh();const auto& row=result.at("items").at(0);
+            const bool protectedSlot=readBinaryFile(portrait)==before&&row.value("unusableArtworkSlots",json::array())==json::array({"cover"});
+            const bool peerRepaired=fs::exists(hero)&&readBinaryFile(hero)==readBinaryFile(automatic);
+            writeJsonAtomic(p/L"broken-choice.json",{{"result",result},{"protectedSlot",protectedSlot},{"peerRepaired",peerRepaired}});
+            check(protectedSlot&&peerRepaired&&readBinaryFile(f.target.path)==vdf,"Missing manual choice fell back to automatic art or blocked another slot");
+            entry["cover"]={{"file",text(source)}};select();const auto recovered=refresh();
+            check(readBinaryFile(portrait)==readBinaryFile(source)&&readBinaryFile(f.target.path)==vdf&&
+                recovered.at("items").at(0).value("unusableArtworkSlots",json::array()).empty(),"Reselected manual image did not recover the original card");
+        });
+        if (artworkManualCache) for (const auto* mode : {"add-recovery", "add-cleared", "add-foreign-game", "repair-recovery",
+                "repair-cleared", "repair-reselected", "repair-deleted", "repair-altered-bytes", "repair-foreign-cache",
+                "repair-preview-only", "repair-live-original"})
+            run((std::string("artwork-slot-manual-cache-")+mode).c_str(),[mode](const fs::path& p){verifyManualArtworkCacheWrite(p,mode);});
+        if (artworkManualScrape) for (const auto* mode : {"missing-choice", "missing-legacy-file", "original-fallback", "corrupt-manual-file", "manual-deletion"})
+            run((std::string("artwork-slot-manual-scrape-")+mode).c_str(),[mode](const fs::path& p){
+                DiscoveryProducerFixture f(p);
+                const auto exe=f.exe.parent_path()/L"pcsx2.exe",original=p/L"manual.png",copy=p/L"portable.png";
+                textFile(exe,"owned fixture EXE, never executed");writeRepairArtwork(original,38);textFile(copy,"damaged portable copy");
+                const auto text=[](const auto& path){return toUtf8(path.wstring());};
+                const std::string_view variant(mode);
+                const bool deletion=variant=="manual-deletion", fallback=variant=="original-fallback";
+                json choice=json::object();
+                if (variant!="missing-legacy-file") choice["artworkProtection"]={{"cover",deletion?"deleted":"manual"}};
+                if (fallback) choice["cover"]={{"file",text(original)},{"portableFile",text(copy)}};
+                if (variant=="corrupt-manual-file") choice["cover"]={{"file",text(copy)}};
+                if (variant=="missing-legacy-file") choice["cover"]={{"file",text(p/L"missing.png")}};
+                const auto config=f.data/L"config"/L"manual-overrides.json";
+                writeJsonAtomic(config,{{"schemaVersion",1},{"items",{{canonicalPathKey(exe),choice}}}});
+                const auto before=readBinaryFile(config);
+                const auto vdf=f.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf";
+                const auto beforeVdf=readBinaryFile(vdf);
+                const auto code=f.call({exe.wstring(),f.job.wstring(),L"--only-missing",L"--simulate-no-version"});
+                json manifest;
+                for(const auto& entry:fs::directory_iterator(f.job)) if(entry.is_directory()&&fs::is_regular_file(entry.path()/L"manifest.json")) {
+                    check(manifest.is_null(),"More than one artwork manifest was produced");
+                    manifest=loadJsonDocument(entry.path()/L"manifest.json");
+                }
+                if (!manifest.is_object()) throw std::runtime_error("Offline scraper produced no diagnostic manifest: "+f.error);
+                const auto artwork=[&](const char* type){for(const auto& row:manifest.at("artwork"))if(jsonStringOr(row,"type")==type)return row;return json::object();};
+                const auto tall=artwork("tall"),hero=artwork("hero"),horizontal=artwork("long");
+                writeJsonAtomic(p/L"observed.json",{{"exitCode",code},{"tall",tall},{"hero",hero},{"long",horizontal},
+                    {"failure",manifest.value("failure",json(nullptr))}});
+                check(hero.value("ok",false)&&horizontal.value("ok",false)&&readBinaryFile(config)==before&&readBinaryFile(vdf)==beforeVdf,
+                    "Protecting the portrait blocked other slots or changed local configuration/Steam card");
+                if(fallback) check(code==0&&tall.value("ok",false)&&jsonStringOr(tall,"provider")=="manual-override"&&
+                    jsonStringOr(tall,"sha256")==sha256(readBinaryFile(original)),"Damaged portable image blocked the user's usable original");
+                else if(deletion) check(code==0&&!tall.value("ok",false)&&jsonStringOr(tall,"manualSkipReason")=="manual-deleted",
+                    "Deleted portrait was restored or counted as a scrape failure");
+                else if(variant=="missing-legacy-file") check(code==0&&tall.value("ok",false)&&tall.value("previewOnlyManualFallback",false)&&
+                    fs::path(toWide(jsonStringOr(tall,"portableFile"))).stem()==L"tall-preview-fallback",
+                    "Known missing file should use the established preview fallback in isolation");
+                else check(code==3&&!tall.value("ok",false)&&tall.value("manualProtected",false)&&
+                    !jsonStringOr(tall,"manualProtectionError").empty()&&tall.at("attempts").empty()&&
+                    !manifest.at("failure").value("retryWhenNetworkReturns",true),"Unavailable manual portrait was replaced or queued for network retry");
+            });
+        run("artwork-add-rejects-foreign-cache-and-keeps-real-exe-icon",[](const fs::path& p){
+            ArtworkRepairFixture f(p,false);fixtureAutomaticIcon(f);
+            const auto manifest=fs::path(toWide(jsonStringOr(f.plan["items"][0],"artworkManifest")));auto art=loadJsonDocument(manifest);
+            art["exe"]=toUtf8((p/L"Another Game.exe").wstring());writeJsonAtomic(manifest,art);
+            const auto result=f.commit();
+            check(result.value("committed",false)&&fixtureShortcutIcon(f)==toUtf8((p/L"Game"/L"Game.exe").wstring())&&fs::is_empty(f.target.path.parent_path()/L"grid"),"Foreign artwork cache overrode the real game icon");
+        });
         run("manual-wallpaper-counts-as-hero-not-long",[](const fs::path& p){textFile(p/L"cover.png","cover");textFile(p/L"hero.png","hero");const json manual{{"cover",{{"file",toUtf8((p/L"cover.png").wstring())}}},{"wallpaper",{{"file",toUtf8((p/L"hero.png").wstring())}}}};const auto readiness=artworkReadiness(json::object(),manual);check(readiness["minimumComplete"]==true&&readiness["hero"]==true&&readiness["long"]==false,"Artwork readiness confused wallpaper with horizontal cover");});
-        run("refresh-manual-wallpaper-keeps-horizontal-cover",[](const fs::path& p){Fixture f(p);f.commit();const auto state=fixtureScanState(f),hero=p/L"hero.png",grid=f.target.path.parent_path()/L"grid";textFile(hero,"hero");textFile(grid/L"3221225473.png","long before");writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(p/L"Game"/L"Game.exe"),{{"wallpaper",{{"file",toUtf8(hero.wstring())}}}}}}}});refreshExistingSteamArtwork(f.data,state,f.target,f.data/L"state"/L"refresh.json",true,{canonicalPathKey(p/L"Game")});check(fileText(grid/L"3221225473.png")=="long before"&&fileText(grid/L"3221225473_hero.png")=="hero","Wallpaper refresh clobbered horizontal cover");});
+        run("refresh-manual-wallpaper-keeps-horizontal-cover",[](const fs::path& p){ArtworkRepairFixture f(p);const auto state=fixtureScanState(f),hero=p/L"hero.png",grid=f.target.path.parent_path()/L"grid";writeRepairArtwork(hero);textFile(grid/L"3221225473.png","long before");writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(p/L"Game"/L"Game.exe"),{{"wallpaper",{{"file",toUtf8(hero.wstring())}}}}}}}});refreshExistingSteamArtwork(f.data,state,f.target,f.data/L"state"/L"refresh.json",true,{canonicalPathKey(p/L"Game")});check(fileText(grid/L"3221225473.png")=="long before"&&readBinaryFile(grid/L"3221225473_hero.png")==readBinaryFile(hero),"Wallpaper refresh clobbered horizontal cover");});
         run("retry-malformed-fields-are-quarantined",[](const fs::path& p){writeJsonAtomic(networkRetryQueuePath(p),{{"jobs",{{"bad-time",{{"nextAttemptAt",nullptr}}},{"bad-args",{{"commandArgs",json::array({7})}}},{"bad-count",{{"consecutiveFailures",-1}}},{"good",{{"status","pending"},{"consecutiveFailures",1}}}}}});const auto queue=loadNetworkRetryQueue(p);check(queue["jobs"].size()==1&&queue["jobs"].contains("good"),"Invalid retry fields survived normalization");check(queue["quarantinedJobs"].size()==3,"Rejected retry jobs lost audit evidence");});
         run("initialization-restores-missing-config-before-defaults",[](const fs::path& p){const auto data=p/L"data",configPath=data/L"config"/L"library-config.json";auto config=defaultLibraryConfig();config["roots"]=json::array({toUtf8((p/L"MyGames").wstring())});writeJsonAtomic(fs::path(configPath.wstring()+L".bak"),config);const auto previous=custom_steam_library::configuredDataRoot();SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",data.c_str());initializeSteamBigPictureDataRoot(data,p);SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",previous.empty()?nullptr:previous.c_str());check(loadLibraryConfig(configPath)["roots"]==config["roots"],"Startup overwrote recoverable missing config with defaults");});
         run("cleanup-does-not-race-active-data-transaction",[](const fs::path& p){const auto temp=p/L"active.json.yeman-tmp-1-1";textFile(temp,"active transaction");DataTransactionMutex held;std::thread worker([&]{cleanupInterruptedTemporaryFiles(p);});worker.join();check(fs::exists(temp),"Cleanup deleted a live data transaction temp file");});
@@ -734,14 +2213,21 @@ int wmain(int argc,wchar_t** argv) {
             check(plan["items"].empty(),"Old tool cache entered add plan");
         });
         run("automatic-icon-add-binds-vdf-and-grid-together",[](const auto& p){
-            Fixture f(p);fixtureAutomaticIcon(f);const auto result=f.commit();
+            ArtworkRepairFixture f(p,false);const auto source=fixtureAutomaticIcon(f);const auto result=f.commit();
             const auto icon=f.target.path.parent_path()/L"grid"/L"3221225473_icon.png";
             check(fixtureShortcutIcon(f)==toUtf8(icon.wstring()),"Downloaded icon not bound to shortcut");
-            check(fileText(icon)=="automatic icon bytes","Bound icon file missing");
+            check(readBinaryFile(icon)==readBinaryFile(source),"Bound icon file missing");
             check(result["items"][0]["automaticIconPath"]==toUtf8(icon.wstring()),"Icon binding absent from receipt");
         });
+        run("automatic-icon-add-binds-the-fallback-actually-staged",[](const auto& p){
+            ArtworkRepairFixture f(p,false);const auto source=fixtureAutomaticIcon(f);const auto bad=p/L"invalid.jpg";textFile(bad,"broken icon");
+            const auto manifest=fs::path(toWide(jsonStringOr(f.plan["items"][0],"artworkManifest")));auto art=loadJsonDocument(manifest);
+            art["artwork"][0]["portableFile"]=toUtf8(bad.wstring());writeJsonAtomic(manifest,art);
+            const auto result=f.commit();const auto grid=f.target.path.parent_path()/L"grid", icon=grid/L"3221225473_icon.png";
+            check(result.value("committed",false)&&fixtureShortcutIcon(f)==toUtf8(icon.wstring())&&!fs::exists(grid/L"3221225473_icon.jpg")&&readBinaryFile(icon)==readBinaryFile(source),"Bound icon did not come from the validated staged fallback");
+        });
         run("automatic-icon-add-completion-failure-rolls-back-vdf-and-grid",[](const auto& p){
-            Fixture f(p);fixtureAutomaticIcon(f);
+            ArtworkRepairFixture f(p,false);fixtureAutomaticIcon(f);
             selftestMoveFault=[](const auto&,const auto& to){return to.find(L"transaction.complete.json")!=std::wstring::npos?ERROR_WRITE_FAULT:0;};
             mustThrow([&]{f.commit();});selftestMoveFault={};
             check(!fs::exists(f.target.path),"Failed first icon import left shortcut");
@@ -749,16 +2235,16 @@ int wmain(int argc,wchar_t** argv) {
             check(!hasStages(p)&&pendingJournals(p).empty(),"Failed icon import left stages or unresolved journal");
         });
         run("automatic-icon-refresh-binds-empty-field-without-other-vdf-changes",[](const auto& p){
-            Fixture f(p);f.commit();fixtureAutomaticIcon(f);
+            ArtworkRepairFixture f(p);const auto source=fixtureAutomaticIcon(f);
             auto expected=BinaryVdfDocument::parse(readBinaryFile(f.target.path));
             const auto icon=f.target.path.parent_path()/L"grid"/L"3221225473_icon.png";
             check(bindAutomaticSteamShortcutIcon(expected,p/L"Game"/L"Game.exe",icon),"Expected empty icon");
             const auto result=fixtureRefresh(f);
             check(readBinaryFile(f.target.path)==expected.serialize(),"Refresh changed unrelated shortcut fields");
-            check(fileText(icon)=="automatic icon bytes"&&result["automaticIconsApplied"]==1,"Icon not committed");
+            check(readBinaryFile(icon)==readBinaryFile(source)&&result["automaticIconsApplied"]==1,"Icon not committed");
         });
         run("automatic-icon-refresh-preserves-manually-chosen-grid-icon",[](const auto& p){
-            Fixture f(p);f.commit();fixtureAutomaticIcon(f);
+            ArtworkRepairFixture f(p);fixtureAutomaticIcon(f);
             const auto icon=f.target.path.parent_path()/L"grid"/L"3221225473_icon.png";textFile(icon,"manual choice");
             auto doc=BinaryVdfDocument::parse(readBinaryFile(f.target.path));
             bindAutomaticSteamShortcutIcon(doc,p/L"Game"/L"Game.exe",icon);writeAtomic(f.target.path,doc.serialize());
@@ -767,7 +2253,7 @@ int wmain(int argc,wchar_t** argv) {
             check(result["automaticIconsApplied"]==0&&!result["shortcutsVdfModified"].template get<bool>(),"Manual icon caused VDF rewrite");
         });
         run("automatic-icon-refresh-vdf-activation-failure-rolls-back-images",[](const auto& p){
-            Fixture f(p);f.commit();fixtureAutomaticIcon(f);const auto before=readBinaryFile(f.target.path);
+            ArtworkRepairFixture f(p);fixtureAutomaticIcon(f);const auto before=readBinaryFile(f.target.path);
             selftestMoveFault=[&](const auto& from,const auto& to){return to==f.target.path.wstring()&&from.find(L".yeman-stage-")!=std::wstring::npos?ERROR_WRITE_FAULT:0;};
             mustThrow([&]{fixtureRefresh(f);});selftestMoveFault={};
             check(readBinaryFile(f.target.path)==before,"Failed icon binding changed VDF");
@@ -775,7 +2261,7 @@ int wmain(int argc,wchar_t** argv) {
             check(!hasStages(p)&&pendingJournals(p).empty(),"Failed icon refresh leaked journal/stages");
         });
         run("automatic-icon-refresh-completion-failure-restores-both-resources",[](const auto& p){
-            Fixture f(p);f.commit();fixtureAutomaticIcon(f);const auto before=readBinaryFile(f.target.path);
+            ArtworkRepairFixture f(p);fixtureAutomaticIcon(f);const auto before=readBinaryFile(f.target.path);
             selftestMoveFault=[](const auto&,const auto& to){return to.find(L"transaction.complete.json")!=std::wstring::npos?ERROR_WRITE_FAULT:0;};
             mustThrow([&]{fixtureRefresh(f);});selftestMoveFault={};
             check(readBinaryFile(f.target.path)==before,"Completion failure left automatic icon reference");
@@ -783,7 +2269,7 @@ int wmain(int argc,wchar_t** argv) {
             check(pendingJournals(p).empty(),"Successful icon rollback kept journal");
         });
         run("automatic-icon-refresh-failed-rollback-is-recoverable",[](const auto& p){
-            Fixture f(p);f.commit();fixtureAutomaticIcon(f);const auto before=readBinaryFile(f.target.path);
+            ArtworkRepairFixture f(p);fixtureAutomaticIcon(f);const auto before=readBinaryFile(f.target.path);
             selftestMoveFault=[&](const auto& from,const auto& to){
                 return to.find(L"transaction.complete.json")!=std::wstring::npos ||
                     (to==f.target.path.wstring()&&from.find(L".yeman-stage-")==std::wstring::npos)?ERROR_WRITE_FAULT:0;
@@ -897,7 +2383,7 @@ int wmain(int argc,wchar_t** argv) {
 
         run("storm-library-concurrent-root-list-conflict-and-retry",[](const fs::path& p){const auto f=p/L"config"/L"library-config.json";writeJsonAtomic(f,defaultLibraryConfig());auto stale=loadLibraryConfig(f),baseline=stale;std::thread newer([&]{auto v=loadLibraryConfig(f);v["roots"].push_back("Z:\\Newer");writeJsonWithBackup(f,p/L"backups"/L"config","library-config",v);});newer.join();stale["roots"].push_back("Z:\\Mine");mustThrow([&]{writeJsonWithBackup(f,p/L"backups"/L"config","library-config",stale,&baseline);});auto retry=loadLibraryConfig(f);check(retry["roots"]==json::array({"Z:\\Newer"}),"Stale root list lost newer root");retry["roots"].push_back("Z:\\Mine");writeJsonWithBackup(f,p/L"backups"/L"config","library-config",retry);check(loadLibraryConfig(f)["roots"].size()==2,"Fresh root edit could not retry");});
 
-        auto createDebt=[](Fixture& f){textFile(f.local,validLocal);selftestMoveFault=[](const auto& from,const auto& to)->DWORD{return (to.ends_with(L"localconfig.vdf")&&from.find(L".yeman-stage-")!=std::wstring::npos)||(to.ends_with(L"shortcuts.vdf")&&from.find(L".yeman-stage-")==std::wstring::npos)?ERROR_WRITE_FAULT:ERROR_SUCCESS;};mustThrow([&]{f.commit();});selftestMoveFault={};check(pendingJournals(f.data).size()==1,"Fixture failed to retain transaction debt");return pendingJournals(f.data)[0];};
+        auto createDebt=[](Fixture& f){const auto exe=f.root/L"Game"/L"Game.exe";textFile(exe,"isolated executable marker");f.plan["items"][0]["primaryExecutable"]=toUtf8(exe.wstring());textFile(f.local,validLocal);selftestMoveFault=[](const auto& from,const auto& to)->DWORD{return (to.ends_with(L"localconfig.vdf")&&from.find(L".yeman-stage-")!=std::wstring::npos)||(to.ends_with(L"shortcuts.vdf")&&from.find(L".yeman-stage-")==std::wstring::npos)?ERROR_WRITE_FAULT:ERROR_SUCCESS;};mustThrow([&]{f.commit();});selftestMoveFault={};check(pendingJournals(f.data).size()==1,"Fixture failed to retain transaction debt");return pendingJournals(f.data)[0];};
         for(const auto* change:{"future-schema","missing-original-existence","account-mismatch","bad-backup-bytes","missing-preimage-hash","forged-completion"})run((std::string("txstorm-pending-")+change).c_str(),[=](const fs::path& p){Fixture f(p,true);const auto journal=createDebt(f);auto record=loadJsonDocument(journal);const std::string kind=change;
             if(kind=="future-schema")record["schemaVersion"]=999;
             if(kind=="missing-original-existence")record.erase("targetExisted");
@@ -1845,6 +3331,106 @@ int wmain(int argc,wchar_t** argv) {
             }
             writeJsonAtomic(p/L"add-cli-observations.json",{{"observations",observations}});
         });
+        run("discovery-producer-joined-artwork-repair-account-replay", [](const fs::path& p) {
+            DiscoveryProducerFixture f(p);
+            const auto restoredGame = f.games / L"Restored Game", restoredExe = restoredGame / L"bin" / L"Game.exe";
+            const auto repairGame = f.games / L"Repair Game", repairExe = repairGame / L"Game.exe";
+            const auto script = libLaunch::wrapperPath(restoredGame);
+            textFile(restoredExe, "owned fixture executable, never run");
+            textFile(repairExe, "owned fixture executable, never run");
+            textFile(script, "' Owned legacy wrapper, never run\r\n");
+            auto state = f.catalog();
+            auto row = state["games"].at(0);
+            state["games"] = json::array();
+            for (const auto& [directory, primary] : {std::pair{restoredGame, restoredExe}, std::pair{repairGame, repairExe}}) {
+                row["gameDirectory"] = toUtf8(directory.wstring());
+                row["primaryExecutable"] = toUtf8(primary.wstring());
+                state["games"].push_back(row);
+            }
+            writeJsonAtomic(f.scan, state);
+            const auto cover = f.data / L"artwork" / L"saved-cover.jpg";
+            fs::create_directories(cover.parent_path());
+            writeRepairArtwork(cover, 71, true);
+            writeJsonAtomic(f.data / L"config" / L"manual-overrides.json", {{"items", {{canonicalPathKey(repairExe),
+                {{"cover", {{"file", toUtf8((p / L"retired-download.jpg").wstring())}, {"portableFile", toUtf8(cover.wstring())}}}}}}}});
+            const auto video = f.data / L"media" / L"preview.mp4";
+            textFile(video, "preview fixture untouched by static repair");
+
+            struct Account { const char* id; int32_t stored; const char* shortId; const char* longId; };
+            const std::array<Account, 2> accounts{{
+                {"19627", -646717066, "3648250230", "15669115425508032512"},
+                {"19628", -1522958974, "2772008322", "11905685087263391744"},
+            }};
+            const auto configPath = [&](const Account& account) { return f.steam / L"userdata" / toWide(account.id) / L"config"; };
+            for (const auto& account : accounts) {
+                const auto config = configPath(account), grid = config / L"grid";
+                auto document = BinaryVdfDocument::emptySteamShortcuts();
+                auto& rows = vdfFindObject(document.root(), "shortcuts")->objectValue;
+                rows.push_back({"0", steamShortcutNode(-1789429860, "Restored Game", quotedSteamPath(libLaunch::systemFile(L"wscript.exe")),
+                    quotedSteamPath(restoredGame), 11, {}, toUtf8(libLaunch::steamOptions(script)))});
+                rows.push_back({"1", steamShortcutNode(account.stored, "Repair Game", quotedSteamPath(repairExe),
+                    quotedSteamPath(repairGame), 12, {}, "--keep-original-options")});
+                writeAtomic(config / L"shortcuts.vdf", document.serialize());
+                fs::create_directories(grid);
+                writeRepairArtwork(grid / L"2505537436p.jpg", 31, true);
+                writeRepairArtwork(grid / L"2505537436_hero.jpg", 39, true);
+            }
+            const auto staleGrid = configPath(accounts[0]) / L"grid";
+            textFile(staleGrid / L"3648250230p.jpg", "owned stale image contents");
+            writeRepairArtwork(staleGrid / L"3648250230_hero.jpg", 44, true);
+
+            json observed = json::array();
+            bool verifiedStaticReceipts = true;
+            for (const auto& account : accounts) {
+                const auto config = configPath(account), grid = config / L"grid", vdf = config / L"shortcuts.vdf";
+                const auto selected = grid / toWide(std::string(account.shortId) + "p.jpg");
+                const auto plan = f.job / toWide(std::string(account.id) + "-plan.json");
+                const auto receipt = f.job / toWide(std::string(account.id) + "-repair.json");
+                const auto original = readBinaryFile(vdf), unaffectedCover = readBinaryFile(grid / L"2505537436p.jpg"),
+                    unaffectedHero = readBinaryFile(grid / L"2505537436_hero.jpg");
+                const auto inspect = [&] {
+                    check(f.call({L"--plan-add-library-to-steam", L"--state", f.scan.wstring(), L"--steam-root", f.steam.wstring(),
+                        L"--account", toWide(account.id), L"--select-game", repairGame.wstring(), L"--output", plan.wstring()}) == 0,
+                        "Account-scoped plan rejected");
+                    auto result = loadJsonDocument(plan);
+                    check(result.at("accountId") == account.id && result.at("items").size() == 2, "Plan mixed account results");
+                    for (const auto& item : result.at("items")) {
+                        const bool repairing = item.at("gameDirectory") == toUtf8(repairGame.wstring());
+                        check(item.at("status") == "already-in-steam" && item.at("primaryExecutable") == toUtf8((repairing ? repairExe : restoredExe).wstring()) &&
+                            item.at("shortAppId") == (repairing ? account.shortId : "2505537436") &&
+                            item.at("longAppId") == (repairing ? account.longId : "10761201346557247488"), "Wrong primary or original Steam identity after plan readback");
+                    }
+                    return result;
+                };
+                const auto before = inspect();
+                check(f.call({L"--commit-refresh-steam-artwork", L"--state", f.scan.wstring(), L"--steam-root", f.steam.wstring(),
+                    L"--account", toWide(account.id), L"--select-game", repairGame.wstring(), L"--confirm-steam-closed", L"--output", receipt.wstring()}) == 0,
+                    "Isolated Steam artwork CLI did not complete");
+                const auto result = loadJsonDocument(receipt);
+                check(result.at("accountId") == account.id && result.at("artworkFilesActivated") == 1 && result.at("items").at(0).at("shortAppId") == account.shortId &&
+                    f.output.find("STEAM_REFRESH_RESULT_RECEIPT: sha256-v1:" + custom_steam_library::plan_receipt::addCompletionDigest(result)) != std::string::npos,
+                    "Repair did not acknowledge the verified account/card write");
+                check(readBinaryFile(selected) == readBinaryFile(cover) && readBinaryFile(vdf) == original &&
+                    readBinaryFile(grid / L"2505537436p.jpg") == unaffectedCover && readBinaryFile(grid / L"2505537436_hero.jpg") == unaffectedHero,
+                    "Repair did not preserve original shortcut fields and untouched control artwork");
+                const auto unresolved = result["items"][0].value("unresolvedRequiredArtworkSlots", json::array());
+                check(unresolved == (std::string_view(account.id) == "19627" ? json::array() : json::array({"wallpaper"})),
+                    "Absent background was not reported or borrowed another account's image");
+                const auto& repaired = result.at("items").at(0);
+                const json expectedWrites = json::array({{{"slot", "cover"},
+                    {"fileName", toUtf8(selected.filename().wstring())}, {"sha256", sha256(readBinaryFile(selected))}}});
+                verifiedStaticReceipts &= jsonStringOr(repaired, "longAppId") == account.longId &&
+                    repaired.value("verifiedStaticArtworkWrites", json::array()) == expectedWrites;
+                observed.push_back({{"beforePlan", before}, {"repair", result}, {"readbackPlan", inspect()}});
+            }
+            for (size_t i = 0; i < accounts.size(); ++i)
+                check(!fs::exists(configPath(accounts[i]) / L"grid" / toWide(std::string(accounts[1-i].shortId) + "p.jpg")),
+                    "One account's ID appeared in another account's grid");
+            check(fileText(video) == "preview fixture untouched by static repair" && !hasStages(p) && pendingJournals(f.data).empty(),
+                "Static repair touched dynamic media or left transaction debt");
+            writeJsonAtomic(p / L"replay.json", observed);
+            check(verifiedStaticReceipts, "Receipt omitted the exact card and verified portrait write or claimed an unrelated slot");
+        });
         run("discovery-producer-delete-cli-refuses-unconfirmed-plan",[&](const fs::path& p){
             wchar_t mode[32]{};const auto modeSize=GetEnvironmentVariableW(L"YMCC_DELETE_RESUME_VARIANT",mode,32);const bool raceOnly=modeSize&&modeSize<32&&std::wstring(mode)==L"source-race";
             if(!raceOnly){
@@ -1881,7 +3467,7 @@ int wmain(int argc,wchar_t** argv) {
                 DiscoveryProducerFixture f(p/std::to_wstring(serial++));const std::string action=operation,kind=fault;auto state=f.catalog();writeJsonAtomic(f.scan,state);const auto directory=state["games"][0]["gameDirectory"].get<std::string>();
                 const auto vdf=f.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf",output=f.data/L"state"/L"action.json",global=f.data/L"state"/(action=="refresh"?L"last-steam-artwork-refresh.json":L"last-steam-delete.json");
                 auto doc=BinaryVdfDocument::emptySteamShortcuts();vdfFindObject(doc.root(),"shortcuts")->objectValue.push_back({"0",steamShortcutNode(-1073741823,"Selected",quotedSteamPath(f.exe),quotedSteamPath(f.exe.parent_path()),0)});writeAtomic(vdf,doc.serialize());
-                const auto image=f.root/L"manual.png";textFile(image,"owned manual horizontal artwork");writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(f.exe),{{"long",{{"file",toUtf8(image.wstring())}}}}}}}});
+                const auto image=f.root/L"manual.png";writeRepairArtwork(image);writeJsonAtomic(f.data/L"config"/L"manual-overrides.json",{{"items",{{canonicalPathKey(f.exe),{{"long",{{"file",toUtf8(image.wstring())}}}}}}}});
                 const std::string oldOutput=json{{"schemaVersion",1},{"mode","steam-library-delete-plan"},{"items",json::array()},{"summary",json::object()},{"keep","retained requested output"}}.dump();textFile(output,oldOutput);textFile(global,"retained global result");json captured;unsigned captures=0;
                 selftestMoveFault=[&](const std::wstring& from,const std::wstring& to)->DWORD{
                     const bool chosen=identityCallerPath(to)==identityCallerPath(output.wstring())||identityCallerPath(to)==identityCallerPath(global.wstring());if(!chosen)return 0;
@@ -2085,6 +3671,72 @@ int wmain(int argc,wchar_t** argv) {
         for(const auto* kind:{"add-inactive","delete-inactive","add-plan-write-failure","healthy-noop"})run((std::string("discovery-producer-audit-commit-")+kind).c_str(),[&,kind](const fs::path& p){
             DiscoveryProducerFixture f(p);const std::string k=kind;auto state=f.catalog();state["games"]=json::array();if(k=="add-inactive"||k=="delete-inactive")state["schemaVersion"]=99;writeJsonAtomic(f.scan,state);const auto plan=f.data/L"state"/L"plan.json",receipt=f.data/L"state"/L"last-steam-add.json";writeJsonAtomic(receipt,{{"schemaVersion",99},{"keep","unknown prior commit"}});const auto old=fileText(receipt),vdf=fileText(f.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf");if(k=="add-plan-write-failure")selftestMoveFault=[&](const std::wstring&,const std::wstring& to)->DWORD{return identityCallerPath(to)==identityCallerPath(plan.wstring())?ERROR_ACCESS_DENIED:0;};json result;bool threw=false;try{const SteamShortcutTarget target{f.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf","19627"};result=k=="delete-inactive"?commitSteamLibraryDeletePlan(f.data,f.scan,target,plan,true,{canonicalPathKey(f.exe.parent_path().parent_path())}):commitSteamLibraryAddPlan(f.data,f.scan,target,plan,true);}catch(...){threw=true;}selftestMoveFault={};check(!threw,"Inactive/unconfirmed plan escaped as commit exception");check(!result.value("committed",false)&&fileText(f.steam/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf")==vdf,"Inactive/empty plan wrote fake Steam data");if(k=="healthy-noop")check(result.value("reason",std::string{})=="nothing-ready-to-add"&&loadJsonDocument(receipt).value("committed",true)==false,"Confirmed healthy zero-item plan lost compatibility");else check(fileText(receipt)==old&&!result.value("planWriteConfirmed",false)&&result["discoveryState"]["active"]==false,"Inactive/unconfirmed plan entered commit and rewrote prior receipt");
         });
+
+        for (const auto* variant : {"add", "update-vbs", "delete"})
+            run((std::string("discovery-producer-audit-commit-scan-race-") + variant).c_str(), [variant](const fs::path& p) {
+                const std::string_view operation = variant;
+                const bool adding = operation == "add", deleting = operation == "delete";
+                ArtworkRepairFixture f(p, !adding);
+                const auto game = p / L"Game", primary = game / L"Game.exe", scan = fixtureScanState(f);
+                auto inventory = loadJsonDocument(scan);
+                inventory["games"][0]["status"] = "ready";
+                writeJsonAtomic(scan, inventory);
+                auto newer = inventory;
+                const auto other = game / L"Other.exe";
+                textFile(other, "replacement primary, never launched");
+                newer["games"][0]["primaryExecutable"] = toUtf8(other.wstring());
+                const auto script = libLaunch::wrapperPath(game), bindingRoot = libLaunch::bindingRoot(f.data);
+                if (!adding && !deleting)
+                    writeJsonAtomic(f.data / L"config" / L"manual-overrides.json", {{"items", {{canonicalPathKey(primary),
+                        {{"launchConfiguration", {{"mode", "auto"}}}}}}}});
+                const auto gridFile = f.target.path.parent_path() / L"grid" / L"3221225473p.png";
+                fs::create_directories(gridFile.parent_path());
+                writeRepairArtwork(gridFile);
+                const auto artwork = readBinaryFile(gridFile);
+                const auto original = adding ? std::vector<unsigned char>{} : readBinaryFile(f.target.path);
+                const auto receipt = f.data / L"state" / (deleting ? L"last-steam-delete.json" : L"last-steam-add.json");
+                textFile(receipt, "previous receipt");
+                const std::set<std::string> selection{canonicalPathKey(game)};
+                const auto commit = [&] {
+                    if (deleting) return commitSteamLibraryDeletePlan(f.data, scan, f.target, f.planFile, true, selection);
+                    return commitSteamLibraryAddPlan(f.data, scan, f.target, f.planFile, true, selection, true, !adding);
+                };
+                bool replaced = false;
+                ruleTextAfterMove = [&](const auto&, const auto& destination) {
+                    const bool boundary = deleting ? fs::path(destination).filename() == L"transaction.pending.json" :
+                        identityCallerPath(destination) == identityCallerPath(f.planFile.wstring());
+                    if (!replaced && boundary) {
+                        replaced = true;
+                        writeJsonAtomic(scan, newer);
+                    }
+                };
+                std::string failure;
+                json result;
+                try { result = commit(); } catch (const std::exception& error) { failure = error.what(); }
+                ruleTextAfterMove = {};
+                const bool originalKept = adding ? !fs::exists(f.target.path) : readBinaryFile(f.target.path) == original;
+                const bool launchKept = !fs::exists(script) && !fs::exists(bindingRoot);
+                const bool clean = pendingJournals(f.data).empty() && !hasStages(p);
+                writeJsonAtomic(p / L"observed.json", {{"injected", replaced}, {"committed", result.is_object() && result.value("committed", false)},
+                    {"error", failure}, {"originalKept", originalKept}, {"launchKept", launchKept}, {"clean", clean}});
+                check(replaced && loadJsonDocument(scan) == newer, "Scan replacement actor did not run at the requested boundary");
+                check(failure.find("Library scan changed before Steam commit") != std::string::npos,
+                    "Stale inventory did not cause a specific Steam commit refusal");
+                check(originalKept && launchKept && clean && fileText(receipt) == "previous receipt" && readBinaryFile(gridFile) == artwork,
+                    "Rejected commit changed card, launch files, artwork or prior receipt, or left pending work");
+
+                writeJsonAtomic(scan, inventory);
+                const auto retried = commit();
+                check(retried.value("committed", false), "Valid current inventory did not allow retry");
+                const auto rows = readShortcuts(f.target.path, f.target.accountId);
+                if (deleting) check(rows.empty(), "Retry did not delete the original card");
+                else if (adding) check(rows.size() == 1 && rows[0].exe == quotedSteamPath(primary) && !fs::exists(script),
+                    "Retry did not add a single ordinary shortcut by default");
+                else check(rows.size() == 1 && rows[0].storedAppId == -1073741823 &&
+                    libLaunch::steamScriptOperand(toWide(rows[0].exe), toWide(rows[0].launchOptions)) == script,
+                    "Retry did not update the original card in place");
+                check(pendingJournals(f.data).empty() && !hasStages(p), "Retry left pending work");
+            });
 
         auto primaryFixture=[&](const fs::path& p,const std::function<void(DiscoveryProducerFixture&,const fs::path&,const fs::path&)>& fn){
             DiscoveryProducerFixture f(p);const auto dir=f.exe.parent_path().parent_path(),next=dir/L"Alternate.exe";textFile(next,"owned alternate, never launched");auto catalog=f.catalog();catalog["games"][0]["ownerNote"]="keep";catalog["games"].push_back({{"gameDirectory",toUtf8((p/L"OtherGame").wstring())},{"primaryExecutable",toUtf8((p/L"OtherGame"/L"Other.exe").wstring())},{"status","ready"},{"ownerNote","unrelated"}});writeJsonAtomic(f.scan,catalog);fn(f,dir,next);
@@ -2537,6 +4189,8 @@ int wmain(int argc,wchar_t** argv) {
         check(!publisherTexts||(!reports.empty()&&identityCallerNetwork==0&&identityCallerProcesses==0),"Publisher TXT selection empty or external port invoked");
         check(!ruleTexts||(!reports.empty()&&identityCallerNetwork==0&&identityCallerProcesses==0),"TXT selection empty or external port invoked");
         check(!dataRoots || !reports.empty(),"No data-root consumer cases selected");
+        check(!artworkRepair || !reports.empty(),"No artwork repair cases selected");
+        check(!snapshots || (snapshotDebt ? reports.size()==1 : !reports.empty()),"No requested snapshot cases selected");
         check(!factsOnly||(reports.size()==1&&reports[0]["name"]==factsSelected),"Exact Steam facts selection did not run one case");
         const json summary{{"allPassed",failures==0},{"caseCount",reports.size()},{"failedCount",failures},{"cases",reports},{"fixtures",toUtf8(root.wstring())},{"realSteamFilesModified",false},{"producerSelection",producerOnly},{"producerPriorityWriteAttempts",discoveryProducerPriorityWrites},{"producerAutomaticDriveDiscovery",discoveryProducerDriveDiscovery},{"discoverySelection",discoveries},{"publisherTextSelection",publisherTexts},{"ruleTextSelection",ruleTexts},{"membershipSelection",memberships},{"identitySelection",identities},{"identityNetworkCalls",identityCallerNetwork},{"identityProcessCalls",identityCallerProcesses}};
         writeJsonAtomic(root/L"summary.json",summary);std::cout<<summary.dump(2)<<"\n";return failures?1:0;

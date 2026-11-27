@@ -110,7 +110,7 @@ static void hidHideInvalidateRawInputIdentityCache(){++fake::w.invalidations;}
 // ports are recorded; no tested case needs a cycle to prove configuration return.
 static bool hidHideCycleInstance(const std::wstring& p,const char* reason){++fake::w.cycleCalls;fake::w.ports.push_back({{"api","physical-cycle"},{"path",W2U(p)},{"phase",reason},{"fakeOnly",true}});return false;}
 static int hidHideVisibilitySnapshotFactsLocked(){return 0;}
-static void inputCaptureLogVisibilitySnapshotRows(const HidHideVisibilitySnapshot&,bool,int,const char*,bool){}
+static void inputCaptureLogVisibilitySnapshotRows(const HidHideVisibilitySnapshot&,bool,int,const char*,bool,std::string_view={}){}
 static void msiCrashRecoveryAfterOwnedRestore(const HidHideVisibilitySnapshot&,bool){++fake::w.crashReturnCalls;}
 static bool inputHostRequestLocked(const char* command,const json&,const char*,DWORD,json* response){fake::w.pipeRequests.push_back({{"command",command},{"fakeOnly",true}});if(!fake::w.pipeOk)return false;json payload={{"ok",true},{"cloakOn",fake::w.cloak},{"hidden",json::array()},{"applications",json::array()}};for(const auto& p:fake::w.hidden)payload["hidden"].push_back(W2U(p));for(const auto& p:fake::w.apps)payload["applications"].push_back(W2U(p));if(fake::w.pipeMalformed)payload["hidden"]="bad-type";*response={{"detail",payload.dump()}};return true;}
 static bool hidHideCaptureVisibilitySnapshotViaPipe(HidHideVisibilitySnapshot&);

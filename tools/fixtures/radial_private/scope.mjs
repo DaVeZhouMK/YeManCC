@@ -153,7 +153,45 @@ export function mergeRenderer(scope,file){
  for(const row of renderer.compiledArtifacts??[])need(sha(row.path)===row.sha256,'RENDERER_ARTIFACT_CHANGED');
  for(const row of renderer.toolArtifacts??[])need(scope.toolArtifacts.some(pin=>key(pin.path)===key(row.path)&&pin.sha256===row.sha256),'RENDERER_TOOL_NOT_DECLARED');
 }
-export async function executeReviewed(scope,exe,web){
+function pathInfo(file){try{return fs.lstatSync(file);}catch(error){if(error.code==='ENOENT')return null;throw error;}}
+function canonicalDirectory(dir){need(fs.lstatSync(dir).isDirectory()&&key(fs.realpathSync(dir))===key(dir),'EXECUTION_DIRECTORY_REPARSE:'+dir);}
+function disjointOutput(out,inputs){
+ for(const input of inputs.filter(Boolean)){
+  const paths=[path.resolve(input)];if(fs.existsSync(input))paths.push(fs.realpathSync(input));
+  for(const file of paths)need(!inside(file,out)&&!inside(out,file),'EXECUTION_OUTPUT_OVERLAP:'+file);
+ }
+}
+export function freshReviewedOutput(value,inputs){
+ need(typeof value==='string'&&path.isAbsolute(value)&&!/[\0\r\n]/.test(value),'ABSOLUTE_EXECUTION_OUTPUT_REQUIRED');
+ const out=path.resolve(value),missing=[];
+ disjointOutput(out,inputs);
+ for(let dir=out;;dir=path.dirname(dir)){
+  if(pathInfo(dir)){need(dir!==out,'FRESH_EXECUTION_OUTPUT_REQUIRED');canonicalDirectory(dir);break;}
+  const leaf=path.basename(dir);
+  need(leaf&&!/[. ]$/.test(leaf)&&(process.platform!=='win32'||!leaf.includes(':')),'EXECUTION_OUTPUT_NAME');
+  missing.push(dir);
+ }
+ for(const dir of missing.reverse()){canonicalDirectory(path.dirname(dir));fs.mkdirSync(dir);canonicalDirectory(dir);}
+ return out;
+}
+const EXECUTION_FILES=['real-webview-result.json','real-webview-private-launch.json','owned-webview-profile','run.log'];
+export function reviewedProcessOutput({repo,preparedOut,argv,prepare,recordName,inputs=[]}){
+ const flags=argv.map((value,index)=>value==='--execution-out'?index:-1).filter(index=>index>=0);
+ need(flags.length<=1&&(!prepare||!flags.length),'INVALID_EXECUTION_OUTPUT_ARGUMENT');
+ if(prepare)return preparedOut;
+ canonicalDirectory(preparedOut);
+ if(flags.length)return freshReviewedOutput(argv[flags[0]+1],[repo,preparedOut,process.env.YMCC_RADIAL_EXECUTION_REVIEW,...inputs]);
+ // Old direct invocations may still use a clean prepared directory once, but never overwrite run artifacts.
+ disjointOutput(preparedOut,[repo,...inputs]);
+ for(const name of [...EXECUTION_FILES,recordName])need(!pathInfo(path.join(preparedOut,name)),'EXISTING_EXECUTION_OUTPUT:'+name);
+ fs.writeFileSync(path.join(preparedOut,'.reviewed-execution-claimed'),'',{flag:'wx'});
+ return preparedOut;
+}
+export function saveReviewedProcess(record,state,prepare,final){
+ if(prepare)save(record,state);
+ else if(final)fs.writeFileSync(record,JSON.stringify(state,null,2)+'\n',{flag:'wx'});
+}
+export async function executeReviewed(scope,exe,web,{executionOut}={}){
  const file=process.env.YMCC_RADIAL_EXECUTION_REVIEW,pin=process.env.YMCC_RADIAL_EXECUTION_REVIEW_SHA256;
  if(!file||!pin){const error=Error('NATIVE_PREEXECUTION_PARENT_REVIEW_REQUIRED');error.blocked=true;throw error;}
  need(/^[a-f0-9]{64}$/.test(pin)&&sha(file)===pin,'REVIEW_PIN');const approval=readJson(file);
@@ -168,11 +206,18 @@ export async function executeReviewed(scope,exe,web){
  need(unique([...scope.toolArtifacts,...scope.generated,...actualFiles.map(file=>({path:file,sha256:sha(file)}))]).length<=artifactLimit(scope.entry),'RUNTIME_COMBINED_LIMIT');
  const env={...process.env,YMCC_RADIAL_FIXED_RUNTIME:runtime,YMCC_RADIAL_FIXED_RUNTIME_VERSION:approval.runtimeVersion};
  for(const name of Object.keys(env))if(/^WEBVIEW2_/i.test(name))delete env[name];
+ const out=executionOut??scope.out;
+ if(executionOut!==undefined){
+  canonicalDirectory(out);
+  if(key(out)!==key(scope.out))disjointOutput(out,[scope.repo,scope.out,exe,web,runtime,file]);
+  for(const name of EXECUTION_FILES)need(!pathInfo(path.join(out,name)),'EXISTING_EXECUTION_OUTPUT:'+name);
+ }
+ const log=path.join(out,'run.log'),writeLog=output=>fs.writeFileSync(log,output,executionOut===undefined?{}:{flag:'wx'});
  scope.nativeLaunchAttempted=true;
- const execution=run(exe,[web,scope.out,path.join(scope.out,'frame.json')],{cwd:scope.out,env,windowsHide:true,timeout:150000,maxBuffer:4e6});
+ const execution=run(exe,[web,out,path.join(scope.out,'frame.json')],{cwd:out,env,windowsHide:true,timeout:150000,maxBuffer:4e6});
  execution.child?.once('spawn',()=>{scope.nativeExecutionStarted=true;});
- let result;try{result=await execution;scope.nativeExecutionStarted=true;}catch(error){if(execution.child?.pid)scope.nativeExecutionStarted=true;fs.writeFileSync(path.join(scope.out,'run.log'),String(error.stdout||'')+String(error.stderr||''));throw error;}
- fs.writeFileSync(path.join(scope.out,'run.log'),result.stdout+result.stderr);
+ let result;try{result=await execution;scope.nativeExecutionStarted=true;}catch(error){if(execution.child?.pid)scope.nativeExecutionStarted=true;writeLog(String(error.stdout||'')+String(error.stderr||''));throw error;}
+ writeLog(result.stdout+result.stderr);
  const after=fs.readdirSync(runtime,{recursive:true,withFileTypes:true});need(after.every(e=>!e.isSymbolicLink())&&after.filter(e=>e.isFile()).length===actualFiles.length,'RUNTIME_CHANGED_AFTER_EXECUTION');
  for(const file of actualFiles){const pin=approval.runtimeFiles.find(row=>key(path.resolve(runtime,row.path))===key(file));need(pin&&sha(file)===pin.sha256,'RUNTIME_BYTES_CHANGED_AFTER_EXECUTION');}
  return {reviewFile:file,reviewSha256:pin,runtimeRoot:runtime,runtimeVersion:approval.runtimeVersion,runtimeFiles:approval.runtimeFiles};

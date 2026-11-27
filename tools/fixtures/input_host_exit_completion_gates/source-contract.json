@@ -3,8 +3,8 @@
   "reviewedAt": "2026-11-08T22:30:52.802996+00:00",
   "normalization": "none; all reviewed complete blocks/globals and dependencies use raw bytes",
   "scopeRawHashes": {
-    "readyCase": "7b7b6fa59b7d5ba8ec0bcc8de174979b636d3237b68bb032b65e105aab8d2857",
-    "messageLoop": "26e55133fbbd849e40dc7f10a170d84e9bd36d4ed4761ca9c8f292cc3bb84681",
+    "readyCase": "644988e332f3d09be782ff02bcf378177f558defe0984b1141528a7a7ae68b04",
+    "messageLoop": "8d880bb6d00bdafe47945eacc2a618aa186c60448cd82587df1b37a066120a7b",
     "hostLocalPredicate": "7d466cbe784dc2cc6ac3c32196e8f7094b4ba8dda19b768e2d9fea007cafd7d4",
     "capturePredicate": "90c754a95bc5b4ddada8501c2e615213db25e356b92defd12a252ea7b19cc4ea",
     "global:g_exitRequested": "81db3e1a6cbae8f8f1a070be9da7831aa6a3c8767d5e5e6086d2296c26d7f14d",
@@ -22,8 +22,8 @@
     "native/input_host_exit_owner_runtime.h": "5242074b2228469bdecd61925ad0d4f76aeb79b5c1ebe47889f6474810c76d44",
     "native/exit_cleanup_wait.h": "b1ee8178e4771096ad435f3bff9ea3685d04f8bf007de2dcb9359e7e11dad0e6",
     "native/input_host_exit_retirement.h": "0a779bf12c4f6018d43a92b7e125d7090113d360636d9747fa0d3b3260891f3a",
-    "deps/json/json.hpp": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f",
-    "tools/input_timer_evidence_adapter_selftest.py": "cc4f9a148304ac084f8b11afc969211d71ce00cd9c9fa647a1f243ae12775097",
+    "deps/json/json.hpp": "b0aa5a4c910451300865b1112185cfb03663b62ed024bf367a373af2acb3d310",
+    "tools/input_timer_evidence_adapter_selftest.py": "0481431cb6bd1cf436cc6ca57a65546a15150fd14ecb35a26771f8a3439fb82f",
     "tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json": "aa9cfbf1174bcfa747e7bf655f90d62083e22ef311337e5895a4b0ed5c6fe2c3"
   },
   "dependencyReview20261118": {
@@ -32,6 +32,17 @@
       "tools/input_timer_evidence_adapter_selftest.py": "2ac46662165a73a31c172c20dd9ee05dc7a4dd4c9b15ccdaa7a142fda6501660",
       "tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json": "b419bba0941315f07033e56714975546e6c484a7da294219a8d34914c2c40857"
     }
+  },
+  "scopeReview20261126": {
+    "previousScopeRawHashes": {
+      "readyCase": "7b7b6fa59b7d5ba8ec0bcc8de174979b636d3237b68bb032b65e105aab8d2857",
+      "messageLoop": "26e55133fbbd849e40dc7f10a170d84e9bd36d4ed4761ca9c8f292cc3bb84681"
+    },
+    "previousDependencyRawHashes": {
+      "deps/json/json.hpp": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f",
+      "tools/input_timer_evidence_adapter_selftest.py": "cc4f9a148304ac084f8b11afc969211d71ce00cd9c9fa647a1f243ae12775097"
+    },
+    "scope": "Complete revised READY case and message loop; recovery/timer state is memory-only and the out-of-scope non-exit receipt calls fail closed. The consumed helper definitions are unchanged, and the JSON SAX opt-out is not used."
   },
   "historicalMain": {
     "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-NativeExitOwned23\\before\\native\\main.cpp",

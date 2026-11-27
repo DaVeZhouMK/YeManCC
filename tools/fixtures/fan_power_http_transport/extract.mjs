@@ -19,6 +19,8 @@ save('FanResumeScheduleResult.inc',range('struct FanResumeScheduleResult {','sta
 parts.push(functionSource('static FanResumeScheduleResult fanHostScheduleFanResume(unsigned long long generation, bool explicitManual, unsigned long long continuingManual) {'));
 const manualAnchor='ipc_on("power.fanManualWake", [](const json& a) -> json {';
 const manualAt=main.indexOf(manualAnchor);assert(manualAt>=0);const manualBlock=cppBlock(main,main.indexOf('{',manualAt),manualAnchor);assert.equal(main.slice(manualBlock.end,manualBlock.end+2),');');
+if(main.slice(manualAt,manualBlock.end).includes('fanPublishedWakeGeneration('))
+ parts.push(functionSource('static unsigned long long fanPublishedWakeGeneration(unsigned long long shared, ULONGLONG entry) {'));
 parts.push('static void fixtureRegisterManual(){\n'+main.slice(manualAt,manualBlock.end+2)+'\n}');
 segments.push({anchor:manualAnchor,begin:manualAt,end:manualBlock.end+2,normalizedSha256:sha(main.slice(manualAt,manualBlock.end+2))});
 

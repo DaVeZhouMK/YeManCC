@@ -69,7 +69,8 @@ const inlineHeaders=['oem_vendor_stack.h','shortcut_feedback_native.h','shortcut
 const compileHeaders=['keyboard_shortcut_sequence.h','input_shortcut_toggle.h','shortcut_window_toggle.h','shortcut_frontend_button.h','shortcut_action_protocol.h',
   'keyboard_modifier_event_evidence.h','screen_special_actions.h','steam_qam_followup.h','virtual_target_policy.h','controller_persona.h',
   'boot_mode_shortcuts.h','radial_release.h','virtual_start_protection.h','msi_qs_keyboard_mirror.h','msi_rear_protocol.h','legion_motion_activation.h',
-  'input_frame_submission.h','desktop_function_shortcut.h','keyboard_shortcut_sequence_runtime.h'];
+  'input_frame_submission.h','desktop_function_shortcut.h','keyboard_shortcut_sequence_runtime.h','sleep_power_state.h',
+  'win5_menu_shortcut_policy.h','msi_key_event_class.h','log_snapshot_state.h'];
 const pendingHeaders=[...inlineHeaders,...compileHeaders].map(file=>path.join(root,'native',file));
 pendingHeaders.push(path.join(root,'capabilities/HcOemInputCapabilityBinding.h'));
 const visitedHeaders=new Set();
@@ -169,8 +170,8 @@ if(nativeGateDependencies){
 if(cases==='onex-consumption')assert(hasOneXBindingConsumer,'Selected OneX group requires the actual OneX capability/publication consumer; unsupported sources are not a pass');
 for (const name of ['nativeKeyboardShortcutAllInputs','nativeKeyboardShortcutClickMatches',
   'oemVendorTaskNamesForFamily','oemVendorProcessNamesForFamily','onexX2HomeDisplayMask','nativeOnexX2HomeDispatch',
-  'nativeShortcutFeedback','nativeShortcutUnixMs','nativeShortcutUiDispatch','nativeShortcutTdpEvent',
-  'nativeSteamMenuButton','nativeFrontendButtonNoVirtual','nativeFrontendButtonSendCtrl1','nativeSteamShortcutEmit']) {
+  'nativeShortcutFeedback','nativeShortcutUnixMs','nativeShortcutUiDispatch','nativeShortcutTdpEvent','nativeShortcutTdpJob',
+  'deckySidebarSteamMenuCompleted','nativeSteamMenuButton','nativeFrontendButtonNoVirtual','nativeFrontendButtonSendCtrl1','nativeSteamShortcutEmit']) {
   if (new RegExp('^static [^\\n]*\\b' + name + '\\(', 'm').test(source)) functions.push(name);
 }
 // Exact production types and final output expressions, consumed by this original fixture.
@@ -271,6 +272,9 @@ ${cases==='native-recorded-keyboard-chord'&&source.includes('nativeDesktopChordP
 #include "shortcut_window_toggle.h"
 #include "shortcut_frontend_button.h"
 #include "shortcut_action_protocol.h"
+#include "win5_menu_shortcut_policy.h"
+#include "msi_key_event_class.h"
+#include "log_snapshot_state.h"
 #include "keyboard_shortcut_sequence.h"
 #include "keyboard_modifier_event_evidence.h"
 #include "screen_special_actions.h"
@@ -472,14 +476,20 @@ static unsigned long long currentPowerGeneration() { return fixturePowerGenerati
 static std::atomic<bool> g_inputReleaseRequired{false};
 static std::atomic<bool> fixtureCustomLibraryOwner{false};
 static bool customSteamLibraryInputSuppressed() { return fixtureCustomLibraryOwner; }
+// Win5 Menu's physical source and recording diagnostic have their own fixture.
+static std::atomic<bool> g_win5MenuRuleDemand{false};
+static bool win5MenuBoard() noexcept { return false; }
+static bool win5MenuActionSourceCurrent(const ymcc::win5Menu::Source&,uint64_t,uint64_t,uintptr_t) noexcept { return false; }
+static void win5MenuRecordingDiagnostic(const char*,const char*) noexcept {}
 #include "sleep_power_state.h"
 // Existing memory power facts feed the shared ABI and its actual pure guards.
 // No product observer, publication or sleep operation is started by this fixture.
-static uint64_t fixtureNotificationSequence=0;
+static uint64_t fixtureNotificationSequence=0,fixtureSuspendSerial=0;
 static int __cdecl fixtureSharedPowerRead(ymcc::sleeppower::SharedPowerV1* output, uint32_t bytes) {
     if (!output || bytes != sizeof(*output)) return 0;
     ymcc::sleeppower::SharedPowerV1 value;
     value.generation = fixturePowerGeneration;value.publicationRevision=fixturePublicationRevision;value.observedNotificationSequence=fixtureNotificationSequence;
+    value.suspendSerial=fixtureSuspendSerial;
     value.phase = static_cast<uint32_t>(g_powerLifecycle.load(std::memory_order_acquire));
     value.flags = ymcc::sleeppower::kKnown;
     if (value.phase == 0 && !g_exitRequested.load(std::memory_order_acquire)) value.flags |= ymcc::sleeppower::kHardwareAllowed;
@@ -809,13 +819,45 @@ static bool fixtureSteamThrows=false;
 static std::vector<json> fixtureSteamRequests;
 static json fixtureSteamResult;
 static std::function<void()> fixtureSteamBeforeSend;
+static std::function<void()> fixtureSteamAfterSend;
+namespace ymcc::steamsession {
+struct Session {
+    std::wstring root;
+    DWORD pid=0,account=0;
+    ULONGLONG created=0;
+    bool operator==(const Session&) const = default;
+};
+}
+static ymcc::steamsession::Session fixtureSteamSession;
+static bool fixtureDeckyEnabled=true,fixtureDeckyFenced=false,fixtureDeckyModeDemand=true;
+static unsigned fixtureDeckyRefreshes=0,fixtureDeckyChecks=0;
+static json fixtureDeckyMenuDiagnostic;
+static struct { bool isolated=false; } g_aiFanMockSession;
+#include <source_location>
+#include "steam_ui_mode_cache_miss.h"
+static struct {
+    bool requestConnectionRefresh(const ymcc::steamsession::Session&,std::source_location,ymcc::steamui::ConnectionRefreshQueue* out,
+                                  bool,bool confirmedQamClose) {
+        if(!fixtureDeckyModeDemand)return false;
+        ++fixtureDeckyRefreshes;*out=confirmedQamClose?ymcc::steamui::ConnectionRefreshQueue{0,false,false,true}:
+            ymcc::steamui::ConnectionRefreshQueue{600,false,false};return true;
+    }
+} g_steamModeObserver;
+static struct {
+    bool exitFenced() const { return fixtureDeckyFenced; }
+    struct State { bool enabled; };
+    State snapshot() const { return {fixtureDeckyEnabled}; }
+    bool requestConnectionCheck() { ++fixtureDeckyChecks;return false; } // No attached plugin required.
+} g_deckySidebarRuntime;
+static void deckySidebarDiagnostic(const char*,const json& detail,bool) { fixtureDeckyMenuDiagnostic=detail; }
 static bool sofRegDWORD(HKEY,const wchar_t*,const wchar_t*,DWORD* value) {*value=0;return false;}
 struct FixtureSteamIdentity {
-    struct { DWORD account=0; } session;
+    ymcc::steamsession::Session session;
     bool currentRegistryAccountKnown() const { return false; }
 };
 static struct {
-    std::shared_ptr<const FixtureSteamIdentity> identitySnapshot() const { return {}; }
+    std::shared_ptr<const FixtureSteamIdentity> identitySnapshot() const { return std::make_shared<FixtureSteamIdentity>(FixtureSteamIdentity{fixtureSteamSession}); }
+    ymcc::steamsession::Session sessionSnapshot() const { return fixtureSteamSession; }
 } g_steamSettingsObserver;
 static json steamLiveRequest(DWORD,const json& request,const std::function<bool()>& allowed) {
     ++fixtureSteamAttempts;
@@ -823,15 +865,18 @@ static json steamLiveRequest(DWORD,const json& request,const std::function<bool(
     if(!allowed())return {{"ok",false},{"mutated",false},{"reason","request-cancelled"}};
     fixtureSteamRequests.push_back(request);
     if(fixtureSteamThrows)throw std::runtime_error("uncertain-transport");
+    if(fixtureSteamAfterSend)fixtureSteamAfterSend();
     return fixtureSteamResult;
 }
 // Game/overlay identity is outside this shortcut consumer. Keep the shared
 // sender's new routing dependency inert and forward its original admission
 // callback through the same counted transport port.
-static json nativeSteamMenuGameRequest(DWORD account,json request,const std::function<bool()>& allowed,ULONGLONG=0,unsigned long long=0) {
+#include "steam_qam_origin.h"
+static NativeSteamQamOrigin nativeSteamQamOrigin() noexcept { return {}; } // No foreground access in this fixture.
+static json nativeSteamMenuGameRequest(DWORD account,json request,const std::function<bool()>& allowed,ULONGLONG=0,unsigned long long=0,const NativeSteamQamOrigin* =nullptr) {
     return steamLiveRequest(account,request,allowed);
 }
-${(desktopCase||cases.startsWith('native-oem-')||cases==='onex-consumption'||wmiMaintenance)?'static ULONGLONG nativeSteamMenuColdDeadline(ULONGLONG){throw std::runtime_error("STEAM_ROUTE_NOT_SELECTED_BY_NATIVE_OEM_CLICK_TEST");}':''}
+${(desktopCase||cases.startsWith('native-oem-')||cases==='onex-consumption'||wmiMaintenance)?'static ULONGLONG nativeSteamMenuColdDeadline(ULONGLONG){throw std::runtime_error("STEAM_ROUTE_NOT_SELECTED_BY_NATIVE_OEM_CLICK_TEST");}':'static ULONGLONG nativeSteamMenuColdDeadline(ULONGLONG started) noexcept {return started;}'}
 // Cursor-policy wake is outside this input consumer's inert OS boundary.
 static void steamControllerCursorSignal() noexcept {}
 #include "steam_qam_followup.h"
@@ -847,16 +892,19 @@ static bool nativeKeyboardSequenceDispatch(const NativeKeyboardShortcutRule&,uin
 static bool nativeKeyboardSequenceOwnsKey(WORD){return false;}
 static bool nativeKeyboardSequenceDispatch(const NativeKeyboardShortcutRule&,uint64_t,uint64_t,uint64_t,bool,OemProducerTokens){throw std::runtime_error("KEYBOARD_SEQUENCE_FORBIDDEN_IN_TOGGLE_FIXTURE");}
 `}
-static json nativeShortcutTdpEvent(int);
+static std::function<void()> nativeShortcutTdpJob(int);
 `;
 const hasDefaultOwner = source.includes('static int nativeShortcutLegacyDefaultSlot(');
-const legacyStart = source.indexOf('    const bool shoulderDown = ', source.indexOf('static void gamepadEval() {'));
+const legacyStart = source.indexOf('    const bool shoulderDown = ', source.search(/^static void gamepadEval(?:Impl)?\([^;\r\n]*\)\s*\{/m));
 let legacyEnd = source.indexOf('    gamepadProcessUiInput(w, now', legacyStart);
 // The UI-input cost scope belongs to the following excluded consumer, not the
 // retained shoulder shortcut. Do not leave its opening brace in this slice.
 const legacyUiCostScope = source.slice(legacyStart,legacyEnd).match(/[ \t]*\{\r?\n\s*UiCostGamepadSpan uiInputCost\(kUiCostGamepadUiInput,uiStageCostOn\);\s*$/);
 if(legacyUiCostScope)legacyEnd=legacyStart+legacyUiCostScope.index;
 assert(legacyStart > 0 && legacyEnd > legacyStart);
+const tdpMailboxRoute=cases==='native-oem-ui-mailbox';
+const tdpWindowCase=tdpMailboxRoute?source.match(/^    case WM_GAMEPAD_TDP_DELTA: \{\r?\n[\s\S]*?^    \}/m)?.[0]:'';
+assert(!tdpMailboxRoute||tdpWindowCase,'Missing actual TDP window route');
 // Copy the complete production legacy dispatch region. Only boundary calls and
 // the physical snapshot are mocked; none of its guards or branches are rewritten.
 const legacyFixture = hasDefaultOwner ? `
@@ -869,7 +917,16 @@ static struct { ULONGLONG readContinuityGeneration=1; } g_inputCaptureGamepadSna
 static bool nativeDefaultSummonTry(const FocusTargetSnapshot& target) { return nativeYmccShortcutSummon(target); }
 static WORD g_prevW=0;
 
-static void nativeAdjustTdp(int delta) { fixtureOwnActions.push_back("legacy.tdp"); fixtureDeltas.push_back(delta); }
+${tdpMailboxRoute?`#define YMCC_NATIVE_TDP_ROUTES
+${extract('nativeAdjustTdp')}
+static int fixtureWindowTdp(WPARAM w) {
+  constexpr int WM_GAMEPAD_TDP_DELTA=1;
+  switch(WM_GAMEPAD_TDP_DELTA) {
+${tdpWindowCase}
+  }
+  return -1;
+}
+`:'static void nativeAdjustTdp(int delta) { fixtureOwnActions.push_back("legacy.tdp"); fixtureDeltas.push_back(delta); }'}
 static void nativeAdjustBrightness(int delta) { fixtureOwnActions.push_back("legacy.brightness"); fixtureDeltas.push_back(delta); }
 static void fixtureLegacyReset() {
  g_defaultSummonHold.release();gpKbArmed=gpKxArmed=gpKyArmed=true;gpPrevB=g_bClosePending=false;
@@ -1056,7 +1113,15 @@ static bool deviceInterfaceContainerId(const wchar_t*,GUID*){return fixtureRogRe
 static bool deviceInterfaceUsbInstance(const wchar_t*,std::wstring&){return false;}
 static int oemBoundChordProfileIdFor(YmccFamily,const std::string&);
 static uint64_t rogOemKeyboardFallbackMask();
-`:'';
+`:`
+// The shortcut action fixture does not start or refresh physical raw capture.
+static bool g_oemGateTargetEnabled=false,g_oemGateBackMapping=false;
+static std::string g_oemGatePersona="disabled";
+static bool g_oemRawVkAllowed[256]{};
+static HANDLE g_oemRawAdmitDev=nullptr;
+static uint64_t rogOemKeyboardFallbackMask(){return 0;}
+static void oemBackMappingRefreshGate(bool,const std::string&,bool){}
+`;
 const gateMutation=!desktopCase&&gateCases&&process.env.YMCC_OEM_NATIVE_BEFORE_CONTROL==='1';
 const generatedFunctions=functions.map(extract).sort((a,b)=>source.indexOf(a)-source.indexOf(b)).map(text=>{
   if(virtualRearUiFirstMixedKind===5&&text.startsWith('static void msiWmiHandleEvent(')){

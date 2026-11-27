@@ -52,10 +52,6 @@ static void fixtureRecordBoundary(const char* event,const json& details){
 static std::atomic<ULONGLONG> g_focusLightProofNotBefore{0};
 static void focusEndIsolationOnUi(){visit("focus-end");}
 static constexpr UINT_PTR TIMER_ID_POWER_SOURCE_RECOVERY=0xFF01;
-static bool g_powerSourceRecoveryRunning=false;
-struct {void cancel(){visit("power-source-cancel");}} g_powerSourceHeartbeat;
-static void cpuUvTrialStop(const char*){visit("cpu-undervolt-stop");}
-static void cpuUvTrialEmit(){}
 static void steamWallpaperForegroundSignal(){visit("wallpaper");}
 struct FixtureWallpaperOwner {void revoke(){visit("wallpaper-revoke");}};
 [[maybe_unused]] static FixtureWallpaperOwner& steamWallpaperForegroundOwner(){static FixtureWallpaperOwner owner;return owner;}
@@ -105,13 +101,14 @@ static void inputCaptureResumeSensorsForPower(){visit("sensor-resume");}
     import re
     if 'void appendNativeLifecycleLog(' in p:raise RuntimeError('unexpected duplicate log port')
     p+=ports
-    p+='void appendNativeLifecycleLog(const char* event,const json& =json::object()){if(std::string(event)=="power-broadcast-consumer-failed"){visit("failure-log");if(failFailureLog)throw std::bad_alloc();}else if(std::string(event)=="power-device-wake"||std::string(event)=="power-device-sleep")visit("device-log");}\n'
+    p+='void appendNativeLifecycleLog(const char* event,const json& =json::object()){if(std::string_view(event)=="power-resume-notification"&&fault=="common-s4-entry-boundary"){faultHit=true;const auto sleep=g_sleepPowerDispatch.window(PBT_APMSUSPEND,nowTick,nowFile);g_sleepPowerDispatch.complete(sleep,nowTick);}else if(std::string(event)=="power-broadcast-consumer-failed"){visit("failure-log");if(failFailureLog)throw std::bad_alloc();}else if(std::string(event)=="power-device-wake"||std::string(event)=="power-device-sleep")visit("device-log");}\n'
     # Consume the complete current shared entry as well as the caller case.
     common=c['function']('handlePowerResumeNotification')
-    original='void handlePowerResumeNotification(SgWork w,const char*){'
+    original='void handlePowerResumeNotification(SgWork w,const char*,SgWorkItem* =nullptr){'
     if p.count(original)!=1:raise RuntimeError('unique original memory common port')
     at=p.index(original);opening=p.index('{',at);end=c['braced'](opening,c['mask_cpp'](p))
-    p=p[:at]+'static void handlePowerResumeNotification(SgWork,const char*);'+p[end:]
+    p=p[:at]+'static void handlePowerResumeNotification(SgWork,const char*,SgWorkItem* =nullptr);'+p[end:]
+    common=common.replace('SgWorkItem* originalS4=nullptr','SgWorkItem* originalS4',1)
     p=p.replace('using json = nlohmann::json;', 'using json = nlohmann::json;\nstatic bool fixtureCommonScope=false;\nstatic unsigned fixtureWakeQueueCalls=0;\nstatic unsigned long long fixtureWakeQueueGeneration=0;\nstatic int fixtureWakeQueueKind=-1;\nstatic void armCommonNotificationAllocation();')
     p=p.replace('void sgQueueWork(SgWork w,ULONGLONG g,ULONGLONG=0){','void sgQueueWork(SgWork w,ULONGLONG g,ULONGLONG=0){if(fixtureCommonScope){++fixtureWakeQueueCalls;fixtureWakeQueueGeneration=g;fixtureWakeQueueKind=static_cast<int>(w);return;}')
     p=p.replace('void inputHostRequestPowerRelease(ULONGLONG,const char*){++suspendLeafCalls;}','void inputHostRequestPowerRelease(ULONGLONG,const char*){++suspendLeafCalls;visit("common-input-release");}')
@@ -131,11 +128,13 @@ static void inputCaptureResumeSensorsForPower(){visit("sensor-resume");}
     p=p.replace('target={frozen,generation};return frozen;','target={frozen,generation,frozen?1u:0u,frozen?1ull:0ull};return frozen;')
     # The stronger new selections reach the actual deque owner, not the counted
     # common-entry port used by the earlier cases. No worker thread is started.
-    p=p.replace('static void armCommonNotificationAllocation();','static void armCommonNotificationAllocation();\nstatic bool fixtureUseNativeQueue=false;\nstatic void fixtureActualQueue(SgWork,unsigned long long,ULONGLONG);')
+    p=p.replace('static void armCommonNotificationAllocation();','static void armCommonNotificationAllocation();\nstatic bool fixtureUseNativeQueue=false;\nstruct SgWorkItem;\nstatic void fixtureActualQueue(SgWork,unsigned long long,ULONGLONG,const SgWorkItem*);')
     # SgWork must be declared before that prototype.
-    p=p.replace('static void fixtureActualQueue(SgWork,unsigned long long,ULONGLONG);','enum class SgWork : uint8_t;\nstatic void fixtureActualQueue(SgWork,unsigned long long,ULONGLONG);')
-    p=p.replace('void sgQueueWork(SgWork w,ULONGLONG g,ULONGLONG=0){','void sgQueueWork(SgWork w,ULONGLONG g,ULONGLONG originalWake=0){if(fixtureUseNativeQueue){fixtureActualQueue(w,g,originalWake);return;}')
-    p=p.replace('visit(fixtureCommonScope?"common-msi-observation":"msi-observation");}', 'visit(fixtureCommonScope?"common-msi-observation":"msi-observation");if(fault=="common-native-queue-allocation-fails")failNextAllocation=true;}')
+    p=p.replace('static void fixtureActualQueue(SgWork,unsigned long long,ULONGLONG,const SgWorkItem*);','enum class SgWork : uint8_t;\nstatic void fixtureActualQueue(SgWork,unsigned long long,ULONGLONG,const SgWorkItem* =nullptr);')
+    p=p.replace('void sgQueueWork(SgWork w,ULONGLONG g,ULONGLONG=0){','void sgQueueWork(SgWork w,ULONGLONG g,ULONGLONG originalWake=0,const SgWorkItem* originalS4=nullptr){if(fixtureUseNativeQueue){fixtureActualQueue(w,g,originalWake,originalS4);return;}')
+    p=p.replace('visit(fixtureCommonScope?"common-msi-observation":"msi-observation");}', 'visit(fixtureCommonScope?"common-msi-observation":"msi-observation");if(fault=="common-native-queue-allocation-fails")failNextAllocation=true;if(fault=="common-s4-queue-revocation"){faultHit=true;++g_sharedPowerSuspendSerial;}}')
+    if c['args'].broadcast_consumer_case and c['args'].broadcast_consumer_case.startswith('common-s4-'):
+        p=p.replace('void closeHardwareWriteGate(const char*){++suspendLeafCalls;}','void closeHardwareWriteGate(const char*){++suspendLeafCalls;++g_sharedPowerSuspendSerial;}')
     source=c['source'];mask=c['mask_cpp'](source);start=mask.index('struct SgWorkItem {');opening=mask.index('{',start);finish=c['braced'](opening,mask)
     workItem=source[start:finish]+';'
     originalQueue=c['function']('sgQueueWork')
@@ -179,7 +178,8 @@ static void sleepRecoveryAutoCaptureSuspend(unsigned long long,ULONGLONG){throw 
     f=rebound_record+'\n'+f
     with (c['out']/'actual-journal-bindings.json').open('x',encoding='utf-8') as output:
         json.dump({'actualRecord':actual_record,'sha256':hashlib.sha256(actual_record.encode()).hexdigest(),'onlyDefinitionNameRebound':True,'actualDecoratorHeader':'native/sleep_fact_log_record.h','actualFrequencyHeader':'native/log_frequency_policy.h','actualFilesystemJournalUnderOwnedRoot':True,'timestampTerminal':'inert clock arms next original allocation only;does not throw itself','activityObserverTerminal':'no-op;does not grant actions'},output,indent=2)
-    f+='\n'+common+'\n'
+    ready=source[source.index('static bool powerLifecycleMatches('):source.index('static void postPowerResumeReady(')]
+    f+='\n'+ready+'\n'+common+'\n'
     with (c['out']/'common-entry-bindings.json').open('x',encoding='utf-8') as output:
         json.dump({'actualCommonEntry':common,'sha256':hashlib.sha256(common.encode()).hexdigest(),'completeOriginalFunction':True,'primaryClassifiersUnchanged':True,'queueTerminal':'original memory port; selected common cases count accepted calls without executing game worker'},output,indent=2)
 
@@ -254,6 +254,8 @@ static bool fixtureWallpaperDeliverSuspend(uint64_t expected){
     else:
         f+='\nstatic uint64_t fixtureWallpaperOpen(){return 0;}\nstatic bool fixtureWallpaperDeliverSuspend(uint64_t){return false;}\n'
     actual='LRESULT broadcast(HWND h,UINT m,WPARAM w,LPARAM l){\n'+body+'\n}\n'
+    s4_at=h.index('int handleS4(')
+    actual+=h[s4_at:c['braced'](h.index('{',s4_at),c['mask_cpp'](h))]+'\n'
     # Retain reset from the original fixture; no accepted old business executes.
     oldchecks=c['checks'];opening=oldchecks.index('void reset(bool pause=false){');end=oldchecks.index('\nvoid sleepIntent()',opening)
     reset=oldchecks[opening:end]
@@ -267,7 +269,29 @@ int main(int argc,char** argv){
  auto check=[&](bool ok,const char* text){++assertions;require(ok,text);};
  try{
   reset(false);platformAoAc=false;faultHit=false;fault.clear();visits.clear();
-  if(selected.rfind("sensor-query-",0)==0){
+  if(selected.rfind("common-s4-",0)==0){
+   fixtureUseNativeQueue=true;fixtureCommonScope=true;keepInput=false;g_sgWorkQ.clear();
+   const auto generation=currentPowerGeneration();const auto serial=g_sharedPowerSuspendSerial.load();
+   const bool ownClose=selected=="common-s4-own-gate-close";
+   g_powerLifecycle=ownClose?PowerLifecycle::Suspended:PowerLifecycle::Resuming;
+   nowFile+=100;
+   fault=selected;
+   handleS4(generation,static_cast<LPARAM>(nowFile));
+   SgWorkItem item{};
+   if(ownClose){
+    check(sgTakeWorkDeliveryLocked(item)&&item.wakeOriginal107==nowFile&&item.wakeSuspendSerial==serial+1,
+          "S4 carries its original 107 across its own gate close");
+   }else{
+    check(faultHit,"selected interleaving happened inside the accepted original 107");
+    check(!sgTakeWorkDeliveryLocked(item),"old S4 cannot take the newer common boundary");
+   }
+   fault.clear();nowFile+=100;
+   handleS4(generation,static_cast<LPARAM>(nowFile));
+   check(sgTakeWorkDeliveryLocked(item)&&item.generation==generation&&item.wakeOriginal107==nowFile&&
+         item.wakeBoundaryMatches(g_sleepPowerDispatch.observedSleepBoundarySequence(),g_sharedPowerSuspendSerial.load()),
+         "later 107 delivers with its own boundary");
+   check(!sgTakeWorkDeliveryLocked(item),"S4 delivered exactly once");
+  }else if(selected.rfind("sensor-query-",0)==0){
    if(!(selected=="sensor-query-normal"||selected=="sensor-query-capture-allocation"||selected=="sensor-query-refused-allocation"||selected=="sensor-query-diagnostic-double"||selected=="sensor-query-already-paused"||selected=="sensor-query-inactive"))throw std::runtime_error("unknown exact sensor broadcast scenario");
    g_machineIdentity.family=YmccFamily::Unknown;keepInput=false;fault.clear();
    const bool paused=selected=="sensor-query-already-paused",inactive=selected=="sensor-query-inactive";
@@ -333,7 +357,12 @@ int main(int argc,char** argv){
    const bool retry=selected=="common-retry-automatic";
    const bool duplicate=selected=="common-duplicate-automatic"||selected=="common-duplicate-interactive";
    if(retry){g_sgRetryInProgress=true;g_sgTask.retryKind=SgRetryKind::EntryFailure;g_sgTask.retryAttempt=2;g_sgTask.mode=SgSleepMode::S3;}
-   if(duplicate){g_powerLifecycle=PowerLifecycle::Ready;g_hardwareWriteGate=true;g_resumeReadyGeneration=originalGeneration;g_lastResumeNotifyTick=nowTick;frozen=false;g_sgSleepCycleActive=false;g_sgTask={};}
+   if(duplicate){
+    g_powerLifecycle=PowerLifecycle::Resuming;
+    if(!recordPowerResumeReady(originalGeneration,capturePowerResumeBoundary(),true))
+     throw std::runtime_error("could not seed the committed duplicate Ready receipt");
+    g_powerLifecycle=PowerLifecycle::Ready;g_hardwareWriteGate=true;g_lastResumeNotifyTick=nowTick;frozen=false;g_sgSleepCycleActive=false;g_sgTask={};
+   }
    const auto work=retry||selected=="common-duplicate-automatic"?SgWork::WakeAutomatic:SgWork::WakeSuspend;
    bool escaped=false;try{handlePowerResumeNotification(work,"fixture-common-entry");}catch(...){escaped=true;}
    check(!escaped,"independent common entry consumer cannot escape and suppress lifecycle queue");
@@ -443,7 +472,10 @@ int main(int argc,char** argv){
     const auto readyGeneration=currentPowerGeneration();
     // The synchronous worker port sets the phase only. Supply the same
     // committed Ready receipt that the original duplicate-entry cases use.
-    g_resumeReadyGeneration=readyGeneration;
+    g_powerLifecycle=PowerLifecycle::Resuming;
+    if(!recordPowerResumeReady(readyGeneration,capturePowerResumeBoundary(),true))
+     throw std::runtime_error("could not seed the committed radial Ready receipt");
+    g_powerLifecycle=PowerLifecycle::Ready;
     const auto invalidations=mockRadialInvalidations,shutdowns=mockRadialShutdownCalls;
     fault.clear();g_radialOverlay.open=true;
     for(const auto edge:{PBT_APMRESUMEAUTOMATIC,PBT_APMRESUMESUSPEND,PBT_APMRESUMECRITICAL}){
@@ -487,20 +519,19 @@ int main(int argc,char** argv){
    fault.clear();broadcast(g_hwnd,WM_POWERBROADCAST,PBT_APMRESUMESUSPEND,0);
    check(g_powerLifecycle==PowerLifecycle::Ready&&!frozen,"subsequent original wake can finish through common recovery owner");
    check(currentPowerGeneration()==before+1&&suspendQueued==1,"wake preserves exact pause generation and count");
-  }else if(selected=="suspend-cpu-observer-failure"){
-   fault="cpu-undervolt-stop";
+  }else if(selected=="suspend-public-consumer-handoff"){
    const auto before=currentPowerGeneration();
-   g_powerSourceRecoveryRunning=true;
-   bool escaped=false;
-   try{broadcast(g_hwnd,WM_POWERBROADCAST,PBT_APMSUSPEND,0);}catch(...){escaped=true;}
-   check(faultHit&&visits["cpu-undervolt-stop"]==1,"CPU trial cancellation reached the injected fault");
-   check(!escaped,"CPU trial cancellation fault cannot escape the shared broadcast");
-   check(visits["failure-log"]==1,"shared broadcast records the CPU trial cancellation failure once");
-   check(!g_powerSourceRecoveryRunning&&visits["power-source-cancel"]==1,"power source recovery is retired independently");
+   const auto publication=g_sharedPowerPublicationRevision.load();
+   broadcast(g_hwnd,WM_POWERBROADCAST,PBT_APMSUSPEND,0);
    check(currentPowerGeneration()==before+1&&suspendQueued==1,"shared suspend owns exactly one generation and pause");
-   check(!g_sleepPowerDispatch.hasPending()&&g_sleepPowerDispatch.snapshot()["consumerActive"]==false,"shared receipt is retired after the CPU observer fault");
-   fault.clear();broadcast(g_hwnd,WM_POWERBROADCAST,PBT_APMRESUMECRITICAL,0);
+   check(!g_sleepPowerDispatch.hasPending()&&g_sleepPowerDispatch.snapshot()["consumerActive"]==false,"shared receipt completes before public consumer delivery");
+   check(g_sharedPowerPublicationRevision.load()>publication&&g_sharedPowerProjectionPending,
+       "completed suspend queues the shared consumer projection");
+   const auto suspendPublication=g_sharedPowerPublicationRevision.load();
+   broadcast(g_hwnd,WM_POWERBROADCAST,PBT_APMRESUMECRITICAL,0);
    check(g_powerLifecycle==PowerLifecycle::Ready&&!frozen,"later critical wake reaches the shared Ready owner");
+   check(g_sharedPowerPublicationRevision.load()>suspendPublication&&g_sharedPowerProjectionPending,
+       "completed wake hands the current state to the same pending projection");
   }else if(selected=="suspend-foreground-queue-failure"){
    fault="msi-suspend-queue";
    const auto before=currentPowerGeneration();
@@ -563,9 +594,12 @@ int main(int argc,char** argv){
     check(!g_sleepPowerDispatch.hasPending()&&g_sleepPowerDispatch.snapshot()["consumerActive"]==false,
           "the non-authoritative query failure releases its public receipt");
    }
+   const auto hints=fixtureWakeReadbackHints;
    broadcast(g_hwnd,WM_POWERBROADCAST,PBT_APMRESUMECRITICAL,0);
    check(g_powerLifecycle==PowerLifecycle::Ready&&visits["steam-interactive"]==1,
          "the following critical wake keeps the original Steam and shared recovery paths reachable");
+   check(fixtureWakeReadbackHints==hints+1,
+         "critical-only resume asks the common owner to look for original Kernel-Power records");
    g_sgRetryEntryFailure=false;
    at(nowTick+2000);broadcast(g_hwnd,WM_POWERBROADCAST,PBT_APMQUERYSUSPEND,0);
    check(g_sgSleepQueryOwnsGeneration&&currentPowerGeneration()==suspendGeneration+1,

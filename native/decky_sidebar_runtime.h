@@ -113,6 +113,13 @@ struct DiagnosticRuntimeThreadCpu {
     DWORD id=0;
     ULONGLONG birth=0,kernel=0,user=0;
 };
+struct AdmissionWaitLog {
+    DWORD steamPid=0;
+    ULONGLONG steamBirth=0, power=0;
+    unsigned repeated=0;
+    static constexpr unsigned checkpoint=64;
+    bool detailOnly() const noexcept { return repeated>0&&repeated<checkpoint; }
+};
 struct State {
     bool enabled = false;
     bool steamKnown = false;
@@ -134,6 +141,9 @@ struct State {
     ULONGLONG admissionElapsedMs = 0;
     DWORD admissionNextRetryMs = 0;
     bool admissionRecovery = false;
+    std::optional<ULONGLONG> connectionExhaustedAtPower;
+    bool connectionExhaustedOfficialBackend = false;
+    AdmissionWaitLog admissionWaitLog; // Notification copy only; never part of the UI snapshot.
 };
 // Proof to reuse work, never permission to launch. No wire or log fields.
 struct LaunchBindingScope {
@@ -153,6 +163,7 @@ struct LaunchAdmission {
     ymcc::steamui::ModeCacheMiss modeCacheMiss;
     DWORD modeSteamPid = 0;
     ULONGLONG modeSteamBirth = 0;
+    ULONGLONG modePowerGeneration = 0;
     LaunchBindingScope bindingScope;
     // Legacy bool callbacks remain observation-only when false.
     LaunchAdmission(bool permit = true, std::string why = {}, bool retry = false, std::string context = {}, bool retained = false)
@@ -165,10 +176,14 @@ class AdmissionWindow {
     bool known_ = false, active_ = false, parked_ = false;
     ULONGLONG opened_ = 0, slowDue_ = 0;
     unsigned attempts_ = 0;
+    AdmissionWaitLog logScope_;
+    unsigned logKinds_ = 0, logRepeats_ = 0;
+    void resetLog() noexcept { logScope_={}; logKinds_=logRepeats_=0; }
 public:
     static constexpr DWORD recoveryIntervalMs = 30000;
     void blocked(unsigned long long epoch, ULONGLONG now, bool retryable) {
         if (!known_ || epoch_ != epoch) {
+            resetLog();
             known_ = true; epoch_ = epoch; attempts_ = 1; retries_ = {};
             opened_ = now; slowDue_ = 0; active_ = retryable; parked_ = !retryable;
             if (retryable) retries_.begin(now);
@@ -205,7 +220,24 @@ public:
     unsigned attempts() const { return attempts_; }
     ULONGLONG elapsed(ULONGLONG now) const { return active_ && now >= opened_ ? now - opened_ : 0; }
     bool recovering() const { return active_ && slowDue_ != 0; }
-    void stop() { retries_ = {}; slowDue_ = 0; active_ = false; parked_ = false; }
+    AdmissionWaitLog logWait(const LaunchAdmission& observation,bool continuing) noexcept {
+        const unsigned kind=observation.reason=="steam-ui-state-pending"&&observation.detail=="shared-mode-pending"&&observation.retryable?1u:
+            observation.reason=="steam-bigpicture-required"&&observation.detail=="desktop"&&!observation.retryable?2u:0u;
+        // Parking on a confirmed desktop preserves the existing slow window.
+        if(!slowDue_||!kind||observation.allowed||observation.bindingOnly||!observation.modeSteamPid||
+           !observation.modeSteamBirth||!observation.modePowerGeneration){resetLog();return {};}
+        if(!continuing||logScope_.steamPid!=observation.modeSteamPid||logScope_.steamBirth!=observation.modeSteamBirth||
+           logScope_.power!=observation.modePowerGeneration){
+            resetLog();logScope_={observation.modeSteamPid,observation.modeSteamBirth,observation.modePowerGeneration};
+        }
+        auto log=logScope_;
+        if(logKinds_&kind){
+            log.repeated=++logRepeats_;
+            if(logRepeats_==AdmissionWaitLog::checkpoint)logRepeats_=0;
+        }else logKinds_|=kind;
+        return log;
+    }
+    void stop() { retries_ = {}; slowDue_ = 0; active_ = false; parked_ = false; resetLog(); }
     void completed() { stop(); known_ = false; attempts_ = 0; }
 };
 
@@ -223,6 +255,7 @@ struct Config {
     std::wstring home;
     std::function<std::string()> preflight; // Source/hash/plugin/debug-flag checks, startup only.
     std::function<void(const State&)> changed;
+    std::function<void()> connectionPresentationChanged;
 #ifdef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
     // Historical callback regressions only; this branch is absent from the product.
     std::function<std::string()> refreshBinding;
@@ -349,7 +382,7 @@ class Runtime {
         }
         result.push_back(L'\0'); return result;
     }
-    void publish(std::string phase, std::string reason = {}, DWORD error = 0, DWORD pid = 0, bool retry = false, unsigned attempts = 0, std::string launchStage = {}, std::string launchMode = {}, bool admissionRetry = false, unsigned admissionAttempts = 0, std::string admissionDetail = {}, ULONGLONG admissionElapsedMs = 0, DWORD admissionNextRetryMs = 0, bool admissionRecovery = false) {
+    void publish(std::string phase, std::string reason = {}, DWORD error = 0, DWORD pid = 0, bool retry = false, unsigned attempts = 0, std::string launchStage = {}, std::string launchMode = {}, bool admissionRetry = false, unsigned admissionAttempts = 0, std::string admissionDetail = {}, ULONGLONG admissionElapsedMs = 0, DWORD admissionNextRetryMs = 0, bool admissionRecovery = false, AdmissionWindow* waitWindow = nullptr, const LaunchAdmission* waitObservation = nullptr) {
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
         // Preserve the former watch owner's inactive-phase teardown. A rejected
         // final admission must not leave a healthy bootstrap child waiting on CEF.
@@ -367,12 +400,17 @@ class Runtime {
               lastPublished_.bindingAttempts == attempts && lastPublished_.launchStage == launchStage && lastPublished_.launchMode == launchMode &&
               lastPublished_.admissionRetry == admissionRetry && lastPublished_.admissionAttempts == admissionAttempts &&
               lastPublished_.admissionDetail == admissionDetail && lastPublished_.admissionRecovery == admissionRecovery &&
+              lastPublished_.connectionExhaustedAtPower==state_.connectionExhaustedAtPower &&
+              lastPublished_.connectionExhaustedOfficialBackend==state_.connectionExhaustedOfficialBackend &&
               lastPublished_.ownedBindingDestroyed==state_.ownedBindingDestroyed && lastPublished_.ownedBindingCleanupError==state_.ownedBindingCleanupError) return;
           state_.phase = std::move(phase); state_.reason = std::move(reason);
           state_.error = error; state_.pid = pid; state_.bindingRetry=retry; state_.bindingAttempts=attempts;state_.launchStage=std::move(launchStage);state_.launchMode=std::move(launchMode);
           state_.admissionRetry=admissionRetry;state_.admissionAttempts=admissionAttempts;state_.admissionDetail=std::move(admissionDetail);
           state_.admissionElapsedMs=admissionElapsedMs;state_.admissionNextRetryMs=admissionNextRetryMs;state_.admissionRecovery=admissionRecovery;
           ++state_.revision; copy = state_;
+          if(waitWindow&&waitObservation&&copy.enabled&&copy.steamKnown&&copy.steamRunning&&
+             copy.ownedBindingDestroyed&&!copy.ownedBindingCleanupError)
+              copy.admissionWaitLog=waitWindow->logWait(*waitObservation,hasPublished_&&lastPublished_.admissionWaitLog.steamPid!=0);
           lastPublished_ = copy; hasPublished_ = true; }
         try { if (reporting_.load() && config_.changed) config_.changed(copy); } catch (...) {} // Best-effort presentation only.
     }
@@ -636,7 +674,8 @@ class Runtime {
             catch (...) { result="preparation-failed"; }
             if(!canContinue())return false;
             if(result.empty())preparedEpoch=epoch;
-            else if(result=="resource-worker-deadline"||result=="resource-worker-cleanup-incomplete")
+            else if(result=="resource-worker-deadline"||result=="resource-worker-cleanup-incomplete"||
+                    result=="resource-package-mismatch")
                 parkedPreparation=std::pair{epoch,admissionEpoch};
             return true;
         };
@@ -681,7 +720,26 @@ class Runtime {
                 publish("failed","launch-failed",pathLaunchFailure.error,0,false,0,pathLaunchFailure.stage,pathLaunchFailure.mode);
             else publish("failed","launch-failed",ERROR_ACCESS_DENIED,0,false,0,"shell-token-elevated");
         };
-        const auto reportConnection=[&](ConnectionRecoveryWindow::Action action,const ConnectionHealth& health,ULONGLONG now,bool blocked=false,bool bindingReused=false){
+        bool connectionExhaustionObserved=false;
+        const auto reportConnection=[&](ConnectionRecoveryWindow::Action action,const ConnectionHealth& health,ULONGLONG now,unsigned long long intent,bool blocked=false,bool bindingReused=false){
+            const bool exhausted=connectionFallback.exhausted();
+            if(connectionExhaustionObserved!=exhausted){
+                bool changed=false;
+                {
+                    std::lock_guard lock(stateMutex_);
+                    if(intent_==intent&&(!exhausted||(!stopping_&&!exitFenced_.load()&&state_.enabled&&!pendingSafetyStop_.active(intent)))){
+                        const auto value=exhausted?std::optional<ULONGLONG>{health.powerGeneration}:std::nullopt;
+                        const bool officialBackend=exhausted&&health.reason=="official-backend-unavailable";
+                        changed=state_.connectionExhaustedAtPower!=value||state_.connectionExhaustedOfficialBackend!=officialBackend;
+                        state_.connectionExhaustedAtPower=value;
+                        state_.connectionExhaustedOfficialBackend=officialBackend;
+                        if(hasPublished_){lastPublished_.connectionExhaustedAtPower=value;lastPublished_.connectionExhaustedOfficialBackend=officialBackend;}
+                    }
+                }
+                connectionExhaustionObserved=exhausted;
+                // Presentation follows the existing worker without revoking a manual repair revision.
+                try{if(changed&&reporting_.load()&&config_.connectionPresentationChanged)config_.connectionPresentationChanged();}catch(...){}
+            }
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
             using Action=ConnectionRecoveryWindow::Action;if(action==Action::none)return;
             try{
@@ -939,8 +997,11 @@ class Runtime {
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
                     const char* holdBlocker="not-eligible";
                     if(pendingPreparedMode(finalAdmission)){
-                        holdBlocker=preparedLaunch.launchScope.steam.pid!=finalAdmission.modeSteamPid||
-                            preparedLaunch.launchScope.steam.created!=finalAdmission.modeSteamBirth?"binding-steam-scope-mismatch":preparedBindingBlocker(intent,now);
+                        const auto& scope=preparedLaunch.launchScope;
+                        if(!scope.verified())holdBlocker="binding-proof-unverified";
+                        else if(scope.steam.pid!=finalAdmission.modeSteamPid||scope.steam.created!=finalAdmission.modeSteamBirth)
+                            holdBlocker="binding-steam-scope-mismatch";
+                        else holdBlocker=preparedBindingBlocker(intent,now);
                     }
                     hold=!holdBlocker;
                     if(hold)heldLaunchUntil=boundStarted+ConnectionRecoveryWindow::transportGraceMs;
@@ -1219,7 +1280,7 @@ class Runtime {
             }
             if(stop){
                 const auto now=GetTickCount64();const ConnectionHealth health{false,false,"decky-stopped"};
-                reportConnection(connectionFallback.observe(now,health),health,now);closeOwned("runtime-stop");break;
+                reportConnection(connectionFallback.observe(now,health),health,now,intent);closeOwned("runtime-stop");break;
             }
             if(resourceAdmissionEpoch!=admissionEpoch||resourcePreparationEpoch!=preparationEpoch){
                 resourceAdmissionEpoch=admissionEpoch;resourcePreparationEpoch=preparationEpoch;
@@ -1231,7 +1292,7 @@ class Runtime {
             }
             if(safetyPending){
                 const auto now=GetTickCount64();const ConnectionHealth health{false,false,"terminal-safety-stop"};
-                reportConnection(connectionFallback.observe(now,health),health,now);
+                reportConnection(connectionFallback.observe(now,health),health,now,intent);
                 cancelResourceRetry();
                 // The terminal page was live-read before its packet was posted.
                 // Stop only its owned binding now; retain Loader/broker authority
@@ -1247,7 +1308,7 @@ class Runtime {
             }
             if(crashEpoch!=crashResetEpoch){
                 const auto now=GetTickCount64();const ConnectionHealth health{false,false,"steam-session-changed"};
-                reportConnection(connectionFallback.observe(now,health),health,now);
+                reportConnection(connectionFallback.observe(now,health),health,now,intent);
                 launchPolicy.reset();launchPolicyReported=false;loaderPathObservedAbsent=false;parkedPreparationSeen=~0ULL;
                 crashEpoch=crashResetEpoch;crashBudget.reset();loaderRecovery.reset();loaderRecoveryDue=false;healthRequested=true; // New verified session must check now, not wait for the idle backstop.
             }
@@ -1389,7 +1450,7 @@ class Runtime {
                         publishLaunchStop();
                     }
                     const ConnectionHealth health{false,false,"launch-policy-blocked"};
-                    reportConnection(connectionFallback.observe(now,health),health,now);
+                    reportConnection(connectionFallback.observe(now,health),health,now,intent);
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
                     if(!launchPolicyReported)bindingDiagnostic({{"scope","global-connection"},{"stage","launch-policy-blocked"},
                         {"reason",pathStopped?"loader-path-unavailable":"shell-token-elevated"},{"recoveryPhase","blocked"},{"attempted",false},
@@ -1530,7 +1591,7 @@ class Runtime {
                 // rung unless a separate watch recovery is already pending.
                 const bool observeOwnedTransport=action==Action::reconnect&&process&&health.transportConnected&&
                     !recoveryRequested&&!outageWatchRequested;
-                reportConnection(action,health,healthNow,blocked,reuseFreshBinding||preserveRetainedTransport||observeOwnedTransport);
+                reportConnection(action,health,healthNow,intent,blocked,reuseFreshBinding||preserveRetainedTransport||observeOwnedTransport);
                 if(recovering&&!blocked&&launchAllowed(intent)){
                     bool keptTransport=preserveRetainedTransport;
                     if(action==Action::recycle){
@@ -1632,9 +1693,9 @@ class Runtime {
             // lease before the new watch arrives; that handoff still has
             // priority over optional resource maintenance on this worker.
             // Deferred preparation grants no rebind, restart or launch authority.
-            // After a deadline or unconfirmed cleanup, a mode hint is not new
-            // resource demand. Steam source/Ready changes and admitted launch
-            // preflight keep their independent attempts.
+            // A mode hint is not new resource demand after a deadline,
+            // unconfirmed cleanup, or verified package mismatch. Steam source
+            // and Ready changes and admitted launch keep independent checks.
             if(enabled && known && !process && !context && !retainedFrontend && !(admission.allowed&&admission.bindingOnly) && config_.prepareEnvironment && preparedEpoch!=preparationEpoch &&
                 parkedPreparation!=std::pair{preparationEpoch,admissionEpoch} &&
                 (preparationAttemptEpoch!=preparationEpoch || preparationAttemptIntent!=intent)) {
@@ -1712,7 +1773,8 @@ class Runtime {
                 const auto now=GetTickCount64();admissionChecks.blocked(admissionEpoch,now,admission.retryable);
                 publish("waiting-manual-steam", admission.reason, 0, 0, false, 0, {}, {},
                     admissionChecks.timeout(now)!=INFINITE, admissionChecks.attempts(), admission.detail,
-                    admissionChecks.elapsed(now),admissionChecks.timeout(now)==INFINITE?0:admissionChecks.timeout(now),admissionChecks.recovering());
+                    admissionChecks.elapsed(now),admissionChecks.timeout(now)==INFINITE?0:admissionChecks.timeout(now),admissionChecks.recovering(),
+                    &admissionChecks,&admission);
             }else if(process&&intent!=attempted){
                 attempted=intent;launchAttempted=launchIntent;stopWindow();
 #ifdef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
@@ -2061,7 +2123,7 @@ public:
         std::lock_guard lock(lifecycleMutex_);
         if(enabled&&exitFenced_.load(std::memory_order_acquire))return false;
         const auto publishIntent = [&] {
-        { std::lock_guard stateLock(stateMutex_); state_.enabled = enabled; disabledReason_=enabled?std::string{}:disabledReason; pendingSafetyStop_.clear();activeBindingRun_.clear();activeBindingFailure_={}; ++intent_; if(enabled){++launchIntent_;++admissionEpoch_;++crashResetEpoch_;++preparationEpoch_;} }
+        { std::lock_guard stateLock(stateMutex_); state_.enabled = enabled; state_.connectionExhaustedAtPower.reset(); state_.connectionExhaustedOfficialBackend=false; disabledReason_=enabled?std::string{}:disabledReason; pendingSafetyStop_.clear();activeBindingRun_.clear();activeBindingFailure_={}; ++intent_; if(enabled){++launchIntent_;++admissionEpoch_;++crashResetEpoch_;++preparationEpoch_;} }
         };
         // Serialize only intent publication with the owning settings transaction.
         // Stop/join and worker startup must run after that settings lock is released.
@@ -2104,6 +2166,7 @@ private:
           // Publish the new intent and cancel its predecessor atomically with beginPending.
           // Otherwise the worker can renew first and this cancellation kills the NEW token.
           if(renewCrashBudget&&known&&running)++crashResetEpoch_;
+          if(renewCrashBudget||(known&&!running)){state_.connectionExhaustedAtPower.reset();state_.connectionExhaustedOfficialBackend=false;}
           // Returning shared Steam facts need one check on the existing worker.
           // Same-session gaps do not renew crash budgets; their stopped health
           // window may otherwise retain the healthy 30s idle backstop. This

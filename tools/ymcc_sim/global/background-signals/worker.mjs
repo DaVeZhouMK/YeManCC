@@ -67,7 +67,7 @@ try{
  result.behavior={exitCode:behavior.exitCode,timedOut:behavior.timedOut,receipt};
  result.checks=receipt.checks??[];result.inputConsumerStateFeedback=result.checks.map(x=>({id:x.id,...x.inputConsumerStateFeedback}));
  result.executedProductModules=receipt.executedProductModules??[];
- if(behavior.exitCode!==0||receipt.status!=='PASS'||result.checks.length!==20||result.checks.some(x=>x.status!=='PASS'))throw Object.assign(Error('Formal background consumer assertions failed'),{code:'BACKGROUND_BEHAVIOR_FAILED'});
+ if(behavior.exitCode!==0||receipt.status!=='PASS'||result.checks.length!==21||result.checks.some(x=>x.status!=='PASS'))throw Object.assign(Error('Formal background consumer assertions failed'),{code:'BACKGROUND_BEHAVIOR_FAILED'});
  result.stage='original-native-tests';
  const nativeOutput=path.join(evidenceDir,'native');
  const originalNativeSource=fs.readFileSync(path.join(repoRoot,'tools/default_background_selftest.mjs'),'utf8');
@@ -103,7 +103,7 @@ try{
  result.originalNative={status:native.exitCode===0&&!native.errorCode&&Number(match?.[1])>=12?'PASS':'FAIL',exitCode:native.exitCode,timedOut:native.timedOut,checks:Number(match?.[1]??0),scope:'behavioral-mock',actualConsumer:'reviewed derived wrapper reuses original default_background_selftest.mjs production C++ extraction and isolated behavior; current UI anchor and explicit SDK compiler environment',sourceContractOnly:['UI path text','optional native virtual-host mapping']};
  result.stage='verify-exact-compiled-inputs';
  result.changedCompiledInputs=result.compiledInputs.filter(item=>sha(fs.readFileSync(path.join(repoRoot,item.path)))!==item.sha256);
- result.status=result.originalDynamic.status==='PASS'&&result.originalNative.status==='PASS'&&behavior.exitCode===0&&receipt.status==='PASS'&&result.checks.length===20&&result.checks.every(x=>x.status==='PASS')&&result.changedCompiledInputs.length===0?'PASS':'FAIL';
+ result.status=result.originalDynamic.status==='PASS'&&result.originalNative.status==='PASS'&&behavior.exitCode===0&&receipt.status==='PASS'&&result.checks.length===21&&result.checks.every(x=>x.status==='PASS')&&result.changedCompiledInputs.length===0?'PASS':'FAIL';
  result.compatibility={schemaVersion:1,status:result.status==='PASS'?'PASS':'FAIL',hcRuntimeRequired:false,
   requiredExports:['backgroundGet','backgroundInstall','backgroundClear','dynamicBackgroundGet','dynamicBackgroundInstallUrl','dynamicBackgroundInstallOnline','dynamicBackgroundClear','getBackgroundOpacity','setBackgroundOpacity','getBackgroundBlur','setBackgroundBlur','notifyBackgroundChanged','nextLowBatteryStatic','shouldSkipVideoReconcile','refreshDynamicBackground','getDynamicBackgroundState'],
   nativeConsumers:['default_background_state','background_state','ipc background.clear lambda'],

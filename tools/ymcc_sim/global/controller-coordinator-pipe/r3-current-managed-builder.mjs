@@ -2,7 +2,7 @@ import {optimizeManagedHashes} from './r3-current-managed-hash.mjs';
 import {optimizeManagedReceipt} from './r3-current-managed-receipt.mjs';
 // Build-only SDK-free managed consumer for the real native pipe integration.
 import {requireCurrentCompileBatch} from './r3-current-compile-batch.mjs';
-import {managedCompileContract,validateManagedSourceRequirements,verifyManagedDecoderCompileEvidence} from './r3-managed-input-contract.mjs';
+import {managedCompileContract,validateManagedSourceRequirements,verifyManagedDecoderCompileEvidence,SHARED_INPUT_POWER_SOURCES} from './r3-managed-input-contract.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -56,7 +56,7 @@ export function buildManagedFixture(out,options={}){
  const read=relative=>fs.readFileSync(inputs.find(r=>r.relative===relative).snapshot,'utf8').replace(/^\uFEFF/,'');
  const tools=toolchainFiles(repo).map(p=>{need(fs.existsSync(p)&&fs.statSync(p).isFile(),'Missing compiler/framework input: '+p);return{path:p,sha256:fileHash(p),bytes:fs.statSync(p).size};});
  const source=read('InputHost/Program.cs'),host=path.join(repo,'InputHost');
- const generated=createOfflineHostFixture(out,host,true,{externalGameOutputHelper:true,externalGameFeedbackCatalog:true,...(admitted?.sourceAuthority?.mode==='B51_FROZEN_V7_PRIVATE_COMPILE_ONLY'?{gameFeedbackCatalogPath:inputs.find(r=>r.relative==='capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs').snapshot}:{})});let fake=generated.fake;
+ const generated=createOfflineHostFixture(out,host,true,{externalGameOutputHelper:true,externalGameFeedbackCatalog:true,...(contract.sharedInputPower?{powerBindingMode:'authenticated-native',externalProcessExitOwner:true}:{}),...(admitted?.sourceAuthority?.mode==='B51_FROZEN_V7_PRIVATE_COMPILE_ONLY'?{gameFeedbackCatalogPath:inputs.find(r=>r.relative==='capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs').snapshot}:{})});let fake=generated.fake;
  const jointAdapterInputs=[];let msiJointVisibilityBackend=null;
  if(options.msiJointVisibility===true){
   need(contract.signalEvidence===true,'MSI joint visibility requires the existing terminal26 contract');
@@ -114,7 +114,7 @@ export function buildManagedFixture(out,options={}){
   'internal sealed class HMController : IDisposable { internal string? InstanceId { get; } internal HMController(string? instanceId=null){InstanceId=instanceId;} ');
  fake=replaceOnce(fake,'Program.Fixture.Current=Program.Arrival(Program.Fixture.NextRoot);return new();',
   'Program.Fixture.Current=Program.Arrival(Program.Fixture.NextRoot);return new(p.Id=="dualsense-edge"&&!Program.PsFixtureMissingSdkRoot?Program.ManagedPsRoot(Program.Fixture.Creates):null);');
- let managedEntry='using YeManInputHost.Diagnostics;\n'+read('tools/fixtures/input_lifecycle_integration/ManagedEntry.cs');
+ let managedEntry=(contract.sharedInputPower?'#define YMCC_FIXTURE_SHARED_INPUT_POWER\n':'')+'using YeManInputHost.Diagnostics;\n'+read('tools/fixtures/input_lifecycle_integration/ManagedEntry.cs');
  managedEntry=replaceOnce(managedEntry,'"dualsense-edge" => new(true, 1, 0, 1, 0, 0, true, "fixture-edge-arrival"),','"dualsense-edge" => ManagedPsPnpObservation(),');
  managedEntry=replaceOnce(managedEntry,
   '"elite" => new(true, 1, 0, 1, 0, 0, true, "fixture-elite-arrival"),',
@@ -250,6 +250,16 @@ namespace HIDMaestro {
   need(decoderSource&&fileHash(decoderSource.snapshot)===decoderSource.sha256,'Actual SteamDeck pad decoder snapshot required');
   files['SteamDeckPadReportObservation.cs']=fs.readFileSync(decoderSource.snapshot);
  }
+ if(contract.sharedInputPower){
+  need(generated.powerBindingMode==='authenticated-native'&&generated.compilationInputs.length===SHARED_INPUT_POWER_SOURCES.length,'EXACT_AUTHENTICATED_POWER_INPUTS_REQUIRED');
+  for(const relative of SHARED_INPUT_POWER_SOURCES){
+   const input=inputs.find(row=>row.relative===relative);
+   need(input,'POWER_SOURCE_REQUIRED:'+relative);
+   const actual=generated.compilationInputs.filter(row=>path.resolve(row.path).toLowerCase()===path.resolve(input.path).toLowerCase());
+   need(actual.length===1&&actual[0].sha256===input.sha256&&actual[0].bytes===input.bytes&&fileHash(input.snapshot)===input.sha256,'POWER_SNAPSHOT_AND_GENERATOR_IDENTITY_REQUIRED:'+relative);
+   files[path.basename(relative)]=fs.readFileSync(input.snapshot);
+  }
+ }
  files['HcControllerGameFeedbackCapabilityCatalog.generated.cs']=read('capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs');
  if(options.psOwnershipSelfTest)files['PsEndpointOwnershipTests.cs']=read('tools/ps_endpoint_ownership_selftest.cs');
  files['ManagedEntry.cs']=optimizeManagedHashes(files['ManagedEntry.cs']).text;
@@ -300,7 +310,7 @@ namespace HIDMaestro {
  need(generatedInputs.every(r=>fileHash(r.path)===r.sha256),'Generated compilation input changed during build');
  need(jointAdapterInputs.every(row=>fileHash(row.path)===row.sha256&&fileHash(row.snapshot)===row.sha256),'MSI joint adapter source changed during build');
  const runtimeArtifacts=['Fixture.dll','Fixture.deps.json','Fixture.runtimeconfig.json'].map(name=>{const p=path.join(path.dirname(dll),name);return{path:p,sha256:fileHash(p),bytes:fs.statSync(p).size};});
- const result={schemaVersion:1,status:'BUILT',managedInputContract:contract.id,managedInputCount:contract.count,terminalCleanupCompiled:contract.terminalCleanup,steamDeckPadDecoderCompiled:contract.steamDeckPadDecoder,signalEvidenceCompiled:contract.signalEvidence===true,semanticMutation,behaviorPass:null,fixtureExecuted:false,fixtureProject:project,fixtureDll:dll,manifestPath:path.join(path.dirname(dll),'fixture-manifest.json'),inputManifestSha256:bindingHash,sourceStable,toolchainStable,sdkVersion,commands,runtimeArtifacts,evaluatedCompilerInputs:actual,generatedIdentity:{path:path.join(out,'BuildIdentity.g.cs'),sha256:fileHash(path.join(out,'BuildIdentity.g.cs'))},normalHostMainExecuted:false,realSdkLoaded:false,hardwareIo:false,sourceFilesEdited:false,cli:['dotnet',dll,'--pipe','NAME','--parent-pid','PID','--receipt','ABS_NEW_JSON','[--fault output-stop-once]'],receiptContract:['hasController','hasContext','phase','events','faultTriggered','pipeExitCode','outputStopResults','stateAfterLoop','stateAfterFinalCleanup','inputBindings'],boundaries:['Compiled fixture only. Behavioral/natural-exit conclusions require the native parent to run scenarios and observe process exit.','SDK SHA/MVID in replies are current product constants; the admitted asset verifier fake does not load/verify the actual SDK.','Only BCL runtime and the generated fixture assembly are loaded; no device/driver/Steam calls.']};
+ const result={schemaVersion:1,status:'BUILT',managedInputContract:contract.id,managedInputCount:contract.count,terminalCleanupCompiled:contract.terminalCleanup,steamDeckPadDecoderCompiled:contract.steamDeckPadDecoder,signalEvidenceCompiled:contract.signalEvidence===true,...(contract.sharedInputPower?{sharedInputPowerCompiled:true}:{}),semanticMutation,behaviorPass:null,fixtureExecuted:false,fixtureProject:project,fixtureDll:dll,manifestPath:path.join(path.dirname(dll),'fixture-manifest.json'),inputManifestSha256:bindingHash,sourceStable,toolchainStable,sdkVersion,commands,runtimeArtifacts,evaluatedCompilerInputs:actual,generatedIdentity:{path:path.join(out,'BuildIdentity.g.cs'),sha256:fileHash(path.join(out,'BuildIdentity.g.cs'))},normalHostMainExecuted:false,realSdkLoaded:false,hardwareIo:false,sourceFilesEdited:false,cli:['dotnet',dll,'--pipe','NAME','--parent-pid','PID','--receipt','ABS_NEW_JSON','[--fault output-stop-once]'],receiptContract:['hasController','hasContext','phase','events','faultTriggered','pipeExitCode','outputStopResults','stateAfterLoop','stateAfterFinalCleanup','inputBindings'],boundaries:['Compiled fixture only. Behavioral/natural-exit conclusions require the native parent to run scenarios and observe process exit.','SDK SHA/MVID in replies are current product constants; the admitted asset verifier fake does not load/verify the actual SDK.','Only BCL runtime and the generated fixture assembly are loaded; no device/driver/Steam calls.']};
  if(contract.signalEvidence)verifyManagedDecoderCompileEvidence({...result,inputBindings:bindings},contract.id,evidenceRoot);
  const manifestText=JSON.stringify(result).slice(0,-1)+',"inputBindings":'+bindingText+'}\n';
  fs.writeFileSync(result.manifestPath,manifestText,{flag:'wx'});fs.writeFileSync(path.join(out,'fixture-manifest.json'),manifestText,{flag:'wx'});

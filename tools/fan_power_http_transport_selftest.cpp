@@ -9,6 +9,7 @@
 #include <functional>
 #include "fan_physical_wake.h"
 #include "fan_resume_business.h"
+#include "sleep_power_dispatch.h"
 #include "sleep_power_remote_transport.h"
 #pragma comment(lib,"bcrypt.lib")
 #pragma comment(lib,"advapi32.lib")
@@ -80,6 +81,8 @@ void appendFanLifecycleLog(const char* name,const json& detail){if(std::string(n
 unsigned long long currentFanPowerGeneration(){return fixtureFanGeneration.load();}
 std::atomic<bool> sharedPowerKnown{true},sharedPowerPending{false},sharedDiagnosticPublication{false};
 std::atomic<std::uint64_t> sharedPublication{1},sharedSerial{1},sharedNotification{1};
+static auto& g_sharedPowerSuspendSerial=sharedSerial;
+static ymcc::sleeppower::Dispatch g_sleepPowerDispatch;
 ymcc::sleeppower::RevocationMirrors g_sharedPowerRevocations;
 static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,std::uint32_t size)noexcept{
  if(g_exitRequested.load()||!sharedPowerKnown.load()||size<sizeof(*out))return 0;*out={};out->generation=currentPowerGeneration();out->phase=static_cast<std::uint32_t>(g_powerLifecycle.load());out->suspendSerial=sharedSerial.load();out->observedNotificationSequence=sharedNotification.load();
@@ -154,6 +157,8 @@ static void fixtureSleep(DWORD delay){
 #undef WinHttpQueryHeaders
 int legacyMain(int argc,char** argv){
  if(argc!=4)return 9;fixturePort=static_cast<INTERNET_PORT>(std::stoi(argv[1]));const std::string mode=argv[2];fixtureCase=argv[3];
+ // A Ready reply can only retain control if the peer actually claimed the offer.
+ fixtureClaimBusiness=(mode=="resume"||mode=="resume-retry")&&fixtureCase!="shared-owner-resume-unclaimed";
  if(fixtureCase.rfind("shared-unknown",0)==0)sharedPowerKnown=false;
  if(fixtureCase=="shared-pending-resume")sharedPowerPending=true;
  if(fixtureCase=="shared-publication-resume")sharedDiagnosticPublication=true;
@@ -205,7 +210,7 @@ int legacyMain(int argc,char** argv){
  }
  else ok=fanHostEmergencyPost(mode=="post-safe"?L"/api/close":L"/api/resume","fixture",2,mode=="post-safe",&status,1,"native.power",&body);
  if(sharedCancel.joinable())sharedCancel.join();
- std::cout<<json{{"ok",ok},{"status",status},{"bodyBytes",body.size()},{"bodyParsed",!body.empty()&&!json::parse(body,nullptr,false).is_discarded()},{"elapsedMs",GetTickCount64()-started},{"availabilityQueries",availabilityQueries},{"authRejected",authRejected},{"headerFailed",headerFailed},{"leaseArms",leaseArms},{"lifecycle",lifecycle},{"requestViews",requestViews},{"reopened",reopened},{"unexpectedDrains",unexpectedDrains}}.dump()<<"\n";return 0;
+ std::cout<<json{{"ok",ok},{"status",status},{"bodyBytes",body.size()},{"bodyParsed",!body.empty()&&!json::parse(body,nullptr,false).is_discarded()},{"elapsedMs",GetTickCount64()-started},{"availabilityQueries",availabilityQueries},{"authRejected",authRejected},{"headerFailed",headerFailed},{"leaseArms",leaseArms},{"fixtureClaims",fixtureBusinessClaims},{"lifecycle",lifecycle},{"requestViews",requestViews},{"reopened",reopened},{"unexpectedDrains",unexpectedDrains}}.dump()<<"\n";return 0;
 }
 
 static int businessMain(int argc,char** argv) try {

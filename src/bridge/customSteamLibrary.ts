@@ -1,5 +1,6 @@
 import { app, fs, shell, windowApi } from '@/bridge/api';
-import { invoke, on } from '@/bridge/ipc';
+import { invoke, on, IpcRemoteError } from '@/bridge/ipc';
+import { getSharedPowerLifecycle, onSharedPowerLifecycle, sharedPowerWriteScope, type SharedPowerWriteScope } from './powerLifecycleState';
 
 /**
  * Preparation gate for the Custom Steam Library integration.
@@ -56,13 +57,115 @@ interface SessionWatch {
 }
 let sessionGeneration = 0;
 let sessionWatch: SessionWatch | null = null;
-// A local abort cannot undo a native write or a dispatched child launch. Wait
-// for those receipts in order, and skip superseded work before dispatching it.
+let launchPreparation: AbortController | null = null;
+// A local abort cannot undo a dispatched mutation. The queue waits for the
+// Native receipt, or releases its waiter while retaining the unresolved ticket.
 let sessionMutationTail: Promise<void> = Promise.resolve();
-function mutateSession<T>(generation: number, action: () => Promise<T>): Promise<T | undefined> {
+function mutateSession<T>(generation: number, action: () => Promise<T> | undefined): Promise<T | undefined> {
   const work = sessionMutationTail.then(() => generation === sessionGeneration ? action() : undefined);
   sessionMutationTail = work.then(() => {}, () => {});
   return work;
+}
+
+const MUTATION_ACK_MS = 4000;
+const MUTATION_READ_MS = 1500;
+type MutationKind = 'enable' | 'disable' | 'launch';
+type LaunchReceipt = { ok: boolean; pid?: number };
+type MutationOutcome = { result?: boolean | LaunchReceipt; error?: string };
+type PendingMutation = { ticket: number; kind: MutationKind; generation: number; detach?: () => void };
+let pendingMutation: PendingMutation | undefined;
+let recoveredLaunch: LaunchReceipt | undefined;
+let openRequested = false;
+
+class MutationUnconfirmed extends Error {
+  constructor() { super('游戏库上一项操作尚未确认，请稍后重试'); }
+}
+
+function createdChild(value: MutationOutcome['result']): LaunchReceipt | undefined {
+  return value && typeof value === 'object' && value.ok === true ? value : undefined;
+}
+
+async function settlePendingMutation(pending: PendingMutation, retryMissingReply = false): Promise<MutationOutcome | undefined> {
+  const read = () => invoke<{ ticket: number; state: string; outcome?: MutationOutcome }>(
+    'customSteamLibrary.settleMutation', { mutationTicket: pending.ticket }, { timeoutMs: MUTATION_READ_MS }).catch(() => null);
+  let reply = await read();
+  if (!reply && retryMissingReply && pendingMutation === pending) reply = await read();
+  if (pendingMutation !== pending || reply?.ticket !== pending.ticket) return;
+  let outcome: MutationOutcome;
+  if (reply.state === 'retired') outcome = { error: '游戏库操作已过期，请重新操作' };
+  else if (reply.state === 'completed' && reply.outcome && (
+    typeof reply.outcome.error === 'string' ||
+    (pending.kind === 'launch' ? typeof (reply.outcome.result as LaunchReceipt | undefined)?.ok === 'boolean'
+      : typeof reply.outcome.result === 'boolean'))) outcome = reply.outcome;
+  else return;
+  pendingMutation = undefined;
+  pending.detach?.();
+  return outcome;
+}
+
+function observePendingMutation(pending: PendingMutation): void {
+  let observing = false;
+  let observeAgain = false;
+  const recover = () => {
+    if (pendingMutation !== pending) return;
+    if (observing) { observeAgain = true; return; }
+    const generation = sessionGeneration;
+    observing = true;
+    void mutateSession(generation, async () => {
+      if (pendingMutation !== pending) return;
+      const outcome = await settlePendingMutation(pending);
+      if (outcome && openRequested && pending.kind === 'launch') recoveredLaunch = createdChild(outcome.result);
+      if (outcome && generation === sessionGeneration) return outcome;
+    }).then(outcome => {
+      if (!outcome || generation !== sessionGeneration) return;
+      if (recoveredLaunch && openRequested) beginSessionWatch(generation, true);
+      else if (pending.kind !== 'disable' && (!openRequested || pending.generation === generation))
+        void stopNativeIntegrationSession(generation);
+    }).catch(() => {}).finally(() => {
+      observing = false;
+      if (observeAgain) { observeAgain = false; recover(); }
+    });
+  };
+  let scope = sharedPowerWriteScope(getSharedPowerLifecycle())?.join(':');
+  const stopPower = onSharedPowerLifecycle(state => {
+    const next = sharedPowerWriteScope(state)?.join(':');
+    if (next && next !== scope) recover();
+    scope = next;
+  }, { observeNotificationSequence: true, observeSuspendSerial: true });
+  const stopCompletion = on<{ ticket?: number }>('customSteamLibrary.mutationCompleted', value => {
+    if (value?.ticket === pending.ticket) recover();
+  });
+  pending.detach = () => { stopPower(); stopCompletion(); };
+}
+
+async function recoverPriorMutation(): Promise<void> {
+  const pending = pendingMutation;
+  if (!pending) return;
+  const outcome = await settlePendingMutation(pending);
+  if (!outcome) throw new MutationUnconfirmed();
+  if (openRequested && pending.kind === 'launch') recoveredLaunch = createdChild(outcome.result);
+}
+
+async function submitSessionMutation<T extends boolean | LaunchReceipt>(kind: MutationKind, generation: number,
+  beforeSend: () => boolean, send: (ticket: number) => Promise<T>): Promise<T | undefined> {
+  if (pendingMutation) throw new MutationUnconfirmed();
+  const ticket = await invoke<number>('customSteamLibrary.mutationTicket', { kind }, { timeoutMs: MUTATION_READ_MS });
+  if (generation !== sessionGeneration || !beforeSend()) return;
+  if (!Number.isSafeInteger(ticket) || ticket <= 0) throw new MutationUnconfirmed();
+  try { return await send(ticket); }
+  catch (error) {
+    if (error instanceof IpcRemoteError) throw error;
+    const pending = { ticket, kind, generation };
+    pendingMutation = pending;
+    // Register before reading: a completion can arrive while a reply still
+    // describes the running state. The ordered queue keeps that follow-up.
+    observePendingMutation(pending);
+    const outcome = await settlePendingMutation(pending, true);
+    if (!outcome) throw new MutationUnconfirmed();
+    if (outcome.error !== undefined) throw new Error(outcome.error);
+    if (kind === 'launch' && generation !== sessionGeneration && openRequested) recoveredLaunch = createdChild(outcome.result);
+    return outcome.result as T;
+  }
 }
 
 // The custom library is a separate process. Window hand-off is therefore
@@ -98,8 +201,8 @@ function joinWindowsPath(root: string, child: string): string {
 
 // 2026-09-17 用户裁决：删除 legacy 顶层 CustomSteamLibrary 回退——现行两根
 // 结构下子包与主程序同根（C:\SOFT\YeMan\YeManCC\CustomSteamLibrary）。
-async function resolveExecutable(): Promise<string> {
-  const exeDir = await app.exeDir();
+async function resolveExecutable(signal?: AbortSignal): Promise<string> {
+  const exeDir = await app.exeDir(MUTATION_READ_MS, signal);
   const candidates = [
     // Normal installed layout: YeManCC.exe and its child package share a root.
     joinWindowsPath(exeDir, 'CustomSteamLibrary\\CustomSteamLibrary.exe'),
@@ -107,7 +210,10 @@ async function resolveExecutable(): Promise<string> {
     `${CUSTOM_STEAM_LIBRARY_ROOT}\\CustomSteamLibrary.exe`,
   ];
   for (const candidate of candidates) {
-    if (await fs.exists(candidate).catch(() => false)) return candidate;
+    signal?.throwIfAborted();
+    const present = await fs.exists(candidate, MUTATION_READ_MS, signal).catch(() => false);
+    signal?.throwIfAborted();
+    if (present) return candidate;
   }
   throw new Error(`未找到 ${CUSTOM_STEAM_LIBRARY_TITLE}：${candidates.join('；')}`);
 }
@@ -267,26 +373,35 @@ function clearSessionWatch(): void {
   watch.read = null;
 }
 
-async function setCustomSteamLibrarySessionIntent(enabled: boolean, generation: number): Promise<boolean | undefined> {
-  if (!CUSTOM_STEAM_LIBRARY_INTEGRATION_ENABLED && enabled) return false;
-  return mutateSession(generation, () => invoke<boolean>('customSteamLibrary.setIntegrationSession', { enabled }));
+async function setCustomSteamLibrarySessionIntent(enabled: boolean, generation: number, beforeSend = () => true,
+  powerScope?: SharedPowerWriteScope): Promise<boolean | undefined> {
+  if (enabled && (!CUSTOM_STEAM_LIBRARY_INTEGRATION_ENABLED || !powerScope)) return false;
+  return mutateSession(generation, async () => {
+    if (!enabled) await recoverPriorMutation();
+    if (!beforeSend() || generation !== sessionGeneration) return;
+    return submitSessionMutation(enabled ? 'enable' : 'disable', generation, beforeSend,
+      mutationTicket => invoke<boolean>('customSteamLibrary.setIntegrationSession',
+        { enabled, mutationTicket, ...(powerScope ? { powerScope } : {}) }, { timeoutMs: MUTATION_ACK_MS }));
+  });
 }
 async function stopNativeIntegrationSession(generation: number): Promise<void> {
   await setCustomSteamLibrarySessionIntent(false, generation).catch(() => false);
 }
 
-function beginSessionWatch(generation: number): void {
+function beginSessionWatch(generation: number, powerInterrupted = false): void {
   if (generation !== sessionGeneration) return;
   clearSessionWatch();
   const watch: SessionWatch = { generation, timer: null, deadline: Date.now() + SESSION_STARTUP_GRACE_MS,
     observedPresent: false, read: null, detachHints: null };
   sessionWatch = watch;
   const current = () => sessionWatch === watch && generation === sessionGeneration;
+  let powerScope: string | undefined;
+  const admitted = () => current() && !!powerScope && sharedPowerWriteScope(getSharedPowerLifecycle())?.join(':') === powerScope;
   let readStartedAt = 0;
   let timerDue = 0;
   let returnCheckAt: number | null = null;
   const queueRead = (delay: number) => {
-    if (!current() || watch.read) return;
+    if (!admitted() || watch.read) return;
     const wait = Math.max(0, delay);
     const due = Date.now() + wait;
     if (watch.timer !== null && timerDue <= due) return;
@@ -299,7 +414,7 @@ function beginSessionWatch(generation: number): void {
   };
   const returnDelay = () => Math.max(returnCheckAt ?? 0, readStartedAt + SESSION_STARTUP_POLL_MS) - Date.now();
   const hintReturn = () => {
-    if (!current() || !watch.observedPresent || returnCheckAt !== null) return;
+    if (!admitted() || !watch.observedPresent || returnCheckAt !== null) return;
     // The host can restore the parent just before it destroys its own window.
     // Coalesce focus, visibility and input-owner hints into one fresh read.
     returnCheckAt = Date.now() + SESSION_RETURN_SETTLE_MS;
@@ -310,6 +425,7 @@ function beginSessionWatch(generation: number): void {
     if (!current()) return;
     // Retire synchronously. A late disable receipt must never clear a newer
     // watch, and a queued disable must check generation before it is sent.
+    recoveredLaunch = undefined;
     clearSessionWatch();
     requestYeManWindowAction('show');
     await stopNativeIntegrationSession(generation);
@@ -317,16 +433,17 @@ function beginSessionWatch(generation: number): void {
     window.dispatchEvent(new CustomEvent('customSteamLibrary:' + event, { detail }));
   };
   const poll = async () => {
-    if (!current() || watch.read) return;
+    if (!admitted() || watch.read) return;
     returnCheckAt = null;
     readStartedAt = Date.now();
     const read = new AbortController();
     watch.read = read;
+    const readCurrent = () => admitted() && watch.read === read;
     try {
       const status = await invoke<CustomSteamLibraryStatus>('customSteamLibrary.status', {}, {
         signal: read.signal, timeoutMs: SESSION_STARTUP_GRACE_MS,
       });
-      if (!current()) return;
+      if (!readCurrent()) return;
       if (status.present) {
         watch.observedPresent = true;
         if (status.compatible === false || status.inputOwner !== 'parent') {
@@ -338,12 +455,14 @@ function beginSessionWatch(generation: number): void {
       if (Date.now() < watch.deadline && !watch.observedPresent) return;
       await close('closed');
     } catch {
-      if (current() && Date.now() >= watch.deadline) await close('closed');
+      // Neither an established child nor a startup interrupted by sleep is
+      // proved absent by a transport failure.
+      if (readCurrent() && !watch.observedPresent && !powerInterrupted && Date.now() >= watch.deadline) await close('closed');
     } finally {
       if (current() && watch.read === read) {
         watch.read = null;
         if (returnCheckAt !== null) queueRead(returnDelay());
-        else if (watch.observedPresent) queueRead(SESSION_AUDIT_MS);
+        else if (watch.observedPresent || Date.now() >= watch.deadline) queueRead(SESSION_AUDIT_MS);
         else queueRead(Math.min(readStartedAt + SESSION_STARTUP_POLL_MS, watch.deadline) - Date.now());
       }
     }
@@ -353,58 +472,116 @@ function beginSessionWatch(generation: number): void {
   const removeOwnerHint = on<{ owner?: string }>('gamepad.input-owner', (data) => {
     if (data?.owner === 'yemancc') hintReturn();
   });
+  let stopPower: (() => void) | undefined;
   watch.detachHints = () => {
     window.removeEventListener('focus', hintReturn);
     document.removeEventListener('visibilitychange', visibilityChanged);
     removeOwnerHint();
+    stopPower?.();
   };
-  void poll();
+  stopPower = onSharedPowerLifecycle(power => {
+    const next = sharedPowerWriteScope(power)?.join(':');
+    if (!next || (powerScope && next !== powerScope)) powerInterrupted = true;
+    if (next === powerScope) return;
+    powerScope = next;
+    if (watch.timer !== null) clearTimeout(watch.timer);
+    watch.timer = null;
+    returnCheckAt = null;
+    const read = watch.read;
+    watch.read = null;
+    read?.abort();
+    if (next) void poll();
+  }, { observeNotificationSequence: true, observeSuspendSerial: true });
+  if (!current()) stopPower();
 }
 
 export async function launchCustomSteamLibrary(): Promise<CustomSteamLibraryLaunchResult> {
   if (!CUSTOM_STEAM_LIBRARY_INTEGRATION_ENABLED) {
     return { ok: false, executable: '', reason: 'Custom Steam Library integration is hidden' };
   }
+  const observedScope = () => sharedPowerWriteScope(getSharedPowerLifecycle())?.join(':');
+  const powerScope = sharedPowerWriteScope(getSharedPowerLifecycle());
+  if (!powerScope) return { ok: false, executable: '', reason: '电源状态尚未就绪，请稍后重试' };
+  const origin = powerScope.join(':');
   const generation = ++sessionGeneration;
-  clearSessionWatch();
+  openRequested = true;
+  launchPreparation?.abort();
+  const preparation = new AbortController();
+  launchPreparation = preparation;
+  const admitted = () => !preparation.signal.aborted && observedScope() === origin;
+  let stopPower: (() => void) | undefined;
+  let enableSent = false;
   let executable = '';
   const superseded = (): CustomSteamLibraryLaunchResult => ({ ok: false, executable,
     reason: 'Custom Steam Library session was stopped or replaced' });
+  const retire = async (): Promise<CustomSteamLibraryLaunchResult> => {
+    if (enableSent) await stopNativeIntegrationSession(generation);
+    return { ok: false, executable, reason: '电源状态已变化，请重新打开游戏库' };
+  };
   try {
+    stopPower = onSharedPowerLifecycle(() => {
+      if (!admitted()) preparation.abort();
+    }, { observeNotificationSequence: true, observeSuspendSerial: true });
+    await mutateSession(generation, recoverPriorMutation);
+    if (generation !== sessionGeneration) return superseded();
+    if (!admitted()) return await retire();
+    if (recoveredLaunch) {
+      const result = recoveredLaunch;
+      recoveredLaunch = undefined;
+      beginSessionWatch(generation, true);
+      return { ok: true, executable, pid: result.pid };
+    }
+    clearSessionWatch();
     // Native remains the sole input owner. Mutations have no local abort or
     // timeout: an unknown native outcome cannot grant a newer launch passage.
-    const armed = await setCustomSteamLibrarySessionIntent(true, generation);
+    const armed = await setCustomSteamLibrarySessionIntent(true, generation, () => {
+      if (!admitted()) return false;
+      enableSent = true;
+      return true;
+    }, powerScope);
     if (generation !== sessionGeneration) return superseded();
+    if (!admitted()) return await retire();
     if (armed !== true) throw new Error('Custom Steam Library session was not accepted');
-    executable = await resolveExecutable();
+    executable = await resolveExecutable(preparation.signal);
     if (generation !== sessionGeneration) return superseded();
-    const parentPid = await app.pid();
+    if (!admitted()) return await retire();
+    const parentPid = await app.pid(MUTATION_READ_MS, preparation.signal);
     if (generation !== sessionGeneration) return superseded();
-    const launched = await mutateSession(generation, () => shell.hidden(executable, [
+    const launched = await mutateSession(generation, () => admitted() ? submitSessionMutation('launch', generation, admitted,
+      mutationTicket => shell.hidden(executable, [
       '--integration=YeManCC',
       '--protocol=' + CUSTOM_STEAM_LIBRARY_PROTOCOL_VERSION,
       '--parent-pid=' + parentPid,
       '--input-owner=parent',
-    ]));
+    ], MUTATION_ACK_MS, false, { powerScope, mutationTicket })) : undefined);
     if (generation !== sessionGeneration) return superseded();
     if (launched?.ok === true) {
-      beginSessionWatch(generation);
-      requestYeManWindowAction('minimize');
+      const readyForHandoff = admitted();
+      beginSessionWatch(generation, !readyForHandoff);
+      if (readyForHandoff && admitted()) requestYeManWindowAction('minimize');
     } else {
+      if (!admitted()) return await retire();
       await stopNativeIntegrationSession(generation);
     }
     return { ok: launched?.ok === true, executable, pid: launched?.pid };
   } catch (error) {
-    if (generation === sessionGeneration) {
-      clearSessionWatch();
-      await stopNativeIntegrationSession(generation);
-    }
+    if (generation !== sessionGeneration) return superseded();
+    if (error instanceof MutationUnconfirmed) return { ok: false, executable, reason: error.message };
+    if (!admitted()) return await retire();
+    clearSessionWatch();
+    if (enableSent) await stopNativeIntegrationSession(generation);
     throw error;
+  } finally {
+    if (launchPreparation === preparation) launchPreparation = null;
+    stopPower?.();
   }
 }
 
 export async function stopCustomSteamLibrarySession(): Promise<void> {
   const generation = ++sessionGeneration;
+  openRequested = false;
+  recoveredLaunch = undefined;
+  launchPreparation?.abort();
   clearSessionWatch();
   await stopNativeIntegrationSession(generation);
 }

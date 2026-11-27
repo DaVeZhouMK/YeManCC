@@ -34,9 +34,13 @@ namespace YeMan.Setup {
     WebAssets.PrepareRuntimeSdk();
     string parent=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"YeManCC-Setup","web-profile");
     SafeFiles.NoLinks(parent);Directory.CreateDirectory(parent);
-    var environment=await CoreWebView2Environment.CreateAsync(null,Path.Combine(parent,Guid.NewGuid().ToString("N")),new CoreWebView2EnvironmentOptions());
+    var create=CoreWebView2Environment.CreateAsync(null,Path.Combine(parent,Guid.NewGuid().ToString("N")),new CoreWebView2EnvironmentOptions());
+    if(await Task.WhenAny(create,Task.Delay(12000))!=create)throw new IOException("界面环境初始化超时");
+    var environment=await create;if(IsDisposed)return;
     Trace("environment created");
-    await browser.EnsureCoreWebView2Async(environment);
+    var ensure=browser.EnsureCoreWebView2Async(environment);
+    if(await Task.WhenAny(ensure,Task.Delay(12000))!=ensure)throw new IOException("界面控制器初始化超时");
+    await ensure;if(IsDisposed)return;
     Trace("controller ready");
     var core=browser.CoreWebView2;
     core.Settings.AreDefaultContextMenusEnabled=false;core.Settings.AreDevToolsEnabled=false;core.Settings.AreHostObjectsAllowed=false;core.Settings.IsStatusBarEnabled=false;core.Settings.AreBrowserAcceleratorKeysEnabled=false;
@@ -50,15 +54,19 @@ namespace YeMan.Setup {
     trustedDocument="data:text/html;charset=utf-8;base64,"+Convert.ToBase64String(Encoding.UTF8.GetBytes(html));
     core.NavigateToString(html);
     await Task.Delay(15000);
-    if(!IsDisposed&&!ready){CaptureExitCode=1;Trace("UI handshake timeout");if(capture!=null){Json.Save(Path.Combine(capture,"ERROR.json"),new{Error="UI handshake timed out",SystemActions="NOT_RUN"});Close();}else MessageBox.Show(this,"本地界面未完成初始化，请重新打开设置中心。","界面未就绪",MessageBoxButtons.OK,MessageBoxIcon.Information);}
-   }catch(Exception e){CaptureExitCode=1;if(capture!=null){Json.Save(Path.Combine(capture,"ERROR.json"),new{Error=e.ToString()});Close();}else MessageBox.Show(this,e.Message,"无法打开本地设置界面",MessageBoxButtons.OK,MessageBoxIcon.Information);}
+    if(!IsDisposed&&!ready)FailInitialization(new IOException("本地界面未完成初始化"));
+   }catch(Exception e){if(!IsDisposed)FailInitialization(e);}
   }
+  void FailInitialization(Exception e){CaptureExitCode=capture==null&&engineInvocations==0?2:1;if(capture!=null)Json.Save(Path.Combine(capture,"ERROR.json"),new{Error=e.ToString(),SystemActions="NOT_RUN"});Close();}
   object Scan(string root){return DetectionSnapshot(root);}
   internal static object DetectionSnapshot(string root) {
    var installation=Engine.AssessInstall();
-   var system=Native.SystemSupport();if(!system.Allowed){installation.Allowed=false;installation.Error=system.Error;}
-   return new {localVersion=BuildInfo.ProgramVersion,hwVersion=BuildInfo.HwVersion,root=root,installedVersion=installation.InstalledVersion,installation=installation,
-    runtimes=new[]{new RuntimeObservation{name=system.Label,ready=system.Allowed,error=system.Error},Runtimes.Observe("WebView2 Runtime · x64",Runtimes.WebView),Runtimes.Observe(".NET 10 桌面运行时 · x64",()=>Runtimes.DesktopVersion()>=new Version(10,0,12)),Runtimes.Observe("VC++ v14 · x64",()=>Runtimes.VC("x64")),Runtimes.Observe("VC++ v14 · x86",()=>Runtimes.VC("x86")),Runtimes.Observe("HidHide 手柄驱动",()=>new HidHidePlatform().Observe().Ready)}};
+   var system=Native.SystemSupport();
+   RuntimeObservation driver;
+   try{driver=HidHide.Detection(new HidHidePlatform().Observe());}
+   catch(Exception e){driver=new RuntimeObservation{name="HidHide 手柄驱动",error=e.Message};}
+   return new {localVersion=BuildInfo.ProgramVersion,hwVersion=BuildInfo.HwVersion,root=root,installation=installation,
+    runtimes=new[]{new RuntimeObservation{name=system.Label,ready=system.Allowed,badge=system.Allowed?null:"未验证"},Runtimes.Observe("WebView2 Runtime · x64",Runtimes.WebView),Runtimes.Observe(".NET 10 桌面运行时 · x64",Runtimes.DesktopReady),Runtimes.Observe("VC++ v14 · x64",()=>Runtimes.VC("x64")),Runtimes.Observe("VC++ v14 · x86",()=>Runtimes.VC("x86")),driver}};
   }
   void Send(object data) {if(!IsDisposed&&browser.CoreWebView2!=null)browser.CoreWebView2.PostWebMessageAsJson(Json.Write(data));}
   void Notice(string text){Send(new{type="notice",message=text});}
@@ -69,7 +77,7 @@ namespace YeMan.Setup {
     if((e.Source!="about:blank"&&e.Source!=trustedDocument)||e.WebMessageAsJson.Length>32768)return;
     var data=Json.Read<Dictionary<string,object>>(e.WebMessageAsJson);string action=Value(data,"action");
     if(action=="ready") {
-     if(ready)return;ready=true;Send(new{type="init",preview=preview,path=plan.Root,shortcut=plan.DesktopShortcut,defender=plan.DefenderExclusions,scan=Scan(Plan.InstallRoot)});if(capture==null)padTimer.Start();
+     if(ready)return;var scan=Scan(Plan.InstallRoot);Send(new{type="init",preview=preview,path=plan.Root,shortcut=plan.DesktopShortcut,defender=plan.DefenderExclusions,scan=scan});ready=true;if(capture==null)padTimer.Start();
      if(capture!=null){await CaptureUi();return;}if(applyOnLoad)await Apply(plan);return;
     }
     if(!ready)return;
@@ -91,8 +99,6 @@ namespace YeMan.Setup {
    if(preview)throw new IOException("预览禁止执行安装");
    if(running||applyClaimed)return;Plan.Validate(selected);selected.Root=SafeFiles.Full(selected.Root);
    var assessment=Engine.AssessInstall();if(!assessment.Allowed)throw new IOException(assessment.Error);
-   string current=assessment.InstalledVersion;
-   if(assessment.Action!="recover"&&(selected.ExpectedInstalledVersion==null||selected.ExpectedInstalledVersion!=current)){Send(new{type="scan",scan=Scan(selected.Root)});throw new IOException("YMCC 版本已变化，请核对显示的版本后再安装");}
    applyClaimed=true;
    if(!Native.IsAdmin) {
     try {string data=Convert.ToBase64String(Encoding.UTF8.GetBytes(Json.Write(selected)));Process.Start(new ProcessStartInfo(System.Reflection.Assembly.GetExecutingAssembly().Location,"--apply "+data){UseShellExecute=true,Verb="runas"});Close();}
@@ -103,7 +109,6 @@ namespace YeMan.Setup {
    try {engineInvocations++;receipt=await Task.Run(()=>new Engine(text=>{if(!IsDisposed)BeginInvoke((Action)(()=>Send(new{type="progress",message=text})));}).Execute(selected));}
    catch(Exception e){receipt=new Receipt{Root=selected.Root,Phase="failed",Error=e.Message};}
    finally{running=false;}
-   if(receipt.Phase=="confirmation-required"){applyClaimed=false;Send(new{type="confirmation",scan=Scan(selected.Root),message="上次安装已恢复，请确认版本后继续"});return;}
    Send(new{type="result",result=receipt});
   }
   void Pad() {
@@ -140,12 +145,13 @@ namespace YeMan.Setup {
     }
     ClientSize=new Size(820,580);await Task.Delay(100);
     observations.Add(new{type="SYNTHETIC_INSTALL_CHOICES_LAYOUT_ONLY",states=await CaptureInstallChoices()});
-    // Explicit synthetic failure input verifies only the shared result layout, not OS installation.
-    Send(new{type="result",result=new Receipt{Phase="blocked-reboot",Root=Plan.InstallRoot,RebootRequired=true,Error="测试输入：运行库要求重启，YMCC 尚未安装完成"}});await Task.Delay(100);
-    string pending=await browser.CoreWebView2.ExecuteScriptAsync("({title:document.getElementById('ymcc-title').textContent,phase:window.YMCCSetup.getState().result.Phase,warning:!!document.querySelector('.mc-result-symbol.failed')})");
+    var legacy=new HidHideSnapshot{DriverPackage=true,PackageVersions={"1.1.50.0"}};
+    string driverWarning=HidHide.Warning(new HidHideRecord{Before=legacy,Status=HidHide.ExistingStatus(legacy)});
+    Send(new{type="result",result=new Receipt{Phase="completed",Root=Plan.InstallRoot,Warnings={"RTSS 暂时无法更新，已跳过。",driverWarning}}});await Task.Delay(100);
+    string pending=await browser.CoreWebView2.ExecuteScriptAsync("({title:document.getElementById('ymcc-title').textContent,count:document.querySelectorAll('.mc-component-warning').length,hasLegacy:[...document.querySelectorAll('.mc-component-warning')].some(e=>e.textContent.includes('HidHide')&&e.textContent.includes('1.1.50.0')),failed:!!document.querySelector('.mc-result-symbol.failed')})");
     var pendingState=Json.Read<Dictionary<string,object>>(pending);
-    if(Convert.ToString(pendingState["title"])!="请重启后继续安装"||Convert.ToString(pendingState["phase"])!="blocked-reboot"||!Convert.ToBoolean(pendingState["warning"]))throw new IOException("Pending-reboot layout falsely reports completion");
-    await CapturePage("pending-reboot-SYNTHETIC-layout.png");observations.Add(new{type="SYNTHETIC_FAILURE_LAYOUT_ONLY",state=pendingState});
+    if(Convert.ToString(pendingState["title"])!="安装完成"||Convert.ToInt32(pendingState["count"])!=2||!Convert.ToBoolean(pendingState["hasLegacy"])||Convert.ToBoolean(pendingState["failed"]))throw new IOException("Completed-with-warnings layout did not show legacy HidHide without failing installation");
+    await CapturePage("installed-with-warnings-SYNTHETIC-layout.png");observations.Add(new{type="SYNTHETIC_COMPLETION_WITH_WARNINGS_LAYOUT_ONLY",state=pendingState});
     if(engineInvocations!=0||running||applyClaimed)throw new IOException("Preview invoked an installation path");
     Json.Save(Path.Combine(capture,"RENDER.json"),new{Type="ACTUAL_WEBVIEW2_RENDER",ProductName=Text,IconSha256=WebAssets.IconHash,UiSha256=WebAssets.HtmlHash,ArtifactSha256=SafeFiles.Hash(System.Reflection.Assembly.GetExecutingAssembly().Location),Preview=true,EngineInvocations=engineInvocations,SystemActions="NOT_RUN",NetworkRequests="BLOCKED_BY_HOST_AND_CSP",observations=observations});
    }catch(Exception e){CaptureExitCode=1;Json.Save(Path.Combine(capture,"ERROR.json"),new{Error=e.ToString()});}finally{Close();}
@@ -160,14 +166,20 @@ namespace YeMan.Setup {
   async Task<object> CaptureInstallChoices() {
    string original=await browser.CoreWebView2.ExecuteScriptAsync("window.YMCCSetup.getState().scan");
    var observations=new List<object>();
+   var legacyDriver=HidHide.Detection(new HidHideSnapshot{DriverPackage=true,PackageVersions={"1.1.50.0"}});
+   await browser.CoreWebView2.ExecuteScriptAsync("(()=>{const s="+original+";s.runtimes[s.runtimes.length-1]="+Json.Write(legacyDriver)+";window.YMCCSetup.receive({type:'scan',scan:s});})()");
+   string legacyState=await browser.CoreWebView2.ExecuteScriptAsync("(()=>{const b=[...document.querySelectorAll('.mc-runtime-row')].find(e=>e.textContent.includes('HidHide')).querySelector('.mc-badge');return {text:b.textContent,ready:b.classList.contains('ready'),nextDisabled:document.getElementById('ymcc-next').disabled};})()");
+   var old=Json.Read<Dictionary<string,object>>(legacyState);
+   if(Convert.ToString(old["text"])!="旧版，待修复"||Convert.ToBoolean(old["ready"])||Convert.ToBoolean(old["nextDisabled"]))throw new IOException("Legacy HidHide should be visible without disabling installation");
+   await CapturePage("environment-legacy-hidhide-SYNTHETIC-layout.png");observations.Add(new{type="SYNTHETIC_LEGACY_HIDHIDE_LAYOUT_ONLY",state=old});
    await browser.CoreWebView2.ExecuteScriptAsync("(()=>{const s="+original+";const w=s.runtimes.find(r=>r.name.startsWith('WebView2'));w.ready=false;w.error=null;window.YMCCSetup.receive({type:'scan',scan:s});})()");await Task.Delay(100);
    string webviewStatus=await browser.CoreWebView2.ExecuteScriptAsync("[...document.querySelectorAll('.mc-runtime-row')].find(r=>r.textContent.includes('WebView2')).querySelector('.mc-badge').textContent");
-   if(Json.Read<string>(webviewStatus)!="联网补齐")throw new IOException("WebView2 缺失提示与联网规则不一致");
+   if(Json.Read<string>(webviewStatus)!="可离线安装")throw new IOException("WebView2 缺失提示与离线规则不一致");
    observations.Add(new{type="SYNTHETIC_MISSING_WEBVIEW_DETECTION_ONLY",status=webviewStatus});
-   await browser.CoreWebView2.ExecuteScriptAsync("(()=>{const s="+original+";s.runtimes.slice(1).forEach(r=>{r.ready=false;r.error=null;});window.YMCCSetup.receive({type:'scan',scan:s});})()");await Task.Delay(100);
-   string missing=await browser.CoreWebView2.ExecuteScriptAsync("({count:document.querySelectorAll('.mc-runtime-row').length,automatic:[...document.querySelectorAll('.mc-badge')].filter(e=>e.textContent==='自动补齐').length,network:[...document.querySelectorAll('.mc-badge')].filter(e=>e.textContent==='联网补齐').length})");
+   await browser.CoreWebView2.ExecuteScriptAsync("(()=>{const s="+original+";s.runtimes.slice(1).forEach(r=>{r.ready=false;r.error=null;r.badge=null;});window.YMCCSetup.receive({type:'scan',scan:s});})()");await Task.Delay(100);
+   string missing=await browser.CoreWebView2.ExecuteScriptAsync("({count:document.querySelectorAll('.mc-runtime-row').length,automatic:[...document.querySelectorAll('.mc-badge')].filter(e=>e.textContent==='尝试补齐').length,offline:[...document.querySelectorAll('.mc-badge')].filter(e=>e.textContent==='可离线安装').length})");
    var missingState=Json.Read<Dictionary<string,object>>(missing);
-   if(Convert.ToInt32(missingState["count"])!=6||Convert.ToInt32(missingState["automatic"])!=4||Convert.ToInt32(missingState["network"])!=1)throw new IOException("Compact missing-runtime state lost installation or network information");
+   if(Convert.ToInt32(missingState["count"])!=6||Convert.ToInt32(missingState["automatic"])!=4||Convert.ToInt32(missingState["offline"])!=1)throw new IOException("Compact missing-runtime state lost offline installation information");
    await CapturePage("environment-missing-SYNTHETIC-layout.png");observations.Add(new{type="SYNTHETIC_MISSING_RUNTIME_LAYOUT_ONLY",state=missingState});
    await browser.CoreWebView2.ExecuteScriptAsync("window.YMCCSetup.receive({type:'scan',scan:"+original+"})");
    await browser.CoreWebView2.ExecuteScriptAsync("(()=>{const s="+original+";s.runtimes[0].ready=null;s.runtimes[0].error='测试输入：环境读取权限不足';window.YMCCSetup.receive({type:'scan',scan:s});})()");await Task.Delay(100);
@@ -176,26 +188,19 @@ namespace YeMan.Setup {
    if(Convert.ToInt32(failedState["count"])!=6||Convert.ToString(failedState["text"])!="检测失败"||Convert.ToBoolean(failedState["nextDisabled"]))throw new IOException("环境读取错误使页面失去响应："+failedRuntime);
    await CapturePage("environment-read-error-SYNTHETIC-layout.png");observations.Add(new{type="SYNTHETIC_RUNTIME_READ_ERROR_LAYOUT_ONLY",state=failedState});
    var examples=new[]{
-    new {Name="fresh",Version="",Action="install",Allowed=true,Label="安装 YMCC "+BuildInfo.ProgramVersion,Button="开始安装 →"},
-    new {Name="older",Version="0.0.38",Action="update",Allowed=true,Label="YMCC 0.0.38 → "+BuildInfo.ProgramVersion+" · 保留设置",Button="更新安装 →"},
-    new {Name="same",Version=BuildInfo.ProgramVersion,Action="reinstall",Allowed=true,Label="YMCC "+BuildInfo.ProgramVersion+" · 同版重新安装，保留设置",Button="重新安装 →"},
-    new {Name="newer",Version="0.0.40",Action="blocked",Allowed=false,Label="当前 0.0.40 · 包内 "+BuildInfo.ProgramVersion,Button="开始安装 →"},
-    new {Name="unknown",Version="unknown",Action="blocked",Allowed=false,Label="当前 版本未知 · 包内 "+BuildInfo.ProgramVersion,Button="开始安装 →"},
-    new {Name="recover",Version="unknown",Action="recover",Allowed=true,Label="上次安装未完成 · 恢复后确认版本",Button="恢复并继续 →"}
+    new {Name="fresh",Action="install",Label="安装 YMCC "+BuildInfo.ProgramVersion,Button="开始安装 →"},
+    new {Name="overwrite",Action="overwrite",Label="覆盖程序文件，保留设置",Button="覆盖安装 →"},
+    new {Name="recover",Action="recover",Label="恢复上次改动后继续安装",Button="恢复并继续 →"}
    };
    foreach(var example in examples) {
-    string data=Json.Write(new{installedVersion=example.Version,installation=new InstallAssessment{InstalledVersion=example.Version,PackageVersion=BuildInfo.ProgramVersion,Action=example.Action,Allowed=example.Allowed,Label=example.Label,Error=example.Allowed?null:"测试输入：现有版本不可覆盖"}});
+    string data=Json.Write(new{installation=new InstallAssessment{PackageVersion=BuildInfo.ProgramVersion,Action=example.Action,Allowed=true,Label=example.Label}});
     await browser.CoreWebView2.ExecuteScriptAsync("(()=>{const s=Object.assign("+original+","+data+");window.YMCCSetup.receive({type:'scan',scan:s});if(window.YMCCSetup.getState().view==='home')window.YMCCSetup.next();})()");await Task.Delay(100);
     string raw=await browser.CoreWebView2.ExecuteScriptAsync("({label:document.getElementById('ymcc-version-change').textContent,button:document.getElementById('ymcc-next').textContent,disabled:document.getElementById('ymcc-next').disabled,view:window.YMCCSetup.getState().view})");
     var state=Json.Read<Dictionary<string,object>>(raw);
-    if(Convert.ToString(state["label"])!=example.Label.Replace("YMCC","YeManCC")||Convert.ToString(state["button"])!=example.Button||Convert.ToBoolean(state["disabled"])==example.Allowed||Convert.ToString(state["view"])!="review")throw new IOException("安装版本界面分支不正确："+example.Name+" "+raw);
+    if(Convert.ToString(state["label"])!=example.Label.Replace("YMCC","YeManCC")||Convert.ToString(state["button"])!=example.Button||Convert.ToBoolean(state["disabled"])||Convert.ToString(state["view"])!="review")throw new IOException("安装界面分支不正确："+example.Name+" "+raw);
     await CapturePage("installation-"+example.Name+"-SYNTHETIC-layout.png");observations.Add(new{input=example,state=state});
    }
-   await browser.CoreWebView2.ExecuteScriptAsync("window.YMCCSetup.receive({type:'progress',message:'测试输入：恢复中'});window.YMCCSetup.receive({type:'confirmation',scan:"+original+",message:'测试输入：恢复后确认版本'})");await Task.Delay(100);
-   string restored=await browser.CoreWebView2.ExecuteScriptAsync("({view:window.YMCCSetup.getState().view,logs:window.YMCCSetup.getState().logs.length,result:window.YMCCSetup.getState().result,notice:document.getElementById('ymcc-notice').textContent})");
-   var restoredState=Json.Read<Dictionary<string,object>>(restored);
-   if(Convert.ToString(restoredState["view"])!="review"||Convert.ToInt32(restoredState["logs"])!=0||restoredState["result"]!=null||Convert.ToString(restoredState["notice"])!="测试输入：恢复后确认版本")throw new IOException("恢复后未回到版本确认界面："+restored);
-   await CapturePage("recovery-confirmation-SYNTHETIC-layout.png");observations.Add(new{type="SYNTHETIC_RECOVERY_CONFIRMATION_LAYOUT_ONLY",state=restoredState});return observations;
+   return observations;
   }
   async Task<string> VerifyNavigation(int height) {
    Trace("navigation assertions start "+height);

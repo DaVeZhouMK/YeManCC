@@ -25,7 +25,9 @@ const router = read('src/router.ts');
 const app = read('src/App.vue');
 check('pointer and LB/RB share policy', () => {
   assert.match(nav, /residentNavigationRoutes\(ROUTES, false, radialTestingEnabled\.value\)/);
-  assert.match(engine, /residentNavigationRoutes\(ROUTES, enabled, isRadialTestingEnabled\(\)\)/);
+  assert.match(engine, /const controllerRoutes = residentNavigationRoutes\(ROUTES, false\)/);
+  assert.match(engine, /const controllerTestingRoutes = residentNavigationRoutes\(ROUTES, false, true\)/);
+  assert.match(engine, /isRadialTestingEnabled\(\) \? controllerTestingRoutes : controllerRoutes/);
 });
 for (const [name, text] of [['sidebar', nav], ['controller navigation', engine], ['router', router]]) {
   check(`${name}: no capability visibility dependency`, () => assert.doesNotMatch(text, /fanFeatureEnabled|virtualGamepadFeatureEnabled|gyroMotionFeatureEnabled|refreshGyroVirtualFeatureAvailability/));

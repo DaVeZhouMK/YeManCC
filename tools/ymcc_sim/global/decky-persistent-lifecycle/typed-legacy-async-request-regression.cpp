@@ -104,7 +104,7 @@ inline Json typed(const std::filesystem::path& output,const std::string& kind,co
     const auto previousTelemetry=environment(L"YMCC_TYPED_ASYNC_TELEMETRY");setEnvironment(L"YMCC_TYPED_ASYNC_TELEMETRY",mapping.name);
     auto client=std::make_shared<Client>();Runtime runtime;std::atomic<unsigned> plans{0};std::atomic<bool> committed{false};
     Config config;config.executable=detail::executable();config.home=output.wstring();std::filesystem::create_directories(output);config.preflight=[]{return std::string{};};config.ownedBinding=client;
-    config.bindingPlan=[&](BindingMode,std::uint64_t generation){++plans;auto request=makeRequest(generation);request["bootstrap"]["fixtureContextPid"]=context.lease.at("pid");request["bootstrap"]["fixturePort"]=server.port;return BindingPlan{std::move(request),{}};};runtime.initialize(std::move(config));runtime.observeSteam(1,true);runtime.setEnabled(true);
+    config.bindingPlan=[&](BindingMode,std::uint64_t generation,const auto&){++plans;auto request=makeRequest(generation);request["bootstrap"]["fixtureContextPid"]=context.lease.at("pid");request["bootstrap"]["fixturePort"]=server.port;return BindingPlan{std::move(request),{}};};runtime.initialize(std::move(config));runtime.observeSteam(1,true);runtime.setEnabled(true);
     const auto startDeadline=GetTickCount64()+4000;while(!runtime.snapshot().pid&&GetTickCount64()<startDeadline)Sleep(5);
     Json assertions=Json::array();auto add=[&](const char* id,bool okay,const Json& value){assertions.push_back(invariant(id,okay,value));};
     const auto pid=runtime.snapshot().pid;add("inert child did not start",pid!=0,pid);need(pid!=0,"inert child did not start");

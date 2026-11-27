@@ -123,8 +123,6 @@ Copy-Item -LiteralPath "$root\tools\gpd_native_handoff_cycle_legacy.h" -Destinat
 Copy-Item -LiteralPath "$root\tools\gpd_native_handoff_cycle_partial_before.h" -Destination "$snapshot\tools\gpd_native_handoff_cycle_partial_before.h"
 Copy-Item -LiteralPath "$root\deps\json\json.hpp" -Destination "$snapshot\deps\json\json.hpp"
 Copy-Item -LiteralPath "$root\capabilities" -Destination "$snapshot\capabilities" -Recurse
-# Preserve the production TU dependency closure introduced by AMD settings.
-Copy-Item -LiteralPath "$root\deps\adlx-sdk" -Destination "$snapshot\deps\adlx-sdk" -Recurse
 Get-ChildItem -LiteralPath $snapshot -File -Recurse|ForEach-Object{Get-FileHash -LiteralPath $_.FullName}|Select-Object Path,Hash|ConvertTo-Json|Set-Content -LiteralPath "$OutputRoot\compiled-snapshot-hashes.json" -Encoding utf8
 $optimization=if($BuildProfile -eq 'Unoptimized'){'/Od'}else{'/O2'}
 $common=@('/nologo','/std:c++20','/utf-8','/EHsc','/MT',$optimization,'/bigobj','/DNDEBUG','/DUNICODE','/D_UNICODE','/DYMCC_SCREEN_NATIVE_INPUT_CANDIDATE=1')

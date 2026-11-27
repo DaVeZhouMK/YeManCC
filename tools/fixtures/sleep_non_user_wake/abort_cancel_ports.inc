@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -113,7 +114,6 @@ static ymcc::sleeppower::Dispatch g_sleepPowerDispatch;
 static HWND g_hwnd=reinterpret_cast<HWND>(1);
 static constexpr UINT_PTR SG_RETRY_TIMER_ID=1234;
 static constexpr UINT WM_SG_S0_INTENT=WM_APP+1,WM_SG_S0_WAKE=WM_APP+2,WM_SG_S4_WAKE=WM_APP+3,WM_FAN_KERNEL_POWER_FACT=WM_APP+4;
-struct FanKernelPowerFact{int eventId;ULONGLONG fileTime;};
 static bool g_sgSleepIntentArmed=true,g_sgSleepQueryOwnsGeneration=true,g_sgSleepQueryGateClosed=true;
 static bool g_sgModernStandbyActive=true,g_sgModernWakeClassified=false,g_sgRepairEligible=true,g_sgRetryInProgress=true;
 static ULONGLONG g_sgSleepQueryGeneration=11,g_sgModernWakeClassifiedTick=0,g_sgRetryDueTick=1,g_sgSleepTriggerTick=1;
@@ -172,7 +172,8 @@ static bool sgResumeMarkerDefinitelyStale(const std::wstring&,DWORD){return fals
 static void sgInitNt(){}
 static bool sgSleepRetryActive(){return g_sgRetryInProgress;}
 static bool focusQueryProcessIdentity(DWORD pid,void*,ULONGLONG* created){barrier("identity-query");if(ownedLeaseMode){HANDLE p=::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);*created=p?ownedBirth(p):0;if(p)::CloseHandle(p);return *created!=0;}*created=456;return pid==123;}
-static void focusSingleResumedGame(const std::vector<DWORD>& pids,ULONGLONG,const ymcc::sleeppower::SharedPowerV1&){if(!pids.empty())++focusCalls;}
+static void focusSingleResumedGame(const std::vector<DWORD>& pids,ULONGLONG,const ymcc::sleeppower::SharedPowerV1&,
+                                  std::optional<std::uint64_t> = std::nullopt){if(!pids.empty())++focusCalls;}
 static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1*,uint32_t) noexcept;
 #include "sgAcquireResumeFiles.inc"
 static HANDLE fakeOpenProcess(DWORD access,BOOL inherit,DWORD pid){barrier("process-open");const auto h=ownedLeaseMode?::OpenProcess(access,inherit,pid):reinterpret_cast<HANDLE>(2);if(ownedLeaseMode&&!keepResumeFailure&&transientVetoStage=="open")applyTransientVeto();return h;}
@@ -204,12 +205,14 @@ static ThreadState queryThreads(DWORD){++queryCalls;barrier("running-confirmatio
 static bool sameUser(HANDLE){return false;}
 #include "wake_offsets.inc"
 }
+static std::atomic<uint64_t> g_sharedPowerSuspendSerial{0};
+#include "strict_resume_declarations.inc"
 #include "sgResumeSleepTargetUnlocked.inc"
 #undef Sleep
 #undef OpenProcess
 #undef CloseHandle
 #include "hardwareWriteAllowed.inc"
-static std::atomic<uint64_t> g_sharedPowerPublicationRevision{0},g_sharedPowerSuspendSerial{0};
+static std::atomic<uint64_t> g_sharedPowerPublicationRevision{0};
 #include "readSharedSystemPower.inc"
 static bool fixtureNativePowerAdmitted(){ymcc::sleeppower::SharedPowerV1 power;return ymcc::sleeppower::capturePower(&readSharedSystemPower,power);}
 
@@ -223,10 +226,13 @@ static void sleepRecoveryAutoCancelPreparedSuspend(){
     if(selectedEvent=="steam-query-canceled-fault")throw std::bad_alloc();
 }
 static void inputHostRequestPowerRearm(unsigned long long generation,const char*){++rearmCalls;rearmGeneration=generation;}
-static void appendFanLifecycleLog(const char*,const json&){++readyNotices;}
-static void fanHostScheduleEmergencyResume(unsigned long long generation){++fanResumeCalls;fanResumeGeneration=generation;}
-static unsigned long long currentFanPowerGeneration(){return currentPowerGeneration();}
-static void ipc_emit(const char*,const json&){}
+[[maybe_unused]] static void appendFanLifecycleLog(const char*,const json&){}
+[[maybe_unused]] static void fanHostScheduleEmergencyResume(unsigned long long generation){++fanResumeCalls;fanResumeGeneration=generation;}
+[[maybe_unused]] static unsigned long long currentFanPowerGeneration(){return currentPowerGeneration();}
+static void ipc_emit(const char* event,const json&){
+ if(std::string_view(event)=="gameMedia.resume-ready")++readyNotices;
+ if(std::string_view(event)=="fan.resume-ready")++fanResumeCalls;
+}
 [[maybe_unused]] static void deckySidebarResumeAfterIntent(unsigned long long){}
 static void publishSharedPowerLifecycle(const char* reason){if(std::string_view(reason)!="sleep-intent-canceled")return;++sharedReadyCalls;ymcc::sleeppower::SharedPowerV1 power;if(ymcc::sleeppower::capturePower(&readSharedSystemPower,power))sharedReadyGeneration=power.generation;}
 struct EventInput{int eventId,reason,targetState;ULONGLONG originalTime;};
@@ -238,18 +244,40 @@ static int sgKernelPowerReason(const std::string&){return incoming.reason;}
 static ULONGLONG sgKernelPowerEventFileTime(const std::string&){return incoming.originalTime;}
 namespace ymcc::abnormalsleep {static void publishConfirmedWake(std::atomic<ULONGLONG>& marker,ULONGLONG at){sgPublishSleepEventTime(marker,at);}}
 #include "sleep_residency_evidence.h"
+#include "sleep_kernel_cycle.h"
 static void sgSleepTimeoutRecordSystemSuccess(ULONGLONG){}
-static void sgSleepTimeoutRecordKernel(int,int,ULONGLONG,ULONGLONG,bool=false,bool=false){} // Original callback cache terminal; no classification is exercised here.
+static void sgSleepTimeoutRecordKernel(int,int,ULONGLONG,ULONGLONG,bool=false,bool=false,
+        ymcc::sleeppower::KernelCycleIdentity={}){} // Original callback cache terminal; no classification is exercised here.
 static void sgStaticScanCancel(const char*){}
 static void sgSleepTimeoutObserveCompleted(const json&,ULONGLONG,ULONGLONG,int){}
 static json sgSleepEnvironmentSnapshot(){return json::object();}
 static const char* sgKernelPowerReasonName(int){return "inert-parser-leaf";}
 static void sgAbnormalPostCompleted(const std::string&,ULONGLONG){}
 static void sleepRecoveryAutoRecordKernelWake(unsigned long long,int,int,int,ULONGLONG){}
-static BOOL fakePostMessage(HWND,UINT message,WPARAM,LPARAM payload){
-    if(message==WM_FAN_KERNEL_POWER_FACT)delete reinterpret_cast<FanKernelPowerFact*>(payload);return TRUE;
+static bool failKernelWakePost=false;
+static bool failKernelIntentPost=false;
+static bool queueKernel107=false;
+static unsigned kernelWakePosts=0,kernelWakeReplays=0;
+static unsigned kernelIntentPosts=0;
+static std::vector<UINT> kernelReplayOrder;
+static UINT replayMessage=0;
+static WPARAM replayArgument=0;
+static LPARAM replayOriginal=0;
+[[maybe_unused]] static LRESULT fakeSendKernelWake(HWND,UINT message,WPARAM argument,LPARAM original){
+    kernelReplayOrder.push_back(message);
+    ++kernelWakeReplays;replayMessage=message;replayArgument=argument;replayOriginal=original;return 0;
+}
+static BOOL fakePostMessage(HWND window,UINT message,WPARAM argument,LPARAM original){
+    if(message==WM_SG_S0_INTENT){++kernelIntentPosts;return !failKernelIntentPost;}
+    if(message==WM_SG_S0_WAKE||message==WM_SG_S4_WAKE){
+        ++kernelWakePosts;
+        if(queueKernel107&&message==WM_SG_S4_WAKE)return ::PostMessageW(window,message,argument,original);
+        return !failKernelWakePost;
+    }
+    return TRUE;
 }
 #define PostMessageW fakePostMessage
+#include "ready_lifecycle.inc"
 #include "sgKernelPowerEventCallback.inc"
 static void sgAbortSleepIntent(const char*,ULONGLONG=0);
 #include "sgRenewCancellationReady.inc"
@@ -271,7 +299,7 @@ static BOOL fixtureProcessIdToSessionId(DWORD pid,DWORD* session){
 #undef ProcessIdToSessionId
 static bool sgWriteFileAtomic(const std::wstring& p,const std::string& s){if(p==L"controlled-trigger")return true;std::ofstream f{std::filesystem::path(p)};f<<s;return static_cast<bool>(f);}
 static bool sleepRecoveryAutoAllows(unsigned long long,unsigned long long){return false;}
-static void postWakeGameRecoveryStatus(ULONGLONG,bool,const std::string&,size_t,ptrdiff_t) noexcept {}
+static void postWakeGameRecoveryStatus() noexcept {}
 static bool nativeMonitorExcluded(const std::wstring&){return true;}
 static std::vector<std::wstring> sgExcludes(){return {};}
 static bool sgNameExcludedBy(const std::wstring&,const std::vector<std::wstring>&){return true;}
@@ -339,11 +367,10 @@ static void sleepRecoveryAutoGameReleased(unsigned long long){
  {std::lock_guard lock(workerEvidenceMx);workerCompletionOutsideOperation=free;workerCompletion=true;}workerEvidenceCv.notify_all();
 }
 #include "SgSuspendResult.inc"
-#include "powerLifecycleMatches.inc"
 [[noreturn]] static void workerRejectUnselected(){++workerUnexpectedActions;throw std::runtime_error("unselected original worker action");}
 static SgSuspendResult sgPauseSleepTarget(unsigned long long,const SgWorkItem* =nullptr){workerRejectUnselected();}
 static void sgRealWake(const char*,unsigned long long,const SgWorkItem* =nullptr){workerRejectUnselected();}
-static void publishPowerResumeReady(unsigned long long){workerRejectUnselected();}
+static void publishPowerResumeReady(unsigned long long,PowerResumeBoundary){workerRejectUnselected();}
 static void sgApplyLongSleepResumeGrace(unsigned long long){workerRejectUnselected();}
 static bool sgResumeClassificationHeld(unsigned long long){workerRejectUnselected();}
 static bool sgResumeClassificationObserved(unsigned long long){workerRejectUnselected();}
@@ -456,7 +483,7 @@ static int runOwnedLease(const std::string& mode){
  const bool existingNormal=checkedIoFailures.load()==(existingKind=="known-into-empty"?0U:1U)&&existingClock&&queuedTargets==((existingKind=="append"||existingDistinct)?2U:1U)&&g_manualPausedPid==child.dwProcessId+1&&(existingVeto?(!running&&retained&&markerRetained&&actualOwnedNtCalls==0):(running&&!retained&&!markerRetained&&actualKernelNtCallsOnWorker==8))&&!g_sgWakeRecoveryPending.load()&&focusCalls==0;
  const bool normal=!abortThrewAllocation&&workerSafe&&(existingMode?existingNormal:checkedBoundaryMode?(!running&&retained&&markerRetained&&actualOwnedNtCalls==0&&transientVetoApplied&&focusCalls==0&&(transientVetoKind=="exit"||!g_sgWakeRecoveryPending.load())):checkedPermanentMode?(!running&&retained&&markerRetained&&!g_sgWakeRecoveryPending.load()&&actualOwnedNtCalls==0&&checkedIoFailures.load()==WakeGameResume::attemptCount+1):checkedGenerationMode?(!running&&retained&&markerRetained&&!g_sgWakeRecoveryPending.load()&&actualOwnedNtCalls==0):workerReplaceMode?(!running&&retained&&markerRetained&&actualOwnedNtCalls==0&&workerMarkerReplacements==1):veto?(running==issuedBeforeVeto&&retained&&markerRetained&&actualOwnedNtCalls==(issuedBeforeVeto?1U:0U)&&focusCalls==0):permanent?(!running&&retained&&markerRetained&&!g_sgWakeRecoveryPending.load()&&actualOwnedNtCalls==0):resumeExpected?(running&&!retained&&!markerRetained&&(!readyHold||callsWhileNotReady==0)&&(!(batchAppend||batchMerge)||(oldBatchStarted==queuedBatchStarted&&oldBatchAttempt==queuedBatchAttempt&&queuedTargets==(batchAppend?2U:1U)&&g_manualPausedPid==child.dwProcessId+1))):(!running&&retained&&markerRetained&&ntCalls==0));
  const bool readyCurrent=(!same&&mode!="continued-generation"&&!olderTask)||
-  (rearmCalls==1&&fanResumeCalls==1&&sharedReadyCalls==1&&rearmGeneration==g_powerGeneration&&fanResumeGeneration==g_powerGeneration&&sharedReadyGeneration==g_powerGeneration&&(!olderTask||taskBefore==11));
+  (rearmCalls==1&&fanResumeCalls==0&&sharedReadyCalls==1&&rearmGeneration==g_powerGeneration&&sharedReadyGeneration==g_powerGeneration&&(!olderTask||taskBefore==11));
  const bool safe=(!wrongBirth||ntCalls==0)&&(!newer||(!fixtureNativePowerAdmitted()&&rearmCalls==0&&fanResumeCalls==0&&sharedReadyCalls==0));
  const auto taskAfter=g_sgTask.generation;const auto phase=g_powerLifecycle.load();
  const auto productCalls=ntCalls;const auto productResume=resumeCalls;const auto birthText=std::to_string(actualBirth);
@@ -507,6 +534,111 @@ int main(int argc,char** argv){try{
     if(argc==3&&std::string(argv[1])=="owned-lease")return runOwnedLease(argv[2]);
     if(argc!=3)throw std::runtime_error("stage/event required");selectedStage=argv[1];selectedEvent=argv[2];
     consumerThread=std::this_thread::get_id();
+#if YMCC_FIXTURE_KERNEL_WAKE_REDELIVERY
+    if(selectedStage=="kernel-wake-redelivery"||selectedStage=="kernel-wake-readback"){
+        struct WakeWindow {
+            HWND window=CreateWindowExW(0,L"STATIC",L"",0,0,0,0,0,HWND_MESSAGE,nullptr,nullptr,nullptr);
+            ~WakeWindow(){g_sleepPowerDispatch.closeReceiptWake();if(window)DestroyWindow(window);}
+        } owner;
+        if(!owner.window||!g_sleepPowerDispatch.openReceiptWake())throw std::runtime_error("wake transport setup failed");
+        g_hwnd=owner.window;
+#ifdef YMCC_FIXTURE_KERNEL_WAKE_READBACK
+        if(selectedStage=="kernel-wake-readback"){
+            const bool s4=selectedEvent=="only107",liveFirst=selectedEvent=="live-first",readbackFirst=selectedEvent=="readback-first";
+            const bool deliver=selectedEvent=="only507"||s4||readbackFirst;
+            incoming={s4?107:507,s4?0:1,s4?5:0,400};
+            SgOriginalWakeDelivery original{currentPowerGeneration(),200,0,0,g_sharedPowerSuspendSerial.load(),
+                {400,incoming.eventId,incoming.reason,incoming.targetState,true},"query-original"};
+            if(liveFirst)sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(1));
+            if(selectedEvent=="new506-before")g_sgLatestSleepEntryFileTime=500;
+            sgKernelPowerEventCallback(EvtSubscribeActionDeliver,&original,nullptr);
+            if(readbackFirst)sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(1));
+            if(selectedEvent=="new506-queued")g_sgLatestSleepEntryFileTime=500;
+            if(selectedEvent=="new-generation")++g_powerGeneration;
+            if(selectedEvent=="new-suspend")g_sleepPowerDispatch.callback(PBT_APMSUSPEND,500,[](const auto&){return true;},500);
+            if(selectedEvent=="exit")g_exitRequested=true;
+            const bool signaled=WaitForSingleObject(g_sleepPowerDispatch.receiptWakeHandle(),0)==WAIT_OBJECT_0;
+            sgRedeliverS4Wake(g_hwnd);sgRedeliverS4Wake(g_hwnd);
+            const bool ok=signaled==(!liveFirst&&selectedEvent!="new506-before")&&
+                kernelWakePosts==(liveFirst?1U:0U)&&kernelWakeReplays==(deliver?1U:0U)&&
+                (!deliver||(replayMessage==(s4?WM_SG_S4_WAKE:WM_SG_S0_WAKE)&&replayArgument==(s4?11U:1U)&&replayOriginal==400));
+            std::cout<<json({{"stage",selectedStage},{"event",selectedEvent},{"callbackPublished",kernelWakeReplays>0||kernelWakePosts>0},{"callbackExpected",deliver||liveFirst},
+                {"safe",ok},{"normal",ok},{"posts",kernelWakePosts},{"replays",kernelWakeReplays},{"original",replayOriginal},
+                {"ownerWakeSignaled",signaled},{"physicalCalls",0}}).dump()<<'\n';
+            return ok?0:2;
+        }
+#endif
+        const auto emit=[](EventInput value){incoming=value;sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(1));};
+        if(selectedEvent.ends_with("506")||selectedEvent.starts_with("cross")){
+            failKernelIntentPost=selectedEvent!="success506";
+            failKernelWakePost=selectedEvent=="cross107failed"||selectedEvent=="cross507failed";
+            queueKernel107=selectedEvent=="cross107posted";
+            emit({506,1,0,400});
+            if(selectedEvent=="replace506"){
+                emit({506,3,0,450});emit({506,1,0,425});emit({506,3,0,450});
+            }
+            if(selectedEvent=="retired506")g_sgClosedSleepIntentFileTime=400;
+            if(selectedEvent=="generation506")++g_powerGeneration;
+            if(selectedEvent=="exit506")g_exitRequested=true;
+            if(selectedEvent.starts_with("cross107"))emit({107,0,5,500});
+            if(selectedEvent=="cross507failed")emit({507,3,0,500});
+            const bool signaled=WaitForSingleObject(g_sleepPowerDispatch.receiptWakeHandle(),0)==WAIT_OBJECT_0;
+            sgRedeliverS4Wake(g_hwnd);sgRedeliverS4Wake(g_hwnd);
+            const bool replaced=selectedEvent=="replace506",s4=selectedEvent=="cross107failed",s0=selectedEvent=="cross507failed";
+            const bool intent=selectedEvent=="failed506"||replaced||s0;
+            std::vector<UINT> expected;
+            if(s4)expected.push_back(WM_SG_S4_WAKE);
+            if(s0)expected.push_back(WM_SG_S0_WAKE);
+            if(intent)expected.push_back(WM_SG_S0_INTENT);
+            MSG queued{};
+            const bool queued107=PeekMessageW(&queued,g_hwnd,WM_SG_S4_WAKE,WM_SG_S4_WAKE,PM_REMOVE)!=FALSE;
+            const bool ok=signaled==failKernelIntentPost&&kernelIntentPosts==(replaced?4U:1U)&&
+                kernelWakePosts==(s0||selectedEvent.starts_with("cross107")?1U:0U)&&kernelReplayOrder==expected&&
+                (!intent||(replayArgument==(replaced?3U:1U)&&replayOriginal==(replaced?450:400)))&&
+                (!s4||(replayArgument==11U&&replayOriginal==500))&&queued107==queueKernel107&&
+                (!queued107||(queued.wParam==currentPowerGeneration()&&queued.lParam==500));
+            std::cout<<json({{"stage",selectedStage},{"event",selectedEvent},{"callbackPublished",kernelIntentPosts>0},
+                {"safe",ok},{"normal",ok},{"intentPosts",kernelIntentPosts},{"wakePosts",kernelWakePosts},
+                {"replays",kernelReplayOrder},{"expectedReplays",expected},{"argument",replayArgument},{"original",replayOriginal},
+                {"ownerWakeSignaled",signaled},{"queued107",queued107},{"queued107Generation",queued.wParam},
+                {"queued107Original",queued.lParam},{"physicalCalls",0}}).dump()<<'\n';
+            return ok?0:2;
+        }
+        failKernelWakePost=selectedEvent!="success507";
+        queueKernel107=selectedEvent.starts_with("posted107-");
+        const bool laterPostedS4=selectedEvent=="posted107-after507";
+        const bool delayed=selectedEvent=="manual507-delayed";
+        if(delayed)emit({507,5,0,450});
+        emit({507,selectedEvent=="coalesce507"?3:1,0,400});
+        if(selectedEvent=="new-generation")++g_powerGeneration;
+        const bool olderSuspend=selectedEvent=="older-suspend";
+        if(olderSuspend||selectedEvent=="new-suspend")
+            g_sleepPowerDispatch.callback(PBT_APMSUSPEND,500,[](const auto&){return true;},olderSuspend?350:500);
+        if(selectedEvent=="exit")g_exitRequested=true;
+        if(selectedEvent=="continue-to-s4")emit({107,0,5,500});
+        if(queueKernel107)emit({107,0,5,laterPostedS4?500ULL:350ULL});
+        if(selectedEvent=="coalesce507"){emit({507,5,0,450});emit({507,3,0,425});}
+        if(selectedEvent=="manual507")emit({507,5,0,450});
+        const auto wakeSignal=WaitForSingleObject(g_sleepPowerDispatch.receiptWakeHandle(),0);
+        sgRedeliverS4Wake(g_hwnd);sgRedeliverS4Wake(g_hwnd);
+        const bool manual=selectedEvent=="manual507"||delayed;
+        const bool replay=selectedEvent=="failed507"||selectedEvent=="continue-to-s4"||selectedEvent=="coalesce507"||manual||olderSuspend||
+            (queueKernel107&&!laterPostedS4);
+        const bool s4=selectedEvent=="continue-to-s4",coalesced=selectedEvent=="coalesce507";
+        const bool signaled=wakeSignal==WAIT_OBJECT_0;
+        MSG queued{};
+        const bool queued107=PeekMessageW(&queued,g_hwnd,WM_SG_S4_WAKE,WM_SG_S4_WAKE,PM_REMOVE)!=FALSE;
+        const bool ok=(failKernelWakePost?signaled:wakeSignal==WAIT_TIMEOUT)&&
+            kernelWakePosts==(s4||manual||queueKernel107?2U:coalesced?3U:1U)&&kernelWakeReplays==(replay?1U:0U)&&
+            queued107==queueKernel107&&(!queued107||(queued.wParam==currentPowerGeneration()&&queued.lParam==(laterPostedS4?500:350)))&&
+            (!replay||(replayMessage==(s4?WM_SG_S4_WAKE:WM_SG_S0_WAKE)&&replayArgument==(s4?11U:coalesced?5U:1U)&&replayOriginal==(s4?500:coalesced?450:400)));
+        std::cout<<json({{"stage",selectedStage},{"event",selectedEvent},{"callbackPublished",kernelWakePosts>0},
+            {"safe",ok},{"normal",ok},{"posts",kernelWakePosts},{"replays",kernelWakeReplays},{"original",replayOriginal},
+            {"ownerWakeSignaled",signaled},{"queued107",queued107},{"queued107Generation",queued.wParam},
+            {"queued107Original",queued.lParam},{"physicalCalls",0}}).dump()<<'\n';
+        return ok?0:2;
+    }
+#endif
     if(selectedStage=="lifetime"){
         g_sgCancellationReady.bind(currentPowerGeneration(),300,0);
         g_powerLifecycle=PowerLifecycle::Ready;g_hardwareWriteGate=true;
@@ -553,8 +685,8 @@ int main(int argc,char** argv){try{
     const auto phase=g_powerLifecycle.load();
     const bool superseding=selectedEvent=="new506-user"||selectedEvent=="new506-nonuser"||selectedEvent=="partial-running-confirmation"||selectedEvent=="unknown-running-confirmation"||selectedEvent=="new-suspend"||selectedEvent=="new-query"||selectedEvent=="exit";
     const bool early=selectedStage!="nt-return"&&selectedStage!="trace-log"&&selectedStage!="episode-close"&&selectedStage!="gate-open-log";
-    const bool safe=!superseding||(!fixtureNativePowerAdmitted()&&!rearmCalls&&!readyNotices&&(selectedStage=="gate-open-log"||phase!=PowerLifecycle::Ready)&&(!early||resumeCalls==0));
-    const bool normal=superseding||(resumeCalls==(keepResumeFailure?0U:1U)&&rearmCalls==1&&readyNotices==1&&phase==PowerLifecycle::Ready&&fixtureNativePowerAdmitted());
+    const bool safe=!fanResumeCalls&&(!superseding||(!fixtureNativePowerAdmitted()&&!rearmCalls&&!readyNotices&&!sharedReadyCalls&&(selectedStage=="gate-open-log"||phase!=PowerLifecycle::Ready)&&(!early||resumeCalls==0)));
+    const bool normal=superseding||(resumeCalls==(keepResumeFailure?0U:1U)&&rearmCalls==1&&readyNotices==1&&sharedReadyCalls==1&&sharedReadyGeneration==g_powerGeneration&&phase==PowerLifecycle::Ready&&fixtureNativePowerAdmitted());
     const bool steamCancelExpected=queryCancel&&!superseding;
     const bool steamCancelMatches=steamCancelCalls==(steamCancelExpected?1u:0u)&&steamCancelAtReady==steamCancelExpected;
     const bool delivered=!raced||eventPublished;

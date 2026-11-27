@@ -11,6 +11,8 @@
     "deps/json/json.hpp"
   ],
   "sharedLeaves": [
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/shared-leaf-successor.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/shared-leaf-successor.json",
     "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
     "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
     "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
@@ -27,8 +29,6 @@
     "tools/ymcc_sim/global/host-process.ps1",
     "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/adapter.mjs",
     "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json",
-    "tools/sleep_game_pause_selftest.py",
-    "tools/sleep_non_user_wake_selftest.py",
     "tools/ymcc_sim/global/sleep-native-recovery-consumer/boundary.h",
     "tools/ymcc_sim/global/sleep-native-recovery-consumer/sitecustomize.py",
     "native/sleep_request_fallback.h",
@@ -71,11 +71,11 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
-      "sha256": "15d5bc0ebb5b0e6791a5822abf7eeed131b7724444835a8662189b73bd67c476"
+      "sha256": "bfd5a530a9080c46dadb490388588746557e10fe55defb4f9b51dbd18af65f4d"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
-      "sha256": "b82c1b62fa2ed9bfea3ae5e7170d921ea9d3c626c6db759df94a6805113f6192"
+      "sha256": "7bf29e5ebb68f01a385757982b0b63b7be2f422d023108c853d9dab25dd2cd37"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
@@ -104,14 +104,6 @@
     {
       "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json",
       "sha256": "2f970646b4fca1005acd9e53bc497869c1f18ba5f67cd6869b5a5268ad67eaea"
-    },
-    {
-      "path": "tools/sleep_game_pause_selftest.py",
-      "sha256": "49fc350e90ffb4e46fbe433311dc11a368a1e23817a61f1788b623fc2f7d0a60"
-    },
-    {
-      "path": "tools/sleep_non_user_wake_selftest.py",
-      "sha256": "6aa4096c914f6f8bf1d38be7e492c0765989a54ff8efa499d8a926521d271b3b"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/boundary.h",
@@ -151,7 +143,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-review.mjs",
-      "sha256": "de30cde09750df4d5333888d776d49fc48300e3877d0fb5de07bc59bf4dd900b"
+      "sha256": "924b1957aad0def5eeb8032549416b5d92696a341cd35a1077431352a9914710"
     }
   ],
   "reviewedFunctions": [

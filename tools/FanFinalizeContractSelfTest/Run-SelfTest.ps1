@@ -8,7 +8,8 @@ $EvidenceRoot=[IO.Path]::GetFullPath($EvidenceRoot)
 if(Test-Path -LiteralPath $EvidenceRoot){throw 'Fresh evidence directory required'}
 New-Item -ItemType Directory -Path $EvidenceRoot | Out-Null
 $artifacts=Join-Path $EvidenceRoot 'build'
-& dotnet build (Join-Path $PSScriptRoot 'FanFinalizeContractSelfTest.csproj') -c Release --artifacts-path $artifacts -v quiet *> (Join-Path $EvidenceRoot 'build.log')
+# Keep compiler processes inside the lifetime of this one-shot fixture.
+& dotnet build (Join-Path $PSScriptRoot 'FanFinalizeContractSelfTest.csproj') -c Release --artifacts-path $artifacts -v quiet -p:UseSharedCompilation=false -nodeReuse:false *> (Join-Path $EvidenceRoot 'build.log')
 if($LASTEXITCODE -ne 0){throw 'Finalize contract test build failed'}
 $tool=Join-Path $artifacts 'bin\FanFinalizeContractSelfTest\release\FanFinalizeContractSelfTest.dll'
 & dotnet $tool $HostPayloadRoot $EvidenceRoot (Join-Path $EvidenceRoot 'verification.json') *> (Join-Path $EvidenceRoot 'execution.log')
@@ -27,15 +28,20 @@ foreach($name in @('YeManFanBackend.dll','Microsoft.Windows.SDK.NET.dll','WinRT.
 & dotnet $tool '--write-negative-fixture' (Join-Path $HostPayloadRoot 'YeManFanHost.dll') (Join-Path $negativeHost 'YeManFanHost.dll') *> (Join-Path $EvidenceRoot 'negative-mutation.log')
 if($LASTEXITCODE -ne 0){throw 'Exact honest-terminal mutation fixture failed'}
 $negativeEvidence=Join-Path $EvidenceRoot 'negative-evidence'
-& dotnet $tool $negativeHost $negativeEvidence (Join-Path $EvidenceRoot 'negative-verification.json') *> (Join-Path $EvidenceRoot 'negative-execution.log')
+$negativeReceipt=Join-Path $EvidenceRoot 'negative-verification.json'
+& dotnet $tool $negativeHost $negativeEvidence $negativeReceipt *> (Join-Path $EvidenceRoot 'negative-execution.log')
 $negativeCode=$LASTEXITCODE
-$negative=Get-Content -LiteralPath (Join-Path $EvidenceRoot 'negative-verification.json') -Raw -Encoding UTF8|ConvertFrom-Json
+$negativeBytes=[IO.File]::ReadAllBytes($negativeReceipt)
+$negative=[Text.Encoding]::UTF8.GetString($negativeBytes).TrimStart([char]0xFEFF)|ConvertFrom-Json
 if($negativeCode -eq 0 -or $negative.status -ne 'FAIL' -or $negative.failure -notmatch 'exhausted finalize is honest failure'){
  throw 'A forged Ready terminal was not rejected by the actual state assertion'
 }
 $result|Add-Member -NotePropertyName knownBadReadyTerminalRejected -NotePropertyValue $true
 $result|Add-Member -NotePropertyName negativeExitCode -NotePropertyValue $negativeCode
-$result|Add-Member -NotePropertyName negativeReceipt -NotePropertyValue (Join-Path $EvidenceRoot 'negative-verification.json')
+$result|Add-Member -NotePropertyName negativeReceipt -NotePropertyValue $negativeReceipt
+# Use the audited in-case evidence binding; the negative itself must still be FAIL.
+$negativeSha=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($negativeBytes)).ToLowerInvariant()
+$result|Add-Member -NotePropertyName sourceHashes -NotePropertyValue @(@{path=$negativeReceipt;sha256=$negativeSha})
 $result|ConvertTo-Json -Depth 12|Set-Content -LiteralPath (Join-Path $EvidenceRoot 'verification.json') -Encoding UTF8
 Write-Output ('FAN_FINALIZE_CONTRACT PASS checks='+@($result.checks).Count+' known-bad-terminal-rejected=True')
 exit 0

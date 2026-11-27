@@ -2,6 +2,7 @@
 #include "windows_motion_submission.h"
 #include "legion_motion_source.h"
 #include "input_frame_submission.h"
+#include "sleep_power_state.h"
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -23,7 +24,7 @@ inline Axes profile(Axes a,bool yaw,bool invertHorizontal,bool invertVertical) n
     return a;
 }
 struct Source {
-    std::uint64_t power=0;
+    sleeppower::SharedPowerV1 sharedPower;
     input::frameSubmission::Sample physical;
     windows_motion::Stamp windows;
     std::optional<legion_motion::Sample> controller;

@@ -9,8 +9,10 @@ import { reportText } from './fixtures/owned_return_settlement_r120/report.mjs';
 // Bounded R120 settlement sidecar. The only executable is the inert fixture.
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const fixture=path.join(root,'tools/fixtures/owned_return_settlement_r120');
-const output=path.resolve('G:/YeManCC-Work/Build/Validation/VirtualInput-ReturnClosure-R120-20261016/settlement-sidecar');
-assert.equal(process.argv.length,2,'No arguments: output/source bounds are fixed');
+const args=process.argv.slice(2);
+assert(args.length===0 || (args.length===2 && args[0]==='--out' && args[1]),'usage: node tools/owned_return_settlement_r120_selftest.mjs [--out directory]');
+const output=path.resolve(args[1]??'G:/YeManCC-Work/Build/Validation/VirtualInput-ReturnClosure-R120-20261016/settlement-sidecar');
+assert(output.toLowerCase()!==root.toLowerCase() && !output.toLowerCase().startsWith(root.toLowerCase()+path.sep),'Evidence must stay outside the source repository');
 const run=path.join(output,new Date().toISOString().replace(/[:.]/g,'-'));
 fs.mkdirSync(path.join(run,'logs'),{recursive:true});
 const save=(name,value)=>fs.writeFileSync(path.join(run,name),JSON.stringify(value,null,2)+'\n');
@@ -26,6 +28,7 @@ let inventory;try { inventory=JSON.parse(audit.stdout); } catch { inventory={par
 save('steam-integration-audit.json',inventory);
 command('git-status-before','git',['status','--short'],root);
 const production=['native/main.cpp','native/sleep_power_state.h','native/msi_owned_return_runtime.h','native/msi_owned_return_recovery.h',
+  'native/msi_owned_return_off_endpoint.h','native/virtual_output_status.h',
   'native/msi_crash_recovery_runtime.h','native/msi_crash_recovery_journal.h','deps/json/json.hpp'];
 const bytes=new Map(production.map(name=>[name,fs.readFileSync(path.join(root,name))]));
 const snapshot=path.join(run,'snapshot');
@@ -44,10 +47,11 @@ let code=ownCode('inert.cpp.inc');
 code+=productionCode('struct','InputHostVirtualIntentMutation','native/main.cpp');
 code+=productionCode('enum','MsiReturnDebtBasis','native/main.cpp');
 for(const name of ['msiReturnDebtBasisName','msiReturnDebtDischarge','inputHostExitFenceRaised'])code+=productionCode('function',name,'native/main.cpp');
-for(const name of ['msiOwnedReturnPublish','msiOwnedReturnContext','msiOwnedReturnRecordCurrent'])code+=productionCode('function',name,'native/msi_owned_return_runtime.h');
+for(const name of ['msiOwnedReturnPublish','msiOwnedReturnNonblockingContext','msiOwnedReturnContext','msiOwnedReturnRecordCurrentLocked','msiOwnedReturnRecordCurrent'])code+=productionCode('function',name,'native/msi_owned_return_runtime.h');
 for(const name of ['msiCrashStoreLocked','msiCrashRecoveryAfterModeDischarge'])code+=productionCode('function',name,'native/msi_crash_recovery_runtime.h');
 code+=productionCode('function','msiDinputTryDischargeReturnDebt','native/main.cpp');
 code+=productionCode('struct','MsiOwnedReturnSignal','native/msi_owned_return_runtime.h');
+code+=productionCode('function','msiOwnedReturnSignalCurrent','native/msi_owned_return_runtime.h');
 code+=ownCode('signal-boundary.cpp.inc');
 code+=productionCode('function','msiOwnedReturnMaintenance','native/msi_owned_return_runtime.h');
 code+=ownCode('cases.cpp.inc');
@@ -63,7 +67,7 @@ const binding={sourceRoot:root,sourceSHA,compiledDefinitions:ranges,mutationProv
   fixtureSHA:Object.fromEntries([...fixtureBytes].map(([name,value])=>[name,sha(value)])),
   runnerSHA:sha(fs.readFileSync(fileURLToPath(import.meta.url))),translationUnitSHA:sha(code),
   extractionEdits:[],productionSettlementDefinitionsUnmodified:true,productionRecoveryPolicyAndJournalUnmodified:true,
-  signalBoundary:'qualified signal and distinct sequences supplied; production ReadSignal deliberately excluded',
+  signalBoundary:'qualified signal and distinct sequences supplied; production ReadSignal and subsequent OFF requalification deliberately excluded',
   persistenceBoundary:'sgWriteFileAtomic inert actor and in-memory serialized bytes; StoreLocked and AfterModeDischarge are real',
   limitations:['Atomic token changes alone do not establish a prior-debt contract violation','No OS file IO/fsync fault coverage','No ReadSignal identity/read-window coverage',
     'Atomics-only revocations; no impossible journal/episode replacement under held locks',
@@ -100,7 +104,7 @@ for(const item of ranges) {
     if(sha(current)!==item.sha256)relevantChanged.push(item.file+'::'+item.symbol);
   }catch {relevantChanged.push(item.file+'::'+item.symbol);}
 }
-for(const file of ['native/msi_owned_return_recovery.h','native/msi_crash_recovery_journal.h','deps/json/json.hpp'])
+for(const file of production.filter(name=>name!=='native/main.cpp'&&name!=='native/msi_owned_return_runtime.h'&&name!=='native/msi_crash_recovery_runtime.h'))
   if(changedFiles.includes(file))relevantChanged.push(file);
 const result={interpretation:"Historical prior-debt settlement observed; no persistent-contract violation proven. See FINAL-REVIEW.md.",createdAt:new Date().toISOString(),run,passed:Object.values(profiles).length===2&&Object.values(profiles).every(p=>p.passed)&&relevantChanged.length===0,
   verdict:Object.values(profiles).length===2&&Object.values(profiles).every(p=>p.passed&&p.duringStoreObservations===9)?'OBSERVED_PRIOR_DEBT_SETTLEMENT_DURING_STORE_EVENTS':'VALIDATION_INCOMPLETE',

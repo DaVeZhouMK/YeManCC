@@ -4,8 +4,8 @@ import AppIcon from '@/components/AppIcon.vue';
 import { keyboard, windowApi } from '@/bridge/api';
 import { focusGamepadElement } from '@/gamepad/focus';
 import { detectedGameName } from '@/bridge/gamedetect';
-import { validateLockedGameTarget, type LockedGameTarget } from '@/bridge/gameQuickSession';
-import { startGameValueSession, subscribeGameValueState, gameValueCommand, cancelGameValueScan, stopGameValueSession, getGameValueDraft, saveGameValueDraft, type GameValueState } from '@/bridge/gameValueScan';
+import type { LockedGameTarget } from '@/bridge/gameQuickSession';
+import { startGameValueSession, subscribeGameValueState, gameValueCommand, cancelGameValueScan, stopGameValueSession, getGameValueDraft, saveGameValueDraft, getGameValueState, type GameValueState } from '@/bridge/gameValueScan';
 
 const props = defineProps<{ target: LockedGameTarget }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -73,8 +73,8 @@ async function returnToGame(): Promise<void> {
   if (busy.value) return;
   returning.value = true; error.value = ''; saveDraft();
   try {
-    const current = await validateLockedGameTarget();
-    if (!current || current.pid !== props.target.pid || current.processCreated !== props.target.processCreated || current.path.toLowerCase() !== props.target.path.toLowerCase()) throw new Error('当前游戏已退出或改变，请重新获取游戏');
+    const current = getGameValueState();
+    if (!current || current.stage === 'closed' || current.pid !== props.target.pid || current.processCreated !== props.target.processCreated || current.path.toLowerCase() !== props.target.path.toLowerCase()) throw new Error('当前游戏已退出或改变，请重新获取游戏');
     if (!(await windowApi.minimize())) throw new Error('未能返回游戏，请再试一次');
   } catch (cause) { if (mounted) error.value = (cause as Error).message; }
   finally { if (mounted) returning.value = false; }
@@ -83,7 +83,7 @@ async function inputKeyboard(selector: string): Promise<void> {
   panel.value?.querySelector<HTMLInputElement>(selector)?.focus({ preventScroll: true });
   try { await keyboard.open(); } catch (cause) { error.value = (cause as Error).message; }
 }
-function close(): void { if (operation.value === 'writeAll' || state.value?.stage === 'writing') return; saveDraft(); if (starting.value || operation.value === 'first' || operation.value === 'next' || state.value?.stage === 'scanning') void stopGameValueSession().catch(() => {}); emit('close'); }
+function close(): void { if (operation.value === 'writeAll' || state.value?.stage === 'writing') return; saveDraft(); void stopGameValueSession().catch(() => {}); emit('close'); }
 function back(event: Event): void { event.preventDefault(); event.stopImmediatePropagation(); close(); }
 function keydown(event: KeyboardEvent): void { if (event.key === 'Escape') back(event); }
 watch([firstValue, nextValue, desiredValue], saveDraft, { flush: 'sync' });
@@ -93,7 +93,7 @@ onMounted(() => {
   window.addEventListener('ipc:gamepad-back', back, true); window.addEventListener('keydown', keydown, true);
   void initialize();
 });
-onBeforeUnmount(() => { saveDraft(); mounted = false; unsub?.(); if (starting.value || operation.value === 'first' || operation.value === 'next' || state.value?.stage === 'scanning') void stopGameValueSession().catch(() => {}); window.removeEventListener('ipc:gamepad-back', back, true); window.removeEventListener('keydown', keydown, true); });
+onBeforeUnmount(() => { saveDraft(); mounted = false; unsub?.(); void stopGameValueSession().catch(() => {}); window.removeEventListener('ipc:gamepad-back', back, true); window.removeEventListener('keydown', keydown, true); });
 </script>
 
 <template>

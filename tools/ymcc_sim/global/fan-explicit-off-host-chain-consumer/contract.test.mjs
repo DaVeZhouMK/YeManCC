@@ -1,5 +1,55 @@
 import assert from 'node:assert/strict';import test from 'node:test';import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';
 import {verifyMode,read,hash} from './contract.mjs';
+import {verifyRequestTimeline} from './timeline.mjs';
+import {ownedJobCompleted} from './run.mjs';
+
+test('owned fan Job requires assigned natural zero for its exact child and deadline',()=>{
+ const deadline=1000,stdout='YMCC_SIM_OWNED_JOB childPid=19\r\n',job={status:'EXITED',exitCode:0,rootExitCode:0,jobAssigned:true,jobDisposed:true,
+  childExitedBeforeReturn:true,zeroObservedBeforeDispose:true,activeProcessesFinal:0,terminationRequested:false,cleanupError:null,deadlineExpired:false,deadlineEpochMs:deadline,childPid:19};
+ assert(ownedJobCompleted(job,stdout,deadline));
+ for(const delta of [{jobAssigned:false},{childExitedBeforeReturn:false},{zeroObservedBeforeDispose:false},{activeProcessesFinal:1},{terminationRequested:true},
+  {cleanupError:'query failed'},{deadlineExpired:true},{childPid:20},{deadlineEpochMs:999}])assert(!ownedJobCompleted({...job,...delta},stdout,deadline));
+ assert(!ownedJobCompleted(job,stdout+stdout,deadline));assert(!ownedJobCompleted(null,stdout,deadline));
+});
+
+function emptyWakeTimeline(){
+ const ready={native:{generation:3,phase:'ready',resumeReady:true,hardwareWritesAllowed:true},coordinator:{powerGeneration:3,wakeReadyGeneration:3}};
+ const wake={event:'committed-wake-settled',...structuredClone(ready),intent:false};
+ const late={event:'late-auto-settled',...structuredClone(ready),intent:false,submitted:false,offRetired:true,ok:true};
+ const send={event:'request-issued',request:1,path:'/api/state'},receive={event:'response-received',request:1,path:'/api/state',status:200};
+ const timeline=[{event:'sleep-observed'},{event:'disable-completed'},{event:'client-wake-notice',...structuredClone(ready)},wake,send,receive,late,{event:'cleanup-completed'}];
+ const sequence=()=>timeline.forEach((row,i)=>{row.sequence=i+1;row.at=i;});
+ sequence();
+ return {output:{mode:'empty-apply',ok:true,error:'',timelineSchemaVersion:1,timeline},node:{requests:[{path:'/api/state',status:200}]},wake,late,send,receive,ready,sequence};
+}
+test('empty wake timeline permits read-only observations after OFF',()=>{
+ const {output,node}=emptyWakeTimeline(), receipt=verifyRequestTimeline(output,node);
+ assert.equal(receipt.status,'PASS');assert.equal(receipt.newControlsAfterOff,0);
+});
+test('empty wake timeline rejects missing, repeated or displaced terminal observations',()=>{
+ const missing=emptyWakeTimeline();missing.wake.event='native-read';
+ assert.throws(()=>verifyRequestTimeline(missing.output,missing.node),/EXPLICIT_EMPTY_WAKE_EVENT/);
+ const repeat=emptyWakeTimeline();repeat.output.timeline.splice(4,0,structuredClone(repeat.late));repeat.sequence();
+ assert.throws(()=>verifyRequestTimeline(repeat.output,repeat.node),/EXPLICIT_EMPTY_WAKE_EVENT/);
+ const reversed=emptyWakeTimeline();reversed.wake.event='late-auto-settled';reversed.late.event='committed-wake-settled';
+ assert.throws(()=>verifyRequestTimeline(reversed.output,reversed.node),/EXPLICIT_EMPTY_WAKE_ORDER/);
+});
+test('empty wake timeline rejects stale or unavailable write permission',()=>{
+ for(const update of [row=>{row.native.generation=2;},row=>{row.native.hardwareWritesAllowed=false;},row=>{row.coordinator.wakeReadyGeneration=2;}]){
+  const {output,node,late}=emptyWakeTimeline();update(late);
+  assert.throws(()=>verifyRequestTimeline(output,node),/EXPLICIT_EMPTY_WAKE_GENERATION/);
+ }
+});
+test('empty wake timeline rejects retired callbacks, intent replay and control sends',()=>{
+ for(const update of [r=>{r.wake.intent=true;},r=>{r.late.intent=true;},r=>{r.late.submitted=true;},r=>{r.late.offRetired=false;}]){
+  const input=emptyWakeTimeline();update(input);
+  assert.throws(()=>verifyRequestTimeline(input.output,input.node),/EXPLICIT_EMPTY_WAKE_REPLAY_NOT_RETIRED/);
+ }
+ const {output,node,send,receive,ready,sequence}=emptyWakeTimeline();
+ output.timeline.splice(4,0,{event:'native-read',...structuredClone(ready)});
+ Object.assign(send,ready,{path:'/api/enable'});receive.path=node.requests[0].path='/api/enable';sequence();
+ assert.throws(()=>verifyRequestTimeline(output,node),/EXPLICIT_EMPTY_WAKE_REPLAY_NOT_RETIRED/);
+});
 const spec=read(path.join(import.meta.dirname,'spec.json')),privateRoot=path.dirname(spec.fault.preExecutionPrediction);
 function originalInputs(mode='allowed',fault=false){const directory=path.join(privateRoot,fault?'fault-allowed':'original-'+mode),managed=read(path.join(directory,'result.json')),boundary=read(path.join(directory,'managed-runtime-boundary.json')),node=read(path.join(directory,'node/node-runtime-boundary.json')),execution=read(path.join(directory,'owned-managed-execution.json')),originalOutput=JSON.parse(fs.readFileSync(path.join(directory,'bridge-host-chain.out'),'utf8').trim());
  if(fault){const projected=new TextDecoder('gbk').decode(Buffer.from(spec.fault.expectedTsError,'utf8'));assert.equal(originalOutput.error,projected,'independent byte-encoding projection must match the retained original CSharp text');originalOutput.error=spec.fault.expectedTsError;}

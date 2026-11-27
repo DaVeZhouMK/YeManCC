@@ -89,13 +89,13 @@ def extract_inputs(raw: dict[str, bytes]) -> tuple[dict[str, bytes], dict]:
     main = raw[INPUTS[0]].decode("utf-8")
     runtime = raw[INPUTS[1]].decode("utf-8")
     resume, start = extract_function(main, "handlePowerResumeNotification")
-    if not re.match(r"static void handlePowerResumeNotification\(SgWork work, const char\* reason\)\s*\{", resume):
+    if not re.match(r"static void handlePowerResumeNotification\(SgWork work, const char\* reason, SgWorkItem\* originalS4=nullptr\)\s*\{", resume):
         raise RuntimeError("Resume signature changed; re-audit the stub boundary")
     masked = mask_cpp(resume)
     hooks = list(re.finditer(re.escape(HOOK), masked))
     if not hooks:
         raise MissingProductionHook("WAITING_FOR_PRODUCTION_HOOK: confirm the source version before running")
-    if len(hooks) != 1 or not re.search(re.escape(HOOK) + r"\s*sgQueueWork\(work, generation\);\s*}\s*$", masked):
+    if len(hooks) != 1 or not re.search(re.escape(HOOK) + r"\}\);\s*if\(originalS4\)deliverS4\(\);\s*else sgQueueWork\(work, generation\);\s*}\s*$", masked):
         raise RuntimeError("New hook must occur exactly once immediately before final sgQueueWork")
     allowed = set("handlePowerResumeNotification store load fetch_add if GetTickCount64 "
                   "appendNativeLifecycleLog currentPowerGeneration sgSleepRetryActive "
@@ -105,12 +105,21 @@ def extract_inputs(raw: dict[str, bytes]) -> tuple[dict[str, bytes], dict]:
                   "xinputSlotsMarkDiscoveryDirty openHardwareWriteGate sgHandheldResumeInputOnWake "
                   "sgRecordFact inputHostRequestWakeRescan closeHardwareWriteGate "
                   "inputHostRequestPowerRelease gamepadResetNativeState armPowerResumeWatchdog "
-                  "ipc_emit msiVisibilityObserverNoteResume".split())
+                  "ipc_emit msiVisibilityObserverNoteResume active call catch clearPowerResumeReady "
+                  "consume deliverS4 observedSleepBoundarySequence radialInputIsolationInvalidate readPowerResumeReady "
+                  "revokeSharedPowerMirrors s4Current sgCompleteSharedWakeClassification sgResumeClassificationHeld "
+                  "sgSleepTimeoutObservationHeld shutdown wakeBoundaryMatches".split())
     actual_calls = set(re.findall(r"\b([A-Za-z_]\w*)\s*\(", masked))
     if actual_calls - allowed:
         raise RuntimeError("Unreviewed resume dependency: " + repr(sorted(actual_calls - allowed)))
     pieces = {"actual_resume.inc": resume.encode("utf-8")}
     locations = {"actual_resume.inc": {"source": INPUTS[0], "line": main.count("\n", 0, start) + 1}}
+    work_items = list(re.finditer(r"^struct SgWorkItem \{[\s\S]+?^\};", mask_cpp(main), re.M))
+    if len(work_items) != 1:
+        raise RuntimeError("Actual wake work item identity changed")
+    work_item = work_items[0]
+    pieces["SgWorkItem.inc"] = main[work_item.start():work_item.end()].encode("utf-8")
+    locations["SgWorkItem.inc"] = {"source": INPUTS[0], "line": main.count("\n", 0, work_item.start()) + 1}
     for name in ("msiVisibilityObserverNoteResume", "msiVisibilityObserverWakeReady"):
         body, offset = extract_function(runtime, name)
         pieces[name + ".inc"] = body.encode("utf-8")
@@ -124,11 +133,11 @@ def extract_inputs(raw: dict[str, bytes]) -> tuple[dict[str, bytes], dict]:
     calls = {
         "actual_early_receipt.inc": "msiVisibilityObserverNoteResume(currentPowerGeneration());",
         "actual_ready_call.inc": "msiVisibilityObserverWakeReady(generation);",
-        "actual_s4_call.inc": 'handlePowerResumeNotification(SgWork::WakeHibernate, "kernel-s4-wake");',
+        "actual_s4_call.inc": 'handlePowerResumeNotification(SgWork::WakeHibernate, "kernel-s4-wake", &accepted);',
     }
     anchors = {"actual_early_receipt.inc": "case WM_POWERBROADCAST:",
                "actual_ready_call.inc": "case WM_POWER_INPUT_RECOVER:",
-               "actual_s4_call.inc": "kernel-s4-wake"}
+               "actual_s4_call.inc": "case WM_SG_S4_WAKE:"}
     for filename, call in calls.items():
         actual, offset = unique_statement(main, call)
         if anchors[filename] not in main[max(0, offset - 20000):offset]:
@@ -156,6 +165,8 @@ HARNESS = r'''
 #include "PowerLifecycle.inc"
 #include "SgRetryKind.inc"
 using ULONGLONG = unsigned long long;
+using DWORD = std::uint32_t;
+#include "SgWorkItem.inc"
 using namespace ymcc::msi::visibility::wake;
 static_assert(buildEnabled, "Both MSI diagnostic flags must be enabled");
 static Policy g_msiVisibilityWakePolicy;
@@ -163,6 +174,9 @@ static std::atomic<unsigned long long> g_msiVisibilityWakePending{0};
 static std::atomic<unsigned long long> g_powerGeneration{1}, g_resumeReadyGeneration{0};
 static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
 static std::atomic<bool> g_sensorSuspendCallbackActive{false}, g_inputReady{true};
+static std::atomic<bool> g_exitRequested{false};
+static std::atomic<ULONGLONG> g_sharedPowerSuspendSerial{0},g_sgLatestSleepEntryFileTime{0};
+static struct { ULONGLONG observedSleepBoundarySequence() const { return 0; } } g_sleepPowerDispatch;
 static std::atomic<bool> g_inputHostPowerAdmissionRevoked{false}, g_sgSleepCycleActive{false};
 static bool g_sgSleepQueryGateClosed=false, g_sgSleepQueryOwnsGeneration=false;
 static ULONGLONG g_sgSleepQueryGeneration=0, g_sgRetryDueTick=0, g_lastResumeNotifyTick=0;
@@ -277,11 +291,20 @@ static void stopPowerResumeWatchdog() { watchdogGeneration=0;record("stop-watchd
 static void armPowerResumeWatchdog(ULONGLONG generation) { watchdogGeneration=generation;record("arm-watchdog",generation); }
 static void sgClearInternalSleepRequest(const char* reason) { record("clear-internal-sleep",0,fields({{"reason",reason}})); }
 static int KillTimer(std::uintptr_t handle,unsigned timer) { record("kill-owned-fake-timer",handle,fields({{"timer",timer}}));return 1; }
-static void sgQueueWork(SgWork work,ULONGLONG generation) { queued.push_back({work,generation});record("queue-work",generation,fields({{"work",static_cast<int>(work)}})); }
+static void sgQueueWork(SgWork work,ULONGLONG generation,ULONGLONG=0,const SgWorkItem* original=nullptr) {
+    if(original&&original->generation!=generation)return;
+    queued.push_back({work,generation});record("queue-work",generation,fields({{"work",static_cast<int>(work)}}));
+}
+static bool sgResumeClassificationHeld(ULONGLONG) { return false; }
+static void sgCompleteSharedWakeClassification(ULONGLONG) {}
+static bool sgSleepTimeoutObservationHeld(ULONGLONG) { return false; }
+static void revokeSharedPowerMirrors() {}
+static void radialInputIsolationInvalidate() {}
+static struct { bool active() const { return false; } void shutdown() {} } g_radialOverlay;
 static void hidHideInvalidateRawInputIdentityCache() { record("invalidate-identity"); }
 static void xinputSlotsMarkDiscoveryDirty() { record("discovery-dirty"); }
 static void openHardwareWriteGate() { hardwareGate=true;record("open-gate"); }
-static void closeHardwareWriteGate(const char* reason) { hardwareGate=false;record("close-gate",0,fields({{"reason",reason}})); }
+static void closeHardwareWriteGate(const char* reason) { ++g_sharedPowerSuspendSerial;hardwareGate=false;record("close-gate",0,fields({{"reason",reason}})); }
 static void sgHandheldResumeInputOnWake(const char* reason) { record("handheld-resume-stub",0,fields({{"reason",reason}})); }
 static void inputHostRequestWakeRescan(ULONGLONG generation) { record("input-rescan-stub",generation); }
 static void inputHostRequestPowerRelease(ULONGLONG generation,const char* reason) { record("input-release-stub",generation,fields({{"reason",reason}})); }
@@ -312,6 +335,10 @@ static void readyCommit(ULONGLONG generation) {
 #include "actual_ready_call.inc"
 }
 static void kernelS4Call() {
+    // The original window admission is outside this observer-only fixture.
+    SgWorkItem accepted{SgWork::WakeHibernate,currentPowerGeneration()};
+    accepted.wakeOriginal107=fakeNow;
+    accepted.wakeSuspendSerial=g_sharedPowerSuspendSerial.load();
 #include "actual_s4_call.inc"
 }
 static void queryWasReleased() {

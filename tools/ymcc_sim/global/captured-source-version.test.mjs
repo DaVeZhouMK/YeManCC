@@ -380,7 +380,7 @@ test('only the exact imported static policy JSON is opened; runtime settings, se
   forbidContent(forbidden, reads => {
     const result = f.capture();
     assert.equal(result.status, 'PASS', JSON.stringify(result.failure));
-    assert.equal(result.policy.version, 5);
+    assert.deepEqual(result.policy, SNAPSHOT_POLICY);
     assert.equal(result.snapshotDiff.equal, true);
     const dataRow = result.files.find(row => row.path === staticPath);
     assert.deepEqual(dataRow, {path: staticPath, size: staticBytes.length, sha256: digest(staticBytes)});

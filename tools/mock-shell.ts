@@ -14,6 +14,28 @@ const listeners: ((e: { data: any }) => void)[] = [];
 export function emitMockIpcEvent(event: string, data: unknown): void {
   listeners.forEach(listener => listener({ data: { event, data } }));
 }
+let captureReply: ((message: Msg) => boolean) | undefined;
+export function holdMockIpcReply(command: string) {
+  if (captureReply) throw new Error('An IPC reply capture is already armed');
+  let captured: Msg | undefined;
+  const capture = (message: Msg) => {
+    if (message.cmd !== command) return false;
+    captured = message;
+    captureReply = undefined;
+    return true;
+  };
+  captureReply = capture;
+  return {
+    captured: () => captured !== undefined,
+    release(result: unknown) {
+      if (captureReply === capture) captureReply = undefined;
+      if (!captured) return;
+      const id = captured.id;
+      captured = undefined;
+      listeners.forEach(listener => listener({ data: { id, result } }));
+    },
+  };
+}
 const shellCalls: Array<{ program: string; args: string[]; timeoutMs?: number }> = [];
 (globalThis as any).__mockShellCalls = shellCalls;
 const registryWrites: Array<{ root: string; path: string; name: string; value: any }> = [];
@@ -155,6 +177,7 @@ function dispatch(cmd: string, a: any): any {
 
 const webview = {
   postMessage(msg: Msg) {
+    if (captureReply?.(msg)) return;
     Promise.resolve().then(() => {
       try {
         const result = dispatch(msg.cmd, msg.args ?? {});

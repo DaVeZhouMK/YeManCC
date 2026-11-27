@@ -30,6 +30,12 @@ async function main() {
     recoveryClaimEvidence:{sourceFanGeneration:7,oemReleaseActionKind:'proven-by-source-auto-register-and-terminal-close',oemReleaseActionClass:'release-action-proven'}};
   check(hasSafeSourceFanRelease(source,7),'source return consumes automatic readback plus exact terminal closure without fake HC flags');
   check(!hasSafeSourceFanRelease(source,8),'source return cannot retire a successor generation');
+  const dualDuty={...source,sourceFanAutomaticReturned:false,recoveryClaimEvidence:{
+    ...source.recoveryClaimEvidence as Record<string,unknown>,oemReleaseActionKind:'proven-by-source-duty-zero-commands-and-terminal-close'}};
+  check(hasSafeSourceFanRelease(dualDuty,7),'dual-duty source consumes actual commands without claiming automatic readback');
+  check(!hasSafeSourceFanRelease({...dualDuty,sourceFanAutomaticReturned:true},7)&&
+    !hasSafeSourceFanRelease({...dualDuty,sourceFanClosePending:true},7)&&!hasSafeSourceFanRelease(dualDuty,8),
+  'dual-duty commands cannot replace current closed-terminal evidence or be relabeled as readback');
   for(const delta of [{sourceFanClosePending:true},{sourceFanClosed:false},{sourceFanGeneration:8},
     {sourceFanAutomaticReturned:false},{hardwareWrites:true},{hardwareWritesEnabled:true},{openCalled:true},{openEventsCalled:true},
     {hcCloseCleanupPending:true},{unknownState:true},{sourceFanMode:false},

@@ -1,0 +1,352 @@
+{
+  "schemaVersion": 1,
+  "managedInputContract": "current105-terminal26-sdk-lifetime-compact-v1",
+  "baselineCompileProfile": {
+    "relative": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal23-compile-source-profile.json",
+    "bytes": 7540,
+    "sha256": "0fdd87e8578789f1235c7b13b1e63d50f38592af2c582474393a9ad40ac953f4"
+  },
+  "baselineProfiles": [
+    {
+      "relative": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal22-native-source-profile.json",
+      "bytes": 1347,
+      "sha256": "f6916a908291a9246d3638278fa6579e173330a4a1a4b1278ecff1a491ac8107"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-current105-source-adapter-profile.json",
+      "bytes": 13253,
+      "sha256": "8c8a5803990da252418f91be0dc5df13b89efd589b14a197f962e12ba9943674"
+    }
+  ],
+  "runtimeHeader": {
+    "relative": "native/steam_original_recovery_runtime.h",
+    "bytes": 120233,
+    "sha256": "afba81a5775bf01d6e6d677adad6b88599437dbcf1d673a7f47857833a7ffa88"
+  },
+  "extraCompileHeaders": [
+    {
+      "relative": "native/steam_original_recovery_policy.h",
+      "bytes": 7234,
+      "sha256": "767c718d52c2397cd11870ea6314598f68c5d9f29b54a65a92cee846997e1140"
+    },
+    {
+      "relative": "native/steam_original_recovery_dual_route.h",
+      "bytes": 1762,
+      "sha256": "755a07be7c83d4c379b4764538d6e4fac2a0985df44fd6b7aa40eb136003028a"
+    },
+    {
+      "relative": "native/steam_original_recovery_config.h",
+      "bytes": 3022,
+      "sha256": "ddd746052f886f15cdf44352a320ff19a5c7147e96ecb4a665a204be8212ebd0"
+    },
+    {
+      "relative": "native/steam_original_recovery_wake_watch.h",
+      "bytes": 8803,
+      "sha256": "c3675a51d2805596e5b886704da2affafa3b5e6a7fb905d5b3f6471d1879bf08"
+    },
+    {
+      "relative": "native/steam_original_recovery_storage.h",
+      "bytes": 14682,
+      "sha256": "169b2f51778909e4e8f115e3af3753666551dec6b9f1e24f5ac83f61b64b0c1c"
+    },
+    {
+      "relative": "native/steam_original_recovery_worker.h",
+      "bytes": 5024,
+      "sha256": "4ad4fa640321b42ed3d45f708d574ff9e98b745142fb13019773e044604ff69c"
+    }
+  ],
+  "extraCompileSources": [
+    {
+      "relative": "native/steam_original_recovery_engine.cpp",
+      "bytes": 264844,
+      "sha256": "85db70e448bdb7ab0760421aead5ead599134367c1cf984edf4342c00881556b"
+    },
+    {
+      "relative": "native/steam_original_recovery_engine.h",
+      "bytes": 6831,
+      "sha256": "d9eb51cdf39598cccabca8b0f144b043dbdf43dfd686ee91080b64fb8da0427e"
+    }
+  ],
+  "startSha256": "51ccaad4aa380a596c8818b46c22c619f858c10bc0b8cdfbcd85135b4f483815",
+  "exportSnapshotSha256": "9b469a75e62f6227c5b8d0a177fad66aba012a1293b7b0e7b2024f3f561ed1a8",
+  "bridgeSha256": "3c36f9593a3b517052a3a87d5a71813e2ac9504915eca7c6fa226a65578831f7",
+  "bridgeSource": {
+    "relative": "native/main.cpp",
+    "bytes": 6796707,
+    "sha256": "339f79a8e87a7afc1e1dbe0c9daf4e0e05032b8a5e300c47ad422d6c60bae62d"
+  },
+  "entryShapes": {
+    "start": {
+      "symbol": "steamOriginalRecoveryStart",
+      "returnType": "void",
+      "parameters": [],
+      "nameOccurrencesInRuntime": 1
+    },
+    "exportSnapshot": {
+      "symbol": "steamOriginalRecoveryExportSnapshot",
+      "returnType": "std::wstring",
+      "parameters": [],
+      "nameOccurrencesInRuntime": 1
+    },
+    "bridge": {
+      "symbol": "steamOriginalRecoveryEngineHandle",
+      "returnType": "json",
+      "parameters": [
+        "const json& request",
+        "const std::function<bool()>& stillCurrent",
+        "const std::function<void(const json&)>& emit",
+        "const std::function<bool()>& observationCurrent",
+        "std::uintptr_t wakeSignal",
+        "std::uintptr_t cancelSignal",
+        "std::uintptr_t identityCancelSignal",
+        "std::shared_ptr<ymcc::steamnative::ReadScope> publicationScope",
+        "std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease> processGroup",
+        "std::shared_ptr<ymcc::steamgamefacts::RequestCancellation> businessRequestCancellation"
+      ],
+      "hashNormalization": "CRLF to LF, same as original consumer"
+    }
+  },
+  "fixture": {
+    "relative": "tools/fixtures/input_coordinator_lifecycle/fixture.cpp",
+    "bytes": 363039,
+    "sha256": "5d9d9e84aaaf4c01aedffc12226185ffc224ee2deae697813ff0197fd88f5d74"
+  },
+  "fixtureObservationChanges": [
+    {
+      "label": "annotate existing check/failure without changing bool or assertion",
+      "before": "static void check(bool good,const char* name){++checks;const auto owner=cases.empty()?\"bootstrap\":cases.back().value(\"name\",\"\");assertionTrace.push_back({{\"case\",owner},{\"assertion\",name},{\"passed\",good},{\"checkIndex\",checks}});if(!good)failures.push_back({{\"case\",owner},{\"assertion\",name}});fixtureOffCheckpoint(\"assertion\",name,good?1:0);}",
+      "after": "static void check(bool good,const char* name){++checks;const auto owner=cases.empty()?\"bootstrap\":cases.back().value(\"name\",\"\");\n const auto ordinal=cases.size();unsigned occurrence=0;for(const auto& item:cases)if(item.value(\"name\",\"\")==owner)++occurrence;\n if(!cases.empty()){cases.back()[\"sourceOrdinal\"]=ordinal;cases.back()[\"nameOccurrence\"]=occurrence;}\n assertionTrace.push_back({{\"case\",owner},{\"assertion\",name},{\"passed\",good},{\"checkIndex\",checks},{\"sourceOrdinal\",ordinal},{\"nameOccurrence\",occurrence}});\n if(!good)failures.push_back({{\"case\",owner},{\"assertion\",name},{\"sourceOrdinal\",ordinal},{\"nameOccurrence\",occurrence},{\"checkIndex\",checks}});fixtureOffCheckpoint(\"assertion\",name,good?1:0);}",
+      "count": 1
+    },
+    {
+      "label": "read-only boundary snapshots",
+      "before": "int wmain(",
+      "after": "// Read-only observations at the old95 boundary and after the B49 tail.\n// Same resource fields/lock as the original grouped witness; no new check,\n// seed, Stop, debt assignment, process query or file/device operation.\nstatic json fixtureCurrentOrderedReturn=json::object();\nstatic json fixtureCurrentOrderedBoundary(){\n std::lock_guard<std::mutex> work(g_inputHostLifecycleWorkMx);\n return json{{\"afterSourceOrdinal\",cases.size()},{\"lastCaseName\",cases.empty()?\"\":cases.back().value(\"name\",\"\")},{\"checks\",checks},{\"nativeEvents\",fixtureEvents},{\"resources\",json{{\"hostHandle\",g_inputHostProcess!=nullptr},{\"pipeHandle\",g_inputHostServerPipe!=nullptr},{\"pipeConnected\",g_inputHostPipeConnected},{\"prepared\",g_inputHostPrepared},{\"quarantined\",g_inputHostReleaseQuarantined},{\"visibility\",g_hidHideVisibilityJournal.active},{\"childObservers\",fullPipeChildObservers.size()},{\"workQueue\",g_inputHostLifecycleWorkQueue.size()},{\"workRequested\",g_inputHostLifecycleWorkRequested.load()},{\"workInFlight\",g_inputHostLifecycleWorkInFlight.load()},{\"psRetirement\",g_psEndpointOwnership.retirementRequired()},{\"msiSdDebt\",g_msiSteamDeckReleaseDebt.required()},{\"msiModeDebt\",g_msiDinputReturnOwed.load()},{\"msiModeDebtEpisode\",g_msiDinputReturnDebtEpisode.load()},{\"startBlocked\",g_inputHostStartBlocked},{\"spawnCount\",fullPipeSpawnCount},{\"receiptPaths\",fullPipeReceipts.size()}}}};\n}\nint wmain(",
+      "count": 1
+    },
+    {
+      "label": "Preserve all original cases and assertions, defer deliberately unresolved MSI negative last, observe separate boundaries",
+      "before": "else if(mode==L\"full-pipe\"){fullPipeCases(true);fixtureTargetReturnFullPipeCases();fullPipeOffLifecycleCase(\"MSI-return-unproven\");ok=failures.empty();}",
+      "after": "else if(mode==L\"full-pipe\"){fullPipeCases(true);fixtureCurrentOrderedReturn[\"preTargetReturnBody\"]=fixtureCurrentOrderedBoundary();fixtureTargetReturnFullPipeCases();fullPipeOffLifecycleCase(\"MSI-return-unproven\");fixtureCurrentOrderedReturn[\"postTargetReturnTail\"]=fixtureCurrentOrderedBoundary();ok=failures.empty();}",
+      "count": 1
+    },
+    {
+      "label": "retain raw report and exception with extra boundary field",
+      "before": "{\"assertionTrace\",assertionTrace},{\"cases\",cases}",
+      "after": "{\"assertionTrace\",assertionTrace},{\"orderedReturn\",fixtureCurrentOrderedReturn},{\"cases\",cases}",
+      "count": 2
+    }
+  ],
+  "producerData": {
+    "schemaVersion": 2,
+    "relative": "tools/input_coordinator_lifecycle_selftest.mjs",
+    "key": "appendNativeLifecycleLog",
+    "bytes": 244592,
+    "sha256": "e2b74cffb6cd5ef675a19e47a11e53af1fc4eef0deb23c403ae6011a0db594d4",
+    "selectionContract": "default-core-no-directed-sd-v1",
+    "expectedLiteralRows": 2,
+    "selectedLiteral": 0,
+    "decodedUtf8Bytes": 1390,
+    "decodedUtf8Sha256": "22a134d8c573e44c07c4f9e866d84abfdb4ba7dc2518072790a8d93056473f4f",
+    "literals": [
+      {
+        "sourceLine": 606,
+        "sourceUtf8Byte": 99719,
+        "sourceUtf8Bytes": 1421,
+        "rowSha256": "890312506e82ff561535f9ddc35b35c9349848474b70205c999964f31c8ec6e8",
+        "decodedUtf8Bytes": 1390,
+        "decodedUtf8Sha256": "22a134d8c573e44c07c4f9e866d84abfdb4ba7dc2518072790a8d93056473f4f",
+        "expected905Error": "CURRENT_LOG_DATA_VALUE_CHANGED",
+        "producerExecuted": false,
+        "role": "base-default"
+      },
+      {
+        "sourceLine": 688,
+        "sourceUtf8Byte": 115472,
+        "sourceUtf8Bytes": 111,
+        "rowSha256": "ebf87f8b46589d25e64f0970cf3b43402dd2768936eef307126265692382856c",
+        "decodedUtf8Bytes": 80,
+        "decodedUtf8Sha256": "805e025dca44d1d66f8d82121539abb6865795ee64702c2bccd88bbdfb2d0555",
+        "expected905Error": "CURRENT_LOG_DATA_VALUE_CHANGED",
+        "producerExecuted": false,
+        "role": "sd-off-source-lost-only"
+      }
+    ],
+    "previousVersion1Expected": {
+      "schemaVersion": 1,
+      "decodedUtf8Bytes": 905,
+      "decodedUtf8Sha256": "0d1ce123abecf8e263d1157b0daa5bd64bbfd93139ae5bd884677385adb02e12"
+    }
+  },
+  "adapterDependencies": [
+    {
+      "relative": "tools/fixtures/input_coordinator_lifecycle/lifecycle-log-data.mjs",
+      "bytes": 5551,
+      "sha256": "ff610c22e6b484d5bd833e440c70adf64ac02cf7d24bdde79de4fc0f26a35452"
+    },
+    {
+      "relative": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "bytes": 254289,
+      "sha256": "1bd1d8cb9de1909f575601d6f20d87392dfbbc5546389b838596be215912c754"
+    },
+    {
+      "relative": "tools/fixtures/input_coordinator_lifecycle/prepare_ack_cases.inc",
+      "bytes": 11424,
+      "sha256": "7fb9fcebff50390e536779d8c4565e3305bc8ca78a63ef90413521c10fd4aea2"
+    }
+  ],
+  "kind": "CURRENT105_TERMINAL26_CURRENT_CAPTURE_COMPILE_SOURCE_GUARD_V1",
+  "id": "current105-terminal26-current-capture-20261121-c391",
+  "sourceApproval": false,
+  "sourceReady": false,
+  "publicRuntime": false,
+  "fullSourceExpectationApproved": false,
+  "predecessorProfile": {
+    "relative": "tools/ymcc_sim/global/controller-coordinator-pipe/r3-terminal26-compile-source-profile-v2.json",
+    "bytes": 15915,
+    "sha256": "69d5eac31101aafe95126f1ba53f152560341d39ac0865a13e99f87ad96c4b2d"
+  },
+  "sourceCapture": {
+    "root": "G:/YeManCC-Work/Testing/YMCC/Workspace/C391-managed/Mainline/YeManCC-source/YeManCC",
+    "primaryRoot": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC",
+    "binding": "EXACT_CAPTURE_MANIFEST_AND_15_COMPILE_SOURCE_INPUTS",
+    "manifest": {
+      "relative": ".ymcc-source-snapshot/manifest.json",
+      "bytes": 2501862,
+      "sha256": "c1597b945b0871af5a17b1f09fe3fc3376c07b55b4f15a2cf539085585c1fd9d"
+    },
+    "nodeToolsBinding": {
+      "relative": ".ymcc-source-snapshot/node-tools-binding.json",
+      "bytes": 319738,
+      "sha256": "0d8cf4a9686174ad23a6029fd23c56b56bb229ec36678698c060e5aae8102c4d"
+    },
+    "manifestKind": "ymcc-fixed-source-snapshot",
+    "policyVersion": 10,
+    "fileCount": 11944,
+    "sourceApprovalGranted": false,
+    "runtimeAuthorityGranted": false
+  },
+  "fixtureObservedOutput": {
+    "bytes": 365043,
+    "sha256": "00c32cb2504e033935b48cd6192b7e15cd163d06eb90eb8c758714e217abc5b0"
+  },
+  "lifecycleFixtureInputRepair": {
+    "kind": "EXACT_CURRENT_CAPTURE_ALREADY_REPAIRED_IDENTITY_V1",
+    "input": {
+      "bytes": 365043,
+      "sha256": "00c32cb2504e033935b48cd6192b7e15cd163d06eb90eb8c758714e217abc5b0"
+    },
+    "output": {
+      "bytes": 365043,
+      "sha256": "00c32cb2504e033935b48cd6192b7e15cd163d06eb90eb8c758714e217abc5b0"
+    },
+    "changes": [],
+    "originalRepairCount": 17,
+    "alreadyAppliedInCapture": true,
+    "sourceCaptureModified": false,
+    "assertionsRemoved": 0,
+    "originalAssertionExpressionsAndNamesPreserved": true,
+    "fullParentAccepted": false
+  },
+  "fixtureSourceOverrides": [
+    {
+      "relative": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "mode": "exact-reviewed-after-identity-v1",
+      "before": {
+        "relative": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+        "bytes": 254289,
+        "sha256": "1bd1d8cb9de1909f575601d6f20d87392dfbbc5546389b838596be215912c754"
+      },
+      "after": {
+        "relative": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+        "bytes": 254289,
+        "sha256": "1bd1d8cb9de1909f575601d6f20d87392dfbbc5546389b838596be215912c754"
+      },
+      "changes": [],
+      "originalBefore": {
+        "relative": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+        "bytes": 243550,
+        "sha256": "39eaeb9022dd674b07a04de6568773cd4828f2f86e513d7f1457da8441dfe616"
+      },
+      "originalAfter": {
+        "relative": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+        "bytes": 243732,
+        "sha256": "0c21bcee6c9b50d127e1b773fc6b5d2712c3a9a4ce9d8a3ed2dd7868cb19f3f1"
+      }
+    },
+    {
+      "relative": "tools/fixtures/input_coordinator_lifecycle/prepare_ack_cases.inc",
+      "mode": "exact-reviewed-after-identity-v1",
+      "before": {
+        "relative": "tools/fixtures/input_coordinator_lifecycle/prepare_ack_cases.inc",
+        "bytes": 11424,
+        "sha256": "7fb9fcebff50390e536779d8c4565e3305bc8ca78a63ef90413521c10fd4aea2"
+      },
+      "after": {
+        "relative": "tools/fixtures/input_coordinator_lifecycle/prepare_ack_cases.inc",
+        "bytes": 11424,
+        "sha256": "7fb9fcebff50390e536779d8c4565e3305bc8ca78a63ef90413521c10fd4aea2"
+      },
+      "changes": [],
+      "originalBefore": {
+        "relative": "tools/fixtures/input_coordinator_lifecycle/prepare_ack_cases.inc",
+        "bytes": 11258,
+        "sha256": "14433459940b085dfe497d1639e1b0a6d57305068e8300224bd2bdeb958e68ed"
+      },
+      "originalAfter": {
+        "relative": "tools/fixtures/input_coordinator_lifecycle/prepare_ack_cases.inc",
+        "bytes": 11424,
+        "sha256": "7fb9fcebff50390e536779d8c4565e3305bc8ca78a63ef90413521c10fd4aea2"
+      }
+    }
+  ],
+  "tupleFixture": {
+    "relative": "tools/fixtures/input_coordinator_lifecycle/tuple_recovery_cases.inc",
+    "mode": "exact-original13-after-identity-v1",
+    "before": {
+      "relative": "tools/fixtures/input_coordinator_lifecycle/tuple_recovery_cases.inc",
+      "bytes": 63272,
+      "sha256": "98a0f8f817c5c48399272b308fe79c3290b7b5c9531ff8b8f948914dfab99104"
+    },
+    "after": {
+      "relative": "tools/fixtures/input_coordinator_lifecycle/tuple_recovery_cases.inc",
+      "bytes": 63272,
+      "sha256": "98a0f8f817c5c48399272b308fe79c3290b7b5c9531ff8b8f948914dfab99104"
+    },
+    "changes": [],
+    "originalRepairCount": 13,
+    "originalBefore": {
+      "bytes": 59089,
+      "sha256": "977e11bf6ea13a56e2ce2b1260a2dd915f8c403d29e03fa8ac940b5488122ccb"
+    },
+    "originalAfter": {
+      "bytes": 63272,
+      "sha256": "98a0f8f817c5c48399272b308fe79c3290b7b5c9531ff8b8f948914dfab99104"
+    }
+  },
+  "review": {
+    "status": "SCOPED_COMPILE_SOURCE_GUARD_ONLY",
+    "profileUsable": true,
+    "compileOnly": true,
+    "sourceReady": false,
+    "sourceApprovalGranted": false,
+    "publicRuntimeAccepted": false,
+    "runtimeAuthorityGranted": false,
+    "fullParentAccepted": false,
+    "currentPrimaryAccepted": false,
+    "normalProductMainMayExecute": false,
+    "actualCompilerLedgerStillRequired": true,
+    "publicEntriesDenied": [
+      "steamOriginalRecoveryStart",
+      "steamOriginalRecoveryExportSnapshot",
+      "steamOriginalRecoveryEngineHandle"
+    ],
+    "observationAnchorCounts": [
+      1,
+      1,
+      1,
+      2
+    ],
+    "scope": "Only this manifest-pinned capture, fifteen compile-source roles, unchanged three entry denials and exact fixture mappings. No tests, native compilation, runtime, SourceReady or full current qualification."
+  }
+}

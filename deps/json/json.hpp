@@ -7479,7 +7479,7 @@ class lexer_base
 
 This class organizes the lexical analysis during JSON deserialization.
 */
-template<typename BasicJsonType, typename InputAdapterType>
+template<typename BasicJsonType, typename InputAdapterType, bool TrackTokenText = true>
 class lexer : public lexer_base<BasicJsonType>
 {
     using number_integer_t = typename BasicJsonType::number_integer_t;
@@ -7586,17 +7586,18 @@ class lexer : public lexer_base<BasicJsonType>
 
     @return true if and only if no range violation was detected
     */
+    template<bool KeepString>
     bool next_byte_in_range(std::initializer_list<char_int_type> ranges)
     {
         JSON_ASSERT(ranges.size() == 2 || ranges.size() == 4 || ranges.size() == 6);
-        add(current);
+        if constexpr (KeepString) { add(current); }
 
         for (auto range = ranges.begin(); range != ranges.end(); ++range)
         {
             get();
             if (JSON_HEDLEY_LIKELY(*range <= current && current <= *(++range))) // NOLINT(bugprone-inc-dec-in-conditions)
             {
-                add(current);
+                if constexpr (KeepString) { add(current); }
             }
             else
             {
@@ -7623,6 +7624,7 @@ class lexer : public lexer_base<BasicJsonType>
     @note In case of errors, variable error_message contains a textual
           description.
     */
+    template<bool KeepString = true>
     token_type scan_string()
     {
         // reset token_buffer (ignore opening quote)
@@ -7656,35 +7658,35 @@ class lexer : public lexer_base<BasicJsonType>
                     {
                         // quotation mark
                         case '\"':
-                            add('\"');
+                            if constexpr (KeepString) { add('\"'); }
                             break;
                         // reverse solidus
                         case '\\':
-                            add('\\');
+                            if constexpr (KeepString) { add('\\'); }
                             break;
                         // solidus
                         case '/':
-                            add('/');
+                            if constexpr (KeepString) { add('/'); }
                             break;
                         // backspace
                         case 'b':
-                            add('\b');
+                            if constexpr (KeepString) { add('\b'); }
                             break;
                         // form feed
                         case 'f':
-                            add('\f');
+                            if constexpr (KeepString) { add('\f'); }
                             break;
                         // line feed
                         case 'n':
-                            add('\n');
+                            if constexpr (KeepString) { add('\n'); }
                             break;
                         // carriage return
                         case 'r':
-                            add('\r');
+                            if constexpr (KeepString) { add('\r'); }
                             break;
                         // tab
                         case 't':
-                            add('\t');
+                            if constexpr (KeepString) { add('\t'); }
                             break;
 
                         // unicode escapes
@@ -7755,28 +7757,28 @@ class lexer : public lexer_base<BasicJsonType>
                             if (codepoint < 0x80)
                             {
                                 // 1-byte characters: 0xxxxxxx (ASCII)
-                                add(static_cast<char_int_type>(codepoint));
+                                if constexpr (KeepString) { add(static_cast<char_int_type>(codepoint)); }
                             }
                             else if (codepoint <= 0x7FF)
                             {
                                 // 2-byte characters: 110xxxxx 10xxxxxx
-                                add(static_cast<char_int_type>(0xC0u | (static_cast<unsigned int>(codepoint) >> 6u)));
-                                add(static_cast<char_int_type>(0x80u | (static_cast<unsigned int>(codepoint) & 0x3Fu)));
+                                if constexpr (KeepString) { add(static_cast<char_int_type>(0xC0u | (static_cast<unsigned int>(codepoint) >> 6u))); }
+                                if constexpr (KeepString) { add(static_cast<char_int_type>(0x80u | (static_cast<unsigned int>(codepoint) & 0x3Fu))); }
                             }
                             else if (codepoint <= 0xFFFF)
                             {
                                 // 3-byte characters: 1110xxxx 10xxxxxx 10xxxxxx
-                                add(static_cast<char_int_type>(0xE0u | (static_cast<unsigned int>(codepoint) >> 12u)));
-                                add(static_cast<char_int_type>(0x80u | ((static_cast<unsigned int>(codepoint) >> 6u) & 0x3Fu)));
-                                add(static_cast<char_int_type>(0x80u | (static_cast<unsigned int>(codepoint) & 0x3Fu)));
+                                if constexpr (KeepString) { add(static_cast<char_int_type>(0xE0u | (static_cast<unsigned int>(codepoint) >> 12u))); }
+                                if constexpr (KeepString) { add(static_cast<char_int_type>(0x80u | ((static_cast<unsigned int>(codepoint) >> 6u) & 0x3Fu))); }
+                                if constexpr (KeepString) { add(static_cast<char_int_type>(0x80u | (static_cast<unsigned int>(codepoint) & 0x3Fu))); }
                             }
                             else
                             {
                                 // 4-byte characters: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
-                                add(static_cast<char_int_type>(0xF0u | (static_cast<unsigned int>(codepoint) >> 18u)));
-                                add(static_cast<char_int_type>(0x80u | ((static_cast<unsigned int>(codepoint) >> 12u) & 0x3Fu)));
-                                add(static_cast<char_int_type>(0x80u | ((static_cast<unsigned int>(codepoint) >> 6u) & 0x3Fu)));
-                                add(static_cast<char_int_type>(0x80u | (static_cast<unsigned int>(codepoint) & 0x3Fu)));
+                                if constexpr (KeepString) { add(static_cast<char_int_type>(0xF0u | (static_cast<unsigned int>(codepoint) >> 18u))); }
+                                if constexpr (KeepString) { add(static_cast<char_int_type>(0x80u | ((static_cast<unsigned int>(codepoint) >> 12u) & 0x3Fu))); }
+                                if constexpr (KeepString) { add(static_cast<char_int_type>(0x80u | ((static_cast<unsigned int>(codepoint) >> 6u) & 0x3Fu))); }
+                                if constexpr (KeepString) { add(static_cast<char_int_type>(0x80u | (static_cast<unsigned int>(codepoint) & 0x3Fu))); }
                             }
 
                             break;
@@ -8080,7 +8082,7 @@ class lexer : public lexer_base<BasicJsonType>
                 case 0x7E:
                 case 0x7F:
                 {
-                    add(current);
+                    if constexpr (KeepString) { add(current); }
                     break;
                 }
 
@@ -8116,7 +8118,7 @@ class lexer : public lexer_base<BasicJsonType>
                 case 0xDE:
                 case 0xDF:
                 {
-                    if (JSON_HEDLEY_UNLIKELY(!next_byte_in_range({0x80, 0xBF})))
+                    if (JSON_HEDLEY_UNLIKELY(!next_byte_in_range<KeepString>({0x80, 0xBF})))
                     {
                         return token_type::parse_error;
                     }
@@ -8126,7 +8128,7 @@ class lexer : public lexer_base<BasicJsonType>
                 // U+0800..U+0FFF: bytes E0 A0..BF 80..BF
                 case 0xE0:
                 {
-                    if (JSON_HEDLEY_UNLIKELY(!(next_byte_in_range({0xA0, 0xBF, 0x80, 0xBF}))))
+                    if (JSON_HEDLEY_UNLIKELY(!(next_byte_in_range<KeepString>({0xA0, 0xBF, 0x80, 0xBF}))))
                     {
                         return token_type::parse_error;
                     }
@@ -8150,7 +8152,7 @@ class lexer : public lexer_base<BasicJsonType>
                 case 0xEE:
                 case 0xEF:
                 {
-                    if (JSON_HEDLEY_UNLIKELY(!(next_byte_in_range({0x80, 0xBF, 0x80, 0xBF}))))
+                    if (JSON_HEDLEY_UNLIKELY(!(next_byte_in_range<KeepString>({0x80, 0xBF, 0x80, 0xBF}))))
                     {
                         return token_type::parse_error;
                     }
@@ -8160,7 +8162,7 @@ class lexer : public lexer_base<BasicJsonType>
                 // U+D000..U+D7FF: bytes ED 80..9F 80..BF
                 case 0xED:
                 {
-                    if (JSON_HEDLEY_UNLIKELY(!(next_byte_in_range({0x80, 0x9F, 0x80, 0xBF}))))
+                    if (JSON_HEDLEY_UNLIKELY(!(next_byte_in_range<KeepString>({0x80, 0x9F, 0x80, 0xBF}))))
                     {
                         return token_type::parse_error;
                     }
@@ -8170,7 +8172,7 @@ class lexer : public lexer_base<BasicJsonType>
                 // U+10000..U+3FFFF F0 90..BF 80..BF 80..BF
                 case 0xF0:
                 {
-                    if (JSON_HEDLEY_UNLIKELY(!(next_byte_in_range({0x90, 0xBF, 0x80, 0xBF, 0x80, 0xBF}))))
+                    if (JSON_HEDLEY_UNLIKELY(!(next_byte_in_range<KeepString>({0x90, 0xBF, 0x80, 0xBF, 0x80, 0xBF}))))
                     {
                         return token_type::parse_error;
                     }
@@ -8182,7 +8184,7 @@ class lexer : public lexer_base<BasicJsonType>
                 case 0xF2:
                 case 0xF3:
                 {
-                    if (JSON_HEDLEY_UNLIKELY(!(next_byte_in_range({0x80, 0xBF, 0x80, 0xBF, 0x80, 0xBF}))))
+                    if (JSON_HEDLEY_UNLIKELY(!(next_byte_in_range<KeepString>({0x80, 0xBF, 0x80, 0xBF, 0x80, 0xBF}))))
                     {
                         return token_type::parse_error;
                     }
@@ -8192,7 +8194,7 @@ class lexer : public lexer_base<BasicJsonType>
                 // U+100000..U+10FFFF F4 80..8F 80..BF 80..BF
                 case 0xF4:
                 {
-                    if (JSON_HEDLEY_UNLIKELY(!(next_byte_in_range({0x80, 0x8F, 0x80, 0xBF, 0x80, 0xBF}))))
+                    if (JSON_HEDLEY_UNLIKELY(!(next_byte_in_range<KeepString>({0x80, 0x8F, 0x80, 0xBF, 0x80, 0xBF}))))
                     {
                         return token_type::parse_error;
                     }
@@ -8692,8 +8694,11 @@ scan_number_done:
     void reset() noexcept
     {
         token_buffer.clear();
-        token_string.clear();
-        token_string.push_back(char_traits<char_type>::to_char_type(current));
+        if constexpr (TrackTokenText)
+        {
+            token_string.clear();
+            token_string.push_back(char_traits<char_type>::to_char_type(current));
+        }
     }
 
     /*
@@ -8721,9 +8726,12 @@ scan_number_done:
             current = ia.get_character();
         }
 
-        if (JSON_HEDLEY_LIKELY(current != char_traits<char_type>::eof()))
+        if constexpr (TrackTokenText)
         {
-            token_string.push_back(char_traits<char_type>::to_char_type(current));
+            if (JSON_HEDLEY_LIKELY(current != char_traits<char_type>::eof()))
+            {
+                token_string.push_back(char_traits<char_type>::to_char_type(current));
+            }
         }
 
         if (current == '\n')
@@ -8762,10 +8770,13 @@ scan_number_done:
             --position.chars_read_current_line;
         }
 
-        if (JSON_HEDLEY_LIKELY(current != char_traits<char_type>::eof()))
+        if constexpr (TrackTokenText)
         {
-            JSON_ASSERT(!token_string.empty());
-            token_string.pop_back();
+            if (JSON_HEDLEY_LIKELY(current != char_traits<char_type>::eof()))
+            {
+                JSON_ASSERT(!token_string.empty());
+                token_string.pop_back();
+            }
         }
     }
 
@@ -8878,7 +8889,7 @@ scan_number_done:
         while (current == ' ' || current == '\t' || current == '\n' || current == '\r');
     }
 
-    token_type scan()
+    token_type scan(bool keep_string = true)
     {
         // initially, skip the BOM
         if (position.chars_read_total == 0 && !skip_bom())
@@ -8937,6 +8948,10 @@ scan_number_done:
 
             // string
             case '\"':
+                if constexpr (!TrackTokenText)
+                {
+                    if (!keep_string) { return scan_string<false>(); }
+                }
                 return scan_string();
 
             // number
@@ -12224,14 +12239,14 @@ using parser_callback_t =
 
 This class implements a recursive descent parser.
 */
-template<typename BasicJsonType, typename InputAdapterType>
+template<typename BasicJsonType, typename InputAdapterType, bool TrackTokenText = true>
 class parser
 {
     using number_integer_t = typename BasicJsonType::number_integer_t;
     using number_unsigned_t = typename BasicJsonType::number_unsigned_t;
     using number_float_t = typename BasicJsonType::number_float_t;
     using string_t = typename BasicJsonType::string_t;
-    using lexer_t = lexer<BasicJsonType, InputAdapterType>;
+    using lexer_t = lexer<BasicJsonType, InputAdapterType, TrackTokenText>;
     using token_type = typename lexer_t::token_type;
 
   public:
@@ -12368,7 +12383,7 @@ class parser
                         }
 
                         // closing } -> we are done
-                        if (get_token() == token_type::end_object)
+                        if (get_token_for_string(sax, true) == token_type::end_object)
                         {
                             if (JSON_HEDLEY_UNLIKELY(!sax->end_object()))
                             {
@@ -12401,7 +12416,7 @@ class parser
                         states.push_back(false);
 
                         // parse values
-                        get_token();
+                        get_token_for_string(sax, false);
                         continue;
                     }
 
@@ -12413,7 +12428,7 @@ class parser
                         }
 
                         // closing ] -> we are done
-                        if (get_token() == token_type::end_array)
+                        if (get_token_for_string(sax, false) == token_type::end_array)
                         {
                             if (JSON_HEDLEY_UNLIKELY(!sax->end_array()))
                             {
@@ -12555,7 +12570,7 @@ class parser
                 if (get_token() == token_type::value_separator)
                 {
                     // parse a new value
-                    get_token();
+                    get_token_for_string(sax, false);
                     continue;
                 }
 
@@ -12588,7 +12603,7 @@ class parser
             if (get_token() == token_type::value_separator)
             {
                 // parse key
-                if (JSON_HEDLEY_UNLIKELY(get_token() != token_type::value_string))
+                if (JSON_HEDLEY_UNLIKELY(get_token_for_string(sax, true) != token_type::value_string))
                 {
                     return sax->parse_error(m_lexer.get_position(),
                                             m_lexer.get_token_string(),
@@ -12609,7 +12624,7 @@ class parser
                 }
 
                 // parse values
-                get_token();
+                get_token_for_string(sax, false);
                 continue;
             }
 
@@ -12641,6 +12656,27 @@ class parser
     token_type get_token()
     {
         return last_token = m_lexer.scan();
+    }
+
+    template<typename SAX>
+    static auto keep_sax_string(SAX* sax, bool key, int) -> decltype(sax->keep_sax_string(key))
+    {
+        return sax->keep_sax_string(key);
+    }
+
+    static bool keep_sax_string(...) noexcept { return true; }
+
+    template<typename SAX>
+    token_type get_token_for_string(SAX* sax, bool key)
+    {
+        if constexpr (!TrackTokenText)
+        {
+            return last_token = m_lexer.scan(keep_sax_string(sax, key, 0));
+        }
+        else
+        {
+            return get_token();
+        }
     }
 
     std::string exception_message(const token_type expected, const std::string& context)
@@ -19407,7 +19443,7 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
     // can be restored when json_pointer backwards compatibility is removed
     // friend ::nlohmann::json_pointer<StringType>;
 
-    template<typename BasicJsonType, typename InputType>
+    template<typename BasicJsonType, typename InputType, bool TrackTokenText>
     friend class ::nlohmann::detail::parser;
     friend ::nlohmann::detail::serializer<basic_json>;
     template<typename BasicJsonType>
@@ -23405,6 +23441,17 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
         return format == input_format_t::json
                ? parser(std::move(ia), nullptr, true, ignore_comments).sax_parse(sax, strict)
                : detail::binary_reader<basic_json, decltype(ia), SAX>(std::move(ia), format).sax_parse(format, sax, strict);
+    }
+
+    // YMCC extension: strict JSON SAX for callers that ignore the error text.
+    // A SAX sink may also opt out of decoding individual strings by providing
+    // keep_sax_string(bool key). Those callbacks receive empty strings; syntax,
+    // UTF-8 validation, number conversion, and error locations are unchanged.
+    template<typename SAX>
+    static bool sax_parse_without_token_text(const char* first, const char* last, SAX* sax)
+    {
+        auto ia = detail::input_adapter(first, last);
+        return detail::parser<basic_json, decltype(ia), false>(std::move(ia)).sax_parse(sax, true);
     }
 
     /// @brief generate SAX events

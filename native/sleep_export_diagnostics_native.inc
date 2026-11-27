@@ -16,44 +16,56 @@ struct SgWindowsSleepExport {
         }
     }
 };
-static json sgSleepExportSelectAnomaly() {
+static json sgSleepExportSelectAnomaly(std::uint64_t exportFileTime) {
     std::vector<std::string> facts;
     {std::lock_guard<std::mutex> lock(g_sgFactMx);facts.assign(g_sgFacts.begin(),g_sgFacts.end());}
     auto selected=ymcc::sleepexport::selectAnomaly(facts);
     if(!selected.is_null())return selected;
-    // Existing ordinary log only, bounded tail at explicit export. A partial
-    // concurrently appended record is ignored by the strict selector.
-    try {
-        std::ifstream in(fspath::path(SG_FACT_LOG),std::ios::binary);
-        if(!in)return nullptr;
-        in.seekg(0,std::ios::end);const auto end=in.tellg();
-        if(end<=0)return nullptr;
-        constexpr std::streamoff cap=1024*1024;
-        const auto offset=(std::max)(std::streamoff{0},static_cast<std::streamoff>(end)-cap);
-        in.seekg(offset);
-        std::string bytes(static_cast<std::size_t>(static_cast<std::streamoff>(end)-offset),'\0');
-        in.read(bytes.data(),static_cast<std::streamsize>(bytes.size()));
-        bytes.resize(static_cast<std::size_t>(in.gcount()));
-        return ymcc::sleepexport::selectAnomalyFromFileTail(bytes,offset!=0);
-    }catch(...){/* Missing historical evidence never grants a power action. */}
-    return nullptr;
+    const auto selectFile=[&](const fspath::path& path,bool rotated)->json {
+        try {
+            if(rotated) {
+                std::error_code ec;
+                if(fspath::symlink_status(path,ec).type()!=fspath::file_type::regular||ec)return nullptr;
+            }
+            std::ifstream in(path,std::ios::binary);
+            if(!in)return nullptr;
+            in.seekg(0,std::ios::end);const auto end=static_cast<std::streamoff>(in.tellg());
+            if(end<=0)return nullptr;
+            constexpr std::streamoff cap=1024*1024;
+            // The writer rotates after the threshold, so allow one extra bounded row.
+            constexpr std::streamoff rotatedCap=cap+ymcc::sleepexport::maxFactBytes+1;
+            const auto offset=rotated?0:(std::max)(std::streamoff{0},end-cap);
+            const auto size=rotated?(std::min)(end,rotatedCap):end-offset;
+            in.seekg(offset);
+            std::string bytes(static_cast<std::size_t>(size),'\0');
+            in.read(bytes.data(),static_cast<std::streamsize>(bytes.size()));
+            bytes.resize(static_cast<std::size_t>(in.gcount()));
+            if(rotated)return ymcc::sleepexport::selectRotatedPairedAnomaly(bytes,exportFileTime);
+            return ymcc::sleepexport::selectAnomalyFromFileTail(bytes,offset!=0);
+        }catch(...){return nullptr;}
+    };
+    selected=selectFile(fspath::path(SG_FACT_LOG),false);
+    if(!selected.is_null())return selected;
+    return selectFile(fspath::path(SG_FACT_LOG+L".previous"),true);
 }
 static SgWindowsSleepExport sgExportWindowsSleepEvidence(const std::wstring& dataDir,const std::string& exportId={},
         unsigned long long generation=currentPowerGeneration()) {
     SgWindowsSleepExport result;
     // logs.exportAll owns the existing export mutex for this whole call.
     static ymcc::sleepexport::DeadlineCooldown recentDeadline;
-    const auto current=[generation] {
-        return !g_exitRequested.load(std::memory_order_acquire)&&
-            g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready&&
-            currentPowerGeneration()==generation;
+    const auto contextBlocker=[generation]() -> const char* {
+        if(g_exitRequested.load(std::memory_order_acquire))return "native-exit-requested";
+        if(g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready)return "power-not-ready";
+        return currentPowerGeneration()!=generation?"power-generation-changed":nullptr;
     };
+    const auto current=[&]{return contextBlocker()==nullptr;};
     fspath::path reportPath,receiptPath;
     std::size_t commandOutputBytes=0;
     ymcc::sleepexport::QueryFailureOutputBytes commandFailureOutput;
     ymcc::sleepexport::CaptureFinalization commandFinalization;
     ymcc::sleepexport::CaptureLoopTiming captureLoopTiming;
     bool commandTimedOut=false;
+    unsigned historyDays=ymcc::sleepexport::defaultHistoryDays;
     std::optional<std::uint64_t> preparationMs,captureCallMs,reportFileReadMs;
     const auto runQuery=[&](std::uint32_t timeout)->ymcc::sleepexport::QueryResult {
         ymcc::sleepexport::QueryResult q;
@@ -78,7 +90,8 @@ static SgWindowsSleepExport sgExportWindowsSleepEvidence(const std::wstring& dat
             if(!count||count>=32768) {q.readError="absolute-System32-unavailable";return q;}
             const auto exe=std::wstring(system,count)+L"\\powercfg.exe";
             if(exe.size()<3||exe[1]!=L':'||exe[2]!=L'\\') {q.readError="System32-path-not-absolute";return q;}
-            const auto cmd=quote_windows_arg(exe)+L" /systempowerreport /xml /duration 1 /output "+quote_windows_arg(reportPath.wstring());
+            const auto cmd=quote_windows_arg(exe)+L" /systempowerreport /xml /duration "+std::to_wstring(historyDays)+
+                L" /output "+quote_windows_arg(reportPath.wstring());
             const auto commandStarted=GetTickCount64();
             const auto run=runCapture(cmd,timeout,[&]{return !current();},nullptr,nullptr,nullptr,&captureLoopTiming);
             captureCallMs=GetTickCount64()-commandStarted;
@@ -117,8 +130,21 @@ static SgWindowsSleepExport sgExportWindowsSleepEvidence(const std::wstring& dat
         return result;
     };
     try {
-        result.receipt=ymcc::sleepexport::collectWithAnomaly(sgSleepExportSelectAnomaly,current,query,
+        const auto select=[&]{
+            const auto exportFileTime=sgNowFileTime();
+            auto selected=sgSleepExportSelectAnomaly(exportFileTime);
+            historyDays=ymcc::sleepexport::reportHistoryDays(selected,exportFileTime);
+            return selected;
+        };
+        const char* receiptBlocker=nullptr;
+        const auto receiptCurrent=[&]{receiptBlocker=contextBlocker();return receiptBlocker==nullptr;};
+        result.receipt=ymcc::sleepexport::collectWithAnomaly(select,receiptCurrent,query,
             &recentDeadline,generation,GetTickCount64());
+        if(receiptBlocker)try {
+            const auto reason=result.receipt.value("reason","");
+            if(reason=="export-context-not-current"||reason=="export-context-changed")
+                result.receipt["queryContextGate"]={{"schema",1},{"blocker",receiptBlocker}};
+        }catch(...){}
         if(deadlineRecorded)try {
             if(result.receipt.contains("query") && result.receipt.value("reason","")=="query-not-completed-successfully")
                 result.receipt["deadlineRetryPolicy"]=recentDeadline.retryPolicy();
@@ -194,7 +220,7 @@ static SgWindowsSleepExport sgExportWindowsSleepEvidence(const std::wstring& dat
         }catch(...){++outputEvidenceBuildFailures;}
         try{result.receipt["commandFailureOutputEvidenceBuildFailures"]=outputEvidenceBuildFailures;}catch(...){}
         result.receipt["commandOutputBytes"]=commandOutputBytes;
-        result.receipt["historyDays"]=1;
+        result.receipt["historyDays"]=historyDays;
         result.receipt["correlation"]="Windows report history; match original event timestamp; not live retry authority";
         result.receipt["temporaryFiles"]="unique-export-owned; removed after archive attempt";
         if(result.receipt.value("reportAvailable",false)&&!reportPath.empty()) {

@@ -1,3 +1,9 @@
+<!-- FAN-SHARED-SLEEP-CURRENT -->
+**当前睡眠恢复入口（2026-11-26）：** 风扇消费唯一 Native 睡眠协调层发布的当轮授权；原有风扇通知只作为受约束的提示。公共投递补发、主动关闭和新一轮挂起的接测，以及当前实机复测包，统一见 [Fan 任务入口](G:/YeManCC-Work/Docs/Tasks/Fan/TASK.md:2)。前端回归用 `fan_manual_wake_ipc_selftest.mjs` 读取协调层实际报文。下方 11 月 14 日的配套信息为历史快照。
+
+休眠专项由 `tools/fan_physical_wake_selftest.ps1 -S4WireOnly` 导出原生 `S4_RETAINED_FAN_WIRE`；把其 `gate.out` 设为 `YMCC_FAN_S4_REPLAY` 后运行原前端夹具，检查 Close 前没有写入、当轮原曲线只恢复一次，以及 OFF 或新挂起压过迟到许可。生产 Host 不订阅独立的 Windows 电源事件。
+<!-- /FAN-SHARED-SLEEP-CURRENT -->
+
 <!-- FAN-REMOTE-CURRENT-JOINT-20261114 -->
 当前唯一睡眠层已完成源码、r9/r10限定软件组合和现成171232完整包配对；Host db7b7e17…、payload e6d63d4a…、TS固定native-f5-deadline-v1与原F5入口一致。父死亡后迟到返/不返与ACK Unknown边界保持，不新增恢复次数/轮询。当前剩余是用这一新包验证真实后台自动恢复与物理结果；11月13日旧Host日志不能代签。见[当前配套后继](G:/YeManCC-Work/Testing/YMCC/Evidence/SharedSleepLifecycle-20261112/all-consumers/fan-consumption/matched-package-171232-r11/REPORT.zh-CN.md)。
 <!-- /FAN-REMOTE-CURRENT-JOINT-20261114 -->
@@ -21,7 +27,7 @@
 | 机型识别/能力接入 | ../../../capabilities/README.md；capabilityAdmission.ts：evaluateFanDeviceGate | Host：RealHcBackend.CapabilityRoutes/ResolveRoute/BuildFanRoutes；桥：acceptCurrentHandshake | hc_capability_catalog_generate.mjs --check、fan_host_lifecycle_selftest.ts 原握手场景 |
 | 厂商profile与基础EC协议选择 | Host：InheritedEcFanWriter.SupportsRoute/Bind/InheritedRoot、GetInheritedEcFanWriter | 必须同时GenericDuty＋GenericEcControl；两个setter和整个profile回调都由同程序集IDevice声明。会话currentness先核；Lenovo WMI、GPD Mini、source9等不借继承形状切基础writer | fan.unified-capability-roundtrip原SourceOnly协议参数化；逐项范围见[本轮记录](G:/YeManCC-Work/Testing/YMCC/Evidence/Fan-InheritedEc-Protocol-Regression-20261103/REPORT.md) |
 | 手动开启/重新接管 | ../fanHost.ts：start/startInternal、apply；../../views/FanView.vue：FAN:UI | 本代原生许可、Open/OpenEvents、租约、控制写入确认；旧实例退出与跨await取消检查 | fan_startup_ipc_boundaries_selftest.mjs、fan_host_owned_exit_selftest.ts、fan_host_supersede_exit_selftest.ts |
-| 睡眠/唤醒 | ../fanHost.ts：readNativePowerState、resumeAfterNativeReady、observePowerBoundary／runRearmAfterWake；App：onFanResumeReady | 公共Native观察与Fan设备代次分列；UNKNOWN/pending撤授予但不伪造睡眠，迟到Ready先查当前快照；保留原物理唤醒/F5、Close债与同源取消，原生恢复owner持有Registration至POST/GET结算，新有效请求可重入 | fan_manual_wake_ipc_selftest.mjs；fan_physical_wake_selftest.ps1 -SharedPowerOnly／-CallersOnly；fan_power_http_transport_selftest.py --shared-owner-only／--resume-existing-only |
+| 睡眠/唤醒 | ../fanHost.ts：readNativePowerState、resumeAfterNativeReady、observePowerBoundary／runRearmAfterWake；App：onFanResumeReady | 公共Native观察与Fan设备代次分列；UNKNOWN/pending撤授予但不伪造睡眠。迟到Ready先查当前快照，回包落后于公共代次、挂起序号或通知顺序时丢弃；公共UNKNOWN/pending时，同序回包也不授予Ready，只有更新且明确不待处理的Native观察可先进入原设备门。保留原物理唤醒/F5、Close债与同源取消，原生恢复owner持有Registration至POST/GET结算，新有效请求可重入 | fan_manual_wake_ipc_selftest.mjs；fan_physical_wake_selftest.ps1 -SharedPowerOnly／-CallersOnly；fan_power_http_transport_selftest.py --shared-owner-only／--resume-existing-only |
 | 故障自愈/关闭 | ../fanHost.ts：FAN:HEAL/CANCEL/SETTLE、disable/close；Host：ScheduleRecoveryRetry | 单恢复任务；预算不被观察续期；OFF/Close撤销后续native意图接续，只有新明确ON可重新接纳；旧Timer不处置后继；HC清理与OEM物理交还分开，原已入队FIFO保持 | fan_control_self_heal_selftest.ts、fan_startup_cleanup_self_heal_selftest.ts、fan_native_intent_retirement_selftest.ts |
 | 开机场景与新ON/OFF交错 | ../bootModes.ts：applyBootMode/restoreSelectedBootMode、fan消费分支 | 提交前捕获原Fan取消身份；preset逐请求归属贯穿原准入/队列/租约/重试/自愈，旧未提交请求归还新lease并保留旧已提交/新手动owner；场景Close在原队列当前归属及本地意图复核后接纳，已派发清理仍完成；start与native传输另核 | boot_modes_selftest.mjs --filter "fan scene"；[公共交错记录](G:/YeManCC-Work/Testing/YMCC/Evidence/Fan-PublicLifecycle-Storm-20261109/REPORT.zh-CN.md) |
 | 状态/按钮/页面离开 | ../../views/FanView.vue：FAN:UI；../../views/fanStatusText.ts | 单按钮点击启用／确认后点击关闭；开启／恢复显示进度，保留4秒操作／每代5秒固定保护；待恢复不冒充已受控，页面卸载不新建恢复任务 | fan_control_display_evidence_selftest.ts、fan_manual_wake_ipc_selftest.mjs、ymcc_sim/global/ui-navigation |

@@ -17,8 +17,8 @@
     {
       "kind": "Default",
       "file": "native/hc_default_motion_catalog.h",
-      "count": 3,
-      "sha256": "de416c9823fb06e4519feac98fa810c81bfe46ac39e8728fe838c96249ad4d4d"
+      "count": 4,
+      "sha256": "d9aa7affb86090781ae7dc0461a117b56071890e7fb5d86ec04413a464c91e15"
     },
     {
       "kind": "Generic",
@@ -49,7 +49,8 @@
     "HandheldCompanion.Devices.OneXPlayer3",
     "HandheldCompanion.Devices.OneXPlayerX2",
     "HandheldCompanion.Devices.OneXPlayerX2MiniPro",
-    "HandheldCompanion.Devices.SteamMachine"
+    "HandheldCompanion.Devices.SteamMachine",
+    "YeManCC.SourceDevices.GPDWinMax3"
   ],
   "pendingRoutes": [
     "controller-source-qualified recipe/submit/calibration binding"

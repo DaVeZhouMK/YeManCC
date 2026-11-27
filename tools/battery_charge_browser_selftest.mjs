@@ -26,8 +26,8 @@ import Component from './src/components/BatteryChargeSettings.vue';
 import * as model from './src/bridge/batteryCharge';
 import {getSharedPowerLifecycleDiagnostics} from './src/bridge/powerLifecycleState';
 window.__model=model;window.__powerDiagnostics=getSharedPowerLifecycleDiagnostics;
-window.__fixture={calls:[],state:null,defer:false,fail:false,failSet:false,pending:[],actualController:new URLSearchParams(location.search).get('actual-controller')==='1',power:{phase:'ready',generation:1,known:true,inputReady:true,hardwareWritesAllowed:true,publicationRevision:1,suspendSerial:0}};
-window.__publishPower=(generation,phase,notificationPending=false,suspendSerial=window.__fixture.power.suspendSerial)=>{const f=window.__fixture;f.power={phase,generation,known:true,inputReady:phase==='ready',hardwareWritesAllowed:phase==='ready',notificationPending,suspendSerial,publicationRevision:f.power.publicationRevision+1};window.dispatchEvent(new CustomEvent('ipc:power.lifecycleChanged',{detail:structuredClone(f.power)}));};
+window.__fixture={calls:[],state:null,defer:false,fail:false,failSet:false,pending:[],actualController:new URLSearchParams(location.search).get('actual-controller')==='1',power:{phase:'ready',generation:1,known:true,inputReady:true,hardwareWritesAllowed:true,publicationRevision:1,suspendSerial:0,observedNotificationSequence:1}};
+window.__publishPower=(generation,phase,notificationPending=false,suspendSerial=window.__fixture.power.suspendSerial,observedNotificationSequence=window.__fixture.power.observedNotificationSequence)=>{const f=window.__fixture;f.power={phase,generation,known:true,inputReady:phase==='ready',hardwareWritesAllowed:phase==='ready',notificationPending,suspendSerial,observedNotificationSequence,publicationRevision:f.power.publicationRevision+1};window.dispatchEvent(new CustomEvent('ipc:power.lifecycleChanged',{detail:structuredClone(f.power)}));};
 const fixtureApp=createApp({setup(){const shown=ref(true),version=ref(0);window.__show=v=>shown.value=v;window.__reset=v=>{window.__fixture.state=v;shown.value=true;version.value++};return()=>h(KeepAlive,{key:version.value},{default:()=>shown.value?h(Component):null})}});window.__destroy=()=>fixtureApp.unmount();fixtureApp.mount('#app');
 `;
 const ipcMock = `export const isNativeRuntime=true;export class IpcTimeoutError extends Error {} export function on(name,handler){const listener=event=>handler(event.detail);window.addEventListener('ipc:'+name,listener);return()=>window.removeEventListener('ipc:'+name,listener);}export async function invoke(cmd,args,options){const f=window.__fixture;f.calls.push({cmd,args,options});
@@ -38,6 +38,7 @@ if(cmd==='battery.charge.refresh'&&f.state.verification==='unconfirmed'&&!f.fail
  if(cmd==='battery.charge.get'||cmd==='battery.charge.refresh'){if(f.fail)throw Error('fixture read failure');if(f.defer)return new Promise((resolve,reject)=>{const signal=options?.signal;const abort=()=>reject(Error('IPC request retired'));if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});f.pending.push(value=>{signal?.removeEventListener('abort',abort);resolve(value)});});return structuredClone(f.state)}
 if(cmd==='battery.charge.set'){
  if(f.failSet)throw Error('fixture lost acknowledgement');
+ if(f.deferSet)return new Promise(resolve=>{f.pendingSet=resolve;});
  const software=f.state.kind==='software-bypass-threshold',ack=f.state.family==='ASUS';
  f.state={...f.state,requestedLimit:args.target,currentLimit:software||ack?null:args.target,managed:!software||args.target<100,verification:software?(args.target===100?'unmanaged':'software-active'):ack?'acknowledged':'readback',preferenceSaved:!f.failPreference,preferenceReason:f.failPreference?'开机全局充电偏好未保存':''};return structuredClone(f.state);
 }
@@ -250,6 +251,117 @@ try{
  assert.equal(await reads(),coalescedReads+1,'duplicate or delayed Ready must not start another read');
  assert.equal(await writes(),coalescedWrites,'coalesced Ready must not replay a write');
  cases.push('coalesced same-generation Ready retires the old read and accepts one current read without replaying writes');
+ const notificationWrites=await writes(),idleNotificationReads=await reads();
+ await page.evaluate(()=>window.__publishPower(9,'ready',false,1,2));
+ assert.equal(await reads(),idleNotificationReads,'a notification-only Ready with no outstanding work must not read');
+ await page.evaluate(()=>{window.__fixture.defer=true;window.dispatchEvent(new Event('focus'));});
+ await page.waitForFunction(()=>window.__fixture.pending.length===1);
+ const notificationReads=await reads();
+ const replacementRequested=await page.evaluate(()=>{const f=window.__fixture;window.__publishPower(9,'ready',false,1,3);const requested=f.pending.length===2;f.pending.shift()({...f.state,currentLimit:50});return requested;});
+ assert.match(await panel.textContent(),/当前：100%/,'the earlier notification reply must not publish');
+ assert.equal(replacementRequested,true,'a new notification must replace the read without waiting for its old result');
+ await page.evaluate(()=>{const f=window.__fixture;window.__publishPower(9,'ready',false,1,3);window.dispatchEvent(new CustomEvent('ipc:power.lifecycleChanged',{detail:{...f.power,observedNotificationSequence:2,publicationRevision:f.power.publicationRevision+1}}));f.defer=false;f.pending.shift()({...f.state,currentLimit:80});});
+ await page.waitForFunction(()=>document.querySelector('.charge-status')?.textContent.includes('当前：80%'));
+ assert.equal(await reads(),notificationReads+1,'duplicate or older notification must not start another read');
+ assert.equal(await writes(),notificationWrites,'nothing replays a charge write');
+ cases.push('notification-only Ready retires the old read once without polling or replaying writes');
+ await page.evaluate(()=>{window.__fixture.deferSet=true;});
+ await choose('100%');await pendingApply.click();
+ await page.waitForFunction(()=>typeof window.__fixture.pendingSet==='function');
+ const applyReads=await reads();
+ await page.evaluate(()=>window.__publishPower(9,'ready',false,1,4));
+ assert.equal(await writes(),notificationWrites+1,'an unresolved write must stay unique');
+ assert.equal(await reads(),applyReads,'the follow-up read must wait for the write to settle');
+ await page.evaluate(()=>{const f=window.__fixture;f.defer=true;f.deferSet=false;f.pendingSet({...f.state,currentLimit:100,requestedLimit:100});f.pendingSet=undefined;});
+ await page.waitForFunction(()=>window.__fixture.pending.length===1);
+ assert.match(await panel.textContent(),/当前：80%/,'a prior notification write receipt must not replace the readback');
+ await page.evaluate(()=>{const f=window.__fixture;f.defer=false;f.pending.shift()({...f.state,currentLimit:100,requestedLimit:100});});
+ await page.waitForFunction(()=>document.querySelector('.charge-status')?.textContent.includes('当前：100%'));
+ assert.equal(await reads(),applyReads+1);assert.equal(await writes(),notificationWrites+1);
+ assert.equal(await pendingApply.isEnabled(),true,'current readback returns control to the page');
+ cases.push('notification-only Ready rechecks a settled write without publishing its old receipt or replaying it');
+ const scopedHint=(serial,sequence)=>page.evaluate(([suspendSerial,notificationSequence])=>{
+  const {generation}=window.__fixture.power;
+  window.dispatchEvent(new CustomEvent('ipc:power.resumed',{detail:{generation,readbackScope:{suspendSerial,notificationSequence}}}));
+ },[serial,sequence]);
+ const scopedWrites=await writes();
+ await page.evaluate(()=>{window.__fixture.defer=true;window.dispatchEvent(new Event('focus'));});
+ await page.waitForFunction(()=>window.__fixture.pending.length===1);
+ const scopedReads=await reads();
+ await scopedHint(2,5);
+ const oldChargeReadRetired=await page.evaluate(()=>window.__fixture.calls.findLast(c=>c.cmd==='battery.charge.get')?.options?.signal?.aborted);
+ await page.evaluate(()=>{const f=window.__fixture;f.defer=false;f.pending.shift()({...f.state,currentLimit:50});});
+ await page.waitForTimeout(45);
+ assert.match(await panel.textContent(),/当前：100%/,'the old charging read must not publish while the new power scope awaits confirmation');
+ assert.equal(oldChargeReadRetired,true,'the old battery IPC wait must release at the hint');
+ assert.equal(await pendingApply.isDisabled(),true,'cached Ready cannot enable Apply while the new scope awaits confirmation');
+ await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await page.clock.runFor(3500);
+ assert.equal(await reads(),scopedReads,'focus cannot start a replacement before public confirmation');
+ assert.equal(await writes(),scopedWrites);
+ // A matching public snapshot can arrive through the existing readback alone.
+ await page.evaluate(()=>{const f=window.__fixture;f.state={...f.state,currentLimit:80,requestedLimit:80};f.power={...f.power,suspendSerial:2,observedNotificationSequence:5,publicationRevision:f.power.publicationRevision+1,inputReady:false,hardwareWritesAllowed:false};});
+ await page.clock.runFor(10000);
+ await page.waitForFunction(()=>document.querySelector('.charge-status')?.textContent.includes('当前：80%'));
+ assert.equal(await reads(),scopedReads+1,'the matched Ready starts one read without the fan/input write gate');
+ assert.equal(await pendingApply.isEnabled(),true,'the battery host retains its independent admission');
+ cases.push('new scope fences old charge data and matching readback restarts the local observer once');
+ await page.evaluate(()=>window.__fixture.deferSet=true);
+ await choose('100%');await pendingApply.click();
+ await page.waitForFunction(()=>typeof window.__fixture.pendingSet==='function');
+ const heldSetReads=await reads();
+ await scopedHint(2,6);
+ await page.evaluate(()=>{const f=window.__fixture;f.deferSet=false;f.pendingSet({...f.state,currentLimit:100,requestedLimit:100});f.pendingSet=undefined;});
+ await page.waitForTimeout(40);
+ assert.match(await panel.textContent(),/当前：80%/,'the old write receipt must not settle UI state for the new scope');
+ assert.equal(await reads(),heldSetReads,'no battery read until the shared scope is confirmed');
+ assert.equal(await writes(),scopedWrites+1,'the single set keeps its original owner and is never replayed');
+ await page.evaluate(()=>window.__publishPower(9,'ready',false,2,6));
+ await page.waitForFunction(count=>window.__fixture.calls.filter(c=>c.cmd==='battery.charge.get').length>=count,heldSetReads+1);
+ await page.waitForFunction(()=>Array.from(document.querySelectorAll('.battery-charge-card button')).some(button=>button.textContent.trim()==='应用'&&!button.disabled));
+ assert.equal(await reads(),heldSetReads+1);assert.equal(await writes(),scopedWrites+1);
+ cases.push('new scope fences an already submitted charge write receipt without replaying the write');
+ for(const boundary of ['suspend-and-ready','notification-only-ready']){
+  await refresh({...percent,ok:false,supported:false,currentLimit:null,verification:'unconfirmed'});
+  await choose('80%');
+  await page.evaluate(()=>{window.__fixture.defer=true;});
+  const preflightWrites=await writes();
+  await pendingApply.click();
+  await page.waitForFunction(()=>window.__fixture.pending.length===1);
+  const preflightReads=await reads();
+  await page.evaluate(mode=>{
+   const f=window.__fixture;
+   const {generation,suspendSerial,observedNotificationSequence}=f.power;
+   f.defer=false;
+   f.state={...f.state,currentLimit:77};
+   if(mode==='suspend-and-ready')window.__publishPower(generation+1,'suspended',false,suspendSerial+1,observedNotificationSequence+1);
+  },boundary);
+  assert.equal(await reads(),preflightReads,'no charge read before the new public Ready');
+  await page.evaluate(mode=>{
+   const {generation,suspendSerial,observedNotificationSequence}=window.__fixture.power;
+   window.__publishPower(generation,'ready',false,suspendSerial,observedNotificationSequence+(mode==='notification-only-ready'?1:0));
+  },boundary);
+  assert.equal(await reads(),preflightReads+1,`${boundary}: current charge reading cannot wait for a retired Apply preflight reply`);
+  await page.waitForFunction(()=>document.querySelector('.charge-status')?.textContent.includes('当前：77%'));
+  assert.equal(await panel.getByRole('button',{name:'正在应用…',exact:true}).isDisabled(),true,'the posted acknowledgement keeps exclusive Apply ownership');
+  assert.equal(await writes(),preflightWrites+1,'only the original refresh was posted');
+  await page.evaluate(()=>{
+   const f=window.__fixture;
+   f.defer=true;
+   f.pending.shift()({...f.state,currentLimit:50});
+  });
+  await page.waitForFunction(()=>window.__fixture.pending.length===1);
+  assert.match(await panel.textContent(),/当前：77%/,'the old acknowledgement cannot publish stale battery state');
+  await page.evaluate(()=>{
+   const f=window.__fixture;
+   f.defer=false;
+   f.pending.shift()({...f.state,currentLimit:100});
+  });
+  await page.waitForFunction(()=>document.querySelector('.charge-status')?.textContent.includes('当前：100%'));
+  assert.equal(await reads(),preflightReads+2,'settlement requests one authoritative read');
+  assert.equal(await writes(),preflightWrites+1,'the retired Apply cannot send set or release');
+  assert.equal(await pendingApply.isEnabled(),true,'current readback returns Apply control');
+  cases.push(`${boundary} resumes battery observation during a retired Apply preflight without replaying it`);
+ }
  await page.evaluate(()=>{window.__fixture.defer=true;window.dispatchEvent(new Event('focus'))});await page.waitForTimeout(30);const destroyedReads=await reads();await page.evaluate(()=>window.__destroy());
  await page.evaluate(v=>{const f=window.__fixture;f.defer=false;for(const done of f.pending.splice(0))done(v);for(const name of ['focus','ipc:window.focus','ipc:window.restored','ipc:power.resumed'])window.dispatchEvent(new CustomEvent(name,{detail:{generation:10}}));},state);
  await page.clock.runFor(120000);await page.waitForTimeout(40);assert.equal(await reads(),destroyedReads);assert.equal(await panel.count(),0);const powerAfterUnmount=await page.evaluate(()=>window.__powerDiagnostics());assert.equal(powerAfterUnmount.subscriberCount,0);assert.equal(powerAfterUnmount.active,false);assert.equal(powerAfterUnmount.read.retryTimerActive,false);cases.push('unmount removes owned event listeners and timer; late read and wake cannot recreate the card or refresh');

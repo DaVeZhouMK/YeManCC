@@ -22,7 +22,7 @@ import { applyTheme } from './theme';
 import { setTrayResident } from './trayResident';
 import { shell, display, proc, fs } from './api';
 import { normalizeInputStartupPreferences } from './inputStartupPolicy';
-import { gyroMotionParamsForPreset } from './gyroPresetModel';
+import { gyroMotionParamsForPreset, isGyroPresetKey } from './gyroPresetModel';
 import { readBootDisplay, applyBootBrightness, readBootSteamStartup } from './bootModePlatform';
 import { invoke, on } from './ipc';
 import {fxSound} from './fxSound';
@@ -33,6 +33,32 @@ import { readGamingHomeConfiguration, writeGamingHomeStartup, steamMasterSet, st
 const PERSONAS = ['disabled', 'elite', 'steamdeck', 'dualsense-edge'] as const;
 const MODULE_KEY = 'bootModes';
 const object = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
+/** Canonicalize local Steam parameters without changing IMU power or another preset's bank. */
+function bootGyroMotion(value: unknown): Record<string, any> {
+    const motion = { ...object(value) };
+    const preset = isGyroPresetKey(motion.activePreset) ? motion.activePreset : motion.preset;
+    if (preset === 'steam') Object.assign(motion, gyroMotionParamsForPreset('steam', { steam: motion }));
+    if (isGyroPresetKey(preset)) Object.assign(motion, { preset, activePreset: preset });
+    const presets = object(motion.presets);
+    if (presets.steam && typeof presets.steam === 'object' && !Array.isArray(presets.steam)) {
+        const steam = gyroMotionParamsForPreset('steam', presets);
+        for (const key of ['enabled', 'virtualPadLink', 'preset', 'activePreset', 'presets']) delete steam[key];
+        motion.presets = { ...presets, steam };
+    }
+    return motion;
+}
+/** Runs only on model-owned copies, through the existing save/restore transactions. */
+function normalizeBootGyroSnapshots(document: BootModeDocument): BootModeDocument {
+    const normalize = (snapshot: Partial<BootModeSnapshot> | undefined) => {
+        if (snapshot?.gyro && Object.prototype.hasOwnProperty.call(snapshot.gyro, 'motion'))
+            snapshot.gyro = { ...snapshot.gyro, motion: bootGyroMotion(snapshot.gyro.motion) };
+    };
+    normalize(document.global); normalize(document.activeSnapshot);
+    for (const scene of [...Object.values(document.scenes), ...Object.values(document.presets).flatMap(bank => Object.values(bank ?? {}))]) {
+        normalize(scene.overrides); normalize(scene.rememberedOverrides);
+    }
+    return document;
+}
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const text = (error: unknown) => error instanceof Error ? error.message : String(error);
 const applicationKey = (path: string) => path.trim().replace(/\//g, '\\').toLowerCase();
@@ -124,7 +150,7 @@ interface BootModeSharedReads {
     charge: ReturnType<typeof optional<Awaited<ReturnType<typeof batteryCharge.get>>>>;
 }
 function sharedBootModeReads(): BootModeSharedReads {
-    return { charge: optional(() => batteryCharge.get(), '充电限制状态') };
+    return { charge: optional(() => batteryCharge.get(undefined, 'boot-capture'), '充电限制状态') };
 }
 export async function captureBootModeSnapshot(shared?: BootModeSharedReads, observe?: (stage: string) => void, options?: { skipAppearance?: boolean }): Promise<BootModeSnapshot> {
     const generation = getSettingsGeneration();
@@ -134,7 +160,7 @@ export async function captureBootModeSnapshot(shared?: BootModeSharedReads, obse
     const [config] = await Promise.all([readOnce(loadPerformanceSchedule, '性能调度设置'), readOnce(loadUiSettings, '界面设置')]);
     observe?.('owners');
     const [mouse, charge, monitor, fx, scaling, appearance, decky, screen, profiles] = await Promise.all([
-        optional(getMouseModeState, '模拟鼠标状态'), shared?.charge ?? optional(() => batteryCharge.get(), '充电限制状态'), readOnce(readMonitorOutputPreferences, '监控设置'), optional(fxExists, '掌机音质优化'), optional(() => steamAddonExists('steamscale'), '小黄鸭联动设置'),
+        optional(getMouseModeState, '模拟鼠标状态'), shared?.charge ?? optional(() => batteryCharge.get(undefined, 'boot-capture'), '充电限制状态'), readOnce(readMonitorOutputPreferences, '监控设置'), optional(fxExists, '掌机音质优化'), optional(() => steamAddonExists('steamscale'), '小黄鸭联动设置'),
         options?.skipAppearance ? null : optional(() => steamAppearance.read(), 'Steam 美化设置'),
         optional(() => deckySidebar.get(), 'Decky 状态'), optional(readBootDisplay, '画面模式'),
         Promise.all(PERSONAS.map(async (persona) => [persona, await optional(() => screenTouchpadsGet(persona), '屏幕触摸配置 ' + persona)] as const)),
@@ -157,7 +183,7 @@ export async function captureBootModeSnapshot(shared?: BootModeSharedReads, obse
         performance: { schedule: config, powerSchemes: normalizeControlPowerSchemes(config.powerSchemes), controls: continuousControlsFromSchedule(config), frames: frameRatePair(settings.rtss.frameRates) },
         charge: { enabled: chargeEnabled, limit: chargeLimit },
         input: { persona: input.outputTarget.persona, outputTarget: input.outputTarget, ownership: bootInputOwnership(input.ownership), mouseBackend: baseBackend ?? null, mousePolicy: basePolicy ?? null, mouse: baseMouse },
-        gyro: { motion: input.gyroMotion },
+        gyro: { motion: bootGyroMotion(input.gyroMotion) },
         touch: { profiles: Object.fromEntries(profiles.filter(([, state]) => state).map(([persona, state]) => [persona, touchConfig(state!)])) },
         audioOptimization: { enabled: fx }, frameGeneration: { enabled: scaling }, softwareLaunch: { paths: [], timing: 'scene', delay: 0 },
         steamAppearance: { states: appearance ? Object.fromEntries(appearance.themes.map(item => [item.name, item.configured])) : {} },
@@ -172,7 +198,7 @@ export async function readBootModeSupport(category?: BootModeCategory, shared?: 
     const [core, tdp, charge] = await Promise.all([
         performance ? optional(detectCoreArchitecture, 'CPU 核心架构') : null,
         performance ? optional(getTdpExecutionCapability, '性能调度能力') : null,
-        performance ? shared?.charge ?? optional(() => batteryCharge.get(), '充电限制状态') : null,
+        performance ? shared?.charge ?? optional(() => batteryCharge.get(undefined, 'boot-capture'), '充电限制状态') : null,
     ]);
     assertSettingsGeneration(generation);
     return {
@@ -262,7 +288,7 @@ export function readStoredBootMode(settings: UnifiedSettings, baseline: BootMode
         initialSourceSnapshots.set(source, firstModeSourceValues(settings));
         initialDocumentSources.set(document, source);
     }
-    return document;
+    return normalizeBootGyroSnapshots(document);
 }
 /** Overview reads durable preferences only. Unknown device values remain null;
  * this view must never substitute for the editor's live capture. */
@@ -276,7 +302,7 @@ function savedOverviewSnapshot(settings: UnifiedSettings, schedule = snapshotPer
         charge: { enabled: null, limit: null },
         input: { persona: input.outputTarget.persona, outputTarget: input.outputTarget, ownership: bootInputOwnership(input.ownership),
             mouseBackend: gamepad.mouseBackend, mousePolicy: gamepad.mouseMode, mouse },
-        gyro: { motion: input.gyroMotion },
+        gyro: { motion: bootGyroMotion(input.gyroMotion) },
         touch: { profiles: object(settings.screenTouchpads).profiles || {} },
         audioOptimization: { enabled: null }, frameGeneration: { enabled: null },
         softwareLaunch: { paths: [], timing: 'scene', delay: 0 }, steamAppearance: { states: {} },
@@ -359,7 +385,7 @@ export function saveBootModes(document: BootModeDocument, expectedRevision = doc
             if (current.revision !== expectedRevision || editorBaseline &&
                 (editorBaseline.revision !== expectedRevision || !sameBootModeEditableContent(current, editorBaseline)))
                 throw Error('开机模式已被其他窗口修改，请重新读取');
-            saved = normalizeBootModeDocument(document, document.global);
+            saved = normalizeBootGyroSnapshots(normalizeBootModeDocument(document, document.global));
             saved.revision = nextBootRevision(current.revision);
             saved.activeSnapshot = cloneBootValue(current.activeSnapshot);
             saved.current = current.current;
@@ -379,7 +405,8 @@ export function saveBootModes(document: BootModeDocument, expectedRevision = doc
 }
 function syncStartupInput(settings: UnifiedSettings, document: BootModeDocument) {
     const snapshot = resolveBootMode(document, startupBootMode(document));
-    const preferences = normalizeInputStartupPreferences({ virtualGamepadPersona: snapshot.input.persona, gyroPreset: object(snapshot.gyro.motion).enabled ? (object(snapshot.gyro.motion).activePreset ?? object(snapshot.gyro.motion).preset ?? 'custom') : 'off' });
+    const motion = bootGyroMotion(snapshot.gyro.motion);
+    const preferences = normalizeInputStartupPreferences({ virtualGamepadPersona: snapshot.input.persona, gyroPreset: motion.enabled ? (motion.activePreset ?? motion.preset ?? 'custom') : 'off' });
     settings.startupDesired = { ...settings.startupDesired, ...preferences };
 }
 /** Boot preparation repairs stored settings; no live Xbox/Steam connection is a prerequisite. */
@@ -394,7 +421,7 @@ export function chooseBootMode(id: BootModeId, document: BootModeDocument, enabl
         if (!isBootModeId(id) || typeof enabled !== 'boolean') throw new Error('开机模式选择无效');
         assertSettingsGeneration(generation);
         await readOnce(loadSettings, '开机模式设置'); assertSettingsGeneration(generation); assertBootSettingsReady();
-        const requested = normalizeBootModeDocument(document, document.global);
+        const requested = normalizeBootGyroSnapshots(normalizeBootModeDocument(document, document.global));
         const boot = await optional(() => invoke<string>('bootMode.startup.identity', {}, { timeoutMs: 3000 }), 'Windows 启动标识');
         assertSettingsGeneration(generation);
         let copy!: BootModeDocument;
@@ -736,7 +763,7 @@ function deferBootMouse(input: BootModeSnapshot['input'], receipt: BootModeRecei
     wake();
 }
 function inputPatch(snapshot: BootModeSnapshot, settings: UnifiedSettings, activate = true): Record<string, any> {
-    const input = object(snapshot.input), rawMotion = object(object(snapshot.gyro).motion), motion = { ...rawMotion, ...(activate && rawMotion.enabled === true ? { outputMode: 'virtual-stick', unit: 'deg/s' } : {}) };
+    const input = object(snapshot.input), rawMotion = bootGyroMotion(object(snapshot.gyro).motion), motion = { ...rawMotion, ...(activate && rawMotion.enabled === true ? { outputMode: 'virtual-stick', unit: 'deg/s' } : {}) };
     return { outputTarget: { ...object(input.outputTarget), ...(activate ? { persona: input.persona, buttonMappingEnabled: input.persona !== 'disabled', gyroEnabled: rawMotion.enabled === true } : {}) }, ...(input.ownership === undefined ? {} : { ownership: bootInputOwnership(input.ownership) }), gyroMotion: motion,
         bootModeShortcuts: activate ? null : settings.input.bootModeShortcuts ?? null };
 }
@@ -893,7 +920,7 @@ async function applyRuntimeModule(id: BootModeModule, value: any, before: any, r
             recordModule(receipt, id, 'skipped', '预设能力尚未确认');
             return;
         }
-        const state = await readOnce(() => batteryCharge.get(), '充电限制状态');
+        const state = await readOnce(() => batteryCharge.get(undefined, 'boot-preflight'), '充电限制状态');
         if (state.ok !== true) {
             const detail = '充电限制：设备状态读取尚未确认';
             receipt.pending.push(detail); recordModule(receipt, id, 'waiting', detail); return;
@@ -1517,7 +1544,7 @@ export function applyBootMode(id: BootModeId, document: BootModeDocument, option
 }
 async function applyBootModeInQueue(id: BootModeId, document: BootModeDocument, mouseEpoch: number, owner?: StartupContext, startupPending: string[] = []): Promise<{document: BootModeDocument; receipt: BootModeReceipt}> {
     cancelBootModeLaunches();
-    document = normalizeBootModeDocument(document, document.global);
+    document = normalizeBootGyroSnapshots(normalizeBootModeDocument(document, document.global));
     owner?.timing?.mark('apply:settings');
     const generation = getSettingsGeneration(), beforeSettings = await readOnce(loadSettings, '开机模式设置'), before = await captureBootModeSnapshot(undefined, owner?.timing ? stage => owner.timing!.mark('apply-capture:' + stage) : undefined), next = resolveBootMode(document, id), receipt: BootModeReceipt = { mode: id, applied: [], skipped: [], pending: [...startupPending],
         modules: Object.fromEntries(BOOT_MODE_MODULES.map(module => [module, same(before[module], next[module]) ? { state: 'unchanged' as const } : { state: 'waiting' as const, detail: '尚未处理本次启动配置' }])) };
@@ -1974,7 +2001,7 @@ export function restoreSelectedBootMode(): Promise<void> {
             await requireClaim();
             // The claimed appearance is already saved intent. The apply
             // capture replaces the intermediate active snapshot before commit.
-            const baseline = await captureBootModeSnapshot(undefined, stage => timing.mark('capture:' + stage), { skipAppearance: true }), document = normalizeBootModeDocument(claimedRaw, baseline);
+            const baseline = await captureBootModeSnapshot(undefined, stage => timing.mark('capture:' + stage), { skipAppearance: true }), document = normalizeBootGyroSnapshots(normalizeBootModeDocument(claimedRaw, baseline));
             owner.revision = document.revision + 1;
             cancelBootModeDeferredMouse();
             await applyBootModeInQueue(owner.mode, document, deferredMouseEpoch, owner, startupPending);

@@ -14,7 +14,7 @@ const duplicateOnly=process.env.YMCC_FAN_WAKE_DUPLICATE_UI_ONLY==='1';
 const appSource=duplicateOnly?fs.readFileSync(path.join(root,'src/App.vue'),'utf8').replaceAll('\r\n','\n'):null;
 const appFanBinding=appSource ? [
  appSource.match(/type FanWakeRequest = \{[\s\S]*?\n\};\nconst fanWakeRequests = [^\n]+/)?.[0],
- ...['rememberFanWakeRequest','onFanPhysicalSuspending','requestFanCommittedResume','onFanResumeReady']
+ ...['rememberFanWakeRequest','onFanPhysicalSuspending','requestFanCommittedResume','onFanResumeReady','onSharedFanWake']
   .map(name=>appSource.match(new RegExp(`function ${name}\\([^\\n]+\\n[\\s\\S]*?\\n\\}`))?.[0]),
 ] : [];
 if(duplicateOnly)assert(appFanBinding.every(Boolean),'actual App Fan wake/suspend source missing');
@@ -27,13 +27,14 @@ const mocks={
 const styles=[];
 const appSuspendBinding=duplicateOnly ? `import {fanHostLifecycle} from '@/bridge/fanHost';
 import {setFanControlActive} from '@/bridge/fanFeature';
-import {getSharedPowerLifecycle,isSharedPowerLifecycleAdmitted} from '@/bridge/powerLifecycleState';
+import {getSharedPowerLifecycle,isSharedPowerLifecycleAdmitted,onSharedPowerLifecycle} from '@/bridge/powerLifecycleState';
 import {on} from '@/bridge/ipc';
 let resumeLifecycleActive=true,latestResumeGeneration=0;
 const fanDiagnosticLog=()=>{},ensureFanAutoStart=()=>{window.__chain.note('app-fan-auto-start');};
 ${appFanBinding.join('\n')}
 window.addEventListener('ipc:fan.suspending',onFanPhysicalSuspending);
 on('fan.resume-ready',({generation})=>onFanResumeReady(Number(generation)||0));
+onSharedPowerLifecycle(onSharedFanWake,{observeFanWakeGeneration:true});
 window.__chain.committedWake=(generation)=>{latestResumeGeneration=generation;fanHostLifecycle.observePowerBoundary('resumed',generation);requestFanCommittedResume(generation);};` : '';
 const result=await build({stdin:{resolveDir:root,loader:'ts',contents:"import {createApp} from 'vue';import Page from './src/views/FanView.vue';createApp(Page).mount('#app');\n"+appSuspendBinding},bundle:true,write:false,format:'iife',platform:'browser',alias:{'@':path.join(root,'src')},define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'real-fan-chain-with-platform-boundaries',setup(b){
  if(process.env.YMCC_FAN_BRIDGE_SOURCE_BEFORE)b.onLoad({filter:/src[\\/]bridge[\\/]fanHost\.ts$/},a=>({contents:fs.readFileSync(process.env.YMCC_FAN_BRIDGE_SOURCE_BEFORE,'utf8'),loader:'ts',resolveDir:path.dirname(a.path)}));
@@ -87,7 +88,7 @@ try{
      window.dispatchEvent(new CustomEvent('ipc:fan.resume-ready',{detail:{generation:2}}));});await success();await enabled();
    const before=await snapshot();assert.equal(before.pressed,'true');assert.equal(before.disabled,false);
    await page.evaluate(()=>{const f=window.__chain,original=f.boundary.getState.bind(f.boundary);let resolve;const held=new Promise(r=>resolve=r);f.duplicateUiReads=0;f.releaseDuplicateUiRead=()=>{f.boundary.getState=original;resolve();};f.boundary.getState=async(...args)=>{f.duplicateUiReads++;await held;return original(...args);};});
-   let error=null,after,afterSuspend,afterUnconfirmedWake,reads,clickBoundary,nextSleep,pendingWake,nextWake,compensatedWake,offDuringRead;
+   let error=null,after,afterSuspend,afterUnconfirmedWake,reads,clickBoundary,nextSleep,pendingWake,nextWake,compensatedWake,offDuringRead,scopedCatchup;
    try{
     await page.evaluate(()=>{for(const name of ['ipc:fan.resume-ready','ipc:power.resume-ready','ipc:power.resumed'])window.dispatchEvent(new CustomEvent(name,{detail:{generation:2}}));});
     after=await snapshot();reads=await page.evaluate(()=>window.__chain.duplicateUiReads);
@@ -127,7 +128,7 @@ try{
     assert.equal(pendingWake.coordinator.wakeReadyGeneration,null,'public pending and a private hint cannot admit a wake');
     assert.equal(pendingWake.notice,nextSleep.notice,'pending Ready must leave the sleep message in place');
     await page.evaluate(()=>{const f=window.__chain;f.native.notificationPending=false;
-      window.dispatchEvent(new CustomEvent('ipc:fan.resume-ready',{detail:{generation:3}}));});
+      window.dispatchEvent(new CustomEvent('ipc:power.lifecycleChanged',{detail:{generation:3,phase:'ready',known:true,notificationPending:false,hardwareWritesAllowed:true,fanWakeGeneration:3,publicationRevision:101}}));});
     await success();await enabled();
     nextWake=await snapshot();
     assert.equal(nextWake.trace.filter(t=>t.op==='enable'&&t.generation===3).length,1,'the real next Fan sleep still resumes the retained curve once');
@@ -147,8 +148,22 @@ try{
       window.dispatchEvent(new CustomEvent('ipc:fan.resume-ready',{detail:{generation:5}}));f.committedWake(5);});
     offDuringRead=await snapshot();
     assert.equal(offDuringRead.trace.filter(t=>t.generation===5&&['enable','app-fan-auto-start'].includes(t.op)).length,0,'OFF supersedes both wake entries for the same generation');
+    scopedCatchup=[];
+    for(const hintFirst of [false,true]){
+     await page.goto(url(family));await enabled();await page.locator('.fan-toggle').click();await success();
+     await page.evaluate(hintFirst=>{const f=window.__chain;f.setNative(6,'suspended');f.boundary.closed('Suspended');f.boundary.resumeGeneration=6;
+       window.dispatchEvent(new CustomEvent('ipc:fan.suspending',{detail:{generation:6,scope:'fan-only'}}));
+       window.dispatchEvent(new CustomEvent('ipc:power.lifecycleChanged',{detail:{generation:3,phase:'suspended',known:true,notificationPending:false,hardwareWritesAllowed:false,publicationRevision:102,observedNotificationSequence:1,suspendSerial:2}}));
+       f.setNative(6,'ready');f.native.physicalWakeObserved=true;f.unavailablePowerReads=hintFirst?4:2;
+       if(hintFirst)window.dispatchEvent(new CustomEvent('ipc:fan.resume-ready',{detail:{generation:6}}));
+       window.dispatchEvent(new CustomEvent('ipc:power.lifecycleChanged',{detail:{generation:3,phase:'suspended',known:true,notificationPending:false,hardwareWritesAllowed:false,publicationRevision:103,observedNotificationSequence:2,suspendSerial:2,fanWakeOnly:true,fanWakeGeneration:6}}));},hintFirst);
+     await page.waitForFunction(misses=>window.__chain.trace.filter(t=>t.op==='power-read-unavailable'&&t.generation===6).length===misses,hintFirst?4:2);
+     await success();const caughtUp=await snapshot();scopedCatchup.push({hintFirst,...caughtUp});
+     assert.equal(caughtUp.trace.filter(t=>t.op==='enable'&&t.generation===6).length,1,'one public Fan receipt survives missed reads without a second wake or click');
+     assert.equal(caughtUp.trace.filter(t=>t.op==='launch').length,1,'scoped catchup reuses the live Host');
+    }
    }
-   duplicateResults.push({family,ok:error===null,error,before,after,reads,clickBoundary,afterSuspend,afterUnconfirmedWake,nextSleep,pendingWake,nextWake,compensatedWake,offDuringRead});fs.writeFileSync(path.join(out,'duplicate-results.json'),JSON.stringify({ok:duplicateResults.every(x=>x.ok),checks:duplicateResults.length,cases:duplicateResults},null,2));
+   duplicateResults.push({family,ok:error===null,error,before,after,reads,clickBoundary,afterSuspend,afterUnconfirmedWake,nextSleep,pendingWake,nextWake,compensatedWake,offDuringRead,scopedCatchup});fs.writeFileSync(path.join(out,'duplicate-results.json'),JSON.stringify({ok:duplicateResults.every(x=>x.ok),checks:duplicateResults.length,cases:duplicateResults},null,2));
    cases.push(family+': confirmed wake + late fan/shared aliases retains ON, no new query/replay, next click is OFF');
   }
   assert.deepEqual(duplicateResults.filter(x=>!x.ok).map(x=>({family:x.family,error:x.error})),[]);

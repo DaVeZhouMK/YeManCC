@@ -1,6 +1,7 @@
 // @@BASE@@
 #include "windows_source_view.h"
 #include "dsu_frame.h"
+#include "sleep_power_observation.h"
 using UINT32=std::uint32_t;using UINT64=std::uint64_t;using ULONGLONG=std::uint64_t;
 // @@METADATA_DECL@@
 // @@LEGACY_DECL@@
@@ -20,12 +21,29 @@ struct InputCaptureSensorSink {
 static std::shared_ptr<InputCaptureSensorSink> g_inputCaptureSink;
 static std::uint64_t currentPower=3;
 static std::uint64_t currentPowerGeneration(){return currentPower;}
+static ymcc::sleeppower::SharedPowerV1 fixtureDsuPower(){
+ using namespace ymcc::sleeppower;
+ return {sizeof(SharedPowerV1),1,currentPowerGeneration(),1,1,0,kKnown|kHardwareAllowed,1};
+}
+[[maybe_unused]] static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,std::uint32_t bytes){
+ if(bytes!=sizeof(*out))return 0;*out=fixtureDsuPower();return 1;
+}
+[[maybe_unused]] static bool sgShouldKeepInputDuringStandby(){return false;}
 static bool fixtureModelBound=true;
 static json inputCaptureCandidateMatrixReceipt(const InputCaptureSensorMeta&){const auto value=model();return{{"gyro",{{"id",value.gyroMatrixId},{"sourceSha256",value.gyroSha256}}},{"accel",{{"id",value.accelMatrixId},{"sourceSha256",value.accelSha256}}}};}
 static json inputCaptureMotionCapabilityReceipt(const InputCaptureSensorMeta&,bool){return{{"deviceClass",model().deviceClass},{"sourceRoute","windows-sensors"},{"modelSelectorBound",fixtureModelBound}};}
 static double hcSinkTimeOfDayMs(std::uint64_t timestamp)noexcept{return double(timestamp/10000);}
 // @@EVIDENCE@@
 // @@VIEW@@
+static WindowsSensorView fixtureSensorView(){
+#if YMCC_FIXTURE_SPLIT_VIEW
+ auto defaultView=inputCaptureWindowsDefaultViewSnapshot(false);
+ std::optional<WindowsSensorView> privateView;
+ return inputCaptureWindowsSensorViewSnapshot(defaultView,privateView);
+#else
+ return inputCaptureWindowsSensorViewSnapshot();
+#endif
+}
 // @@META_GETTER@@
 // @@LEGACY_GETTER@@
 static void ymccResolveMachineIdentityOnce(){}static void inputCaptureResolveHcMotionSelector(){}
@@ -47,6 +65,7 @@ static bool inputHostPhysicalPublicationSourceAdmitted(bool live,bool){return li
 static bool legionMotionSubmissionCurrent(const ymcc::legion_motion::Sample&,std::uint64_t){return false;}
 struct InputFrameSubmission{ymcc::input::frameSubmission::Ticket ticket;std::optional<ymcc::windows_motion::Stamp> windowsMotion;bool rejected=false;ymcc::input::frameSubmission::Verdict reason=ymcc::input::frameSubmission::Verdict::Allowed;};
 // @@HOST_GATE@@
+// @@DSU_POWER_POLICY@@
 // @@DSU_GATE@@
 struct ReadView{std::array<double,6> raw{};bool gyro=false,accel=false;InputCaptureSensorMeta meta;InputCaptureLegacySensorFields fields;ymcc::windows_motion::Stamp stamp,calibration,reviewed,dsu,host;std::uint64_t gyroSequence=0,accelSequence=0;};
 static ReadView readConsumer(const std::function<void()>& between={}){
@@ -87,7 +106,12 @@ static void resetView(){
  fixtureStorePublication(g_windowsDefaultPublicationFence,std::shared_ptr<const ymcc::windows_motion::PublicationFence>{});
 #endif
 fixtureProcessingLease=std::make_shared<std::atomic<bool>>(true);g_inputCaptureSink=std::make_shared<InputCaptureSensorSink>();g_sensorMeta={};g_sensorMeta.gyroDeviceId="HID#VID_8087&PID_0AC2#1#{GYRO}";g_sensorMeta.accelDeviceId="HID#VID_8087&PID_0AC2#1#{ACCEL}";g_sensorMeta.gyroFamily=g_sensorMeta.accelFamily="sensorapi";g_sensorMeta.gyroHcLegacyFields=g_sensorMeta.accelHcLegacyFields=true;g_sensorMeta.gyroPresent=g_sensorMeta.accelPresent=true;g_windowsChoiceCounter->activeBindingGeneration=20;g_windowsSourceModuleLifetime=1;fixtureStorePublication(g_windowsPrivateConsumerProjection,std::shared_ptr<const WindowsPrivateConsumerProjection>{});currentPower=3;fixtureModelBound=true;t_windowsProcessingMeta=nullptr;t_windowsProcessingStamp=nullptr;g_xinputTopologyEpoch=1;g_xinputSlotIdentityEpoch=1;}
-static ymcc::dsu::Frame dsuFor(const ymcc::windows_motion::Stamp& stamp){ymcc::dsu::Frame value;value.live=value.motionReady=true;value.source.power=3;value.source.windows=stamp;auto& physical=value.source.physical;physical.window={1,fakeNow,fakeNow,3,1,true};physical.identity=1;physical.live=physical.routeKnown=true;value.validate=inputCaptureDsuFrameCurrent;value.raw={1,2,3,4,5,6};value.transformed=value.raw;return value;}
+template<class Source> static void setDsuPower(Source& source){
+ auto power=fixtureDsuPower();power.generation=3;
+ if constexpr(requires{source.sharedPower;})source.sharedPower=power;
+ else source.power=power.generation; // The fixed pre-publication control uses the old frame.
+}
+static ymcc::dsu::Frame dsuFor(const ymcc::windows_motion::Stamp& stamp){ymcc::dsu::Frame value;value.live=value.motionReady=true;setDsuPower(value.source);value.source.windows=stamp;auto& physical=value.source.physical;physical.window={1,fakeNow,fakeNow,3,1,true};physical.identity=1;physical.live=physical.routeKnown=true;value.validate=inputCaptureDsuFrameCurrent;value.raw={1,2,3,4,5,6};value.transformed=value.raw;return value;}
 static bool hostFor(const ymcc::windows_motion::Stamp& stamp,bool neutral=false){InputFrameSubmission frame;frame.ticket.neutral=neutral;frame.windowsMotion=stamp;return inputHostWindowsMotionSubmissionCurrent(frame);}
 static void attachPrivate(Backend& backend,bool accepted,bool committed=true){
 #if YMCC_FIXTURE_SELECTION_OWNER
@@ -111,8 +135,8 @@ static void attachPrivate(Backend& backend,bool accepted,bool committed=true){
 int main(int argc,char** argv){try{
  resetSdk();resetView();auto first=readConsumer();check(first.gyro&&first.accel&&first.raw==std::array<double,6>{1,2,3,4,5,6},"actual default processor prefix consumes exact coherent raw fields");check(first.meta.gyroFamily=="sensorapi"&&first.fields.gyro&&first.fields.accel,"actual metadata and MSI field helpers read pinned source");for(const auto& stamp:{first.calibration,first.reviewed,first.dsu,first.host})check(ymcc::windows_motion::same(stamp,first.stamp),"actual four consumer assignments share same composite stamp");check(hostFor(first.host)&&ymcc::dsu::admit(dsuFor(first.dsu),fakeNow).motion,"actual Host/DSU gates accept current source");++g_windowsChoiceCounter->activeBindingGeneration;check(!hostFor(first.host)&&!ymcc::dsu::admit(dsuFor(first.dsu),fakeNow).motion,"default frames before first choice retire while default capture remains alive");check(g_inputCaptureSink->activeBindingGeneration==7,"choice cutover never resets default capture counter");
  resetView();auto pinned=readConsumer([]{std::lock_guard<std::mutex> lock(g_sensorMetaMx);g_sensorMeta.gyroDeviceId="changed";g_sensorMeta.gyroFamily="winrt";g_sensorMeta.gyroHcLegacyFields=false;});check(pinned.meta.gyroDeviceId!="changed"&&pinned.fields.gyro,"metadata and legacy layout cannot change midway through actual processor prefix");check(!t_windowsProcessingMeta&&!t_windowsProcessingStamp,"processing scope restores thread-local view");
- resetView();auto outer=inputCaptureWindowsSensorViewSnapshot();{ymcc::sensors::view::ProcessingScope<InputCaptureSensorMeta> scope(outer,t_windowsProcessingMeta,t_windowsProcessingStamp);try{auto inner=outer;inner.metadata.gyroDeviceId="inner";ymcc::sensors::view::ProcessingScope<InputCaptureSensorMeta> nested(inner,t_windowsProcessingMeta,t_windowsProcessingStamp);check(inputCaptureSensorMetaSnapshot().gyroDeviceId=="inner","nested scope pins its own metadata");throw std::runtime_error("unwind");}catch(...){check(inputCaptureSensorMetaSnapshot().gyroDeviceId==outer.metadata.gyroDeviceId,"exception restores outer processing metadata");}}check(!t_windowsProcessingMeta&&!t_windowsProcessingStamp,"exception leaves no stale processing pointer");
- resetView();{auto outer=inputCaptureWindowsSensorViewSnapshot();outer.profile="profile-a";outer.calibrationKey="key-a";
+ resetView();auto outer=fixtureSensorView();{ymcc::sensors::view::ProcessingScope<InputCaptureSensorMeta> scope(outer,t_windowsProcessingMeta,t_windowsProcessingStamp);try{auto inner=outer;inner.metadata.gyroDeviceId="inner";ymcc::sensors::view::ProcessingScope<InputCaptureSensorMeta> nested(inner,t_windowsProcessingMeta,t_windowsProcessingStamp);check(inputCaptureSensorMetaSnapshot().gyroDeviceId=="inner","nested scope pins its own metadata");throw std::runtime_error("unwind");}catch(...){check(inputCaptureSensorMetaSnapshot().gyroDeviceId==outer.metadata.gyroDeviceId,"exception restores outer processing metadata");}}check(!t_windowsProcessingMeta&&!t_windowsProcessingStamp,"exception leaves no stale processing pointer");
+ resetView();{auto outer=fixtureSensorView();outer.profile="profile-a";outer.calibrationKey="key-a";
  {ymcc::sensors::view::ProcessingScope<InputCaptureSensorMeta> scope(outer,t_windowsProcessingMeta,t_windowsProcessingStamp,&t_windowsProcessingView);check(t_windowsProcessingView==&outer&&t_windowsProcessingView->calibrationKey=="key-a","actual processing scope pins the complete profile and key");
  try{auto inner=outer;inner.profile="profile-b";inner.calibrationKey="key-b";ymcc::sensors::view::ProcessingScope<InputCaptureSensorMeta> nested(inner,t_windowsProcessingMeta,t_windowsProcessingStamp,&t_windowsProcessingView);check(t_windowsProcessingView==&inner&&t_windowsProcessingView->profile=="profile-b","nested scope pins its own complete profile");throw std::runtime_error("unwind-profile");}catch(...){check(t_windowsProcessingView==&outer&&t_windowsProcessingView->calibrationKey=="key-a","exception restores the complete outer profile");}}
  check(!t_windowsProcessingView&&!t_windowsProcessingMeta&&!t_windowsProcessingStamp,"complete processing scope leaves no stale thread-local source");}
@@ -155,7 +179,7 @@ int main(int argc,char** argv){try{
 #endif
  fixtureStorePublication(g_windowsPrivateConsumerProjection,std::shared_ptr<const WindowsPrivateConsumerProjection>{});backend.cleanup();}
 #if YMCC_FIXTURE_PUBLICATION_FENCE
- resetView();{const auto raw=inputCaptureWindowsSensorViewSnapshot();const auto withheld=ymcc::windows_motion::PublicationFence::pending(raw.submission);fixtureStorePublication(g_windowsDefaultPublicationFence,withheld);const auto pendingDefault=readConsumer();
+ resetView();{const auto raw=fixtureSensorView();const auto withheld=ymcc::windows_motion::PublicationFence::pending(raw.submission);fixtureStorePublication(g_windowsDefaultPublicationFence,withheld);const auto pendingDefault=readConsumer();
  check(pendingDefault.gyro&&pendingDefault.fields.gyro&&ymcc::windows_motion::current(pendingDefault.stamp)&&!hostFor(pendingDefault.host),"default return can process original MSI SensorAPI data while its publication is withheld");
  const auto restored=ymcc::windows_motion::PublicationFence::committed(pendingDefault.stamp);fixtureStorePublication(g_windowsDefaultPublicationFence,restored);const auto resumed=readConsumer();
  check(hostFor(resumed.host)&&!hostFor(pendingDefault.host),"default commitment admits only fresh committed snapshots");

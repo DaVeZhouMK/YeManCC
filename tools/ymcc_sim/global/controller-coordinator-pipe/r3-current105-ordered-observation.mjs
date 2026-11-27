@@ -5,6 +5,36 @@ import {createHash} from 'node:crypto';
 const hashSource=bytes=>createHash('sha256').update(bytes).digest('hex');
 const planBytes=fs.readFileSync(new URL('./r3-current105-source-order.json',import.meta.url));if(hashSource(planBytes)!=='9ce43009e475c3bc935f2698ed7febeabce9958e58176d87b2003625bae431f1')throw Error('CURRENT_ORDERED_SOURCE_PLAN_CHANGED');const sealed=JSON.parse(planBytes.toString('utf8'));
 const need=(value,code)=>{if(!value)throw Error('CURRENT_ORDERED_'+code);};
+const terminal29Contract='current105-terminal29-shared-input-power-v1';
+const terminal29File=new URL('./r3-terminal29-runtime-expectations.json',import.meta.url);
+function terminal29Data(){const bytes=fs.readFileSync(terminal29File);need(hashSource(bytes)==='2afe29cc6995c8ddc343a189cfe33820d0b9166b831bddffab147d23638c7b03','TERMINAL29_CONTRACT_CHANGED');const value=JSON.parse(bytes.toString('utf8'));need(value.kind==='EXACT_TERMINAL29_SHARED_POWER_SOFTWARE_RUNTIME_EXPECTATIONS'&&value.managedInputContract===terminal29Contract&&value.publicRuntimeAccepted===false&&value.sourceApprovalGranted===false,'TERMINAL29_SCOPE_REQUIRED');return value;}
+const terminal29PsPauseFile=new URL('./r3-terminal29-ps-pause-expectations.json',import.meta.url);
+function terminal29PsPauseData(){
+ const bytes=fs.readFileSync(terminal29PsPauseFile);
+ need(hashSource(bytes)==='d3e80924e0356ccf8ecc73110f37f9bff94dcde061cb2bf3eef119bf4774f029','TERMINAL29_PS_PAUSE_CONTRACT_CHANGED');
+ const value=JSON.parse(bytes.toString('utf8'));
+ need(value.kind==='EXACT_TERMINAL29_PS_POWER_PAUSE_EXPECTATION'&&value.baseline===hashSource(fs.readFileSync(terminal29File)),'TERMINAL29_PS_PAUSE_BASELINE_REQUIRED');
+ return value;
+}
+export function terminal29PsSuspendReport(report,options={}){
+ return options.managedInputContract===terminal29Contract&&options.psPowerPauseContinuation===true&&
+  report?.cases?.[11]?.psWakeSameGenerationSuccessor!==undefined;
+}
+export function terminal29RuntimeExpected(role,options={}){
+ const baseline=terminal29Data(),wanted=(options.psPowerPauseContinuation===true?terminal29PsPauseData():baseline).expectations[role];
+ need(wanted,'TERMINAL29_ROLE_NOT_QUALIFIED');
+ const expected=structuredClone(wanted);
+ if(options.psSuspendScope===true){
+  need(role==='positive'&&options.psPowerPauseContinuation===true,'TERMINAL29_PS_SUSPEND_SCOPE_REQUIRED');
+  // The only changed ordered occurrence is case 12. Both debt boundaries stay fixed.
+  expected.checks=7273;
+  expected.traceIdentitySha256='2ecec9e5b2161b5bb222387998d568fb167373e132d41153d3357222eb2fd66a';
+  expected.boundaries.pre.checks=6655;
+  expected.boundaries.post.checks=7273;
+  expected.countsOrigin='PS suspend and revision-only continuation (case 12); all other assertion occurrences unchanged.';
+ }
+ return expected;
+}
 const terminal26Contract='current105-terminal26-sdk-lifetime-compact-v1';
 const terminal26File=new URL('./r3-terminal26-runtime-expectations.json',import.meta.url);
 const terminal26Sha256='42a59c8226fb5852cd7d19b57fd9b1036cfe26d4e1482f84252df993f5325842';
@@ -14,8 +44,8 @@ function terminal26Data(){
  return terminal26Sealed;
 }
 function planFor(options={}){
- const id=options.managedInputContract;need(id===undefined||['current105-exact21-v1','current105-terminal22-v1','current105-terminal23-sd-decoder-v1',terminal26Contract].includes(id),'UNKNOWN_MANAGED_CONTRACT');
- return id===terminal26Contract?terminal26Data().sourceOrder:sealed;
+ const id=options.managedInputContract;need(id===undefined||['current105-exact21-v1','current105-terminal22-v1','current105-terminal23-sd-decoder-v1',terminal26Contract,terminal29Contract].includes(id),'UNKNOWN_MANAGED_CONTRACT');
+ return id===terminal29Contract?terminal29Data().sourceOrder:id===terminal26Contract?terminal26Data().sourceOrder:sealed;
 }
 export function terminal26RuntimeExpected(role){const wanted=terminal26Data().expectations[role];need(wanted,'TERMINAL26_ROLE_NOT_QUALIFIED');return structuredClone(wanted);}
 export function currentOrderedPlan(options={}){return structuredClone(planFor(options).occurrences);}

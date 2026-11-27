@@ -144,6 +144,8 @@ inline void ipc_emit(const char* name,const json& value){
     endpointSequence=value.value("powerNotificationSequence",std::uint64_t{0});
     endpointSuspendSerial=value.value("powerSuspendSerial",std::uint64_t{0});++endpointEmits;
 }
+inline bool ipc_emit_shared_power_fact(const json& state,bool){ipc_emit("power.lifecycleChanged",state);return true;}
+[[maybe_unused]] inline bool sleepPowerQueueProjection(HWND){throw std::logic_error("unselected WebView transport fallback");}
 inline std::map<std::string,std::function<json(const json&)>> readEntries;
 template<class F> void ipc_on(const char* name,F value){if(std::string(name)=="lossless.detect"||std::string(name)=="lossless.getState")readEntries[name]=value;else watchEntry=value;}
 #if defined(YMCC_LOSSLESS_RUNTIME_READ_ONLY)
@@ -190,6 +192,7 @@ namespace SleepRecoveryAuto {inline void powerReady(unsigned long long){}}
 inline void steamOriginalRecoveryPowerReady(unsigned long long){}
 namespace SteamControllerCursor {template<class... Args> inline void power(const Args&...){}}
 
+#if !defined(YMCC_LOSSLESS_RUNTIME_READ_ONLY)
 inline json sharedPowerLifecycleSnapshot(){ymcc::sleeppower::SharedPowerV1 value;const auto ok=reader(&value,sizeof(value))==1;return {{"known",ok},{"generation",value.generation},{"notificationPending",(value.flags&4)!=0},{"hardwareWritesAllowed",ymcc::sleeppower::powerAdmitted(value)}};}
 #include "common-projection.inc"
 #if defined(YMCC_LOSSLESS_RUNTIME_WATCH_ORDER)
@@ -199,6 +202,7 @@ inline void deliverCommon(){
     {std::lock_guard<std::mutex> lock(powerMutex);g_sharedPowerPublicationRevision=++nativePowerFact.publicationRevision;}
     g_sharedPowerProjectionPending=true;projectSharedPowerLifecycle(nullptr);
 }
+#endif
 #endif
 inline std::vector<std::pair<std::string,std::function<void()>>> cases(){
     return {
@@ -301,6 +305,7 @@ inline std::vector<std::pair<std::string,std::function<void()>>> cases(){
         g_exitRequested=true;expect(watchEntry(json{{"active",true},{"detailed",false}})==false,"actual-watch-exit-check-kept");
         endpoint.reset();watchEntry={};g_exitRequested=false;
       }}
+#if !defined(YMCC_LOSSLESS_RUNTIME_READ_ONLY)
       ,{"actual-common-projection-resumes-native-monitor",[]{
         endpointDiscoveries=endpointEmits=commonEmits=0;endpointReceiptKnown=false;g_exitRequested=false;commonRetryRequested=false;
         endpoint=std::make_unique<RuntimeMonitor>([]{++endpointDiscoveries;return absent();});installWatch();
@@ -322,6 +327,7 @@ inline std::vector<std::pair<std::string,std::function<void()>>> cases(){
         expect(commonEmits==emitted,"actual-common-exit-refuses-late-projection");
         endpoint->stop();endpoint.reset();watchEntry={};g_exitRequested=false;g_sharedPowerProjectionPending=false;
       }}
+#endif
 #endif
       ,{"concurrent-stop-waits-for-actual-worker-return",[]{
         Gate gate;std::atomic<unsigned> discoveries{0},returned{0};std::atomic<bool> secondEntered{false};

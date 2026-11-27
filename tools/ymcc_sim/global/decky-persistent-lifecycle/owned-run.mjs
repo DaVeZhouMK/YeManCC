@@ -1,7 +1,7 @@
 import {simulationCorePath} from '../release-host-environment.mjs';
 import {typedIds,verifyDeferredResourceGroup,verifyDeferredResourceProof} from './typed-binding-gate.mjs';
 import {OBSERVER_PUBLICATION_GENERATOR,OBSERVER_PUBLICATION_SOURCE,steamSessionObserverPublication} from '../../../fixtures/steam_session_observer_publication.mjs';
-import {cppBlock,uniqueAnchor} from '../decky-update-recovery/native-source-admission.mjs';
+import {cppBlock,uniqueAnchor,extractDeckyReady,deckyReadyFixtureDelivery} from '../decky-update-recovery/native-source-admission.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -45,11 +45,10 @@ export const ORIGINAL_REGISTRATION_IDS=Object.freeze(ORIGINAL_CASES.map(row=>row
 export const ORIGINAL_SELECTION=ORIGINAL_REGISTRATION_IDS.join(',');
 export function originalReadyConsumer(source,{write=false}={}){
  const origin='native/main.cpp',file=path.join(source,origin),text=fs.readFileSync(file,'utf8');
- const matches=[...text.matchAll(/static bool deckySidebarResumeAfterIntent\(unsigned long long generation(?:,const char\* scope="sleep-intent-ready")?\) \{[\s\S]*?\n\}/g)],match=matches[0];
- assert(match,'ORIGINAL_READY_CONSUMER_REQUIRED');assert.equal(matches.length,1,'ORIGINAL_READY_CONSUMER_UNIQUE');
- const target=path.join(source,'native/decky_wake_ready_consumer.inc'),expected=match[0]+'\n';
+ const ready=extractDeckyReady(text);
+ const target=path.join(source,'native/decky_wake_ready_consumer.inc'),expected=ready.code+'\n';
  if(write)fs.writeFileSync(target,expected);assert.equal(fs.readFileSync(target,'utf8'),expected,'ORIGINAL_READY_CONSUMER_BYTES');
- return {...pin(target),origin,originSha256:sha(fs.readFileSync(file)),slice:{begin:match.index,end:match.index+match[0].length,appendNewline:true},bytePreserved:true};
+ return {...pin(target),origin,originSha256:sha(fs.readFileSync(file)),slice:{begin:ready.index,end:ready.index+ready.code.length,appendNewline:true},bytePreserved:true};
 }
 
 
@@ -57,6 +56,13 @@ export function originalReadyConsumer(source,{write=false}={}){
 // its exact current product slice rather than trusting a generated filename.
 export function originalCommittedReadyConsumer(source,{write=false}={}){
  const origin='native/main.cpp',file=path.join(source,origin),text=fs.readFileSync(file,'utf8');
+ // Some frozen sources contain only a committed consumer; retain that extract below.
+ if(text.includes('static bool deckySidebarResumeAfterIntent(const ymcc::sleeppower::SharedPowerV1&')){
+  const ready=extractDeckyReady(text),expected=deckyReadyFixtureDelivery(ready);
+  const target=path.join(source,'native/decky_wake_committed_consumer.inc');
+  if(write)fs.writeFileSync(target,expected);assert.equal(fs.readFileSync(target,'utf8'),expected,'ORIGINAL_PUBLIC_READY_CONSUMER_BYTES');
+  return {...pin(target),origin,originSha256:sha(fs.readFileSync(file)),slice:{begin:ready.deliveryAt,end:ready.deliveryAt+ready.delivery.length},bytePreserved:false,entry:'public-ready',adaptation:'Exact public delivery with an explicit fixture power port; OS dispatch is not executed.'};
+ }
  const matches=[...text.matchAll(/case WM_POWER_RESUME_COMMIT:[\s\S]*?(?=\n\s*case WM_POWER_INPUT_RECOVER:)/g)];
  assert.equal(matches.length,1,'ORIGINAL_COMMITTED_READY_EVENT_UNIQUE');const commit=matches[0];
  assert(commit[0].includes('PowerLifecycle::Ready'),'ORIGINAL_COMMITTED_READY_GUARD_REQUIRED');
@@ -231,10 +237,14 @@ export function sameRunOriginal(out,repo){
  const childFile=path.join(parent.childEvidence,'result.json'),binding=parent.rawEvidence?.find(row=>key(row.path)===key(childFile));assert(binding,'SAME_RUN_CURRENT_CHILD_NOT_BOUND');assert.equal(pin(childFile).sha256,binding.sha256,'SAME_RUN_CURRENT_CHILD_CHANGED');
  const child=read(childFile);assert.equal(child.id,'plugins.decky-current-parent-migration');assert.equal(child.sourceUnchanged,true);assert.equal(child.toolsUnchanged,true);
  const sourceMap=new Map(child.sourceInputs.map(row=>[row.path,row.sha256]));for(const relative of OWNED_INPUTS)assert.equal(sourceMap.get(relative),pin(path.join(repo,relative)).sha256,'SAME_RUN_CHILD_SOURCE_CHANGED:'+relative);
- const proof=child.originalProducer;for(const row of Object.values(proof)){assert(within(parent.childWork,row.path),'SAME_RUN_ORIGINAL_OUTSIDE_OWNED_WORK');assert.equal(key(fs.realpathSync(row.path)),key(row.path),'SAME_RUN_ORIGINAL_REPARSE');assert.equal(pin(row.path).sha256,row.sha256,'SAME_RUN_ORIGINAL_CHANGED');}
- const original=path.dirname(proof.raw.path),execution=child.executions.find(row=>row.id==='original-typed');assert(execution,'SAME_RUN_ORIGINAL_PROCESS_MISSING');
- assert.deepEqual(execution.arguments,[path.join(repo,'tools/decky_binding_runtime_selftest.mjs'),original],'SAME_RUN_COMPLETE_COMMAND_REQUIRED');assert.equal(execution.exitCode,0);assert.equal(execution.signal,null);assert.equal(execution.error,null);assert.equal(execution.timeoutMs,135000);assert(execution.elapsedMs<=135000);assert.equal(key(execution.program.path),key(process.execPath));
+ const execution=child.executions?.find(row=>row.id==='original-typed');assert(execution,'SAME_RUN_ORIGINAL_PROCESS_MISSING');
+ const original=execution.arguments?.[1];assert(typeof original==='string'&&within(parent.childWork,original),'SAME_RUN_ORIGINAL_OUTSIDE_OWNED_WORK');
+ assert.deepEqual(execution.arguments,[path.join(repo,'tools/decky_binding_runtime_selftest.mjs'),original],'SAME_RUN_COMPLETE_COMMAND_REQUIRED');assert.equal(execution.signal,null);assert.equal(execution.error,null);assert.equal(execution.timeoutMs,135000);assert(execution.elapsedMs<=135000);assert.equal(key(execution.program.path),key(process.execPath));
  for(const row of [execution.program,execution.stdout,execution.stderr])assert.equal(pin(row.path).sha256,row.sha256,'SAME_RUN_PROCESS_EVIDENCE_CHANGED');
+ assert.equal(execution.exitCode,0,'SAME_RUN_ORIGINAL_PRODUCER_FAILED');
+ const proof=child.originalProducer;assert(proof?.raw,'SAME_RUN_ORIGINAL_SUCCESS_PROOF_REQUIRED');
+ assert.equal(key(path.dirname(proof.raw.path)),key(original),'SAME_RUN_ORIGINAL_PROOF_WORK_MISMATCH');
+ for(const row of Object.values(proof)){assert(within(parent.childWork,row.path),'SAME_RUN_ORIGINAL_OUTSIDE_OWNED_WORK');assert.equal(key(fs.realpathSync(row.path)),key(row.path),'SAME_RUN_ORIGINAL_REPARSE');assert.equal(pin(row.path).sha256,row.sha256,'SAME_RUN_ORIGINAL_CHANGED');}
  return {original,execution,parent:pin(parentFile),child:pin(childFile)};
 }
 export async function executeOwnedRuntime({repoRoot=path.resolve(import.meta.dirname,'../../../..'),evidenceDir}){
@@ -252,9 +262,9 @@ export async function executeOwnedRuntime({repoRoot=path.resolve(import.meta.dir
  const workspace=path.resolve(simulationCorePath("Workspace"));
  assert(fs.statSync(workspace).isDirectory(),'CORE_WORKSPACE_REQUIRED');
  const fixtureRoot=path.join(workspace,'DR');fs.mkdirSync(fixtureRoot,{recursive:true});assert.equal(key(fs.realpathSync(fixtureRoot)),key(fixtureRoot),'SHORT_WORKSPACE_REPARSE');
- const shared=sameRunOriginal(out,repo);const original=shared?.original??path.join(fixtureRoot,crypto.randomUUID().slice(0,8));if(!shared)assert(!fs.existsSync(original));
- report.originalWorkRoot=original;report.originalWorkRootOwner=shared?'same-global-run sibling parent original fixture, full identity reverified':'fresh single original typed-runtime fixture in the existing project core';
  try{
+  const shared=sameRunOriginal(out,repo);const original=shared?.original??path.join(fixtureRoot,crypto.randomUUID().slice(0,8));if(!shared)assert(!fs.existsSync(original));
+  report.originalWorkRoot=original;report.originalWorkRootOwner=shared?'same-global-run sibling parent original fixture, full identity reverified':'fresh single original typed-runtime fixture in the existing project core';
   const declaration=ownedToolDeclaration(repo);assert(!declaration.blockedReason,declaration.blockedReason);
   for(const relative of OWNED_INPUTS){const file=path.join(repo,relative);assert(within(repo,file)&&key(fs.realpathSync(file))===key(file));const row=pin(file);sourcePins.set(relative,row);report.sourceHashes[relative]=row.sha256;}
   const cpp=fs.readFileSync(path.join(repo,'tools/decky_binding_runtime_selftest.cpp'),'utf8');

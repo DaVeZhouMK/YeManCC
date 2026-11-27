@@ -34,7 +34,8 @@ inline bool slotAlreadySpent(const std::wstring& exe,const std::string& version,
 // The caller serializes after its settings guard is released. Existing predicates
 // and current() calls stay in their original order; diagnostics grant no authority.
 inline bool load(State& state,const std::wstring& exe,const std::string& version,
-                 const std::function<std::string(const std::wstring&)>& digest,const std::function<bool()>& current,const char** stage=nullptr){
+                 const std::function<std::string(const std::wstring&)>& digest,const std::function<bool()>& current,
+                 const char** stage=nullptr,bool* startupUnchanged=nullptr){
     if(stage)*stage="native-marker";
     if(!buildidentity::available||!current())return false;
     if(stage)*stage="protected-directory";
@@ -43,12 +44,13 @@ inline bool load(State& state,const std::wstring& exe,const std::string& version
     if(stage)*stage="native-receipt";
     const auto disk=updateconfig::read((std::filesystem::path(exe).parent_path()/L"native-build-identity.json").wstring(),4096);
     if(!store::receiptImage(disk)||std::string(buildidentity::marker())!=std::string(buildidentity::prefix)+disk.value.at("nativeBuildId").get<std::string>())return false;
+    const auto& expected=disk.value.at("nativeSha256").get_ref<const std::string&>();
     if(stage)*stage="native-image";
-    const auto actual=digest(exe);if(actual!=disk.value.at("nativeSha256").get_ref<const std::string&>()||!current())return false;
+    if(!startupUnchanged&&(digest(exe)!=expected||!current()))return false;
     if(stage)*stage="native-file";
     const auto attrs=GetFileAttributesW(exe.c_str());if(attrs==INVALID_FILE_ATTRIBUTES||(attrs&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT)))return false;
     if(stage)*stage="native-build";
-    state.build={disk.value.at("nativeBuildId").get<std::string>(),actual,version};if(!running::build(state.build))return false;
+    state.build={disk.value.at("nativeBuildId").get<std::string>(),expected,version};if(!running::build(state.build))return false;
     state.normalized=updaterecovery::utf8(updaterecovery::normalized(exe));
     state.path=updaterecovery::pathFor(state.root,exe)+L".decky-running-builds.json";state.backup=state.path+L".bak";
     if(stage)*stage="history-read";
@@ -61,7 +63,13 @@ inline bool load(State& state,const std::wstring& exe,const std::string& version
     if(state.history.is_null())return false;
     if(stage)*stage="build-observe";
     state.history=running::observe(std::move(state.history),state.build,state.normalized);
-    return !state.history.is_null()&&current();
+    if(state.history.is_null()||!current())return false;
+    if(!startupUnchanged)return true;
+    // A settled startup can omit proof of the current image only when there
+    // is nothing to publish. Reservation never takes this observation path.
+    *startupUnchanged=state.primary.kind==updateconfig::Kind::ready&&state.secondary.kind==updateconfig::Kind::ready&&
+        state.primary.value==state.history&&state.secondary.value==state.history;
+    return *startupUnchanged||(digest(exe)==expected&&current());
 }
 inline bool save(const State& state,const Json& next,const std::function<bool()>& current,const char** stage=nullptr){
     if(stage)*stage="history-value";
@@ -81,11 +89,15 @@ inline bool save(const State& state,const Json& next,const std::function<bool()>
 // Original startup invokes this ONCE per actual main process. Observation is
 // installation metadata only; never a Steam or business-setting action. It
 // records healthy/intermediate builds too, so later A-B rollback cannot refill.
-inline bool observe(const std::wstring& exe,const std::string& version,
+enum class Observation { unavailable, unchanged, verified };
+inline Observation observe(const std::wstring& exe,const std::string& version,
     const std::function<std::string(const std::wstring&)>& digest,const std::function<bool()>& current){
-    try{store::Lease lease(exe);if(!lease.owned)return false;State state;
-        return load(state,exe,version,digest,current)&&save(state,state.history,current);
-    }catch(...){return false;}
+    try{store::Lease lease(exe);if(!lease.owned)return Observation::unavailable;State state;
+        bool unchanged=false;
+        if(!load(state,exe,version,digest,current,nullptr,&unchanged))return Observation::unavailable;
+        if(unchanged)return Observation::unchanged;
+        return save(state,state.history,current)?Observation::verified:Observation::unavailable;
+    }catch(...){return Observation::unavailable;}
 }
 // Keep the diagnostic pointer chain out of the huge main TU inliner (MSVC /O2).
 // This cold recovery reservation still executes every original predicate and IO.

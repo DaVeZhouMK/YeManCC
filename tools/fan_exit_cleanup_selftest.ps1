@@ -1,7 +1,19 @@
+[CmdletBinding()]
+param(
+    [ValidateSet('Default','NativeHandoff')][string]$Scope = 'Default',
+    [string]$EvidenceDir
+)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+if ($Scope -eq 'NativeHandoff') {
+    if (-not $EvidenceDir -or -not [IO.Path]::IsPathFullyQualified($EvidenceDir) -or $EvidenceDir -match '["%!\r\n]' -or
+        -not (Test-Path -LiteralPath $EvidenceDir -PathType Container)) {
+        throw 'NativeHandoff requires an existing absolute evidence directory'
+    }
+} elseif ($EvidenceDir) { throw '-EvidenceDir is only for NativeHandoff' }
 $native = Get-Content -LiteralPath (Join-Path $repoRoot 'native\main.cpp') -Raw
 $nativeText = [string]$native
+if ($Scope -eq 'Default') {
 $workspaceRoot = $repoRoot
 $hostSource = Get-Content -LiteralPath (Join-Path $workspaceRoot 'FanLab\real-host\Program.cs') -Raw
 $appSource = Get-Content -LiteralPath (Join-Path $repoRoot 'src\App.vue') -Raw
@@ -356,11 +368,50 @@ int main(int argc, char** argv) {
     std::cout<<json{{"ok",true},{"sourceBoundaryChecks",sourceChecks},{"hardwareCalls",0},{"scope","exact-production-native-boundary-JSON-only"}}.dump()<<std::endl;
 }
 '@
+} else {
+    $exactRun = Join-Path $EvidenceDir ('native-exit-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $exactRun | Out-Null
+    $utf8 = [Text.UTF8Encoding]::new($false)
+    function Get-ExactTopLevel([string]$Prefix, [switch]$Type) {
+        $end = if ($Type) { '};' } else { '}' }
+        $pattern = '(?ms)^' + [regex]::Escape($Prefix) + '.*?^' + [regex]::Escape($end) + '\r?$'
+        $matches = [regex]::Matches($nativeText, $pattern)
+        if ($matches.Count -ne 1) { throw ('NATIVE_HANDOFF_SOURCE_ANCHOR ' + $Prefix) }
+        return $matches[0].Value
+    }
+    $cleanup = Get-ExactTopLevel 'static FanExitHandoffResult fanHostCleanupForAppExit() {'
+    $worker = Get-ExactTopLevel 'static DWORD WINAPI exitCleanupThreadProc(LPVOID param) {'
+    $retire = $worker.IndexOf('fanLeaseKeepaliveShutdown();')
+    $handoff = $worker.IndexOf('const auto fanExitHandoff = fanHostCleanupForAppExit();')
+    $input = $worker.IndexOf('inputHostQuiesceForCaptureExit();')
+    if ($retire -lt 0 -or $handoff -le $retire -or $input -le $handoff) { throw 'NATIVE_HANDOFF_CALLER_ORDER' }
+    $types = @(Get-ExactTopLevel 'enum class FanExitHandoffResult {' -Type
+               Get-ExactTopLevel 'struct FanHostIdentityProbe {' -Type)
+    $code = @(Get-ExactTopLevel 'static const char* fanExitHandoffName(FanExitHandoffResult result) {'
+              Get-ExactTopLevel 'static FanHostIdentityProbe fanHostProbeWithBoundedPortWait(bool* waitedOut,'
+              Get-ExactTopLevel 'struct FanHandoffBinding {' -Type
+              Get-ExactTopLevel 'static FanHandoffBinding fanHandoffBindingFromReceipt('
+              $cleanup)
+    $legacyGate = 'if (handoffResultUnknown || (handoffStatus != 404 && handoffStatus != 405)) {'
+    if ([regex]::Matches($cleanup, [regex]::Escape($legacyGate)).Count -ne 1) { throw 'NATIVE_HANDOFF_NEGATIVE_CONTROL_ANCHOR' }
+    $mutant = $cleanup.Replace($legacyGate, 'if (handoffResultUnknown || (handoffStatus != 401 && handoffStatus != 404 && handoffStatus != 405)) {')
+    # Reuse the same executable: only the private clone opens the 401 legacy gate.
+    foreach ($file in @(
+        @{ name = 'types.inc'; source = $types -join "`n" },
+        @{ name = 'handoff.inc'; source = $code -join "`n" },
+        @{ name = 'unsafe-401.inc'; source = $mutant.Replace('fanHostCleanupForAppExit()', 'unsafe401Cleanup()') }
+    )) {
+        [IO.File]::WriteAllText((Join-Path $exactRun $file.name), $file.source + "`n", $utf8)
+    }
+    $cpp = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'fixtures\fan_exit_native_handoff.cpp.in') -Raw -Encoding UTF8
+}
 $cppPath=Join-Path $exactRun 'exact-fan-boundary.cpp'
 [IO.File]::WriteAllText($cppPath,$cpp,[Text.UTF8Encoding]::new($false))
 $vcvars='C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
 if (!(Test-Path -LiteralPath $vcvars)) { throw 'NATIVE_BOUNDARY_TOOLCHAIN_MISSING' }
 $batPath=Join-Path $exactRun 'compile-and-test.bat'
+$wireArgs = if ($Scope -eq 'Default') { $env:YMCC_FAN_SOURCE_WIRE_ARGS } else { '' }
+$jsonInclude = if ($Scope -eq 'NativeHandoff') { '/I"' + (Join-Path $repoRoot 'deps\json') + '"' } else { '' }
 @"
 @echo off
 set "CL="
@@ -371,11 +422,23 @@ call "$vcvars" >nul
 if errorlevel 1 exit /b 1
 set "INCLUDE=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\shared;%INCLUDE%"
 set "LIB=C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\ucrt\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.26100.0\um\x64;%LIB%"
-cl /nologo /std:c++20 /utf-8 /EHsc /W4 /WX /MT /Z7 /sourceDependencies "$exactRun\source-dependencies.json" /I"$repoRoot\native" "$cppPath" /Fo"$exactRun\selftest.obj" /Fe"$exactRun\selftest.exe"
+cl /nologo /std:c++20 /utf-8 /EHsc /W4 /WX /MT /Z7 /sourceDependencies "$exactRun\source-dependencies.json" /I"$repoRoot\native" $jsonInclude "$cppPath" /Fo"$exactRun\selftest.obj" /Fe"$exactRun\selftest.exe"
 if errorlevel 1 exit /b 1
-"$exactRun\selftest.exe" $env:YMCC_FAN_SOURCE_WIRE_ARGS
+"$exactRun\selftest.exe" $wireArgs
 "@ | Set-Content -LiteralPath $batPath -Encoding ascii
-& $batPath *> (Join-Path $exactRun 'compile-and-test.log')
+if ($Scope -eq 'NativeHandoff') {
+    $previousTemp = $env:TEMP
+    $previousTmp = $env:TMP
+    try {
+        $env:TEMP = $env:TMP = $exactRun
+        & $batPath *> (Join-Path $exactRun 'compile-and-test.log')
+    } finally {
+        $env:TEMP = $previousTemp
+        $env:TMP = $previousTmp
+    }
+} else {
+    & $batPath *> (Join-Path $exactRun 'compile-and-test.log')
+}
 $nativeCode=$LASTEXITCODE
 Get-Content -LiteralPath (Join-Path $exactRun 'compile-and-test.log') -Tail 8
 Write-Output ('FAN_EXIT_EXACT_BOUNDARY_OUTPUT='+$exactRun)

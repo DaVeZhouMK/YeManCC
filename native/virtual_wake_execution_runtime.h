@@ -40,6 +40,7 @@ struct Work {
     unsigned keptHideFailures=0; // Same wake episode; failed hide must not publish kept completion.
     unsigned physicalReturnWaits=0;
     std::uint64_t physicalReturnWaitHost=0;
+    bool pendingPhysicalReturnRetry=false; // Diagnostic origin of the next dispatch only.
 };
 static std::mutex mx; // Metadata only; never held across pipe/mode/HidHide IO.
 static Work episode;
@@ -122,6 +123,7 @@ static void retry(const Work& w,ULONGLONG backoff,const char* reason,bool physic
     std::lock_guard<std::mutex> lock(mx);
     if(const auto stale=retiredLocked(w)){retireLocked(w,stale);return;}
     if(!wanted()){retireLocked(w,"player-intent-off");return;}
+    episode.pendingPhysicalReturnRetry=physicalReturnWait;
     g_wakeHotReplaceRetryAfterTick.store(GetTickCount64()+backoff,std::memory_order_release);
     g_wakeRescanRequested.store(true,std::memory_order_release);
     if(!physicalReturnWait){log(w,"retained",reason);return;}
@@ -155,13 +157,14 @@ static bool before(const Work& w,const char* stage) {
     if(episode.fseReconnectClaimed)return false;
     if(!wanted()){retireLocked(w,"player-intent-off");return false;}
     if(paused()){
+        episode.pendingPhysicalReturnRetry=false;
         g_wakeRescanRequested.store(true,std::memory_order_release);
         g_wakeHotReplaceRetryAfterTick.store(GetTickCount64()+250,std::memory_order_release);
         log(w,"retained",stage);return false;
     }
     const auto currentEpoch=inputHostEpochToken();
     if(currentEpoch!=w.epoch){
-        if(!currentEpoch){g_wakeRescanRequested.store(true,std::memory_order_release);log(w,"retained","old-host-retired-recapture-empty-epoch");}
+        if(!currentEpoch){episode.pendingPhysicalReturnRetry=false;g_wakeRescanRequested.store(true,std::memory_order_release);log(w,"retained","old-host-retired-recapture-empty-epoch");}
         else retireLocked(w,"host-epoch-retired");
         return false;
     }
@@ -199,7 +202,8 @@ static void arm(std::uint64_t generation) {
         reconnectIntent==g_inputHostVirtualIntentRevision.load(std::memory_order_acquire);
     const auto readerDemand=g_inputHostRecoveryIntent.revision();
     const bool win5KeptSd=inputHostWin5KeptSteamDeckWake(inputHostConfiguredPersona());
-    const bool suspendBound=fseReconnectOptedIn || win5KeptSd;
+    const bool suspendBound=fseReconnectOptedIn || win5KeptSd || msiClawKnownBoardAuthority() ||
+        (sgShouldKeepInputDuringStandby() && psWakePolicyActive());
     if(suspendBound && generation!=currentPowerGeneration())return;
     // The existing public resume dispatcher can deliver another wake without
     // changing generation. A public revocation, not another resume, changes the key.
@@ -249,21 +253,29 @@ static void arm(std::uint64_t generation) {
     g_wakeTruthSnapshotUntilTick.store(now+30000,std::memory_order_release);log(episode,"armed","explicit-power-wake");
 }
 static bool pending(Work& w) {
+    // The idle BUS tick can skip the lock. Recheck before borrowing the wake episode.
+    if(!g_wakeRescanRequested.load(std::memory_order_acquire))return false;
     std::lock_guard<std::mutex> lock(mx);if(!g_wakeRescanRequested.load(std::memory_order_acquire))return false;
     w=episode;w.epoch=inputHostEpochToken();
     if(const auto stale=retiredLocked(w)){retireLocked(w,stale);return false;}
     if(!wanted()){retireLocked(w,"player-intent-off");return false;}
     return true;
 }
-static bool queue(const Work& w,std::uint64_t epoch) {
+struct QueueReceipt { unsigned afterPhysicalReturnWaits=0; bool coalesced=false; };
+template<class Submit>
+static bool queue(const Work& w,std::uint64_t epoch,QueueReceipt& receipt,Submit&& submit) {
+    receipt={};
     std::string reason;
     {std::lock_guard<std::mutex> lock(mx);
         if(const auto stale=retiredLocked(w)){retireLocked(w,stale);return false;}
         if(paused()||!wanted())return false;
         auto queued=w;queued.epoch=epoch;reason=encode(queued);episode.epoch=epoch;
+        if(episode.pendingPhysicalReturnRetry&&episode.physicalReturnWaitHost==epoch)
+            receipt.afterPhysicalReturnWaits=episode.physicalReturnWaits;
+        episode.pendingPhysicalReturnRetry=false;
         g_wakeRescanRequested.store(false,std::memory_order_release);g_wakeHotReplaceRetryAfterTick.store(0,std::memory_order_release);
     }
-    if(inputHostQueueLifecycleWork(reason.c_str()))return true;
+    if(submit(reason.c_str(),&receipt.coalesced))return true;
     retry(w,250,"queue-refused");return false;
 }
 // Caller has returned from IO. Host->metadata lock order is never reversed;
@@ -289,6 +301,23 @@ static bool beginDeadHostStart(const Work& w) {
 static bool awaitingReturn(const Work& w) {
     std::lock_guard<std::mutex> lock(mx);
     return returnWait.pending&&sameLocked(w)&&returnWait.work.serial==w.serial&&!retiredLocked(w);
+}
+// A post-final fault can already have stopped this Host before the new wake.
+// Keep the original wake budget while the existing quarantine worker returns it.
+static bool waitForStoppedMsiReturnLocked(const Work& w) {
+    if(!g_inputHostMx.ownedByCurrentThread() || !w.epoch || w.epoch!=g_inputHostEpoch ||
+       g_inputHostRunId.empty() || !inputHostRuntimeMsiReturnRequiredLocked())return false;
+    std::lock_guard<std::mutex> lock(mx);
+    ymcc::sleeppower::SharedPowerV1 power;
+    if(retiredLocked(w)||paused()||!wanted()||!w.msiSourceBound||
+       g_inputHostFaultHoldsStart.load(std::memory_order_acquire)||
+       g_inputHostVirtualIntentWriters.load(std::memory_order_acquire)||
+       w.msiIntentRevision!=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire)||
+       w.msiPersona!=inputHostConfiguredPersona()||
+       !captureSharedPowerLifecycle(power)||power.generation!=w.generation||power.suspendSerial!=w.suspendSerial)return false;
+    returnWait={w,g_inputHostEpoch,g_inputHostRunId,w.msiPersona,true};
+    log(w,"return-begin","quarantined-stopped-msi-host");
+    return true;
 }
 // One real RECREATE per queue dispatch. Retain the count with the original
 // wake, return owner control during backoff, and never reserve fallback quota.
@@ -382,6 +411,7 @@ static bool complete(const Work& w,bool kept,bool newStart=false,bool visibility
     std::lock_guard<InputHostMutex> hostLock(g_inputHostMx);std::lock_guard<std::mutex> lock(mx);
     if(const auto stale=retiredLocked(w)){retireLocked(w,stale);return false;}
     if(episode.fseReconnectClaimed!=fseRecreated || (fseRecreated&&(kept||newStart)))return false;
+    episode.pendingPhysicalReturnRetry=false;
     if(paused()||!wanted()){g_wakeRescanRequested.store(true,std::memory_order_release);return false;}
     if(!g_inputHostProcess||!inputHostProcessAliveLocked()||!g_inputHostPrepared||!g_inputHostNeutralized||
         (!newStart&&g_inputHostEpoch!=w.epoch)){retireLocked(w,"completed-host-proof-unavailable");return false;}
@@ -573,12 +603,17 @@ static bool inputHostWakeReturnedLocked(std::uint64_t retiredHost,const std::str
     std::lock_guard<std::mutex> lock(runtime::mx);auto& debt=runtime::returnWait;
     if(!debt.pending||debt.host!=retiredHost||debt.run!=retiredRun)return false;
     if(const auto stale=runtime::retiredLocked(debt.work)){runtime::retireLocked(debt.work,stale);return false;}
+    if(debt.work.msiSourceBound && (g_inputHostVirtualIntentWriters.load(std::memory_order_acquire)||
+       debt.work.msiIntentRevision!=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire))){
+        runtime::retireLocked(debt.work,"return-msi-intent-retired");return false;
+    }
     if(!runtime::wanted()||inputHostConfiguredPersona()!=debt.persona||
         g_inputHostProcess||g_inputHostReleaseQuarantined||g_hidHideVisibilityJournal.active||
         g_inputHostPrepared||g_inputHostNeutralized||g_inputHostTransportFault||g_inputHostFaultHoldsStart.load())return false;
     // Preserve expected pauses and the original expiry; no request/clock/quota
     // is renewed. Only this debt's old completed return clears its start block.
     const auto work=debt.work;debt={};g_inputHostStartBlocked=false;
+    runtime::episode.pendingPhysicalReturnRetry=false;
     g_wakeHotReplaceRetryAfterTick.store(0,std::memory_order_release);
     g_wakeRescanRequested.store(true,std::memory_order_release);
     runtime::log(work,"return-proven","common-owner-proved-exact-old-tuple-released");return true;

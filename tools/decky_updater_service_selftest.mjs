@@ -1,37 +1,141 @@
 import vm from 'node:vm';import crypto from 'node:crypto';
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
 async function runUpdaterHostPowerCases({root,out,selection='all'}){
- const names=['read-sequence','native-sequence','handoff-sequence','denied-return','generation-change','metadata-only','healthy','legacy','stop','read-suspend-serial','native-suspend-serial','handoff-suspend-serial'];
- assert(selection==='all'||names.includes(selection),'Unknown updater host power case');
+ const installCases=['read-sequence','native-sequence','handoff-sequence','denied-return','generation-change','metadata-only','healthy','legacy','stop','read-suspend-serial','native-suspend-serial','handoff-suspend-serial','held-game-read','held-power-read','submitted-install','native-readback-first','native-denial-first'];
+ const observeCases=['observe-while-suspended','observe-merged-ready','observe-unsubscribed','observe-replaced'];
+ const observing=selection==='observe'||observeCases.includes(selection),names=observing?observeCases:installCases;
+ assert(selection==='all'||selection==='observe'||names.includes(selection),'Unknown updater host power case');
  fs.mkdirSync(out,{recursive:true});assert(!fs.existsSync(path.join(out,'HOST-POWER-RESULT.json')),'Raw result already exists');
  const req=createRequire(path.join(root,'package.json')),{build}=req('esbuild'),ports={
-  'src/bridge/ipc.ts':"export const invoke=(...args)=>globalThis.__updaterHostPower.invoke(...args);export const on=(name,fn)=>globalThis.__updaterHostPower.on(name,fn);",
+  'src/bridge/ipc.ts':"export const invoke=(...args)=>globalThis.__updaterHostPower.invoke(...args);export const on=(name,fn)=>globalThis.__updaterHostPower.on(name,fn);export class IpcRemoteError extends Error {}",
   'src/bridge/gamedetect.ts':"export const refreshGameStatusStrict=()=>globalThis.__updaterHostPower.readGame();",
   'src/bridge/gamePolicyTarget.ts':"export const isPolicyGameInitialized=()=>true;export const getPolicyGame=()=>globalThis.__updaterHostPower.game;export const subscribePolicyGameStatus=fn=>{globalThis.__updaterHostPower.gameListeners.add(fn);return()=>globalThis.__updaterHostPower.gameListeners.delete(fn)};",
   'src/bridge/updateManager.ts':"export const updateSnapshot={phase:'downloaded',version:'0.0.40',sha256:'a'.repeat(64)};export const updateInfo={value:{version:'0.0.40',sha256:'a'.repeat(64)}};export const ensureUpdateManager=()=>Promise.resolve();export const checkForUpdate=()=>{throw Error('No updater check expected')};export const prepareUpdate=()=>{throw Error('No updater download expected')};export const downloadAndInstall=()=>globalThis.__updaterHostPower.install();",
   'src/bridge/deckyMirrorExtensions.ts':"export const registerDeckyMirrorExtension=value=>{const h=globalThis.__updaterHostPower;assertUnique(h);h.extension=value;return()=>{if(h.extension===value)h.extension=null}};function assertUnique(h){if(h.extension)throw Error('Duplicate fixture extension')}",
  };
- const loaded=[],built=await build({stdin:{contents:"export {startDeckyUpdaterHost} from './src/bridge/deckyUpdaterHost';export {onSharedPowerLifecycle,getSharedPowerLifecycle,getSharedPowerLifecycleDiagnostics} from './src/bridge/powerLifecycleState';",resolveDir:root,loader:'ts'},bundle:true,write:false,metafile:true,platform:'node',format:'cjs',target:'es2022',tsconfig:path.join(root,'tsconfig.json'),plugins:[{name:'explicit-updater-host-leaves',setup(b){b.onLoad({filter:/\.(?:ts|tsx|js|mjs)$/},a=>{const rel=path.relative(root,a.path).replaceAll('\\','/');const content=ports[rel]??fs.readFileSync(a.path,'utf8');loaded.push({path:a.path,relative:rel,kind:ports[rel]?'inert-leaf':'actual',sha256:crypto.createHash('sha256').update(content).digest('hex'),...(ports[rel]?{contents:content}:{bytes:Buffer.byteLength(content)})});return{contents:content,loader:a.path.endsWith('.tsx')?'tsx':a.path.endsWith('.ts')?'ts':'js',resolveDir:path.dirname(a.path)}})}}]});
+ if(observing){
+  delete ports['src/bridge/updateManager.ts'];
+  // The real manager links the scheduler's game-policy consumers. These paths must stay inert during a status read.
+  for(const [file,names] of Object.entries({gamedetect:['validateGameTarget','isCurrentGameTarget','isGameStatusCurrent'],gamePolicyTarget:['gamePolicyKey','detectPolicyGame','isPolicyTargetCurrent']})){
+   ports[`src/bridge/${file}.ts`]+=names.map(name=>`export function ${name}(){globalThis.__updaterHostPower.unexpected('${name}');}`).join('');
+  }
+ }
+ const loaded=[],built=await build({stdin:{contents:"export {startDeckyUpdaterHost} from './src/bridge/deckyUpdaterHost';export {powerLifecycle} from './src/bridge/api';export {onSharedPowerLifecycle,getSharedPowerLifecycle,getSharedPowerLifecycleDiagnostics} from './src/bridge/powerLifecycleState';",resolveDir:root,loader:'ts'},bundle:true,write:false,metafile:true,platform:'node',format:'cjs',target:'es2022',tsconfig:path.join(root,'tsconfig.json'),plugins:[{name:'explicit-updater-host-leaves',setup(b){b.onLoad({filter:/\.(?:ts|tsx|js|mjs)$/},a=>{const rel=path.relative(root,a.path).replaceAll('\\','/');const content=ports[rel]??fs.readFileSync(a.path,'utf8');loaded.push({path:a.path,relative:rel,kind:ports[rel]?'inert-leaf':'actual',sha256:crypto.createHash('sha256').update(content).digest('hex'),...(ports[rel]?{contents:content}:{bytes:Buffer.byteLength(content)})});return{contents:content,loader:a.path.endsWith('.tsx')?'tsx':a.path.endsWith('.ts')?'ts':'js',resolveDir:path.dirname(a.path)}})}}]});
  fs.writeFileSync(path.join(out,'HOST-POWER.cjs'),built.outputFiles[0].contents,{flag:'wx'});fs.writeFileSync(path.join(out,'HOST-POWER-GRAPH.json'),JSON.stringify({loaded,metafile:built.metafile},null,2)+'\n',{flag:'wx'});
  const flush=async()=>{for(let i=0;i<50;i++)await Promise.resolve();},defer=()=>{let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve}};
  const fact=(seq=10,revision=1,extra={})=>({known:true,generation:7,phase:'ready',inputReady:true,hardwareWritesAllowed:true,notificationPending:false,publicationRevision:revision,suspendSerial:0,...(seq===undefined?{}:{observedNotificationSequence:seq}),...extra});
  const results=[];
- for(const name of names.filter(n=>selection==='all'||n===selection)){
-  const events=new Map(),timers=new Map(),gameListeners=new Set(),gameGate=defer(),nativeGate=defer(),messages=[],observations=[];let serial=0,powerReads=0,gameReads=0,installs=0,nativeSettled=false,host=null,release=null,m=null,error=null;
+ for(const name of names.filter(n=>selection==='all'||selection==='observe'||n===selection)){
+  const events=new Map(),timers=new Map(),gameListeners=new Set(),gameGate=defer(),nativeGate=defer(),installGate=defer(),messages=[],observations=[];let serial=0,powerReads=0,installPowerReads=0,gameReads=0,installs=0,nativeSettled=false,host=null,release=null,m=null,error=null,oldPowerSignal;
+  const readbackFirst=name==='native-readback-first'||name==='native-denial-first';
+  const heldRead=name==='held-game-read'||name==='held-power-read', splitPower=heldRead||name==='submitted-install'||readbackFirst;
   let current=fact();if(name==='legacy'){delete current.observedNotificationSequence;delete current.suspendSerial;}
-  const h={extension:null,game:null,gameListeners,on(event,fn){let set=events.get(event);if(!set)events.set(event,set=new Set());set.add(fn);return()=>set.delete(fn)},emit(event,value){for(const fn of [...events.get(event)??[]])fn(value)},readGame(){gameReads++;return gameGate.promise},install(){installs++;return Promise.resolve()},invoke(command,args){
-   if(command==='power.lifecycle'){powerReads++;return powerReads===1||nativeSettled?Promise.resolve({...current}):nativeGate.promise;}
-   if(command==='deckySidebar.mirrorReply'){messages.push(structuredClone(args.message));return Promise.resolve(true)}throw Error('Unexpected command '+command)}
+  const startsSuspended=name==='observe-while-suspended'||name==='observe-unsubscribed';
+  if(startsSuspended)current=fact(10,1,{phase:'suspended',inputReady:false,hardwareWritesAllowed:false,suspendSerial:1});
+  const stateReads=[],unexpected=[],preflightSignals=new Set();
+  const h={extension:null,game:null,gameListeners,unexpected(command){unexpected.push(command);throw Error('Unexpected call '+command)},on(event,fn){let set=events.get(event);if(!set)events.set(event,set=new Set());set.add(fn);return()=>set.delete(fn)},emit(event,value){for(const fn of [...events.get(event)??[]])fn(value)},readGame(){gameReads++;return name==='held-game-read'&&gameReads>1?Promise.resolve(null):gameGate.promise},install(){installs++;return name==='submitted-install'?installGate.promise:Promise.resolve()},invoke(command,args,options){
+   if(command==='power.lifecycle'){
+    powerReads++;
+    if(observing)return Promise.resolve({...current});
+    if(splitPower){
+     if(!preflightSignals.has(options.signal))return Promise.resolve({...current});
+     if(++installPowerReads===1){oldPowerSignal=options.signal;if(name!=='held-game-read')return nativeGate.promise;}
+     return Promise.resolve({...current});
+    }
+    return powerReads===1||nativeSettled?Promise.resolve({...current}):nativeGate.promise;
+   }
+   if(command==='app.updateState'&&observing){const read={signal:options.signal,...defer()};stateReads.push(read);return read.promise;}
+   if(command==='deckySidebar.mirrorReply'){messages.push(observing?{...structuredClone(args.message),connection:args.connection}:structuredClone(args.message));return Promise.resolve(true)}return h.unexpected(command)}
   };
   const module={exports:{}},set=(fn,ms)=>{const id=++serial;timers.set(id,{fn,ms});return id},clear=id=>timers.delete(id);
-  const context={module,exports:module.exports,process:{env:{}},Buffer,URL,URLSearchParams,performance,crypto,atob,btoa,__updaterHostPower:h,queueMicrotask,console,Promise,structuredClone,setTimeout:set,clearTimeout:clear,window:{},TextDecoder,TextEncoder};
+  const document=Object.assign(new EventTarget(),{visibilityState:'visible',createElement:()=>({})}),window=new EventTarget();
+  const context={module,exports:module.exports,process:{env:{}},Buffer,URL,URLSearchParams,performance,crypto,atob,btoa,__updaterHostPower:h,queueMicrotask,console,Promise,AbortController,structuredClone,setTimeout:set,clearTimeout:clear,window,document,CustomEvent,TextDecoder,TextEncoder};
   vm.runInNewContext(built.outputFiles[0].text,context,{filename:'actual-updater-host-power.cjs'});m=module.exports;
+  if(splitPower){
+   // Both the shared source and explicit preflight now carry an abort signal.
+   const get=m.powerLifecycle.get;
+   m.powerLifecycle.get=(timeout,signal)=>{assert(signal);preflightSignals.add(signal);return get(timeout,signal);};
+  }
+  const baseline=m.getSharedPowerLifecycleDiagnostics(),baselineEvents=[...events.values()].reduce((n,s)=>n+s.size,0);
   const emit=value=>{current={...value};h.emit('power.lifecycleChanged',current)};
   const peer={connection:'1',runId:'b'.repeat(32)},clientId='aabbccdd-1122-3344-5566-778899aabbcc',send=id=>h.extension.request({...peer,request:{command:'updater.request',runId:peer.runId,clientId,id,action:'install',version:'0.0.40',sha256:'a'.repeat(64)}});
   try{
-   release=m.onSharedPowerLifecycle(()=>{});await flush();assert.equal(m.getSharedPowerLifecycle().phase,'ready');
+   release=m.onSharedPowerLifecycle(()=>{});await flush();assert.equal(m.getSharedPowerLifecycle().phase,startsSuspended?'suspended':'ready');
    host=m.startDeckyUpdaterHost(()=>true);h.extension.connected(peer);h.extension.request({...peer,request:{command:'updater.status',runId:peer.runId}});await flush();
+   if(observing){
+    const next=fact(11,2,{suspendSerial:1}),replacement={...peer,connection:'2'};
+    const status=(p,subscribe)=>h.extension.request({...p,request:{command:'updater.status',runId:p.runId,subscribe}});
+    const saved=(version,operationId)=>({phase:'installing',stage:'install',installerActive:true,version,operationId,sha256:'a'.repeat(64)});
+    const first=startsSuspended?0:1;
+    assert.equal(stateReads.length,first,'A known suspend must not start the state read');
+    emit(next);
+    if(name==='observe-unsubscribed')status(peer,false);
+    if(name==='observe-replaced')h.extension.connected(replacement);
+    await flush();
+    const retired=name==='observe-unsubscribed'||name==='observe-replaced';
+    if(!startsSuspended)assert.equal(stateReads[0].signal.aborted,true,'Merged Ready must retire the old manager slot');
+    observations.push({stage:'after-ready',stateReads:stateReads.length,source:m.getSharedPowerLifecycleDiagnostics()});
+    assert.equal(stateReads.length,first+Number(!retired),'The admitted observer must read exactly once for its current scope');
+    if(name==='observe-unsubscribed'){
+     const sent=messages.length;emit(fact(12,3,{suspendSerial:2}));await flush();assert.equal(stateReads.length,0);assert.equal(messages.length,sent);
+    }else{
+     if(name==='observe-replaced'){
+      const sent=messages.length;stateReads[0].resolve(saved('100.0.0','obsolete-installer'));await flush();assert.equal(messages.length,sent,'Retired read cannot publish to an unsubscribed replacement');
+      status(replacement,true);await flush();assert.equal(stateReads.length,2);
+     }
+     stateReads.at(-1).resolve(saved('99.0.0','current-installer'));await flush();
+     const published=messages.filter(x=>x.type==='ymcc-updater').at(-1);
+     assert.equal(published?.view?.targetVersion,'99.0.0');assert.equal(published.connection,name==='observe-replaced'?'2':'1');
+     const sent=messages.length;
+     if(!startsSuspended)stateReads[0].resolve(saved('100.0.0','obsolete-installer'));
+     emit({...next,publicationRevision:3});emit({...next,publicationRevision:3});h.emit('power.lifecycleChanged',fact());await flush();
+     assert.equal(stateReads.length,first+1,'Metadata, duplicate Ready and stale Ready cannot issue a new read');
+     assert.equal(messages.length,sent,'Metadata and obsolete reply must not publish');
+     assert(!messages.some(x=>x.view?.targetVersion==='100.0.0'),'Old installer state must never be shown');
+    }
+    assert.deepEqual(unexpected,[]);assert.equal(gameReads,0);assert.equal(installs,0);
+   }else{
    send(1);await flush();assert.equal(gameReads,1,'Actual Host must enter game read');
+    if(readbackFirst){
+     const prior={...current},denied=name==='native-denial-first';
+     gameGate.resolve(null);await flush();assert.equal(installPowerReads,1,'The original install must reach its Native read');
+     current=fact(11,2,{suspendSerial:1,...(denied?{phase:'suspending',inputReady:false,hardwareWritesAllowed:false}: {})});
+     nativeSettled=true;nativeGate.resolve({...current});await flush();
+     assert.equal(installs,0,'A newer Native fact cannot authorize the old explicit request');
+     observations.push({stage:'native-readback-without-broadcast',source:m.getSharedPowerLifecycleDiagnostics(),installs});
+     if(denied){
+      assert.equal(m.getSharedPowerLifecycle().hardwareWritesAllowed,false,'The live denial must close the shared gate without a broadcast');
+      send(2);await flush();assert.equal(gameReads,1,'A denied scope must block new install preflight');
+      emit(fact(12,3,{suspendSerial:1}));await flush();assert.equal(installs,0,'Ready delivery never replays an old install');
+     }
+     send(3);await flush();
+     assert.equal(installs,1,'A fresh confirmation must use the current Native scope');
+     assert.equal(gameReads,2);assert.equal(m.getSharedPowerLifecycle().suspendSerial,1);
+     h.emit('power.lifecycleChanged',prior);send(1);await flush();
+     assert.equal(installs,1,'A stale event and retransmitted request must not reinstall');
+    }else if(splitPower){
+    if(name!=='held-game-read'){gameGate.resolve(null);await flush();assert.equal(installPowerReads,1,'Install preflight must enter the original power read');}
+    if(name==='submitted-install'){
+     nativeGate.resolve({...current});await flush();assert.equal(installs,1,'First install must have crossed the submit boundary');
+     emit(fact(11,2,{generation:8,suspendSerial:1}));send(2);await flush();
+     assert.equal(installs,1,'New Ready cannot release an already submitted install');assert.equal(gameReads,1);
+     assert.equal(messages.find(x=>x.type==='ymcc-updater-result'&&x.id===2)?.code,'unavailable');
+     installGate.resolve();await flush();assert.equal(messages.filter(x=>x.type==='ymcc-updater').at(-1)?.view?.canInstall,true);
+    }else{
+     const previous={...current};
+     emit(fact(11,2,{generation:8,suspendSerial:1,known:false,hardwareWritesAllowed:false}));await flush();
+     assert.equal(messages.filter(x=>x.type==='ymcc-updater').at(-1)?.view?.canInstall,false);
+     emit(fact(11,3,{generation:8,suspendSerial:1}));await flush();
+     assert.equal(installs,0,'Ready must not replay the revoked explicit install');
+     assert.equal(messages.filter(x=>x.type==='ymcc-updater').at(-1)?.view?.canInstall,true,'Revoked preflight held the install queue after current Ready');
+     if(name==='held-power-read')assert.equal(oldPowerSignal?.aborted,true,'Only the old read-only power IPC must be aborted');
+     nativeSettled=true;send(2);await flush();
+     assert.equal(installs,1,'A fresh confirmation must install before the old read returns');assert.equal(gameReads,2);
+     gameGate.resolve(null);nativeGate.resolve(previous);send(1);await flush();
+     assert.equal(installs,1,'Late read or retransmission must not replay the retired install');
+    }
+    observations.push({stage:name,installs,gameReads,powerReads,installPowerReads});
+   }else{
    if(name==='read-sequence')emit(fact(11,2));
    if(name==='read-suspend-serial')emit(fact(10,2,{suspendSerial:1}));
    if(name==='denied-return'){emit(fact(11,2,{known:false,hardwareWritesAllowed:false}));emit(fact(11,3));}
@@ -53,11 +157,18 @@ async function runUpdaterHostPowerCases({root,out,selection='all'}){
     if(name==='native-suspend-serial')emit(fact(10,2,{suspendSerial:1}));
     send(2);await flush();assert.equal(installs,1,'A fresh explicit request may use the new admitted scope');assert.equal(gameReads,2);
    }
+   }
+   }
   }catch(e){error={message:e.message,stack:e.stack};}
-  finally{host?.stop();release?.();await flush();const diagnostic=m.getSharedPowerLifecycleDiagnostics();observations.push({stage:'disposed',activeTimers:timers.size,activeEvents:[...events.values()].reduce((n,s)=>n+s.size,0),gameListeners:gameListeners.size,extensionPresent:!!h.extension,source:diagnostic});try{assert.equal(timers.size,0);assert.equal([...events.values()].reduce((n,s)=>n+s.size,0),0);assert.equal(gameListeners.size,0);assert.equal(h.extension,null);assert.equal(diagnostic.active,false);assert.equal(diagnostic.subscriberCount,0);}catch(e){error??={message:e.message,stack:e.stack}}}
-  results.push({name,pass:!error,error,installs,gameReads,powerReads,observations});
+  finally{
+   host?.stop();for(const read of stateReads)read.resolve({phase:'idle'});release?.();await flush();
+   const diagnostic=m.getSharedPowerLifecycleDiagnostics(),progressListeners=events.get('update.progress')?.size??0,activeEvents=[...events.values()].reduce((n,s)=>n+s.size,0);
+   observations.push({stage:'disposed',activeTimers:timers.size,activeEvents,baselineEvents,progressListeners,gameListeners:gameListeners.size,extensionPresent:!!h.extension,source:diagnostic});
+   try{assert.equal(timers.size,0);assert.equal(activeEvents,baselineEvents+progressListeners);assert(progressListeners<=(observing?1:0));assert.equal(gameListeners.size,0);assert.equal(h.extension,null);assert.equal(diagnostic.active,baseline.active);assert.equal(diagnostic.subscriberCount,baseline.subscriberCount);}catch(e){error??={message:e.message,stack:e.stack}}
+  }
+  results.push({name,pass:!error,error,installs,gameReads,powerReads,stateReads:stateReads.length,unexpected,observations});
  }
- const result={status:results.every(r=>r.pass)?'PASS':'FAIL',selection,results,actualHostServiceApiAndSharedSource:true,externalNativeGameManagerPortsInert:true,actualInstallOrSystemActions:0,newTimerThreadPoller:0};
+ const result={status:results.every(r=>r.pass)?'PASS':'FAIL',selection,results,actualHostServiceApiAndSharedSource:true,actualUpdateManager:observing,externalNativeGameManagerPortsInert:!observing,actualInstallOrSystemActions:0,newTimerThreadPoller:0};
  fs.writeFileSync(path.join(out,'HOST-POWER-RESULT.json'),JSON.stringify(result,null,2)+'\n',{flag:'wx'});return result;
 }
 

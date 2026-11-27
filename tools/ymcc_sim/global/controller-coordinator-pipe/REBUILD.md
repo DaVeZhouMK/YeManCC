@@ -1,5 +1,15 @@
 # 可再生的 controller coordinator prerequisite 工序
 
+## 从已捕获的 G 盘源码续编托管夹具
+
+原 `r3-terminal22-prepare.mjs --stage capture` 可先固定源码。若同一主线仍与捕获一致，使用同一 `--workspace`、原合同和原 `PREPARATION.json` 的 SHA256，改用 `--stage resume-managed --capture-sha256 SHA256`。续编只从 `Testing/YMCC/Workspace` 下的原归属目录接续；不复制源码，不重写原准备回执，不重试同一归属下已有的编译。旧来源、失败捕获、身份漂移、目录重定向或已存在的编译输出均拒绝。
+
+续编输出为原 `Build/Validation/CurrentCoordinatorTerminal22/managed-resume/PREPARATION.json`，可直接传给原 `r3-terminal22-native-prepare.mjs --preparation`。它只证明托管构建，原 Native 角色、正负资格、公开入口和实机不自动通过。
+
+只需回收固定历史来源时，可显式选 `--stage resume-frozen-managed`。仍须原捕获完整通过、原回执 SHA256、同一 G 盘独占根、原源码和工具校验、原 managed 构建；允许主线在捕获后改变。回执标记 `frozenSourceOnly: true`，不提供当前主线验收。两个续编阶段占用同一个 `managed-resume`，不会在同一捕获上重复构建；默认和 `resume-managed` 的当前来源门不变。
+
+Terminal29 的严格当前 Native 生命周期准备在编译前后用 `parallel-primary-and-copy`：首遍主线与副本核验并行，均结束后完整重读主线。两次全量核验、漂移拒绝、工具和输出边界不变。原 Native 准备回执的 `open-compile-authority`、`finish-compile-authority` 分列可用于比较成本。Managed、历史冻结及旧合同仍串行；不新增默认用例或发布门。
+
 本文件描述可复用代码接口。本批固定源、D 编译目录和 SHA 只存在于各批生成的 JSON/账本；它们不是下批测试代码的永久依赖。无需安装版、掌机或外部节点。使用选定完整固定源码及其已验证的 input bindings，在新的 owned 目录重建。
 
 ```powershell

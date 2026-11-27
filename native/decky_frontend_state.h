@@ -3,6 +3,9 @@
 #include <string_view>
 #include <initializer_list>
 namespace ymcc::deckyfrontend {
+inline bool qamPanelState(std::string_view value) noexcept {
+    return value=="unobserved"||value=="committed"||value=="native-ready-commit";
+}
 inline bool backendState(std::string_view value) noexcept {
     for(const auto allowed:{std::string_view{"socket-missing"},std::string_view{"socket-connecting"},std::string_view{"socket-open"},std::string_view{"socket-closing"},std::string_view{"socket-closed"},std::string_view{"socket-unavailable"}})if(value==allowed)return true;
     return false;

@@ -50,6 +50,23 @@ export function originalJsRegressionArgs(repo,name,artifact){
  const entry=path.join(repo,'tools',name+'.mjs');
  return name==='decky_sidebar_host_selftest'?[entry]:[entry,artifact];
 }
+export function parseOriginalHostProof(stdout){
+ const rows=stdout.replace(/^\uFEFF/,'').trimEnd().split(/\r?\n/);
+ const start=rows.findLastIndex(line=>line.startsWith('{'));
+ assert(start>=0,'ORIGINAL_HOST_REPORT_MISSING');
+ const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
+ const report=value=>object(value)&&(Array.isArray(value.cases)||Array.isArray(value.results))&&
+  (Object.hasOwn(value,'status')||Object.hasOwn(value,'passed'));
+ // Host logs one JSON object per measurement, then emits its terminal report.
+ for(const line of rows.slice(0,start)){
+  if(!line.trim())continue;
+  const diagnostic=JSON.parse(line);
+  assert(object(diagnostic)&&!report(diagnostic),'ORIGINAL_HOST_DIAGNOSTIC_OR_DUPLICATE_REPORT');
+ }
+ const proof=JSON.parse(rows.slice(start).join('\n'));
+ assert(report(proof),'ORIGINAL_HOST_REPORT_REQUIRED');
+ return proof;
+}
 export const NATIVE_REGRESSIONS=Object.freeze([
  {name:'runtime',source:'tools/decky_sidebar_runtime_selftest.cpp',runMs:15000,legacy:true},
  {name:'recovery',source:'tools/decky_sidebar_recovery_selftest.cpp',runMs:15000,legacy:false},
@@ -411,7 +428,7 @@ export async function runParent({repoRoot=path.resolve(import.meta.dirname,'../.
   }
   const runOriginalJs=name=>guard('original.'+name,()=>{
    const artifact=path.join(work,name),env={...process.env,YMCC_DECKY_ARTIFACT_ROOT:artifact};const p=exec('original.'+name,processExec,originalJsRegressionArgs(repo,name,artifact),60000,{cwd:repo,env});naturalExit(p,0);
-   let proof;if(name===HOST_JS_REGRESSION)proof=read(p.stdout.path);else{const file={decky_loader_official_selftest:'OFFICIAL-LOADER-CONSUMER.json',decky_sidebar_safety_selftest:'SAFETY-NOTIFICATION.json',decky_sidebar_client_selftest:'validation/MIRROR-CLIENT-SELFTEST.json',decky_sidebar_hang_recovery_selftest:'validation/MIRROR-HANG-RECOVERY.json',decky_sidebar_stability_matrix_selftest:'validation/DECKY-STABILITY-MATRIX.json'}[name];const actual=path.join(artifact,file);assert(fs.existsSync(actual),'ORIGINAL_JS_RESULT_MISSING:'+name);proof=read(actual);report.rawEvidence.push(pin(actual));}
+   let proof;if(name===HOST_JS_REGRESSION)proof=parseOriginalHostProof(fs.readFileSync(p.stdout.path,'utf8'));else{const file={decky_loader_official_selftest:'OFFICIAL-LOADER-CONSUMER.json',decky_sidebar_safety_selftest:'SAFETY-NOTIFICATION.json',decky_sidebar_client_selftest:'validation/MIRROR-CLIENT-SELFTEST.json',decky_sidebar_hang_recovery_selftest:'validation/MIRROR-HANG-RECOVERY.json',decky_sidebar_stability_matrix_selftest:'validation/DECKY-STABILITY-MATRIX.json'}[name];const actual=path.join(artifact,file);assert(fs.existsSync(actual),'ORIGINAL_JS_RESULT_MISSING:'+name);proof=read(actual);report.rawEvidence.push(pin(actual));}
    assert(proof.passed===true||proof.status==='passed'||(name==='decky_sidebar_client_selftest'&&proof.productionClientSource===true),'ORIGINAL_JS_NOT_PASS');const results=proof.results??(Array.isArray(proof.cases)?proof.cases:null);assert(Array.isArray(results)&&results.length>0,'ORIGINAL_JS_CASES_REQUIRED');assert(results.every(r=>r.passed!==false&&r.status!=='failed'),'ORIGINAL_JS_RAW_CASE_FAILED');add(p.id,true,{originalCases:results.length,process:pin(path.join(out,'processes',p.id+'.json'))});
   });
   // The full Host VM regression owns its own inputs; no native or baseline output is required.

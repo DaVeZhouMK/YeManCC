@@ -6,7 +6,7 @@ export const DEFAULT_BACKGROUND_VIDEO_PATH = 'C:\\SOFT\\YeMan\\Demo\\MP4\\SteamD
 
 export type BackgroundKind = 'image' | 'video';
 
-export interface MediaPlayback {start:number;end:number;fit:'cover'|'contain';}
+export interface MediaPlayback {start:number;end:number;fit:'cover'|'contain';startMode?:'random'|'from-start';}
 export interface BackgroundState {
   mediaKey?:string;
   mediaReadEpoch?:number;

@@ -15,11 +15,11 @@ if ($LASTEXITCODE -ne 0 -or $commit -ine $ExpectedCommit) {
 
 # Release approval is independent of the payload verifier selected by the checkout.
 # Advance these pins together only when a replacement carries both GPD fixes.
-$component = 'candidate-onex-f1-fan-aliases-20261124'
+$component = 'candidate-gpd-winmax3-20261127'
 $archive = "deps/fan-host-source/$component"
-$archiveSha = '88a501bbda40005f7584b35263b950559d3072f41c76bb665928e4389768798f'
+$archiveSha = '7ae28da84eef7d86696ff7328dd4862541b4817240b90c4cae5d062319650867'
 $payload = 'PowerControl/fan-host'
-$payloadSha = '01c0d834dd11d60559c5f7d8d4ff0627d9d617e0ec0071f19bc521740c166f10'
+$payloadSha = 'e4057d2960714512a2c8c01c701d4b63d9ce167b943cdf3f20ea7ca2508635f0'
 $selector = 'tools/verify-r5v9-fan-host-payload.ps1'
 
 function Read-ApprovedManifest([string]$Relative, [string]$Hash) {
@@ -123,6 +123,11 @@ foreach ($boundary in @('resume', 'read', 'off', 'new-sleep', 'pending', 'stale'
 foreach ($boundary in @('ipc-recovers', 'ipc-off', 'ipc-still-failing')) {
   if (!$action.Contains("'$boundary'", [StringComparison]::Ordinal)) {
     throw "FAN_RELEASE_WAKE_IPC_REGRESSION_REQUIRED: missing coordinator read boundary $boundary."
+  }
+}
+foreach ($boundary in @('authorized', 'off-after-claim')) {
+  if (!$action.Contains("'background-ready public startup with no prior Host: $boundary'", [StringComparison]::Ordinal)) {
+    throw "FAN_RELEASE_COLD_STARTUP_REGRESSION_REQUIRED: missing no-Host boundary $boundary."
   }
 }
 $preflight = Get-Content -LiteralPath (Join-Path $root 'tools/github-release-preflight.ps1') -Raw -Encoding UTF8

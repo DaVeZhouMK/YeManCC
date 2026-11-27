@@ -31,6 +31,11 @@ static std::function<json(const json&)> fixtureManual;
 template<class F>static void ipc_on(const char* name,F handler){if(std::string(name)!="power.fanManualWake")throw std::runtime_error("wrong original IPC leaf");fixtureManual=handler;}
 static const char* powerLifecycleName(PowerLifecycle p){switch(p){case PowerLifecycle::Ready:return "ready";case PowerLifecycle::Suspended:return "suspended";case PowerLifecycle::Suspending:return "suspending";case PowerLifecycle::Resuming:return "resuming";default:return "unknown";}}
 static std::atomic<unsigned long long> g_resumeReadyGeneration{0};
+static std::atomic<unsigned long long> g_sgLatestSleepEntryFileTime{0};
+struct FixtureReadyReceipt { unsigned long long ticket=0; bool worker=false; };
+static FixtureReadyReceipt readPowerResumeReady(unsigned long long generation){
+ return g_resumeReadyGeneration.load()==generation?FixtureReadyReceipt{1,true}:FixtureReadyReceipt{};
+}
 static ULONGLONG g_resumeReadyTick=0;
 static unsigned fixtureCommitCalls=0;
 static void revokeSharedPowerMirrors(){g_sharedPowerRevocations.revoke();}
@@ -41,3 +46,4 @@ static bool commitPowerResume(unsigned long long generation,const char*){
 }
 static ymcc::fan_wake::Observation g_fanPhysicalWake;
 static void fanHostQueueSuspend(const char*,unsigned long long){}
+static void fanHostContinueUnstartedClose(unsigned long long){}

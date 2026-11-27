@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 
 // Original preparation and extraction, shared by the legacy and explicit real-store modes.
-export function prepareOwnedReturnSources({repo,output,selectedProfiles=['Release','Checked'],runName}={}) {
+export function prepareOwnedReturnSources({repo,output,selectedProfiles=['Release','Checked'],runName,runtimeHandoff=false}={}) {
 output = path.resolve(output);
 assert(output.toLowerCase() !== repo.toLowerCase() && !output.toLowerCase().startsWith(repo.toLowerCase() + path.sep), 'Evidence must stay outside the source repository');
 fs.mkdirSync(output, { recursive: true });
@@ -49,6 +49,7 @@ const sources = [
   'tools/msi_owned_return_runtime_selftest.cpp',
   'tools/verify-msi-owned-return-runtime.mjs',
   'tools/fixtures/msi_owned_return_store/prepare_base.mjs',
+  ...(runtimeHandoff?['native/virtual_runtime_msi_return_runtime.h']:[]),
 ];
 const frozen = new Map(sources.map(name => [name, fs.readFileSync(path.join(repo, name))]));
 for (const [name, bytes] of frozen) {
@@ -59,7 +60,8 @@ for (const [name, bytes] of frozen) {
 const ranges = [];
 function extract(kind, name, owner = 'native/main.cpp') {
   const main = frozen.get(owner).toString('utf8');
-  const prefix = kind === 'function' ? '^static[^\\n;{]*\\b' + name + '\\s*\\('
+  const isFunction = kind === 'function' || kind === 'external-bool-function';
+  const prefix = isFunction ? (kind === 'function' ? '^static[^\\n;{]*\\b' : '^bool\\s+') + name + '\\s*\\('
     : '^' + (kind === 'enum' ? 'enum class' : 'struct') + '\\s+' + name + '\\s*\\{';
   const re = new RegExp(prefix, 'mg');
   let match;
@@ -67,7 +69,7 @@ function extract(kind, name, owner = 'native/main.cpp') {
     // A default std::function argument can contain {} before the body. Track
     // the complete parameter list so its initializer is never extracted as it.
     let brace = main.indexOf('{', match.index);
-    if (kind === 'function') {
+    if (isFunction) {
       let depth = 0, mode = 'code'; brace = -1;
       for (let i = main.indexOf('(', match.index); i < main.length; ++i) {
         const c = main[i], n = main[i + 1];
@@ -87,10 +89,10 @@ function extract(kind, name, owner = 'native/main.cpp') {
         else if (depth === 0 && c === '{') { brace = i; break; }
       }
     }
-    const semicolon = kind === 'function' ? -1 : main.indexOf(';', match.index);
+    const semicolon = isFunction ? -1 : main.indexOf(';', match.index);
     if (brace < 0 || (semicolon >= 0 && semicolon < brace)) continue;
     let end = endBrace(main, brace);
-    if (kind !== 'function') { assert.equal(main[end], ';', name); ++end; }
+    if (!isFunction) { assert.equal(main[end], ';', name); ++end; }
     const code = main.slice(match.index, end);
     ranges.push({ name, source: owner,
       startLine: main.slice(0, match.index).split('\n').length,
@@ -143,6 +145,7 @@ const receipt = {
   mode: 'actual-production-runtime-offline-integration', createdAt: new Date().toISOString(),
   output: run, noInputHost: true, noDeviceIo: true, noSdkDeviceIo: true,
   selectedProfiles,
+  ...(runtimeHandoff?{selection:'post-final-runtime-handoff',runtimeHandoffHeader:'native/virtual_runtime_msi_return_runtime.h'}:{}),
   wholeMainCompiled: false, productionHeadersModifiedByVerifier: false,
   strictProfiles: { Release: ['/O2', '/MT', '/DNDEBUG'], Checked: ['/Od', '/MTd', '/RTC1', '/Zi', '/D_DEBUG'] },
   realFunctions, extractedDefinitions: ranges, stubs,

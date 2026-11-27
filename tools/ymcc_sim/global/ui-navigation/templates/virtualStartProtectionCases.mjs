@@ -128,12 +128,25 @@ export async function virtualClickStartCases({height,open,actionCase}) {
   assert(saved.requestId>1&&saved.write?.ok===true);
   const afterClick=await calls();
   assert.deepEqual(afterClick.slice(before.length),['settings.write','input.shortcutRuntime.clear']);
+  if(outcome==='failure'){
+   // Win5 Elite: an admitted settings write can precede a blocked native Start.
+   await f.evaluate(id=>{
+    const host=window.__virtualStartFixture;
+    host.produceState({requestId:id,locked:true,phase:'verifying',candidateOutcome:'failure',
+     verificationPending:true,verificationRemainingMs:10000,elapsedMs:0,remainingMs:30000});
+    host.deliverPayload({...host.capturePayload(),virtualOutput:{state:'starting',requestedPersona:'elite',
+     hostAlive:false,prepared:false,frameAccepted:false,startProtection:{...host.state}}});
+   },saved.requestId);
+   await tone('pending');
+   assert.equal(await xbox.isDisabled(),true,'same-ticket failure candidate still holds the control');
+   assert.deepEqual(await calls(),afterClick,'a failure candidate cannot resubmit the saved intent');
+  }
   const staleReady=await f.evaluate(({outcome,id})=>{
    const host=window.__virtualStartFixture;
    const ready={state:'active',requestedPersona:'elite',boundPersona:'elite',hostEpoch:9,hostAlive:true,
     prepared:true,neutralized:true,frameAccepted:true,sourceLive:true,sourceCurrent:true};
    if(outcome==='failure'){
-    host.produceState({locked:true,phase:'failure',elapsedMs:100,remainingMs:10000});
+    host.produceState({locked:true,phase:'failure',verificationPending:false,verificationRemainingMs:0,elapsedMs:100,remainingMs:10000});
     host.deliverPayload({...host.capturePayload(),backendFaultHold:true,virtualOutput:{
      state:'suspected-failed',reason:'backend-fault-hold',requestedPersona:'elite',hostAlive:false,
      prepared:false,frameAccepted:false,sourceLive:false,startProtection:{...host.state}}});
@@ -153,12 +166,120 @@ export async function virtualClickStartCases({height,open,actionCase}) {
    },staleReady);
    assert.equal(await status.getAttribute('data-tone'),'warning','older ready must not replace the current failure');
    assert.match(await status.innerText(),/失败/);
+   await f.evaluate(id=>{
+    const host=window.__virtualStartFixture;
+    host.produceState({requestId:id,locked:false,phase:'failure',remainingMs:0});
+    host.deliverPayload({...host.capturePayload(),backendFaultHold:true,virtualOutput:{
+     state:'suspected-failed',reason:'backend-fault-hold',requestedPersona:'elite',hostAlive:false,
+     prepared:false,frameAccepted:false,sourceLive:false,startProtection:{...host.state}}});
+   },saved.requestId);
+   await f.waitForFunction(()=>[...document.querySelectorAll('.persona-actions .persona-btn')]
+    .some(button=>button.textContent.trim()==='Xbox'&&!button.disabled),null,{timeout:5000});
+   assert.equal(await status.getAttribute('data-tone'),'warning','unlock does not convert a failed request to ready');
   } else {
    await tone('on');
    assert.match(await status.innerText(),/已开启/);
   }
   assert.equal(await xbox.evaluate(el=>el.classList.contains('active')),true,'saved intent and runtime result remain distinct');
   assert.deepEqual(await calls(),afterClick,'runtime feedback must not replay the user action');
+ });
+}
+
+export const virtualClickAdmissionExpiryName='Virtual start: Win5 first ON expires; explicit OFF and second ON recover';
+
+// Win5 2026-11-22 112013, native-lifecycle.log 597/624/625, 629/725, 754/859/877/878.
+// Exercise the real consumer with memory IPC; the native dispatcher did not run here.
+export async function virtualClickAdmissionExpiryCase({height,open,actionCase}) {
+ await actionCase(virtualClickAdmissionExpiryName,height,async()=>{
+  const f=await open('/button-mapping',height,{virtualStartSeed:'off'});
+  const status=f.locator('.controller-output-status');
+  const buttons=f.locator('.persona-actions .persona-btn');
+  const steamdeck=buttons.filter({hasText:/^SteamDeck$/});
+  const off=buttons.filter({hasText:/^关闭虚拟手柄$/});
+  const tone=value=>f.locator(`.controller-output-status[data-tone="${value}"]`).waitFor({timeout:5000});
+  const snap=()=>f.evaluate(()=>{
+   const h=window.__virtualStartFixture;
+   return {state:h.state,target:h.read().input.outputTarget.persona,accepted:h.accepted,rejected:h.rejected,
+    writes:h.replies.filter(r=>r.cmd==='settings.write').map(r=>[r.requestId,r.status,r.response?.ok]),
+    calls:window.__previewCalls.filter(c=>['settings.write','input.shortcutRuntime.clear'].includes(c.cmd)).map(c=>c.cmd)};
+  });
+  async function click(button,persona,admissions){
+   await button.click({timeout:5000});
+   await f.waitForFunction(({persona,admissions})=>{
+    const h=window.__virtualStartFixture;
+    return h.read().input.outputTarget.persona===persona&&h.accepted===admissions&&
+     h.replies.filter(r=>r.cmd==='input.shortcutRuntime.clear'&&r.status==='fulfilled').length===admissions;
+   },{persona,admissions},{timeout:5000});
+   const s=await snap();
+   assert.equal(s.rejected,0);
+   assert.equal(s.state.persona,persona);
+   assert.equal(s.state.phase,'pending');
+   assert.equal(s.state.locked,true);
+   assert.deepEqual(s.writes.at(-1),[s.state.requestId,'fulfilled',true]);
+   assert.equal(await button.isEnabled(),false,'current admission locks the control');
+   return s;
+  }
+  const publish=(patch,runtime)=>f.evaluate(({patch,runtime})=>{
+   const h=window.__virtualStartFixture;
+   h.produceState(patch);
+   const payload=h.capturePayload();
+   Object.assign(payload.virtualOutput,runtime);
+   h.deliverPayload(payload);
+   return payload;
+  },{patch,runtime});
+  const deliver=payload=>f.evaluate(payload=>window.__virtualStartFixture.deliverPayload(payload),payload);
+  const flush=()=>f.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  const noHost={state:'starting',requestedPersona:'steamdeck',boundPersona:'disabled',hostEpoch:0,
+   hostAlive:false,prepared:false,neutralized:false,frameAccepted:false,steamRunning:true,switchPending:false};
+  const disabled={state:'disabled',reason:'not-requested',requestedPersona:'disabled',hostAlive:false,prepared:false};
+  const ready={state:'active',requestedPersona:'steamdeck',boundPersona:'steamdeck',hostEpoch:1,
+   hostAlive:true,prepared:true,neutralized:true,frameAccepted:true,sourceLive:true,sourceCurrent:true,steamRunning:true};
+  const settled={locked:false,verificationPending:false,verificationRemainingMs:0,elapsedMs:0,remainingMs:0};
+  const candidate=elapsedMs=>({phase:'verifying',candidateOutcome:'success',verificationPending:true,
+   verificationRemainingMs:10000,elapsedMs,remainingMs:30000-elapsedMs});
+
+  await tone('off');
+  const initial=await snap();
+  await f.evaluate(()=>{window.__virtualStartFixture.armed=true});
+  const first=await click(steamdeck,'steamdeck',1);
+  await tone('pending');
+  const expired=await publish({...settled,phase:'expired',candidateOutcome:''},noHost);
+  await flush();
+  assert.equal(await off.isEnabled(),true,'expiry permits explicit OFF');
+  assert.notEqual(await status.getAttribute('data-tone'),'on','expiry must not report success');
+  assert.equal((await snap()).target,'steamdeck','expiry is not a settings rollback');
+  assert.deepEqual((await snap()).calls,first.calls,'expiry cannot replay the click');
+
+  const stopped=await click(off,'disabled',2);
+  assert.equal(stopped.state.requestId,first.state.requestId+1);
+  await publish(candidate(1140),disabled);
+  await flush();
+  assert.equal(await steamdeck.isEnabled(),false,'OFF candidate is not terminal');
+  await publish({...settled,phase:'success'},disabled);
+  await tone('off');
+  assert.deepEqual((await snap()).calls,stopped.calls,'OFF must not automatically turn ON');
+
+  const retry=await click(steamdeck,'steamdeck',3);
+  assert.equal(retry.state.requestId,stopped.state.requestId+1);
+  await deliver(expired);
+  await flush();
+  assert.equal(await off.isEnabled(),false,'old expiry cannot unlock the second ON');
+  assert.notEqual(await status.getAttribute('data-tone'),'on');
+  await publish(candidate(2359),ready);
+  await flush();
+  await tone('pending');
+  await publish({...settled,phase:'success'},ready);
+  await tone('on');
+  await deliver(expired);
+  await flush();
+  assert.equal(await status.getAttribute('data-tone'),'on','old expiry cannot replace current success');
+  assert.equal(await off.isEnabled(),true);
+  const final=await snap();
+  assert.equal(final.target,'steamdeck');
+  assert.equal(final.accepted,3);
+  assert.equal(final.rejected,0);
+  assert.deepEqual(final.writes,[first,stopped,retry].map(s=>[s.state.requestId,'fulfilled',true]));
+  assert.deepEqual(final.calls,[...initial.calls,...Array.from({length:3},()=>['settings.write','input.shortcutRuntime.clear']).flat()]);
  });
 }
 

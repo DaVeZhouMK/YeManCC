@@ -9,7 +9,7 @@ import {performance} from 'node:perf_hooks';
 import {parentDeclaration,validateBaselineReceipt,sourceMap,verifyParentMetadata,PARENT_ID} from '../global/decky-persistent-lifecycle/current-parent-global.mjs';
 import {baselineEnvironment,packageMaintenanceEnvironment,resourceFixtureEnvironment} from '../global/decky-persistent-lifecycle/baseline-environment.mjs';
 import {verifyNativeResourceReference,verifyNativeHealthReference,verifyNativeRuntimeReference} from './release-resource-reference.mjs';
-import {verifyPackageFixtureTools} from '../global/decky-update-recovery/package-fixture-tools.mjs';
+import {verifyPackageFixtureTools,PACKAGE_BASELINE_BUDGET,packageBaselineBudgetArgs} from '../global/decky-update-recovery/package-fixture-tools.mjs';
 import {simulationCorePath} from '../global/release-host-environment.mjs';
 export const REVIEWED_RELEASE_ALIAS_SHA256='f80bd09d210eff41cd845d82f2f97105ea12b578d73f575c1252c708ce69ed80';
 const ROOT=path.resolve(import.meta.dirname,'../../..');
@@ -217,17 +217,18 @@ export function verifyPackageMaintenanceReference({repoRoot,baselineResult,basel
  assert.equal(process.sourceSha256After,process.source.sha256,'PACKAGE_REFERENCE_SOURCE_CHANGED');assert.equal(process.toolSha256After,process.executable.sha256,'PACKAGE_REFERENCE_SHELL_CHANGED');
  assert.equal(process.sourceReadErrorAfter,null);assert.equal(process.toolReadErrorAfter,null);
  assert.equal(key(process.cwd),key(repo),'PACKAGE_REFERENCE_CWD_CHANGED');assert.deepEqual(process.environment,expectedEnvironment,'PACKAGE_REFERENCE_ENVIRONMENT_CHANGED');
- assert.deepEqual(process.args,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',entry,'-EvidenceDir',path.join(base,'package-maintenance'),'-TotalBudgetMs','30000','-RunBudgetMs','25000','-CleanupReserveMs','5000'],'PACKAGE_REFERENCE_ORIGINAL_ARGUMENTS');
- for(const [field,value] of Object.entries({status:0,signal:null,error:null,timedOut:false,stageBudgetMs:30000,innerTotalBudgetMs:30000,runBudgetMs:25000,cleanupReserveMs:5000,registeredAdapterBudgetMs:240000}))assert.equal(process[field],value,'PACKAGE_REFERENCE_PROCESS_'+field);
+ const {totalMs,runMs,cleanupMs}=PACKAGE_BASELINE_BUDGET;
+ assert.deepEqual(process.args,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',entry,'-EvidenceDir',path.join(base,'package-maintenance'),...packageBaselineBudgetArgs()],'PACKAGE_REFERENCE_ORIGINAL_ARGUMENTS');
+ for(const [field,value] of Object.entries({status:0,signal:null,error:null,timedOut:false,stageBudgetMs:totalMs,innerTotalBudgetMs:totalMs,runBudgetMs:runMs,cleanupReserveMs:cleanupMs,registeredAdapterBudgetMs:240000}))assert.equal(process[field],value,'PACKAGE_REFERENCE_PROCESS_'+field);
  const begin=Date.parse(process.startedAt),end=Date.parse(process.finishedAt);
  assert(Number.isFinite(begin)&&Number.isFinite(end)&&end>=begin&&begin>=Date.parse(originalProcess.startedAt)&&end<=Date.parse(originalProcess.finishedAt),'PACKAGE_REFERENCE_NOT_CURRENT');
- assert(Number.isFinite(process.elapsedMs)&&process.elapsedMs>=0&&process.elapsedMs<=30000,'PACKAGE_REFERENCE_PROCESS_DEADLINE');
+ assert(Number.isFinite(process.elapsedMs)&&process.elapsedMs>=0&&process.elapsedMs<=totalMs,'PACKAGE_REFERENCE_PROCESS_DEADLINE');
  assert.equal(process.stdoutBytes,binding.stdout.bytes,'PACKAGE_REFERENCE_STDOUT_SIZE');assert.equal(process.stderrBytes,binding.stderr.bytes,'PACKAGE_REFERENCE_STDERR_SIZE');
  assert.equal(process.fixtureCompilerAuthority.manifestSha256,authority.manifestSha256,'PACKAGE_REFERENCE_COMPILER_AUTHORITY');assert.equal(key(process.fixtureCompilerAuthority.compiler),key(authority.compiler),'PACKAGE_REFERENCE_COMPILER_CHANGED');
  assert.deepEqual(mapTools(process.fixtureCompilerAuthority.files),mapTools(authority.files),'PACKAGE_REFERENCE_COMPILER_SCOPE_CHANGED');
  assert.equal(process.fixtureCompilerAuthority.inputs,authority.files.length,'PACKAGE_REFERENCE_COMPILER_COUNT');
  for(const row of process.fixtureCompilerAuthority.files){verifyPin(row);assert.equal(tools.get(key(row.path)),row.sha256,'PACKAGE_REFERENCE_TOOL_NOT_PREBOUND');}
- for(const [field,value] of Object.entries({pass:true,status:'PASS',complete:true,totalBudgetMs:30000,runBudgetMs:25000,cleanupReserveMs:5000,executionScope:'full-original-ordinary-suite',selectedCase:null,realSteamActions:0,hardwareWrites:0,productProcessesLaunched:0,productionGlobalMutexAccessed:false,fixtureMutexNamespaceRemapped:true}))assert.equal(result[field],value,'PACKAGE_REFERENCE_RESULT_'+field);
+ for(const [field,value] of Object.entries({pass:true,status:'PASS',complete:true,totalBudgetMs:totalMs,runBudgetMs:runMs,cleanupReserveMs:cleanupMs,executionScope:'full-original-ordinary-suite',selectedCase:null,realSteamActions:0,hardwareWrites:0,productProcessesLaunched:0,productionGlobalMutexAccessed:false,fixtureMutexNamespaceRemapped:true}))assert.equal(result[field],value,'PACKAGE_REFERENCE_RESULT_'+field);
  assert(result.selectedMutation===null||result.selectedMutation==='','PACKAGE_REFERENCE_SELECTED_MUTATION');
  assert(Number.isInteger(result.declaredOrdinaryCaseCount)&&result.declaredOrdinaryCaseCount>=32,'PACKAGE_REFERENCE_ORDINARY_SCOPE');assert.equal(result.executedOrdinaryCaseCount,result.declaredOrdinaryCaseCount,'PACKAGE_REFERENCE_ORDINARY_OMITTED');assert.deepEqual(result.omittedOrdinaryCases,[],'PACKAGE_REFERENCE_ORDINARY_OMITTED');
  assert(Array.isArray(result.cases)&&result.cases.length===result.count&&result.passed===result.count&&result.count>=result.declaredOrdinaryCaseCount&&result.cases.every(row=>row.pass===true&&row.executed===true),'PACKAGE_REFERENCE_ASSERTION_FAILED');
@@ -250,7 +251,7 @@ export function verifyPackageMaintenanceReference({repoRoot,baselineResult,basel
   const failure=negative.cases[0];assert.equal(failure.name,expected.case);assert.equal(failure.executed,true);assert.equal(failure.pass,false);assert.equal(failure.error,expected.failure,'PACKAGE_REFERENCE_NEGATIVE_WRONG_FAILURE');
  }
  assert.equal(result.sourceSha256,sources.get('native/decky_package_maintenance.ps1'),'PACKAGE_REFERENCE_PRODUCT_SOURCE_CHANGED');assert.equal(result.embeddedSha256,sources.get('native/decky_package_maintenance_script.h'),'PACKAGE_REFERENCE_EMBEDDED_SOURCE_CHANGED');
- return {schemaVersion:1,status:'SHARED_REFERENCE',requiredReleaseStep:'decky-package-maintenance',originalProcess:binding.process,originalResult:binding.result,stdout:binding.stdout,stderr:binding.stderr,originalArguments:process.args,originalBudgetMs:30000,originalElapsedMs:process.elapsedMs,ordinaryCases:result.executedOrdinaryCaseCount,semanticNegativeMutations:3,originalNegativeFailuresPreserved:binding.negativeResults,originalProducerExecutionsWithinParent:1,originalProducerExecutionsByThisReference:0,cached:false,fullProductAcceptance:false};
+ return {schemaVersion:1,status:'SHARED_REFERENCE',requiredReleaseStep:'decky-package-maintenance',originalProcess:binding.process,originalResult:binding.result,stdout:binding.stdout,stderr:binding.stderr,originalArguments:process.args,originalBudgetMs:totalMs,originalElapsedMs:process.elapsedMs,ordinaryCases:result.executedOrdinaryCaseCount,semanticNegativeMutations:3,originalNegativeFailuresPreserved:binding.negativeResults,originalProducerExecutionsWithinParent:1,originalProducerExecutionsByThisReference:0,cached:false,fullProductAcceptance:false};
 }
 export function verifyParentBaselineReference({repoRoot=ROOT,coreRoot=simulationCorePath(),globalResult,globalSha256,parentResult,parentSha256,declaration,expectedEnvironment=baselineEnvironment(),requirePackageMaintenance=false,packageEnvironment=packageMaintenanceEnvironment(),packageFixtureAuthority,requireResources=false,resourceEnvironment=resourceFixtureEnvironment(),requireJavascript=false,javascriptRequest,requireNativeHealth=false,requireNativeRuntime=false}={}){
  const started=performance.now(),repo=fs.realpathSync(repoRoot),core=fs.realpathSync(coreRoot),globalFile=fs.realpathSync(globalResult),parentFile=fs.realpathSync(parentResult),run=path.dirname(globalFile);

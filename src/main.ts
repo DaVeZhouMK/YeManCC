@@ -167,13 +167,14 @@ async function signalInitialRenderReady(): Promise<void> {
       await nextTick();
       await waitForRenderFrame();
     }
-    const context = await invoke<{ generation?: string; navigationId?: string; gyroTelemetryDocument?: string }>(
+    const context = await invoke<{ generation?: string; navigationId?: string; gyroTelemetryDocument?: string; documentNavigationId?: string }>(
       'window.renderContext', {}, { timeoutMs: 1500 },
     );
     if (!context?.generation || !context?.navigationId || context.navigationId === '0') return;
     const receipt = {
       generation: context.generation,
       navigationId: context.navigationId,
+      documentNavigationId: context.documentNavigationId,
       routeReady: contentReady,
       routeStatus: contentReady ? 'route-ready' : 'route-degraded',
       fallbackVisible: !!document.getElementById('yemancc-route-fallback'),

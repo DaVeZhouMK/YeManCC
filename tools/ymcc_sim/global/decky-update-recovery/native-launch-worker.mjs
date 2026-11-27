@@ -12,7 +12,8 @@ const core=simulationCorePath(""),modulePath='tools/ymcc_sim/global/decky-update
 export const NATIVE_LAUNCH_WORKER_SOURCE_INPUTS=Object.freeze([...HOST_ENVIRONMENT_SOURCE_INPUTS,
  modulePath+'/native-launch-worker.mjs',
  modulePath+'/native-launch-worker-bootstrap.mjs',
- modulePath+'/native-launch-worker.ps1'
+ modulePath+'/native-launch-worker.ps1',
+ 'src/bridge/steamReadBudget.ts'
 ]);
 export const sourceInputs=NATIVE_LAUNCH_WORKER_SOURCE_INPUTS;
 const hash=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');

@@ -21,7 +21,8 @@ export function buildMotionArtifacts({repo,catalog}) {
   }
   const bytes=fs.readFileSync(path.join(repo,table.file)),text=bytes.toString('utf8');
   if(sha(bytes)!==table.sha256)throw Error('MOTION_REVIEWED_TABLE_CHANGED: '+table.file);
-  const tuples=[...text.matchAll(/\{\s*"(HandheldCompanion\.Devices\.[^"]+)"\s*,([\s\S]*?)\}/g)];
+  const namespace=table.kind==='Default'?'(?:HandheldCompanion\\.Devices|YeManCC\\.SourceDevices)':'HandheldCompanion\\.Devices';
+  const tuples=[...text.matchAll(new RegExp('\\{\\s*"('+namespace+'\\.[^"]+)"\\s*,([\\s\\S]*?)\\}', 'g'))];
   if(tuples.length!==table.count)throw Error('MOTION_TABLE_COUNT_CHANGED: '+table.kind);
   for(const [slot,match] of tuples.entries()) {
    const values=[match[1],...[...match[2].matchAll(/"([^"\n]*)"/g)].map(x=>x[1])];

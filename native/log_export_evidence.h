@@ -430,6 +430,9 @@ inline EvidenceJson bufferedLogEvidence(const char* file,const ymcc::logging::Bu
     return {{"file",file},{"failureObservations",value.failureObservations},
         {"counterSaturated",value.failureObservations==ymcc::logging::BufferedDomainLog::CounterLimit},
         {"pendingRows",value.pendingRows},{"streamOpen",value.streamOpen},{"streamGood",value.streamGood},
+        {"tailSeparatorEvidence",{{"schemaVersion",1},{"accepted",value.tailSeparators},
+            {"last",value.tailSeparators ? EvidenceJson{{"tick",value.lastTailSeparatorTick},
+                {"offsetBytes",value.lastTailSeparatorOffset}} : EvidenceJson(nullptr)}}},
         {"first",failure(value.first)},{"last",failure(value.last)}};
 }
 inline EvidenceJson rendererExportCounter(const EvidenceJson& args,const char* key) {

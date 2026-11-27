@@ -1,0 +1,165 @@
+#include "ai_fan_close_evidence.h"
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+using json = nlohmann::json;
+using DWORD = unsigned long;
+#include "types.inc"
+
+struct Reply {
+    bool accepted = false;
+    DWORD status = 0;
+    std::string body;
+    bool unknown = false;
+};
+struct Scenario {
+    const char* id;
+    FanHostIdentityProbe probe;
+    Reply parentExit;
+    Reply close;
+    Reply shutdown;
+    bool portArrives = false;
+};
+static const Scenario* current = nullptr;
+static std::vector<std::string> posts;
+static json events;
+static unsigned checks = 0, sleeps = 0, probes = 0, simulatedMs = 0;
+static struct { bool enabled = false; } g_aiFanMockSession;
+static struct {
+    DWORD livePid() const { throw std::logic_error("AI mock route not selected"); }
+    unsigned long long creationTime() const { throw std::logic_error("AI mock route not selected"); }
+    bool owns(DWORD) const { throw std::logic_error("AI mock route not selected"); }
+} g_aiFanMockHost;
+static const std::string g_exitSessionId = "owned-fixture-exit";
+
+static void require(bool value, const char* name) {
+    ++checks;
+    if (!value) throw std::runtime_error(name);
+}
+static FanHostIdentityProbe fanHostIdentityProbe() {
+    ++probes;
+    if (current->portArrives && sleeps >= 2) return {true, true, true, 71};
+    return current->probe;
+}
+static void Sleep(DWORD ms) { ++sleeps; simulatedMs += ms; }
+static std::string fanHostReadSessionToken() { return "fixture-memory-token"; }
+static json fanHostInstanceSplit(DWORD pid, const std::string&) { return {{"hostProcessPid", pid}}; }
+static json fanHostIdentityDetail(const FanHostIdentityProbe&, bool waited, unsigned long long ms) {
+    return {{"waited", waited}, {"waitedMs", ms}};
+}
+static const char* fanAuthCategory(DWORD) { return "fixture-auth-category"; }
+static const char* fanErrorCodeFromBody(const std::string&) { return "fixture-error-code"; }
+static void traceLog(const char*, ...) {}
+static void appendFanLifecycleLog(const char* name, const json& detail) {
+    events.push_back({{"name", name}, {"detail", detail}});
+}
+
+// Replace only the process/transport leaves; no network or system sleep is linked.
+static bool fanHostEmergencyPost(const std::wstring& endpoint, const std::string& reason,
+    int attempts, bool requireSafeState, DWORD* status, unsigned long long generation = 0,
+    const char* source = nullptr, std::string* body = nullptr, std::string* request = nullptr,
+    bool* header = nullptr, bool* unknown = nullptr) {
+    const bool isClose = endpoint == L"/api/close";
+    require(reason == "app-exit" && attempts == 1 && generation == 0 && !source,
+        "exact single app-exit transport attempt");
+    require(requireSafeState == isClose, "only Close requires safe-state proof");
+    const Reply* reply = nullptr;
+    if (endpoint == L"/api/parent-exit") { posts.push_back("parent-exit"); reply = &current->parentExit; }
+    if (isClose) { posts.push_back("close"); reply = &current->close; }
+    if (endpoint == L"/api/shutdown") { posts.push_back("shutdown"); reply = &current->shutdown; }
+    require(reply != nullptr, "unexpected exit side effect");
+    *status = reply->status;
+    if (body) *body = reply->body;
+    if (request) *request = "fixture-request-id";
+    if (header) *header = true;
+    if (unknown) *unknown = reply->unknown;
+    return reply->accepted;
+}
+
+#include "handoff.inc"
+#include "unsafe-401.inc"
+
+static const json& event(const char* name) {
+    for (const auto& row : events) if (row.at("name") == name) return row.at("detail");
+    static const json absent = nullptr;
+    return absent;
+}
+
+int main() {
+    const FanHostIdentityProbe ready{true, true, true, 71}, late{true, true, false, 0};
+    const Reply bound{true, 200, R"({"ok":true,"recoveryAccepted":true,"acceptingHostInstanceId":"host-a","acceptedRecoveryCycleId":"cycle-a","hostWillRemainResident":true})"};
+    const Reply unbound{true, 200, R"({"ok":true,"recoveryAccepted":true,"acceptingHostInstanceId":"host-a"})"};
+    const Reply unauthorized{false, 401, ""}, safeClose{true, 200, ""}, safeShutdown{true, 200, ""};
+    using Result = FanExitHandoffResult;
+    json rows = json::array();
+    unsigned failed = 0;
+    auto run = [&](const Scenario& scenario, Result result, std::vector<std::string> expectedPosts,
+        const char* terminal, const char* unverifiedReason = nullptr, unsigned expectedSleeps = 0,
+        bool mutation = false) {
+        current = &scenario;
+        checks = sleeps = probes = simulatedMs = 0;
+        posts.clear();
+        events = json::array();
+        std::string failure, observed;
+        try {
+            const auto actual = (mutation ? unsafe401Cleanup : fanHostCleanupForAppExit)();
+            observed = fanExitHandoffName(actual);
+            require(posts == expectedPosts, "unexpected endpoint sequence");
+            require(actual == result, "wrong terminal outcome");
+            const auto& identity = event("fan-exit-identity");
+            require(!identity.is_null() && identity.at("waited") == (expectedSleeps != 0) &&
+                identity.at("waitedMs") == expectedSleeps * 250 && simulatedMs == expectedSleeps * 250 &&
+                sleeps == expectedSleeps && probes == expectedSleeps + 1, "bounded identity probes");
+            const auto& done = event(terminal);
+            require(!done.is_null(), "missing terminal evidence");
+            require(done.at("exitSessionId") == g_exitSessionId, "wrong exit session");
+            if (unverifiedReason) require(done.at("reason") == unverifiedReason, "wrong unverified reason");
+            if (result == Result::RecoveryHandedOff) {
+                require(done.at("acceptingHostInstanceId") == "host-a" && done.at("acceptedRecoveryCycleId") == "cycle-a",
+                    "ownership must bind to the replying Host and its recovery cycle");
+                require(event("fan-exit-parent-exit").at("hostRequestId") == "fixture-request-id", "handoff request evidence");
+            }
+            require(terminal == std::string("fan-exit-restore-confirmed") || event("fan-exit-restore-confirmed").is_null(),
+                "unverified or delegated ownership is not restore confirmation");
+        } catch (const std::exception& error) { failure = error.what(); }
+        const bool passed = mutation
+            ? (failure == "unexpected endpoint sequence" && posts == std::vector<std::string>{"parent-exit", "close", "shutdown"})
+            : failure.empty();
+        failed += !passed;
+        rows.push_back({{"id", scenario.id}, {"passed", passed}, {"checks", checks}, {"observed", observed},
+            {"posts", posts}, {"events", events}, {"probes", probes}, {"simulatedMs", simulatedMs},
+            {"failure", failure}, {"privateMutation", mutation}});
+    };
+    const char* delegated = "fan-exit-recovery-handed-off";
+    const char* unverified = "fan-exit-recovery-unverified";
+    const char* restored = "fan-exit-restore-confirmed";
+    const char* noHost = "no-verified-resident-host";
+    const char* ambiguous = "parent-exit-ambiguous";
+    const std::vector<std::string> parent{"parent-exit"}, legacy{"parent-exit", "close", "shutdown"};
+    run({"no-process", {}, {}, {}, {}}, Result::RecoveryUnverified, {}, unverified, noHost);
+    run({"wrong-image", {true, false, false, 0}, {}, {}, {}}, Result::RecoveryUnverified, {}, unverified, noHost);
+    run({"port-not-ready-after-budget", late, {}, {}, {}}, Result::RecoveryUnverified, {}, unverified, noHost, 6);
+    run({"verified-after-short-port-wait", late, bound, {}, {}, true}, Result::RecoveryHandedOff, parent, delegated, nullptr, 2);
+    run({"bound-acceptance-is-not-restoration", ready, bound, {}, {}}, Result::RecoveryHandedOff, parent, delegated);
+    run({"unbound-2xx-no-close", ready, unbound, {}, {}}, Result::RecoveryUnverified, parent, unverified, "parent-exit-unbound-ack");
+    run({"malformed-2xx-no-close", ready, {true, 200, "{"}, {}, {}}, Result::RecoveryUnverified, parent, unverified, ambiguous);
+    const Scenario auth{"auth-rejected-no-close", ready, unauthorized, safeClose, safeShutdown};
+    run(auth, Result::RecoveryUnverified, parent, unverified, "parent-exit-auth-rejected");
+    run({"lost-response-no-close", ready, {false, 0, "", true}, {}, {}}, Result::RecoveryUnverified, parent, unverified, ambiguous);
+    run({"unknown-outcome-overrides-404", ready, {false, 404, "", true}, {}, {}}, Result::RecoveryUnverified, parent, unverified, ambiguous);
+    run({"explicit-404-unsafe-close-no-shutdown", ready, {false, 404, ""}, {false, 200, ""}, {}},
+        Result::RecoveryUnverified, {"parent-exit", "close"}, unverified, "legacy-close-unconfirmed");
+    run({"explicit-405-safe-close-then-shutdown", ready, {false, 405, ""}, safeClose, safeShutdown},
+        Result::RestoreConfirmed, legacy, restored);
+    run({"shutdown-timeout-does-not-revoke-safe-close", ready, {false, 404, ""}, safeClose, {false, 0, "", true}},
+        Result::RestoreConfirmed, legacy, restored);
+    auto mutant = auth;
+    mutant.id = "private-401-fallthrough-fails-original-endpoint-assertion";
+    run(mutant, Result::RecoveryUnverified, parent, unverified, "parent-exit-auth-rejected", 0, true);
+    std::cout << json{{"status", failed ? "FAIL" : "PASS"}, {"cases", rows}, {"failed", failed},
+        {"scope", "actual native handoff decisions; simulated process, clock and HTTP ports"},
+        {"wholeAppExitExecuted", false}, {"hostResourcesVerified", false}, {"physicalEvidence", false}}.dump() << '\n';
+    return failed ? 23 : 0;
+}

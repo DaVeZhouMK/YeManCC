@@ -19,19 +19,24 @@ if(arguments_.includes('--runtime-power')){
 }else if(arguments_.includes('--discovery')){
  await discoveryOnly();
 }else{
+const nativeEntryOnly=arguments_.includes('--native-entry');
+if(nativeEntryOnly)assert(arguments_.length===2&&arguments_[1]==='--native-entry'&&!arguments_[0].startsWith('--'),'Expected <output> --native-entry');
 const out=path.resolve(process.argv[2]||path.join(root,'../../../Build/Validation/Lossless-Toggle-Xbox-20261022/owner'));
 fs.mkdirSync(out,{recursive:true});
 const inputs=['src/bridge/steamInstallationFacts.ts','tools/fixtures/lossless_steam_installations.mjs','native/main.cpp','native/decky_sidebar_diagnostics.h','src/bridge/quickapp.ts','src/bridge/losslessProfiles.ts','src/bridge/losslessProgramState.ts','src/bridge/losslessScaling.ts','src/bridge/deckyLosslessState.ts','tools/lossless_scaling_selftest.mjs','tools/lossless_toggle_owner_selftest.mjs','src/bridge/api.ts','src/bridge/ipc.ts','native/lossless_launch.h','native/lossless_launch_contract.h','native/lossless_scale.h','native/lossless_scale_contract.h','native/lossless_window_refresh.h','native/lossless_runtime.h','native/sleep_power_state.h','native/sleep_power_observation.h','native/sleep_power_revocation.h','tools/lossless_runtime_power_fixture.h','tools/fixtures/lossless_runtime_power.mjs','tools/fixtures/lossless_runtime_watch_dispatch.inc','tools/fixtures/lossless_runtime_watch_cases.inc','tools/fixtures/lossless_uia_ports.h','tools/fixtures/lossless_uia_client_stubs.inc','tools/fixtures/lossless_uia_element_stubs.inc','tools/fixtures/lossless_uia_cases.inc','tools/fixtures/lossless_runtime_read_fixture.h','tools/fixtures/lossless_runtime_read_cases.inc','tools/ymcc_sim/global/decky-update-recovery/native-source-admission.mjs','native/process_basic_candidates.h','native/process_inventory.h','native/game_process_inventory.h','tools/lossless_discovery_fixture.h','src/bridge/losslessRuntimeState.ts','native/process_efficiency.h','tools/lossless_launch_selftest.cpp','tools/fixtures/lossless_close_probe.ps1','tools/fixtures/lossless_close_owned.cs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'];
 const hash=name=>createHash('sha256').update(fs.readFileSync(path.join(root,name))).digest('hex');
 const sourceHashes=Object.fromEntries(inputs.map(name=>[name,hash(name)]));
-const run=spawnSync(process.execPath,['tools/lossless_scaling_selftest.mjs'],{cwd:root,encoding:'utf8',windowsHide:true,timeout:30000,
- env:{...process.env,YMCC_DECKY_ARTIFACT_ROOT:out}});
-fs.writeFileSync(path.join(out,'owner-stdout.log'),run.stdout||'');fs.writeFileSync(path.join(out,'owner-stderr.log'),(run.stderr||'')+(run.error?String(run.error):''));
-let result={pass:false,sourceHashes,actualOSInput:false,actualLsControl:false,scope:'Actual original owner under memory fs/process/shell boundaries; no physical fullscreen proof'};
+let result={pass:false,selection:nativeEntryOnly?'native-entry':'full',sourceHashes,actualOSInput:false,actualLsControl:false,scope:'Actual original owner under memory fs/process/shell boundaries; no physical fullscreen proof'};
 try{
+ let evidence;
+ if(!nativeEntryOnly){
+ const run=spawnSync(process.execPath,['tools/lossless_scaling_selftest.mjs'],{cwd:root,encoding:'utf8',windowsHide:true,timeout:30000,
+  env:{...process.env,YMCC_DECKY_ARTIFACT_ROOT:out}});
+ fs.writeFileSync(path.join(out,'owner-stdout.log'),run.stdout||'');fs.writeFileSync(path.join(out,'owner-stderr.log'),(run.stderr||'')+(run.error?String(run.error):''));
  assert.equal(run.status,0,'Owner test failed; see stdout/stderr');
- const evidence=JSON.parse(fs.readFileSync(path.join(out,'validation/MAINLINE20-LOSSLESS-OWNER.json'),'utf8'));
+ evidence=JSON.parse(fs.readFileSync(path.join(out,'validation/MAINLINE20-LOSSLESS-OWNER.json'),'utf8'));
  assert.equal(evidence.pass,true);assert.equal(evidence.realSettingsWrites,0);assert.equal(evidence.actualLSControlActions,0);
+ }
  const native=path.join(out,'native');fs.mkdirSync(native,{recursive:true});
  const main=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8');
  // Consume exactly the six real registrations, preserving adjacent parallel IPC modules.
@@ -42,6 +47,12 @@ try{
    return main.slice(begin,end+8);
  });
  const entry=entries.join('\n');
+ const {cppBlock}=await import('./ymcc_sim/global/decky-update-recovery/native-source-admission.mjs');
+ const admissionHelpers=['static void captureLosslessControlAdmission(', 'static bool admitLosslessControl('].map(anchor=>{
+   const begin=main.indexOf(anchor);if(begin<0)return '';
+   return main.slice(begin,cppBlock(main,main.indexOf('{',begin),anchor).end);
+ }).join('\n');
+ const receiver=main.split(/\r?\n/).find(line=>line.trim()==='captureLosslessControlAdmission(cmd,args);')??'';
  assert(main.includes('#include "lossless_launch.h"'));
  assert(main.includes('if (cmd == "lossless.watch") return false;'));
  assert(main.includes('if (cmd == "lossless.ensureRunning" || cmd == "lossless.getState" || cmd == "lossless.ensureScaling" || cmd == "lossless.detect" || cmd == "lossless.resetFailed") return true;'));
@@ -58,10 +69,11 @@ try{
 #include "decky_sidebar_diagnostics.h"
 using json=nlohmann::json;
 static std::atomic<bool> g_exitRequested{false};
-static unsigned long long currentPowerGeneration(){return 1;}
-static bool hardwareWriteAllowed(){return false;}
+static ymcc::sleeppower::SharedPowerV1 nativePower{};
+[[maybe_unused]] static unsigned long long currentPowerGeneration(){return nativePower.generation;}
+[[maybe_unused]] static bool hardwareWriteAllowed(){return ymcc::sleeppower::powerAdmitted(nativePower);}
 static ymcc::sleeppower::RevocationMirrors g_sharedPowerRevocations;
-static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,uint32_t bytes){if(!out||bytes<sizeof(*out))return 0;*out={};return 0;}
+static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,uint32_t bytes){if(!out||bytes<sizeof(*out))return 0;*out=nativePower;return 1;}
 static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& out){return ymcc::sleeppower::capturePower(&readSharedSystemPower,out);}
 static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& captured){return ymcc::sleeppower::powerCurrent(&readSharedSystemPower,captured);}
 static ymcc::sleeppower::RevocationMirrors::Registration observeSharedPowerRevocation(const ymcc::sleeppower::SharedPowerV1& captured){return g_sharedPowerRevocations.observe(&readSharedSystemPower,captured);}
@@ -70,8 +82,13 @@ static std::string W2U(const std::wstring& s){return std::string(s.begin(),s.end
 static void ipc_emit(const char*,const json&){}
 static std::vector<std::pair<std::string,json>> diagnostics;
 static void deckySidebarDiagnostic(const char* event,const json& detail,bool){diagnostics.emplace_back(event,ymcc::deckydiag::record(event,detail));}
-static std::map<std::string,std::function<json(const json&)>> handlers;
-template<class F>static void ipc_on(const char* name,F f){handlers[name]=f;}
+`+admissionHelpers+`
+static json received([[maybe_unused]] const std::string& cmd,json args){
+`+receiver+`
+ return args;
+}
+static std::map<std::string,std::function<json(const json&)>> handlers,workers;
+template<class F>static void ipc_on(const char* name,F f){workers[name]=f;handlers[name]=[name,f](const json& args){return f(received(name,args));};}
 static void install(){
 `+entry+`}
 int main(){
@@ -99,6 +116,36 @@ int main(){
  auto ordinaryReset=watchdog;ordinaryReset["trigger"]="scaling-paused";try{handlers.at("lossless.resetFailed")(ordinaryReset);return 25;}catch(const std::exception&){}
  auto missingTrigger=watchdog;missingTrigger.erase("trigger");try{handlers.at("lossless.resetFailed")(missingTrigger);return 26;}catch(const std::exception&){}
  auto retry=request;retry["retryAttempt"]=1u;handlers.at("lossless.ensureScaling")(retry);retry["retryAttempt"]=2;try{handlers.at("lossless.ensureScaling")(retry);return 23;}catch(const std::exception&){}
+ const auto currentPid=GetCurrentProcessId();
+ const std::array<std::string,3> commands={"lossless.ensureRunning","lossless.ensureScaling","lossless.resetFailed"};
+ auto safeScale=request;safeScale["pid"]=currentPid;safeScale["gamePid"]=currentPid;
+ auto safeReset=watchdog;safeReset["pid"]=currentPid;
+ const std::array<json,3> safeArgs={json{{"exe","C:/Fixture/LosslessScaling.invalid"}},safeScale,safeReset};
+ const std::array<std::string,3> denied={"context-unavailable","context-unavailable","failure-reset-context-changed"};
+ const std::array<std::string,3> entered={"invalid-executable","process-identity-changed","failure-reset-identity-rejected"};
+ unsigned powerChecks=0;bool powerPassed=true;
+ for(unsigned i=0;i<commands.size();++i){
+  const auto check=[&](const char* scenario,const json& value,const std::string& expected){
+   const auto reason=value.value(i==2?"failureResetReason":"reason",std::string{});
+   const bool valid=reason==expected&&!value.value("started",false)&&!value.value("invoked",false)&&!value.value("failureResetAttempted",false);
+   ++powerChecks;powerPassed=powerPassed&&valid;
+   std::cout<<commands[i]<<' '<<scenario<<' '<<(valid?"PASS":"FAIL")<<' '<<reason<<"\\n";
+  };
+  for(unsigned edge=0;edge<4;++edge){
+   nativePower.generation=40;nativePower.flags=3;nativePower.suspendSerial=7;nativePower.observedNotificationSequence=9;nativePower.publicationRevision=20;
+   if(edge==3)nativePower.flags=7;
+   auto posted=received(commands[i],safeArgs[i]);
+   if(edge==0)++nativePower.generation;
+   if(edge==1)++nativePower.suspendSerial;
+   if(edge==2)++nativePower.observedNotificationSequence;
+   nativePower.flags=3;++nativePower.publicationRevision;
+   check(edge==0?"generation":edge==1?"suspend-serial":edge==2?"notification-sequence":"pending-at-receipt",workers.at(commands[i])(posted),denied[i]);
+  }
+  auto fresh=received(commands[i],safeArgs[i]);++nativePower.publicationRevision;
+  check("fresh-with-metadata-update",workers.at(commands[i])(fresh),entered[i]);
+ }
+ nativePower={};
+ if(!powerPassed)return 30;
  auto reset=request;reset["resetOnFailure"]=true;const auto resetResult=handlers.at("lossless.ensureScaling")(reset);
  if(resetResult.at("failureResetRequested")!=false||resetResult.at("failureResetClosed")!=false)return 18;
  reset["resetOnFailure"]=1;try{handlers.at("lossless.ensureScaling")(reset);return 19;}catch(const std::exception&){}
@@ -121,7 +168,7 @@ int main(){
  g_exitRequested=true;const auto state=handlers.at("lossless.getState")(request);
  if(state.at("ok")!=false)return 5;
  for(const auto* key:{"pid","processCreated"}){auto bad=request;bad[key]=key==std::string("pid")?json(0):json("bad");try{handlers.at("lossless.getState")(bad);return 6;}catch(const std::exception&){} }
- std::cout<<"native-entry-pass:6 registrations; no real UIA or application control";return 0;
+ std::cout<<"native-entry-pass:6 registrations; "<<powerChecks<<" queued-power assertions; no real UIA or application control";return 0;
 }
 `);
  const q=value=>'"'+value.replaceAll('/','\\')+'"';
@@ -135,15 +182,21 @@ int main(){
  const contract=spawnSync(path.join(native,'contract.exe'),[inert],{encoding:'utf8',windowsHide:true,timeout:5000});
  fs.writeFileSync(path.join(native,'contract.log'),(contract.stdout||'')+(contract.stderr||''));assert.equal(contract.status,0,'Native quiet-launch contract failed');
  const nativeContract=JSON.parse(contract.stdout);assert.equal(nativeContract.realApplicationsStarted,0);
- const entryRun=spawnSync(path.join(native,'entry.exe'),[],{encoding:'utf8',windowsHide:true,timeout:5000});assert.equal(entryRun.status,0,'Actual native registration failed');
+ result.nativeContract=nativeContract;
+ const entryRun=spawnSync(path.join(native,'entry.exe'),[],{encoding:'utf8',windowsHide:true,timeout:5000});
  fs.writeFileSync(path.join(native,'entry.log'),(entryRun.stdout||'')+(entryRun.stderr||''));
+ result.nativeEntryExit=entryRun.status;
+ assert.equal(entryRun.status,0,'Actual native registration failed');
+ result.nativeEntryPassed=true;
+ if(!nativeEntryOnly){
  const close=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(root,'tools/fixtures/lossless_close_probe.ps1'),'-ScriptDirectory',path.join(out,'Build/LS-Owner-Scripts'),'-EvidenceDirectory',native],{encoding:'utf8',windowsHide:true,timeout:12000});
  fs.writeFileSync(path.join(native,'close.log'),(close.stdout||'')+(close.stderr||''));assert.equal(close.status,0,'Actual close consumer failed');
  const closeConsumer=JSON.parse(fs.readFileSync(path.join(native,'close-consumer.json'),'utf8').replace(/^\uFEFF/,''));assert.equal(closeConsumer.pass,true);assert.equal(closeConsumer.actualLsActions,0);
+ result.closeConsumer=closeConsumer;
+ }
  const current=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8');assert(entries.every(entry=>current.includes(entry)),'Native launch registration changed during the check');
- result.nativeContract=nativeContract;result.nativeEntryPassed=true;result.closeConsumer=closeConsumer;
  const changedInputs=inputs.filter(name=>hash(name)!==sourceHashes[name]);assert.deepEqual(changedInputs,[]);
- result={...result,pass:true,cases:evidence.cases,results:evidence.results,changedInputs};
+ result={...result,pass:true,cases:evidence?.cases,results:evidence?.results,changedInputs};
 }catch(error){result.error=String(error);}
 fs.writeFileSync(path.join(out,'lossless-owner-result.json'),JSON.stringify(result,null,2)+'\n');
 console.log(JSON.stringify({pass:result.pass,cases:result.cases,error:result.error}));process.exitCode=result.pass?0:1;

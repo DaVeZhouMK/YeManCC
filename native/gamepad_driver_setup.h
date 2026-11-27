@@ -17,6 +17,7 @@ namespace ymcc {
 class GamepadDriverSetup {
 public:
     enum State { NotStarted=0, Pending=1, Ready=2, Failed=3, RebootRequired=4, Slow=5, InstallerMissing=6, InstallerInvalid=7, InventoryUnverified=8, MaintenanceDeferred=9 };
+    enum class PollObservation { None, UsbipProgress, UsbipRepeatedProgress, Slow, Terminal };
     static constexpr State ResultState(DWORD code) {
         return code==0 ? Ready :
             (code==3010 || code==1641) ? RebootRequired :
@@ -50,6 +51,7 @@ public:
     DWORD result() const { return result_.load(std::memory_order_acquire); }
     bool warnsTargets() const { return HasWarning(state()); }
     HidHideSetupNotice hidHideNotice() const { return notice_.load(std::memory_order_acquire); }
+    int hidHideExit() const { return hidHideExit_.load(std::memory_order_acquire); }
     const std::wstring& redistDirectory() const { return redistDirectory_; }
     const std::string& sessionToken() const { return sessionToken_; }
     bool active() const { const auto s=state(); return s==Pending || s==Slow; }
@@ -136,11 +138,13 @@ public:
         }
         CloseHandle(pi.hThread);process_=pi.hProcess;state_.store(Pending,std::memory_order_release);
     }
-    bool poll() {
+    bool poll(PollObservation* observation=nullptr) {
+        if (observation) *observation=PollObservation::None;
         if (!active()) return false;
         std::lock_guard<std::mutex> guard(mutex_);
         if (!process_) return false;
-        const bool usbipChanged=refreshUsbipUpgradeLocked();
+        bool repeatedProgress=false;
+        const bool usbipChanged=refreshUsbipUpgradeLocked(observation?&repeatedProgress:nullptr);
         DWORD wait=WaitForSingleObject(process_,0);
         if (wait==WAIT_OBJECT_0 || wait==WAIT_FAILED) {
             // The child can publish its final stage after the first read but
@@ -162,18 +166,25 @@ public:
             const auto report=wait==WAIT_OBJECT_0 ? completedReport() : nlohmann::json{};
             const auto rootUtf8=std::filesystem::path(root_).u8string();
             const std::string root(rootUtf8.begin(),rootUtf8.end());
-            notice_.store(wait==WAIT_OBJECT_0 ? hidHideCompletedSetupNotice(code,report,root,GetCurrentProcessId()) :
-                HidHideSetupNotice::Unverified,std::memory_order_release);
+            const auto notice=wait==WAIT_OBJECT_0 ? hidHideCompletedSetupNotice(code,report,root,GetCurrentProcessId()) : HidHideSetupNotice::Unverified;
+            hidHideExit_.store(hidHideMaintenanceExit(report,notice),std::memory_order_release);
+            notice_.store(notice,std::memory_order_release);
             auto completed=ResultState(code);
             if (completed==MaintenanceDeferred && !gamepadMaintenanceDeferredReport(code,report,root,GetCurrentProcessId()))
                 completed=Failed;
-            result_.store(code,std::memory_order_release);state_.store(completed,std::memory_order_release);return true;
+            result_.store(code,std::memory_order_release);state_.store(completed,std::memory_order_release);
+            if (observation) *observation=PollObservation::Terminal;
+            return true;
         }
         if (state()==Pending && GetTickCount64()-started_>=180000) {
             // Report the slow preparation and keep observing this SAME child; target attempts remain allowed.
             // An MSI transaction is never killed and another installer is never launched.
-            state_.store(Slow,std::memory_order_release);return true;
+            state_.store(Slow,std::memory_order_release);
+            if (observation) *observation=PollObservation::Slow;
+            return true;
         }
+        if (observation && usbipChanged)
+            *observation=repeatedProgress?PollObservation::UsbipRepeatedProgress:PollObservation::UsbipProgress;
         return usbipChanged;
     }
 private:
@@ -181,7 +192,21 @@ private:
         auto snapshot=std::make_shared<const nlohmann::json>(usbipUpgrade_);
         std::atomic_store_explicit(&usbipPublished_,std::move(snapshot),std::memory_order_release);
     }
-    bool refreshUsbipUpgradeLocked() {
+    static bool usbipProgressContentRepeated(const nlohmann::json& previous, const nlohmann::json& next) {
+        if (!previous.is_object() || previous.size()!=6 || next.size()!=6) return false;
+        const auto seq=previous.find("sequence"), schema=previous.find("schemaVersion");
+        if (seq==previous.end() || !seq->is_number_unsigned() || *seq==0 ||
+            schema==previous.end() || !schema->is_number_integer() || !next.at("schemaVersion").is_number_integer()) return false;
+        const auto& phase=next.at("phase").get_ref<const std::string&>();
+        if (phase!="checking" && phase!="update-found" && phase!="removing" && phase!="installing" && phase!="verifying")
+            return false;
+        for (const auto* key : {"schemaVersion", "phase", "installedVersion", "targetVersion", "detail"}) {
+            const auto before=previous.find(key);
+            if (before==previous.end() || *before!=next.at(key)) return false;
+        }
+        return true;
+    }
+    bool refreshUsbipUpgradeLocked(bool* repeatedProgress=nullptr) {
         try {
             std::ifstream input(std::filesystem::path(report_+L".usbip.json"),std::ios::binary|std::ios::ate);
             const auto length=input.tellg();
@@ -200,6 +225,7 @@ private:
                 !value.at("detail").is_string() || !value.at("targetVersion").is_string() ||
                 !value.at("installedVersion").is_string() || !value.at("sequence").is_number_unsigned()) return false;
             if (value.at("sequence").get<unsigned>()<=usbipUpgrade_.value("sequence",0u)) return false;
+            if (repeatedProgress) *repeatedProgress=usbipProgressContentRepeated(usbipUpgrade_,value);
             usbipUpgrade_=value;publishUsbipLocked();return true;
         } catch (...) {return false;}
     }
@@ -247,6 +273,7 @@ private:
     std::atomic<State> state_{NotStarted};
     std::atomic<DWORD> result_{0};
     std::atomic<HidHideSetupNotice> notice_{HidHideSetupNotice::None};
+    std::atomic<int> hidHideExit_{-1};
     std::wstring report_,root_,redistDirectory_;
     std::string sessionToken_;
     WIN32_FILE_ATTRIBUTE_DATA previousReportInfo_{};

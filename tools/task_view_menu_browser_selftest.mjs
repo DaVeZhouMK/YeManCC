@@ -80,7 +80,9 @@ Object.assign(mocks, {
   '@/bridge/gamedetect': `const f=()=>window.__fixture;
     export const detectedGameName=game=>game?.name||'',detectGame=async()=>f().game;export const getCurrentGame=()=>f().game,isCurrentGameTarget=target=>target===f().game,validateGameTarget=async target=>target===f().game;
     export const refreshGameStatus=async()=>f().game,refreshGameStatusStrict=async()=>f().game;
-    export function subscribeGameStatus(cb){f().gameSubscriptions++;cb(f().game);return()=>{f().gameSubscriptions--}};`,
+    export function subscribeGameStatus(cb){f().gameSubscriptions++;cb(f().game);return()=>{f().gameSubscriptions--}};
+    export const isGameStatusCurrent=()=>true;
+    export function subscribeGameTargetReadiness(cb){f().gameSubscriptions++;cb(isGameStatusCurrent());return()=>{f().gameSubscriptions--}};`,
   '@/bridge/gameQuickSession': `${mocks['@/bridge/gameQuickSession']}
     export const isGameTargetSame=(a,b)=>!!a&&!!b&&a.pid===b.pid&&a.processCreated===b.processCreated;`,
 });

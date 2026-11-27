@@ -355,10 +355,34 @@ inline bool sourceFileEqual(const Image& image,const GraphResolution& result,con
     if(observedSize)*observedSize=length+1;return true;
 }
 struct Buffer { SectionSpec section;std::vector<unsigned char> bytes; };
+struct ImportAddressIndex {
+    using Key=std::uint32_t ImportSlot::*;
+    std::vector<const ImportSlot*> slots,lookups;
+    explicit ImportAddressIndex(std::span<const ImportSlot> rows){
+        slots.reserve(rows.size());
+        for(const auto& row:rows)slots.push_back(&row);
+        lookups=slots;
+        const auto by=[](Key key){return [key](const ImportSlot* a,const ImportSlot* b){return a->*key<b->*key;};};
+        std::sort(slots.begin(),slots.end(),by(&ImportSlot::rva));
+        std::sort(lookups.begin(),lookups.end(),by(&ImportSlot::lookupRva));
+    }
+    const ImportSlot* unique(bool slot,std::uint64_t rva) const {
+        const auto& rows=slot?slots:lookups;
+        const auto key=slot?&ImportSlot::rva:&ImportSlot::lookupRva;
+        const auto found=std::lower_bound(rows.begin(),rows.end(),rva,
+            [key](const ImportSlot* row,std::uint64_t value){return row->*key<value;});
+        if(found==rows.end()||(*found)->*key!=rva||
+            (found+1!=rows.end()&&(*(found+1))->*key==rva))return nullptr;
+        return *found;
+    }
+};
 struct Resolver {
     const Image& image;GraphResolution result;std::vector<std::optional<std::uint64_t>> bindings;
     std::vector<bool> importBindings;
+    std::optional<ImportAddressIndex> importAddresses;
     std::vector<Buffer> executable;bool changed=false;const char* failure=nullptr;
+    std::array<std::span<const GraphFixup>,8> orderedFixupRuns{};
+    std::size_t orderedFixupRunCount=0;
     explicit Resolver(const Image& value,const GraphSpec& specification):image(value){
         result.specification=specification;result.actualPreferredBase=image.preferredBase;result.imageSize=image.imageSize;
         result.actualSections.assign(image.sections.begin(),image.sections.end());bindings.resize(specification.ranges.size());
@@ -390,18 +414,19 @@ struct Resolver {
     }
     bool proveImport(std::size_t index,std::uint64_t entry,std::uint64_t actual){
         if(image.loadedImage||index>=result.specification.imports.size()||!image.read)return false;
-        const auto& item=result.specification.imports[index];const ImportSlot* row=nullptr;
+        const auto& item=result.specification.imports[index];
         if(!referenceImport(result.specification,item)||(entry!=item.slotRva&&entry!=item.lookupRva)||!importPartsCompatible(item,item))return false;
-        for(const auto& candidate:image.imports)if((entry==item.slotRva?candidate.rva:candidate.lookupRva)==actual){
-            if(row)return false;row=&candidate;
-        }
+        // Index parsed row addresses for this resolution only; every proof still reads the file bytes.
+        if(!importAddresses)importAddresses.emplace(image.imports);
+        const bool slot=entry==item.slotRva;
+        const auto* row=importAddresses->unique(slot,actual);
         if(!row)return false;
         // Lookup facts and file IAT values are distinct observations. Never
         // substitute the parser's lookup value for a read of the original IAT.
         const GraphImport facts{row->rva,row->lookupRva,row->originalThunk,row->descriptorRva,
             row->lookupTableRva,row->firstThunkRva,row->libraryNameRva,row->library,row->symbol};
         if(!importShape(facts)||!importPartsCompatible(facts,facts)||!libraryEqual(item.library,facts.library)||item.symbol!=facts.symbol)return false;
-        for(const auto& other:image.imports)if(&other!=row&&(other.rva==row->rva||other.lookupRva==row->lookupRva))return false;
+        if(importAddresses->unique(!slot,slot?row->lookupRva:row->rva)!=row)return false;
         std::uint64_t iat=0,lookup=0;
         if(!image.read(facts.slotRva,&iat,8)||!image.read(facts.lookupRva,&lookup,8)||iat!=row->originalThunk||lookup!=row->originalThunk)return false;
         const std::array<std::uint32_t,3> expected{{row->lookupTableRva,row->libraryNameRva,row->firstThunkRva}};
@@ -504,13 +529,39 @@ struct Resolver {
         if(!writable){const auto expected=sectionTranslate(result,reference,true);if(!expected||*expected!=actual)return false;}
         return bindPoint(reference,actual);
     }
+    void prepareFixupRuns(){
+        const auto fields=result.specification.fixups;
+        if(fields.empty())return;
+        std::size_t begin=0,count=0;
+        for(std::size_t i=1;i<fields.size();++i)if(fields[i].fieldRva<fields[i-1].fieldRva){
+            orderedFixupRuns[count++]=fields.subspan(begin,i-begin);
+            if(count==orderedFixupRuns.size())return;
+            begin=i;
+        }
+        orderedFixupRuns[count++]=fields.subspan(begin);
+        orderedFixupRunCount=count;
+    }
     bool propagate(){
         const auto& spec=result.specification;
         for(std::size_t i=0;i<spec.ranges.size();++i)if(bindings[i]){
             const auto& range=spec.ranges[i];const BoundRange source{range.refRva,*bindings[i],range.size,range.kind};
-            for(const auto& field:spec.fixups)if(field.fieldRva>=range.refRva&&field.fieldRva-range.refRva<range.size){
+            const auto verify=[&](const GraphFixup& field){
                 std::uint64_t actual=0;if(!fieldValue(image,result,source,field,actual)||
                     !target(field.targetRva,actual,range.kind==RangeKind::Code||importSpan(result,range.refRva,*bindings[i],range.size))){result.evidence.failedRva=field.fieldRva;return false;}
+                return true;
+            };
+            // Combined graphs can restart RVA order at each input boundary.
+            // Search each ordered run in input order so binding and failures stay ordered.
+            if(orderedFixupRunCount){
+                for(std::size_t run=0;run<orderedFixupRunCount;++run){
+                    const auto fields=orderedFixupRuns[run];
+                    auto field=std::lower_bound(fields.begin(),fields.end(),range.refRva,
+                        [](const GraphFixup& value,std::uint64_t rva){return value.fieldRva<rva;});
+                    for(;field!=fields.end()&&field->fieldRva-range.refRva<range.size;++field)if(!verify(*field))return false;
+                }
+            }else{
+                for(const auto& field:spec.fixups)if(field.fieldRva>=range.refRva&&field.fieldRva-range.refRva<range.size)
+                    if(!verify(field))return false;
             }
         }
         // Exception table positions can change independently of their code.
@@ -573,6 +624,7 @@ struct Resolver {
             if(!range.bytes||!range.size||range.refRva>(std::numeric_limits<std::uint64_t>::max)()-range.size||range.size>1024*1024||bytes>2*1024*1024-range.size){result.evidence.reason="graph-range-budget";return std::move(result);}bytes+=range.size;
         }
         if(!validFixups(spec.fixups)){result.evidence.reason="graph-field-contract-conflict";return std::move(result);}
+        prepareFixupRuns();
         for(std::size_t i=0;i<spec.imports.size();++i){const auto& item=spec.imports[i];
             if(image.loadedImage||!referenceImport(spec,item)||!importPartsCompatible(item,item)){result.evidence.reason="graph-import-contract-invalid";return std::move(result);}
             for(std::size_t j=0;j<i;++j){const auto& old=spec.imports[j];

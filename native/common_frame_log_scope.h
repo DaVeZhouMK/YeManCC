@@ -2,6 +2,7 @@
 
 namespace ymcc::commonFrameLogScope {
 inline constexpr char markerField[]="frameScopeSchema";
+inline constexpr char topologyOnlyField[]="frameTopologyOnlyV1";
 inline constexpr unsigned version=1;
 inline constexpr char transition[]="source-host-admission-outcome;control-neutrality-is-sampled";
 inline constexpr char identityBinding[]="selected-read-source-and-slot;device-root-join-via-existing-visibility-events";

@@ -96,7 +96,7 @@ int wmain(int argc,wchar_t** argv){
    auto s=std::make_shared<Carrier::State>();s->owner=&owner;s->id=7;s->nonce="native-input-fixture-0001";s->global=true;s->monitor=MonitorFromWindow(lower,MONITOR_DEFAULTTOPRIMARY);
    if(desktopInput){s->target=std::make_shared<Target>();s->target->window=lower;s->target->pid=GetCurrentProcessId();s->target->process=OpenProcess(SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,GetCurrentProcessId());}
    c.lpfnWndProc=Carrier::proc;c.lpszClassName=L"YMCCMonitorInputFixtureDisplay";RegisterClassW(&c);s->hwnd=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED|WS_EX_NOREDIRECTIONBITMAP|WS_EX_TRANSPARENT,c.lpszClassName,L"",WS_POPUP|WS_DISABLED,left,top,150,90,nullptr,nullptr,c.hInstance,s.get());
-   if(!s->hwnd||!hudinput::ensure(s->hwnd))throw std::runtime_error("Owned inert display failed");s->ready=s->armed=s->layout=true;s->width=150;s->height=90;s->seq=1;s->expires=wallNow()+60000;s->viewportKey=Carrier::viewportInfo(*s).dump();if(desktopInput){const double w=mi.rcWork.right-mi.rcWork.left,h=mi.rcWork.bottom-mi.rcWork.top;s->drag.position={(left+12-mi.rcWork.left)/w,(top+12-mi.rcWork.top)/h,true,false,1};}const auto initialPlacement=s->drag.position;owner.current=s;owner.refresh(s);pump(owner,80);
+   if(!s->hwnd||!hudinput::ensure(s->hwnd))throw std::runtime_error("Owned inert display failed");s->ready=s->armed=s->layout=true;s->width=150;s->height=90;s->seq=1;s->expires=wallNow()+60000;s->lastViewport=Carrier::readViewport(*s);if(desktopInput){const double w=mi.rcWork.right-mi.rcWork.left,h=mi.rcWork.bottom-mi.rcWork.top;s->drag.position={(left+12-mi.rcWork.left)/w,(top+12-mi.rcWork.top)/h,true,false,1};}const auto initialPlacement=s->drag.position;owner.current=s;owner.refresh(s);pump(owner,80);
    check("actual production carrier creates bounded interactive surface",s->inputWindow&&s->input.active(),{{"inputError",s->inputError},{"panel",rectangle(s->panel)},{"dpi",GetDpiForWindow(lower)}});
    if(!s->inputWindow||!s->input.active())throw std::runtime_error("Production controlled input unavailable");
    auto recorded=s->input.source().PointerMoved([&](auto const&,auto const& a){const auto point=a.CurrentPoint();const auto p=point.Position(),raw=point.RawPosition();const auto device=point.PointerDevice();RECT r{};GetWindowRect(s->inputWindow,&r);trace.push_back({{"kind",device?(int)device.PointerDeviceType():-1},{"contact",s->drag.contact()},{"surfaceError",(long)s->input.error},{"position",{p.X,p.Y}},{"raw",{raw.X,raw.Y}},{"input",rectangle(r)},{"panel",rectangle(s->panel)}});});
@@ -247,7 +247,7 @@ int wmain(int argc,wchar_t** argv){
    if(!desktopInput){
     Carrier noticeOwner;unsigned noticeHaptics=0;noticeOwner.initialize(nullptr,{nullptr,nullptr,nullptr,true,&runtime,[&](bool,bool){++noticeHaptics;}});
     const auto mainInput=s->inputWindow;const auto originalCapture=GetCapture();auto recorder=Microsoft::WRL::Make<NoticeControllerRecorder>();
-    auto n=std::make_shared<Carrier::State>();n->owner=&noticeOwner;n->id=11;n->nonce="notice-input-lifecycle-0001";n->global=true;n->notice=true;n->monitor=s->monitor;n->ready=true;n->width=120;n->height=80;n->viewportKey=Carrier::viewportInfo(*n).dump();n->controller=recorder;
+    auto n=std::make_shared<Carrier::State>();n->owner=&noticeOwner;n->id=11;n->nonce="notice-input-lifecycle-0001";n->global=true;n->notice=true;n->monitor=s->monitor;n->ready=true;n->width=120;n->height=80;n->lastViewport=Carrier::readViewport(*n);n->controller=recorder;
     n->hwnd=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED|WS_EX_NOREDIRECTIONBITMAP|WS_EX_TRANSPARENT,c.lpszClassName,L"",WS_POPUP|WS_DISABLED,left,top,120,80,nullptr,nullptr,c.hInstance,n.get());
     if(!n->hwnd||!hudinput::ensure(n->hwnd))throw std::runtime_error("Notice fixture HWND failed");noticeOwner.current=n;
     noticeOwner.refresh(n);check("hidden pre-owned notice suspends its renderer",!recorder->visible&&!IsWindowVisible(n->hwnd));
@@ -363,7 +363,7 @@ int wmain(int argc,wchar_t** argv){
     auto record=Microsoft::WRL::Make<NoticeControllerRecorder>();auto d=std::make_shared<Carrier::State>();
     d->owner=&damaged;d->id=100+round*2+displayLost;d->nonce="window-loss-fixture-0001";d->global=true;d->monitor=s->monitor;
     d->ready=d->armed=d->layout=true;d->width=150;d->height=90;d->seq=1;d->expires=wallNow()+60000;d->controller=record;
-    d->viewportKey=Carrier::viewportInfo(*d).dump();
+    d->lastViewport=Carrier::readViewport(*d);
     d->hwnd=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED|WS_EX_NOREDIRECTIONBITMAP|WS_EX_TRANSPARENT,c.lpszClassName,L"",WS_POPUP|WS_DISABLED,left,top,150,90,nullptr,nullptr,c.hInstance,d.get());
     if(!d->hwnd||!hudinput::ensure(d->hwnd))throw std::runtime_error("Window-loss fixture display unavailable");
     damaged.current=d;damaged.refresh(d);if(!d->inputWindow||!d->input.active())throw std::runtime_error("Window-loss fixture input unavailable");

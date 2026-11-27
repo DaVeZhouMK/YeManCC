@@ -14,7 +14,7 @@ import {losslessToggleValue,type LosslessProgramState} from '@/bridge/losslessPr
 import {retainLosslessObservation,readLosslessProgram} from '@/bridge/losslessRuntimeState';
 import { focusGamepadElement } from '@/gamepad/focus';
 import { getOptiDialogPlacement } from './optiDialogLayout';
-import { getCurrentGame, isCurrentGameTarget, refreshGameStatusStrict, validateGameTarget, detectedGameName, type DetectedGame } from '@/bridge/gamedetect';
+import { getCurrentGame, isCurrentGameTarget, isGameStatusCurrent, refreshGameStatusStrict, subscribeGameTargetReadiness, validateGameTarget, detectedGameName, type DetectedGame } from '@/bridge/gamedetect';
 import { GameTrainerCancelledError, openOrSearchGameTrainer, cancelGameTrainerPreparation, getReadyGameTrainer, getGameTrainerState, subscribeGameTrainerState } from '@/bridge/gameTrainer';
 import {
   getLosslessGameState, setLosslessScalingEnabled, removeLosslessGameProfile, onLosslessScalingChanged, type LosslessGameState,
@@ -49,6 +49,7 @@ import { subscribePolicyGameStatus, getPolicyGame } from '@/bridge/gamePolicyTar
 import { tryAcquireQuickAction } from '@/bridge/quickActionLock';
 import { readActivationEvidence } from '@/gamepad/activationEvidence';
 import { createTaskViewTouchActivation, readTaskViewSystemTouchEvidence } from '@/gamepad/taskViewTouchActivation';
+import { getSharedPowerLifecycle, isSharedPowerLifecycleAdmitted, onSharedPowerLifecycle, sharedPowerWriteScope, type SharedPowerLifecycleSnapshot } from '@/bridge/powerLifecycleState';
 
 const props = defineProps<{ game: DetectedGame | null; open: boolean }>();
 const emit = defineEmits<{
@@ -72,8 +73,12 @@ const losslessState = ref<LosslessGameState | null>(null);
 const losslessReading = ref(false);
 let losslessReadEpoch = 0;
 let menuStateEpoch = 0;
+let menuStateRefreshPending = false;
 let taskViewSessionEpoch = 0;
-let controlStateEpoch = 0;
+let controlStateRead: AbortController | null = null;
+let resumePreflight: AbortController | null = null;
+let stopWakeGameRecovery: (() => void) | null = null;
+let wakeGameRecoveryRevision = 0;
 let targetEpoch = 0;
 let disposed = false;
 let trainerOperationTarget: LockedGameTarget | null = null;
@@ -137,6 +142,7 @@ async function onOpenOptiConsole(): Promise<void> {
 
 const policyGame = ref<DetectedGame | null>(getPolicyGame());
 let stopPolicyGame: (() => void) | null = null;
+let stopTargetReadiness: (() => void) | null = null;
 // The lock is an operation credential, never a second source of game identity.
 const targetGame = computed(() => policyGame.value);
 const trainerButtonLabel = computed(() => {
@@ -244,50 +250,66 @@ async function refreshSpeedState(target: DetectedGame | null): Promise<void> {
   speedFactor.value = target && state && sameTarget(state,target) && state.cleanupPending ? 'unknown' : target && state && sameTarget(state, target) && state.factor > 0 ? state.factor : 1;
 }
 
+function retireControlStateRead(): void {
+  const read = controlStateRead;
+  controlStateRead = null;
+  read?.abort();
+}
+
 async function refreshControlState(target: DetectedGame | null): Promise<void> {
-  const epoch = ++controlStateEpoch;
-  if (epoch !== controlStateEpoch || !isTargetCurrent(target)) return;
+  if (!props.open || !isTargetCurrent(target)) return;
+  retireControlStateRead();
   if (!target) {
     paused.value = false;
     return;
   }
+  const read = new AbortController();
+  controlStateRead = read;
   try {
-    const state = await hasSuspendedState(target.pid, target.processCreated);
-    if (epoch === controlStateEpoch && isTargetCurrent(target)) paused.value = state.suspended;
-  } catch { /* Transport failure does not prove that this game resumed. */ }
+    const state = await hasSuspendedState(target.pid, target.processCreated, read.signal);
+    if (controlStateRead === read && props.open && isTargetCurrent(target)) paused.value = state.suspended;
+  } catch { /* A retired observation cannot change this target. */ }
+  finally { if (controlStateRead === read) controlStateRead = null; }
 }
 
 function onSuspendedStateSync(): void {
   // This legacy event has no PID/birth. Reread the current target instead of
   // assigning an old game's suspended bit to the new game's button.
-  if (props.open) void refreshControlState(targetGame.value);
+  refreshMenuState();
 }
 
 async function togglePause(): Promise<void> {
   if (pauseBusy.value) return;
   const epoch = targetEpoch;
+  const scope = sharedPowerWriteScope(getSharedPowerLifecycle())?.join(':');
   let target: LockedGameTarget | null = null;
   pauseBusy.value = true;
-  ++controlStateEpoch;
+  retireControlStateRead();
   try {
+    if (!scope) throw new Error('电源状态尚未就绪，请稍后重试');
     target = await ensureTarget();
     assertActionTarget(target);
+    if (sharedPowerWriteScope(getSharedPowerLifecycle())?.join(':') !== scope)
+      throw new Error('电源状态已变化，请重新操作');
     if (paused.value) {
-      const result = await resumeGame();
+      resumePreflight = new AbortController();
+      const result = await resumeGame(resumePreflight.signal, target);
       assertActionTarget(target);
-      ++controlStateEpoch;
+      retireControlStateRead();
       paused.value = result.failCount > 0;
       status(result.okCount > 0 ? '已继续 ' + result.okCount + ' 个被冻结的进程' : (result.ok ? '游戏已继续' : '继续失败：' + (result.msgs.join('；') || '没有待恢复的进程')));
     } else {
       const result = await suspendGame(target.pid, target.name || target.title || '当前游戏', target.processCreated, target);
       assertActionTarget(target);
-      ++controlStateEpoch;
+      retireControlStateRead();
       paused.value = result.ok;
+      if (!result.ok) refreshMenuState();
       status(result.ok ? '已暂停 ' + (target.name || target.title || '当前游戏') : '暂停失败：' + (result.msgs.join('；') || '没有可暂停的游戏进程'));
     }
   } catch (error) {
     if (epoch === targetEpoch && !disposed && (!target || isActionTargetCurrent(target))) status('', '暂停/继续失败：' + (error as Error).message);
   } finally {
+    resumePreflight = null;
     pauseBusy.value = false;
   }
 }
@@ -295,11 +317,15 @@ async function togglePause(): Promise<void> {
 async function closeCurrentGame(): Promise<void> {
   if (closeBusy.value) return;
   const epoch = targetEpoch;
+  const scope = sharedPowerWriteScope(getSharedPowerLifecycle())?.join(':');
   let target: LockedGameTarget | null = null;
   closeBusy.value = true;
   try {
+    if (!scope) throw new Error('电源状态尚未就绪，请稍后重试');
     target = await ensureTarget();
     assertActionTarget(target);
+    if (sharedPowerWriteScope(getSharedPowerLifecycle())?.join(':') !== scope)
+      throw new Error('电源状态已变化，请重新操作');
     const result = await closeGame(target.pid, target.name, target.processCreated, target);
     if (!result.ok) throw new Error(result.msgs.join('；') || '关闭失败');
     if (isActionTargetCurrent(target)) status('已关闭 ' + target.name);
@@ -410,14 +436,30 @@ async function returnDesktop(): Promise<void> {
   }
 }
 
-async function refreshMenuState(): Promise<void> {
-  if (!props.open || disabledForAction.value) return;
-  const epoch = ++menuStateEpoch;
+function refreshMenuState(): void {
+  if (!props.open || disposed) return;
+  menuStateRefreshPending = true;
+  // Recognition publishes readiness before notifying a changed target.
+  void nextTick(flushMenuStateRefresh);
+}
+
+function flushMenuStateRefresh(): void {
+  if (!menuStateRefreshPending || !props.open || disposed || disabledForAction.value || !isGameStatusCurrent()) return;
   const target = getCurrentGame();
+  if (!isTargetCurrent(target)) return;
+  menuStateRefreshPending = false;
   locked.value = getLockedGameTarget();
-  await refreshSpeedState(target);
-  if (epoch !== menuStateEpoch || !props.open || disposed) return;
-  await refreshControlState(target);
+  void refreshSpeedState(target);
+  void refreshControlState(target);
+}
+
+function onTargetReadiness(current: boolean): void {
+  if (!current) {
+    retireControlStateRead();
+    resumePreflight?.abort();
+    return;
+  }
+  refreshMenuState();
 }
 
 function syncCurrentTarget(next: DetectedGame | null): void {
@@ -433,7 +475,8 @@ function syncCurrentTarget(next: DetectedGame | null): void {
   if ((!previous && !next) || sameTarget(previous, next)) return;
   ++targetEpoch;
   ++menuStateEpoch;
-  ++controlStateEpoch;
+  retireControlStateRead();
+  resumePreflight?.abort();
   ++losslessReadEpoch;
   trainerCancelRequested.value = true;
   trainerMenuOpen.value = false;
@@ -445,10 +488,7 @@ function syncCurrentTarget(next: DetectedGame | null): void {
   losslessReading.value = false;
   if (fsrResolve) closeDialog(false);
   status();
-  if (props.open) {
-    void refreshSpeedState(next);
-    void refreshControlState(next);
-  }
+  refreshMenuState();
 }
 
 function onTargetLost(event: Event): void {
@@ -781,9 +821,13 @@ async function runSpeed(factor: number): Promise<void> {
   }
 }
 
-function onWakeGameRecovery(): void {
-  // Reread current state; a late old recovery event must not clear a new pause.
-  void refreshMenuState();
+function onWakeGameRecovery(power: SharedPowerLifecycleSnapshot): void {
+  const revision = power.gameWakeRecoveryRevision ?? 0;
+  if (revision <= wakeGameRecoveryRevision || !isSharedPowerLifecycleAdmitted(power)) return;
+  wakeGameRecoveryRevision = revision;
+  // The terminal fact invalidates the old read; the current game still owns the pause state.
+  retireControlStateRead();
+  refreshMenuState();
 }
 
 function onCustomStatus(value: { message?: string; error?: string }): void {
@@ -802,7 +846,8 @@ function onRulesChanged(value: { currentBlacklisted?: boolean }): void {
   }
 }
 
-watch(() => props.open, (open) => { ++menuStateEpoch; ++taskViewSessionEpoch; taskViewTouch.cancel(); if (open) void refreshMenuState(); else { ++controlStateEpoch; trainerMenuOpen.value = false; closeLosslessMenu(); } });
+watch(() => props.open, (open) => { ++menuStateEpoch; ++taskViewSessionEpoch; taskViewTouch.cancel(); if (open) refreshMenuState(); else { menuStateRefreshPending = false; retireControlStateRead(); resumePreflight?.abort(); trainerMenuOpen.value = false; closeLosslessMenu(); } });
+watch(disabledForAction, (busy) => { if (!busy) flushMenuStateRefresh(); });
 watch(() => [props.open, targetGame.value?.pid, targetGame.value?.processCreated, targetGame.value?.path, targetGame.value?.identityGeneration], () => { stopLosslessObservation?.();stopLosslessObservation=props.open?retainLosslessObservation():null;void refreshLosslessState(); });
 
 onMounted(() => {
@@ -811,30 +856,34 @@ onMounted(() => {
   void refreshLosslessState();
   stopTrainerState = subscribeGameTrainerState(() => { trainerStateRevision.value += 1; });
   stopPolicyGame = subscribePolicyGameStatus(syncCurrentTarget);
+  stopTargetReadiness = subscribeGameTargetReadiness(onTargetReadiness);
   window.addEventListener('ipc:gamepad-back', onGamepadBack);
   window.addEventListener('resize', resizeOptiDialog);
   window.addEventListener(QUICKAPP_SUSPENDED_EVENT, onSuspendedStateSync as EventListener);
-  window.addEventListener('ipc:game.wake-recovery', onWakeGameRecovery);
+  stopWakeGameRecovery = onSharedPowerLifecycle(onWakeGameRecovery, { observeGameWakeRecovery: true });
   window.addEventListener('game-quick-target-lost', onTargetLost);
   window.addEventListener('game-quick-refresh', refreshGame);
-  void refreshMenuState();
+  refreshMenuState();
 });
 onBeforeUnmount(() => {
   disposed = true;
+  menuStateRefreshPending = false;
   ++menuStateEpoch;
   ++taskViewSessionEpoch;
   taskViewTouch.cancel();
-  ++controlStateEpoch;
+  retireControlStateRead();
+  resumePreflight?.abort();
   ++losslessReadEpoch;
   stopLosslessState?.();
   stopLosslessObservation?.();
   trainerCancelRequested.value = true;
   stopTrainerState?.();
+  stopTargetReadiness?.();
   stopPolicyGame?.();
   window.removeEventListener('ipc:gamepad-back', onGamepadBack);
   window.removeEventListener('resize', resizeOptiDialog);
   window.removeEventListener(QUICKAPP_SUSPENDED_EVENT, onSuspendedStateSync as EventListener);
-  window.removeEventListener('ipc:game.wake-recovery', onWakeGameRecovery);
+  stopWakeGameRecovery?.();
   window.removeEventListener('game-quick-target-lost', onTargetLost);
   window.removeEventListener('game-quick-refresh', refreshGame);
   if (fsrResolve) closeDialog(false);

@@ -26,10 +26,11 @@ let deferredObservationUntil = 0;
 let earlyResume: { generation: number; until: number } | null = null;
 let observationEpoch = 0;
 let backendCompletionEpoch = 0;
-type ActiveRead = { completion: number; dispatched: boolean; deferredCompletion: boolean };
+type ActiveRead = { completion: number; dispatched: boolean; deferredCompletion: boolean; retire(): void };
 let activeRead: ActiveRead | undefined;
 let stopVisibility: (() => void) | null = null;
 let stopPower: (() => void) | null = null;
+let powerScopePending = false;
 type StatusSession = Pick<AppearanceSnapshot, 'steamRunning' | 'steamPid' | 'steamBirth'>;
 let observedSession: (StatusSession & { afterSteamEpoch: number }) | undefined;
 let lastKnownSteam: SteamUiState | null = null;
@@ -81,13 +82,18 @@ watch(() => props.steamStateStale, stale => {
   if (stale && appearanceReadQueued === 'manual-entry') queueObservation();
 });
 function readVisible() {
-  return props.sectionVisible && isUiVisible();
+  return !powerScopePending && props.sectionVisible && isUiVisible();
 }
 function clearReadTimer() { if (appearanceReadTimer) { clearTimeout(appearanceReadTimer); appearanceReadTimer = null; } }
 function cancelAutomaticRead() { appearanceReadQueued = null; deferredObservationUntil = 0; clearReadTimer(); }
-function retireObservation() { ++observationEpoch; observedSession = undefined; steamWhileReading = null; earlyResume = null; cancelAutomaticRead(); }
+function retireObservation(acrossPowerBoundary = false) {
+  ++observationEpoch;
+  observedSession = undefined; steamWhileReading = null; earlyResume = null;
+  cancelAutomaticRead();
+  if (acrossPowerBoundary) activeRead?.retire();
+}
 function visibilityChanged(powerGeneration?: number) {
-  if (!readVisible()) { retireObservation(); return; }
+  if (!readVisible()) { retireObservation(powerGeneration !== undefined); return; }
   const hint = earlyResume;
   earlyResume = null;
   appearanceReadBudget.renew();
@@ -158,13 +164,16 @@ async function read(automatic = false) {
   const afterSteamEpoch = readSteamEpoch = steamEpoch;
   reading.value = true;
   const epoch = observationEpoch;
-  const observation: ActiveRead = { completion: backendCompletionEpoch, dispatched: false, deferredCompletion: false };
+  let retire!: () => void;
+  const retired = new Promise<undefined>(resolve => { retire = () => resolve(undefined); });
+  const observation: ActiveRead = { completion: backendCompletionEpoch, dispatched: false, deferredCompletion: false, retire };
   activeRead = observation;
   const current = () => epoch === observationEpoch && alive && active && readVisible();
   let coveredCompletion = false;
   try {
     const result = await steamAppearanceDraft.read(current, {
       current: () => current() && observation.completion === backendCompletionEpoch,
+      retired,
       recheck: queueObservation,
       beforeStatusDispatch: () => {
         if (observation.dispatched) return;
@@ -300,14 +309,31 @@ onMounted(() => {
     if (source !== 'initial') visibilityChanged(source === 'power' ? state.powerGeneration : undefined);
   });
   let powerReady = false, suspendSerial = 0;
+  let notificationSequence: number | undefined;
   stopPower = onSharedPowerLifecycle(state => {
+    const wasPending = powerScopePending;
+    powerScopePending = state.scopeReadbackPending === true;
     const ready = isUiPowerReady(state), serial = state.suspendSerial ?? suspendSerial;
+    const sequence = state.observedNotificationSequence;
     const mergedSuspend = ready && powerReady && serial !== suspendSerial;
+    const newerObservation = ready && powerReady && sequence !== undefined &&
+      notificationSequence !== undefined && sequence > notificationSequence;
     powerReady = ready;
     suspendSerial = serial;
-    // Regular suspend/Ready already retires the read via presentation visibility.
-    if (mergedSuspend) { retireObservation(); visibilityChanged(state.generation); }
-  }, { observeSuspendSerial: true });
+    notificationSequence = sequence ?? notificationSequence;
+    // A new scope can invalidate Status while the old Ready remains visible.
+    if (powerScopePending) {
+      if (!wasPending) retireObservation(true);
+      return;
+    }
+    if (mergedSuspend && !wasPending) retireObservation(true);
+    if (ready && (mergedSuspend || wasPending)) visibilityChanged(state.generation);
+    else if (newerObservation && activeRead) {
+      // Replace only an in-flight observation and keep its existing read budget.
+      retireObservation(true);
+      queueObservation();
+    }
+  }, { observeSuspendSerial: true, observeNotificationSequence: true });
   void read(true);
   window.addEventListener('global:refresh', explicitRefresh); window.addEventListener('ipc:steamAppearance.backendChanged', backendChanged);
 });

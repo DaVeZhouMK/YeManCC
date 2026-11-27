@@ -128,6 +128,19 @@ static void clientStateDiagnosticCases(){
   check(!deckysession::diagnostic(who,m).contains("deckyClientState")&&!deckydiag::record("steam-mode-read",{{"deckyClientState",value}}).contains("deckyClientState"),"Unknown or private client state cannot enter logs");
  }
  check(!deckydiag::record("runtime",{{"deckyClientState","socket-closed"}}).contains("deckyClientState"),"Client state stays within original mode event");
+ for(const auto* label:{"unobserved","committed","native-ready-commit"}){
+  auto value=mode(who,"bigpicture");value["deckyQamPanelState"]=label;
+  const auto record=deckydiag::record("steam-mode-read",deckysession::diagnostic(who,value));
+  check(record.value("deckyQamPanelState",std::string{})==label&&deckysession::bigPicture(who,value),"Panel commit evidence is carried without changing admission");
+  value["birth"]="987";
+  check(!deckysession::diagnostic(who,value).contains("deckyQamPanelState"),"A different process birth cannot claim the observed panel");
+ }
+ for(const auto& bad:std::vector<deckydiag::Json>{nullptr,true,23,"private-token"}){
+  auto value=mode(who,"bigpicture");value["deckyQamPanelState"]=bad;
+  check(!deckysession::diagnostic(who,value).contains("deckyQamPanelState")&&!deckydiag::record("steam-mode-read",{{"deckyQamPanelState",bad}}).contains("deckyQamPanelState"),"Only the fixed panel labels are logged");
+ }
+ auto desktop=mode(who,"desktop");desktop["deckyQamPanelState"]="committed";
+ check(!deckysession::diagnostic(who,desktop).contains("deckyQamPanelState")&&!deckydiag::record("runtime",desktop).contains("deckyQamPanelState"),"Panel diagnostic stays within matching Big Picture mode read");
  const std::vector<std::string> backendStates={"socket-missing","socket-connecting","socket-open","socket-closing","socket-closed","socket-unavailable"};
  for(const auto& label:backendStates){
   auto value=mode(who,"bigpicture");value["observedAccount"]=42u;value["deckyBackendConnected"]=false;value["deckyBackendState"]=label;

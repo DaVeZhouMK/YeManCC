@@ -37,8 +37,12 @@ public:
 };
 inline bool shouldLogSupersededModeRead(bool enabled, unsigned long loaderPid,
                                        std::string_view reason, std::string_view detail) noexcept {
-    return enabled && !loaderPid && reason=="steam-ui-state-pending" &&
-        (detail=="shared-mode-pending" || detail=="shared-mode-events-unsettled");
+    if(!enabled || loaderPid)return false;
+    // A first confirmed Big Picture read can be superseded before Runtime
+    // leaves its last published desktop refusal. That is still admission.
+    return (reason=="steam-bigpicture-required" && detail=="desktop") ||
+        (reason=="steam-ui-state-pending" &&
+            (detail=="shared-mode-pending" || detail=="shared-mode-events-unsettled"));
 }
 template<class Read>
 inline Json supersededModeReadFields(unsigned long steamPid, unsigned long long steamBirth, const Read& read) {
@@ -338,6 +342,17 @@ inline Json record(const std::string& event,const Json& detail) {
         if(wake!=detail.end()&&(*wake=="refresh-notified"||*wake=="retained-refresh-requested"||*wake=="final-read-recheck-queued"))
             result["admissionWake"]=*wake;
     }
+    if(event=="runtime"&&detail.value("phase",Json{})=="waiting-manual-steam"&&detail.value("admissionRepeatBatchCount",Json{})==64u){
+        const auto pid=detail.find("admissionSteamPid"),birth=detail.find("admissionSteamBirth"),power=detail.find("admissionPowerGeneration");
+        if(pid!=detail.end()&&pid->is_number_unsigned()&&*pid>0u&&*pid<=0xffffffffull&&
+           power!=detail.end()&&power->is_number_unsigned()&&*power>0u&&birth!=detail.end()&&birth->is_string()){
+            const auto& text=birth->get_ref<const std::string&>();
+            if(!text.empty()&&text.size()<=20&&text.front()!='0'&&text.find_first_not_of("0123456789")==std::string::npos){
+                result["admissionRepeatBatchCount"]=64u;result["admissionSteamPid"]=*pid;
+                result["admissionSteamBirth"]=*birth;result["admissionPowerGeneration"]=*power;
+            }
+        }
+    }
     if(event=="steam-mode-read-superseded"){
         const auto cause=detail.find("hintCause"),birth=detail.find("steamBirth");
         if(cause!=detail.end()&&(*cause=="mode-refresh"||*cause=="connection-refresh"))result["hintCause"]=*cause;
@@ -414,14 +429,19 @@ inline Json record(const std::string& event,const Json& detail) {
         }
         return result;
     }
-    if(event=="connection-check"&&detail.value("scope",Json{})=="qam-open"){
+    if(event=="connection-check"){
+        const auto scope=detail.find("scope");
         const auto source=detail.find("source");
-        if(source!=detail.end()&&source->is_string()&&(*source=="open-or-legacy"||*source=="probe-result")){
+        if(scope!=detail.end()&&source!=detail.end()&&source->is_string()&&
+           ((*scope=="qam-open"&&(*source=="open-or-legacy"||*source=="probe-result"))||
+            (*scope=="steam-menu-completion"&&(*source=="ymcc-quick-access"||*source=="ymcc-steam-button")))){
             result["source"]=*source;
             const auto wait=detail.find("readSlotWaitMs"),coalesced=detail.find("readCoalesced"),inFlight=detail.find("readInFlight");
             if(detail.contains("attempted")&&detail["attempted"]==true&&wait!=detail.end()&&wait->is_number_unsigned()&&
                *wait<=60000u&&coalesced!=detail.end()&&coalesced->is_boolean()&&inFlight!=detail.end()&&inFlight->is_boolean()){
                 result["readSlotWaitMs"]=*wait;result["readCoalesced"]=*coalesced;result["readInFlight"]=*inFlight;
+                if(*scope=="steam-menu-completion"&&*source=="ymcc-quick-access"&&
+                   detail.contains("readReusedHealthy")&&detail["readReusedHealthy"]==true)result["readReusedHealthy"]=true;
             }
         }
     }
@@ -604,6 +624,9 @@ inline Json record(const std::string& event,const Json& detail) {
         }
     }
     if(event=="steam-mode-read") {
+        const auto path=detail.find("modeReadPath");
+        if(path!=detail.end()&&(*path=="pre-live"||*path=="budget-cache"||*path=="budget-paused"||*path=="live-path"))
+            result["modeReadPath"]=*path;
         const auto cancel=detail.find("modeReadCancelCheck"),startPower=detail.find("modeReadStartPowerGeneration"),
             startSerial=detail.find("modeReadStartSuspendSerial");
         if(detail.value("reason",Json{})=="shared-mode-read-cancelled"&&cancel!=detail.end()&&cancel->is_string()&&
@@ -663,6 +686,8 @@ inline Json record(const std::string& event,const Json& detail) {
         if(backendState!=detail.end()&&backendState->is_string()&&deckyfrontend::backendState(backendState->get_ref<const std::string&>()))result["deckyBackendState"]=*backendState;
         const auto clientState=detail.find("deckyClientState");
         if(clientState!=detail.end()&&clientState->is_string()&&deckyfrontend::clientState(clientState->get_ref<const std::string&>()))result["deckyClientState"]=*clientState;
+        const auto qamPanelState=detail.find("deckyQamPanelState");
+        if(qamPanelState!=detail.end()&&qamPanelState->is_string()&&deckyfrontend::qamPanelState(qamPanelState->get_ref<const std::string&>()))result["deckyQamPanelState"]=*qamPanelState;
         for(const auto* key:{"sessionPidPresent","sessionBirthPresent","sessionRootPresent","registryAccountPresent",
             "modeKnown","modeRunning","modeIdentityConfirmed","uiAccountPresent","uiAccountWatchKnown","uiAccountWatchAvailable",
             "deckyBackendKnown","deckyBackendConnected","deckyHooksKnown","deckyHooksInstalled","deckyClientKnown","deckyClientConnected","deckyClientCheckingKnown","deckyClientChecking","deckyClientVerifiedKnown","deckyClientVerified",
@@ -934,6 +959,13 @@ inline Json record(const std::string& event,const Json& detail) {
             if (bounded.is_object()) result["modeHandoff"] = std::move(bounded);
         }
     }
+    if(event=="steam-mode-signal"&&detail.value("reason",Json{})=="shared-verified-mode") {
+        const auto trigger=detail.find("publicationTrigger");
+        if(trigger!=detail.end()&&trigger->is_string())
+            for(const auto* value:{"no-prior-publication","mode","document","update-residue","empty-frontend",
+                "backend-connection","hooks","client-connection","client-checking","client-verification"})
+                if(*trigger==value){result["publicationTrigger"]=*trigger;break;}
+    }
     if(event=="steam-css-use"||event=="steam-css-guard"||event=="steam-css-resume"||event=="steam-mode-signal") {
         for(const auto* key:{"policyVersion","steamPid","steamBirth","loaderPid","linked","attempts","verified","handleFallback",
             "remaining","unverified","secondaryCheckPending","minimumHoldPending","secondaryDelayMs","minimumHoldMs","helperExitKnown","helperExitCode","helperResultKnown","helperPhase","helperReason","helperFailureCode","helperHResult","backendReady","configuredMatchesBackend","domConfirmed","minimumWindowConfirmed","backendExitConfirmed","backendProcessCount","editorProtected","editorStateUnknown"})
@@ -967,10 +999,37 @@ inline Json failureRecord(const Json& detail,const ymcc::steamfailure::FailureCo
     row.update(ymcc::steamfailure::project(detail,context));
     try{if(context.phase==ymcc::steamfailure::Phase::Finished&&
         (context.operation==ymcc::steamfailure::Operation::RebuildDocument||context.operation==ymcc::steamfailure::Operation::ReopenBigPicture)){
+        if(context.operation==ymcc::steamfailure::Operation::RebuildDocument&&
+           detail.value("cleanupModeReadRetried",Json{})==true)
+            row["cleanupModeReadRetried"]=true;
+        if(context.operation==ymcc::steamfailure::Operation::ReopenBigPicture&&
+           detail.value("reason",Json{})=="decky-bigpicture-reopened"&&detail.value("ok",Json{})==true&&
+           detail.value("mutated",Json{})==true&&detail.value("uncertain",Json(false))==false){
+            const auto document=detail.find("reopenDocument"),backend=detail.find("reopenBackendState"),loaded=detail.find("reopenFrontendLoaded");
+            if(document!=detail.end()&&(*document=="retained"||*document=="changed"))row["reopenDocument"]=*document;
+            if(backend!=detail.end()&&backend->is_string()&&deckyfrontend::backendState(backend->get_ref<const std::string&>()))
+                row["reopenBackendState"]=*backend;
+            if(loaded!=detail.end()&&loaded->is_boolean())row["reopenFrontendLoaded"]=*loaded;
+        }
         const auto socket=detail.find("cleanupPreflightBackendState");
         if(socket!=detail.end()&&socket->is_string()){
             const auto& label=socket->get_ref<const std::string&>();
             if(label=="unconfirmed"||deckyfrontend::backendState(label))row["cleanupPreflightBackendState"]=*socket;
+        }
+        const auto returned=detail.find("cleanupWorkerReturn");
+        if(detail.value("reason",Json{})=="decky-cleanup-worker-cleanup-incomplete"&&
+           detail.value("ok",Json{})==false&&detail.value("uncertain",Json{})==true&&
+           returned!=detail.end()&&returned->is_object()){
+            Json facts=Json::object();
+            for(const auto* key:{"replyReceived","ownerReturned","readerReturned"}){
+                const auto value=returned->find(key);
+                if(value!=returned->end()&&value->is_boolean())facts[key]=*value;
+            }
+            for(const auto* key:{"ownerHandles","ownerPendingIo","jobActiveProcesses","ownerStopError"}){
+                const auto value=returned->find(key);
+                if(value!=returned->end()&&value->is_number_unsigned()&&*value<=0xffffffffull)facts[key]=*value;
+            }
+            if(facts.size()==7)row["cleanupWorkerReturn"]=std::move(facts);
         }
     }}catch(...){}
     // The parent retains its original action/Steam/power stamp across the child.
@@ -987,6 +1046,12 @@ inline Json failureRecord(const Json& detail,const ymcc::steamfailure::FailureCo
         const auto it=detail.find("sessionCheck");
         if(it!=detail.end()&&it->is_string())for(const auto* label:{"parent-account-source","shared-process-receipt","shared-process-delegation",
             "child-mode-read","child-account-mismatch","child-account-proof"})if(*it==label){row["cleanupAccountStage"]=label;break;}
+        if(it!=detail.end()&&*it=="child-mode-read"){
+            const auto failure=detail.find("cleanupModeReadReason");
+            if(failure!=detail.end()&&failure->is_string())
+                for(const auto* label:{"live-busy","live-debug-unavailable","live-context-unavailable","live-read-unavailable"})
+                    if(*failure==label){row["cleanupModeReadReason"]=label;break;}
+        }
         // The parent can return this proof before dispatch. It is not a claim
         // that the Runtime retained the mirror or actually scheduled a retry.
         if(it!=detail.end()&&(*it=="parent-account-source"||*it=="shared-process-receipt"||*it=="shared-process-delegation")&&

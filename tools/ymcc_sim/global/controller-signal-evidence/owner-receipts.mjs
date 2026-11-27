@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
+import {createHash} from 'node:crypto';
 const need=(v,c)=>assert.ok(v,c);
 const schema=JSON.parse(fs.readFileSync(new URL('./consumer-schema.json',import.meta.url),'utf8'));
 export function exact(rows,names,key,code){need(Array.isArray(rows)&&rows.length===names.length&&new Set(rows.map(r=>r[key])).size===names.length&&names.every(n=>rows.some(r=>r[key]===n)),code);}
@@ -18,13 +20,57 @@ export function validateAdmission(r,context){
  }
  return {id:'actual-typed-stop-receipt',pass:true,profiles:2,schedules:8,admissionNegativeBuilds:2,wholeLifecycleAcceptance:false};
 }
-export function validateDsu(r,{source,tool,tools}){
- need(r.status==='PASS'&&Array.isArray(r.sources),'DSU_BOUNDARY');source(r.sources,'dsu-owner');source(r.sourceIdentityAfter,'dsu-owner.after');
- need(r.sourceIdentityAfter.length===r.sources.length&&r.sourceIdentityAfter.every(x=>x.unchanged===true),'DSU_SOURCE_DRIFT');tool(r.toolchain?.vcvars,tools.vcvars,undefined,'dsu.vcvars');exact(r.runs,schema.dsuRuns,'name','DSU_VARIANTS');
- for(const row of r.runs){const positive=!row.name.startsWith('negative-');need(row.accepted===true&&row.compile?.exitCode===0&&row.compile?.signal===null&&row.compile?.error===null&&row.runtime?.exitCode===(positive?0:1)&&row.runtime?.signal===null&&row.runtime?.error===null,'DSU_ACTUAL_PROCESS_OUTCOME');
-  const summary=row.events?.findLast(e=>e.status==='PASS'||e.status==='FAIL');
-  if(positive){const privateRun=row.name.startsWith('private-');need(summary?.status==='PASS'&&summary.cases===(privateRun?28:8)&&summary.checks===(privateRun?391:88),'DSU_CASE_INVENTORY');need(row.events.filter(e=>e.loopback===true).length===(privateRun?7:6),'DSU_LOOPBACK_EXECUTION');if(privateRun)need(row.events.some(e=>e.apiReleaseAttempts===162&&e.apiReleaseSuccesses===125&&e.injectedFailures===48&&e.blockedUnsafeApiCalls===0&&e.emergencyCleanup===0),'DSU_OWNERS_RETIRED');}
-  else{const expected=row.name==='negative-running-only'?'running-false-with-exited-unjoined-thread':'stop-failure-retains-closesocket';need(summary?.status==='FAIL'&&summary.case===expected&&row.events.at(-1)?.rescueOwnedResourcesReleased===true,'DSU_SPECIFIED_OWNER_NEGATIVE');}
+export function dsuGitToolInputs(repo){
+ const root=path.resolve(repo,'../../../Environment/Toolchains/Git/2.56.0.4');
+ return [
+  {path:path.join(root,'cmd/git.exe'),sha256:'20d0dde30a65afb6e5810a883700a94dcd77fbf3b44b32868d45bf7c9b30137c'},
+  {path:path.join(root,'ucrt64/bin/git.exe'),sha256:'9c75f3f41eb5686bacde4b7c4fdfcd7970e8b699ee05c8d7a0cc9c8a7ddaffe8'},
+ ];
+}
+export function validateDsu(r,{repo,source,tool,tools}){
+ const normalized=file=>path.resolve(file).toLowerCase();
+ need(r.status==='PASS'&&Array.isArray(r.sources)&&Array.isArray(r.sourceIdentityAfter)&&
+  typeof r.repo==='string'&&normalized(r.repo)===normalized(repo),'DSU_BOUNDARY');
+ const before=new Map(r.sources.map(row=>[normalized(row.path),row]));
+ exact(r.sourceIdentityAfter.map(row=>({...row,key:normalized(row.path)})),[...before.keys()],'key','DSU_SOURCE_DRIFT');
+ need(before.size===r.sources.length&&r.sourceIdentityAfter.every(row=>{
+  const original=before.get(normalized(row.path));
+  return row.unchanged===true&&row.sha256===original.sha256&&row.bytes===original.bytes;
+ }),'DSU_SOURCE_DRIFT');
+ const gitTools=dsuGitToolInputs(repo),gitKeys=new Set(gitTools.map(row=>normalized(row.path)));
+ for(const pin of gitTools){
+  const row=before.get(normalized(pin.path)),bytes=fs.readFileSync(pin.path);
+  need(row?.sha256===pin.sha256&&row.bytes===bytes.length&&normalized(fs.realpathSync.native(pin.path))===normalized(pin.path)&&
+   createHash('sha256').update(bytes).digest('hex')===pin.sha256,'DSU_GIT_TOOL_IDENTITY');
+ }
+ need(typeof r.gitProbe?.exe==='string'&&normalized(r.gitProbe.exe)===normalized(gitTools[0].path)&&
+  r.gitProbe.exitCode===0&&r.gitProbe.signal===null&&r.gitProbe.error===null&&/^[a-f0-9]{40}$/.test(r.head),'DSU_GIT_PROBE');
+ // Only the two reviewed Git binaries are tools; every other source still goes through the parent closure.
+ const repositoryRows=rows=>rows.filter(row=>!gitKeys.has(normalized(row.path)));
+ source(repositoryRows(r.sources),'dsu-owner');
+ source(repositoryRows(r.sourceIdentityAfter),'dsu-owner.after');
+ tool(r.toolchain?.vcvars,tools.vcvars,undefined,'dsu.vcvars');
+ exact(r.runs,schema.dsuRuns,'name','DSU_VARIANTS');
+ const frameCase='data-subscription-gates-current-production-frame';
+ const stopCase='stop-request-retains-live-worker-and-restart-waits-for-exit';
+ for(const row of r.runs){
+  const positive=!row.name.startsWith('negative-');
+  need(row.accepted===true&&row.compile?.exitCode===0&&row.compile?.signal===null&&row.compile?.error===null&&row.runtime?.exitCode===(positive?0:1)&&row.runtime?.signal===null&&row.runtime?.error===null,'DSU_ACTUAL_PROCESS_OUTCOME');
+  need(Array.isArray(row.events),'DSU_CASE_INVENTORY');
+  if(positive){
+   const privateRun=row.name.startsWith('private-'),summary=row.events.at(-1);
+   const cases=row.events.filter(e=>typeof e.case==='string');
+   need(summary?.status==='PASS'&&summary.cases===(privateRun?30:9)&&summary.checks===(privateRun?457:119)&&
+    cases.length===summary.cases&&new Set(cases.map(e=>e.case)).size===cases.length&&cases.every(e=>e.status==='PASS')&&
+    !row.events.some(e=>e.status==='FAIL'),'DSU_CASE_INVENTORY');
+   need(cases.some(e=>e.case===frameCase)&&cases.some(e=>e.case===stopCase)===privateRun,'DSU_CURRENT_POWER_AND_STOP_CASES');
+   need(row.events.filter(e=>e.loopback===true).length===(privateRun?8:6),'DSU_LOOPBACK_EXECUTION');
+   if(privateRun)need(row.events.some(e=>e.apiReleaseAttempts===177&&e.apiReleaseSuccesses===140&&e.injectedFailures===48&&e.blockedUnsafeApiCalls===0&&e.emergencyCleanup===0),'DSU_OWNERS_RETIRED');
+  }else{
+   const failed=row.events.filter(e=>e.status==='FAIL');
+   const expected=row.name==='negative-running-only'?'running-false-with-exited-unjoined-thread':'stop-failure-retains-closesocket';
+   need(failed.length===1&&failed[0]===row.events.at(-2)&&failed[0].case===expected&&row.events.at(-1)?.rescueOwnedResourcesReleased===true,'DSU_SPECIFIED_OWNER_NEGATIVE');
+  }
  }
  return {id:'dsu-resource-owner',pass:true,publicBuilds:2,privateBuilds:2,negativeBuilds:2,actualLoopback:true,arbitraryBlockingDestruction:'UNKNOWN'};
 }

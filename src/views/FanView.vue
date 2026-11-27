@@ -783,8 +783,9 @@ function onFanPowerWake(generation: number): void {
   setFanNavigationDuty(0);
   hostState.value = fanHostLifecycle.state;
   statusMessage.value = '正在准备恢复风扇…';
+  // A merged Ready can arrive without the Suspend that retires the old page read.
+  stopTelemetry();
   startTelemetry();
-  if (viewActive && viewVisible) void refreshTelemetry();
 }
 
 function onFanGuardState(event: Event): void {

@@ -1,4 +1,6 @@
 import { mapGyroSample } from '../src/bridge/gyroMotionMapperMock';
+import type { GyroGateContext } from '../src/bridge/gyroMotionMapperMock';
+import type { GyroMotionConfigV1 } from '../src/bridge/inputContracts';
 import { applyCustomSensitivity, createDefaultMotionSensitivityArray, getHcSensitivity, hcClampToShort, hcInclinationAngles, hcShortToUnit, hcSteering, HC_GYRO_THRESHOLD_DPS } from '../src/bridge/hcInputUtils';
 
 const context = { runId: 'r', epoch: 1, powerGeneration: 1, targetId: 't', configRevision: 1 };
@@ -74,5 +76,27 @@ const wantSteer = hcShortToUnit(hcClampToShort(hcSteering(hcInclinationAngles(ti
 if (!steered.ok || steered.frame.contribution.y !== 0 || Math.abs(steered.frame.contribution.x - wantSteer) > 1e-6) throw new Error(`T4 JoystickSteering mismatch ${JSON.stringify(steered)} want ${wantSteer}`);
 const flat = mapGyroSample(context, { ...config, motionInput: 'joystick-steering', invertVertical: false }, { sequence: 17, timestamp: 17, gamepadMotionPlane: plane({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 }) });
 if (!flat.ok || flat.frame.contribution.x !== 0 || flat.frame.contribution.y !== 0) throw new Error('T4 flat steering leaked');
-console.log('gyro motion mapper mock selftest: PASS');
+let steamCases = 0;
+for (const identity of [
+  { preset: 'steam' },
+  { activePreset: 'steam', preset: 'fps' },
+  { activePreset: 'invalid', preset: 'steam' },
+] as const) {
+  for (const motionMode of ['on', 'off', 'toggle'] as const) {
+    for (const motionInput of ['local-space', 'joystick-steering', 'player-space', 'world-space'] as const) {
+      const gate: GyroGateContext = { pressed: new Set(['LT', 'rt']), toggleOn: true, accumulatedDisplacement: { x: 45, y: -30 } };
+      const legacy = { ...config, ...identity, enabled: true, motionMode, motionTrigger: motionMode === 'on' ? null : 'LT', motionInput, velocityMode: 'velocity' } as GyroMotionConfigV1;
+      const result = mapGyroSample(context, legacy, local({ x: 400, y: 0, z: 600 }, 100, 101), gate);
+      if (!result.ok || result.frame.contribution.x !== 0 || result.frame.contribution.y !== 0 || result.frame.gyroShort?.x !== 0 || result.frame.gyroShort?.y !== 0 || gate.accumulatedDisplacement?.x !== 0 || gate.accumulatedDisplacement?.y !== 0)
+        throw new Error('Steam legacy mapping or accumulated displacement leaked: ' + JSON.stringify({ identity, motionMode, motionInput, result, gate }));
+      steamCases++;
+    }
+  }
+}
+for (const activePreset of ['fps', 'racing', 'custom'] as const) {
+  const result = mapGyroSample(context, { ...config, activePreset, preset: 'steam' }, local({ x: 10, y: 0, z: 20 }, 102, 103));
+  if (!result.ok || result.frame.contribution.x === 0) throw new Error('Valid non-Steam active preset was masked by stale Steam preset');
+  steamCases++;
+}
+console.log('gyro motion mapper mock selftest: PASS; Steam cases: ' + steamCases);
 

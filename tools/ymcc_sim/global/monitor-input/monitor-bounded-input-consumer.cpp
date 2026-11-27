@@ -103,7 +103,7 @@ int wmain(int argc,wchar_t** argv){
     auto s=std::make_shared<Carrier::State>();s->owner=&carrier;s->id=id;s->nonce="native-bounded-input-0001";s->global=true;s->notice=notice;s->monitor=MonitorFromWindow(lower,MONITOR_DEFAULTTOPRIMARY);
     cls.lpfnWndProc=Carrier::proc;cls.lpszClassName=L"YMCCBoundedDisplay";RegisterClassW(&cls);
     s->hwnd=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED|WS_EX_NOREDIRECTIONBITMAP|WS_EX_TRANSPARENT,cls.lpszClassName,L"",WS_POPUP|WS_DISABLED,0,0,150,90,nullptr,nullptr,cls.hInstance,s.get());need(s->hwnd&&hudinput::ensure(s->hwnd),"Inert display unavailable");
-    s->ready=s->armed=s->layout=true;s->width=150;s->height=90;s->seq=1;s->expires=wallNow()+60000;s->viewportKey=Carrier::viewportInfo(*s).dump();s->crosshair=true;s->drag.position={.1,.1,true,false,1};
+    s->ready=s->armed=s->layout=true;s->width=150;s->height=90;s->seq=1;s->expires=wallNow()+60000;s->lastViewport=Carrier::readViewport(*s);s->crosshair=true;s->drag.position={.1,.1,true,false,1};
     auto controller=Microsoft::WRL::Make<NoticeControllerRecorder>();s->controller=controller;carrier.current=s;carrier.refresh(s);return std::pair{s,controller};
    };
 
@@ -235,7 +235,7 @@ int wmain(int argc,wchar_t** argv){
     need(anchor!=nullptr,"Private summon anchor unavailable");
     Config placementConfig=cfg;placementConfig.anchor=anchor;Carrier positioned;positioned.initialize(nullptr,placementConfig);
     auto [d,drecord]=create(positioned,92);d->crosshair=false;d->drag.position.placed=false;
-    RECT work{};need(Carrier::monitorArea(*d,work),"Private placement viewport unavailable");
+    RECT work{};need(Carrier::clientArea(*d,work),"Private placement viewport unavailable");
     const int width=(work.right-work.left)/3;RECT reserved{work.left,work.top,work.left+width,work.bottom};
     SetWindowPos(anchor,nullptr,reserved.left,reserved.top,width,reserved.bottom-reserved.top,SWP_NOZORDER|SWP_NOACTIVATE);positioned.refresh(d);
     const auto avoids=[&]{RECT overlap{};return !IntersectRect(&overlap,&d->panel,&reserved);};
@@ -452,7 +452,7 @@ int wmain(int argc,wchar_t** argv){
     check("conditional hide parks a disabled bounded input window",parked&&!IsWindowVisible(parked)&&!IsWindowEnabled(parked)&&!drecord->visible);
     drecord->visible=TRUE;conditional.refresh(d);
     check("already-hidden conditional output repairs a live renderer",!drecord->visible&&!IsWindowVisible(d->hwnd)&&!IsWindowVisible(parked));
-    d->layout=false;d->viewportKey="stale-conditional-viewport";drecord->visible=TRUE;conditional.refresh(d);
+    d->layout=false;d->lastViewport.reset();drecord->visible=TRUE;conditional.refresh(d);
     check("conditional denial precedes viewport and layout warmup",!drecord->visible&&!IsWindowVisible(d->hwnd)&&!IsWindowVisible(parked));
     const auto shows=drecord->showWrites;bool framesAccepted=true,framesQuiet=true;
     auto frame=[&](const char* mode,bool show=true,unsigned pid=0){

@@ -3,11 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {commonHidRuntimeProjection,commonHidRuntimeCases,commonHidRuntimeInputs,win5KeptWakeCase} from '../../lib/common_hid_runtime_fixture.mjs';
 import {validateInputResumeOptions,configureInputResumeAdapter,INPUT_RESUME_ID} from './input-resume-options.mjs';
+const parentExitId='fan.parent-exit-contract';
 /** Explicit candidate inputs for the existing simulator consumers. No shell expansion. */
 const routes = {
   'fan.runtime-connection': {
     runtimeRoot: '-RuntimeRoot', sharedRuntimeRoot: '-SharedRuntimeRoot', payloadRoot: '-HostPayloadRoot',
   },
+  [parentExitId]: {payloadRoot: '-HostPayloadRoot'},
   'lighting.signal-consumer': {
     runtimeRoot: '--runtime-root', sharedRuntimeRoot: '--shared-runtime-root', hcVersion: '--hc-version',
     hcProfile: '--hc-profile', lightingPayloadRoot: '--host-payload-root', expectedHelperSha256: '--expected-helper-sha256',
@@ -28,6 +30,13 @@ function runtimeFiles(root, manifest) {
   return [...new Set([manifest, ...names])].sort().map(name=>path.join(directory,name));
 }
 function artifactInputs(id,options) {
+ if(id===parentExitId){
+  if(!options.payloadRoot)return [];
+  const root=path.resolve(options.payloadRoot);
+  const required=['YeManFanHost.exe','YeManFanHost.dll','YeManFanBackend.dll','YeManFanHost.deps.json','YeManFanHost.runtimeconfig.json'];
+  const optional=['Microsoft.Windows.SDK.NET.dll','WinRT.Runtime.dll','YeManFanHost.json'];
+  return [...required.map(name=>path.join(root,name)),...optional.map(name=>path.join(root,name)).filter(file=>fs.existsSync(file))];
+ }
  const files=[];
  if(id==='fan.onex-lighting-coexistence'&&options.fanToolLoadPlan)files.push(path.resolve(options.fanToolLoadPlan));
  if(options.runtimeRoot)files.push(...runtimeFiles(options.runtimeRoot,'HandheldCompanion.runtime.json'));
@@ -95,15 +104,19 @@ export function configureCandidateAdapters(adapters, options = {},repoRoot=path.
     }
     const route = routes[adapter.id];
     if (!route) return adapter;
+    if(adapter.id===parentExitId&&options.payloadRoot?.includes('{outDir}')){
+      return {...adapter,blockedReason:'INVALID_PARENT_EXIT_PAYLOAD_ROOT'};
+    }
     const values = Object.entries(route).flatMap(([key, flag]) => {
       if(options[key]===undefined)return [];
+      if(adapter.id===parentExitId)return [flag,path.resolve(options[key])];
       if(['fan.open-side-effect-isolation','fan.onex-lighting-coexistence'].includes(adapter.id) && key==='runtimeRoot')return [flag,path.join(options[key],'HandheldCompanion.dll')];
       return [flag,options[key]];
     });
     return { ...adapter,
       artifactInputs: [...new Set([...(adapter.artifactInputs??[]),...artifactInputs(adapter.id,options)])],
       args: [...adapter.args, ...values],
-      evidenceInputs: [...new Set([...adapter.evidenceInputs, 'tools/ymcc_sim/global/candidate-options.mjs', 'tools/ymcc_sim/global/cli.mjs', 'tools/ymcc_sim/global/runner.mjs', 'tools/ymcc_sim/domains/global/global_domain.ps1'])],
+      evidenceInputs: [...new Set([...adapter.evidenceInputs, 'tools/ymcc_sim/global/candidate-options.mjs', 'tools/ymcc_sim/global/cli.mjs', 'tools/ymcc_sim/global/runner.mjs', 'tools/ymcc_sim/domains/global/global_domain.ps1', ...(adapter.id===parentExitId?['tools/ymcc_sim/global/host-process.ps1']:[])])],
     };
   });
 }

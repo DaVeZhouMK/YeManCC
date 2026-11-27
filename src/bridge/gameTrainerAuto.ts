@@ -1,9 +1,9 @@
 import { detectedGameName, isGameStatusCurrent, isCurrentGameTarget, subscribeGameTargetReadiness, type DetectedGame } from './gamedetect';
 import { subscribePolicyGameStatus } from './gamePolicyTarget';
-import { canAutoPrepareTrainer, cancelAutomaticTrainerPreparations, getGameTrainerState, getReadyGameTrainer, prepareGameTrainer, trainerTaskKey, refreshGameTrainerData, subscribeGameTrainerState } from './gameTrainer';
+import { canAutoPrepareTrainer, cancelAutomaticTrainerPreparations, getGameTrainerState, getReadyGameTrainer, prepareGameTrainer, readGameTrainerCatalogDueAt, trainerTaskKey, refreshGameTrainerData, subscribeGameTrainerState } from './gameTrainer';
 import { startGameTrainerRecovery } from './gameTrainerRecovery';
 import { getSettingsGeneration } from './settingsRepository';
-import { getUiSetting, loadUiSettings } from './uiSettings';
+import { getUiSetting, loadUiSettings, uiSettingsLoaded } from './uiSettings';
 import { subscribeTrainerLifecycle } from './trainerLifecycle';
 
 const catalogCheckKey = 'yeman.trainer.catalog-next-check.v1';
@@ -28,6 +28,7 @@ export function startGameTrainerAutoPrepare(): () => void {
   // The lifecycle adapter also gates Ready during WebView confirmation.
   let paused = true;
   let initialized = false;
+  let powerEpoch = 0, preferenceAttempt = -1, preferenceReadPending = false;
   let game: DetectedGame | null = null;
   let gameEpoch = 0;
   let catalogEpoch = 0;
@@ -35,20 +36,31 @@ export function startGameTrainerAutoPrepare(): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let catalogTimer: ReturnType<typeof setTimeout> | null = null;
   let catalogDueAt = catalogNextCheck(Date.now());
+  let restoreCatalogDueAt = true;
   let catalogOpenUntil = 0;
   const onWindowOpened = () => { catalogOpenUntil = Date.now() + catalogOpenGrace; };
   const scheduleCatalog = () => {
     if (catalogTimer !== null) clearTimeout(catalogTimer);
     catalogTimer = null;
     if (stopped || paused || !initialized || !getUiSetting('trainerAutoPrepare')) return;
-    catalogTimer = setTimeout(() => {
+    catalogTimer = setTimeout(async () => {
       catalogTimer = null;
       if (stopped || paused || !getUiSetting('trainerAutoPrepare')) return;
       if (Date.now() < Math.max(catalogDueAt, catalogOpenUntil)) { scheduleCatalog(); return; }
       const generation = getSettingsGeneration();
       const catalogObservation = catalogEpoch;
+      const catalogCurrent = () => !stopped && !paused && catalogObservation === catalogEpoch &&
+        getUiSetting('trainerAutoPrepare') && generation === getSettingsGeneration();
+      // Browser profile recovery may discard the localStorage schedule.
+      if (restoreCatalogDueAt) {
+        const dueAt = await readGameTrainerCatalogDueAt();
+        if (!catalogCurrent()) return;
+        restoreCatalogDueAt = false;
+        if (dueAt > Date.now()) { catalogDueAt = dueAt; scheduleCatalog(); return; }
+        if (Date.now() < catalogOpenUntil) { scheduleCatalog(); return; }
+      }
       void refreshGameTrainerData().then(result => {
-        if (stopped || paused || catalogObservation !== catalogEpoch || !getUiSetting('trainerAutoPrepare') || generation !== getSettingsGeneration()) return;
+        if (!catalogCurrent()) return;
         if (result.catalog?.updated && game && getGameTrainerState(detectedGameName(game), game.path)?.state === 'unavailable') {
           const instance = trainerTaskKey(detectedGameName(game), game.path) + '|' + game.pid + '|' + game.processCreated;
           retryAt.delete(instance); transientFailures.delete(instance); schedule();
@@ -92,6 +104,7 @@ export function startGameTrainerAutoPrepare(): () => void {
       sourceGeneration = generation;
       retryAt.clear(); transientFailures.clear();
       catalogDueAt = Date.now() + catalogStartupDelay;
+      restoreCatalogDueAt = false; // A switch of settings source is a fresh observation.
       try { localStorage.removeItem(catalogCheckKey); } catch { /* Advisory only. */ }
       scheduleCatalog();
     }
@@ -123,17 +136,37 @@ export function startGameTrainerAutoPrepare(): () => void {
       }).catch(() => { if (current()) retryTransient(instance); }).finally(() => { if (preparing === attempt) preparing = null; if (current()) schedule(); });
     }, delay);
   };
+  const initializePreferences = () => {
+    if (stopped || paused || initialized) return;
+    if (uiSettingsLoaded()) { initialized = true; return; }
+    if (preferenceReadPending || preferenceAttempt === powerEpoch) return;
+    preferenceAttempt = powerEpoch;
+    preferenceReadPending = true;
+    void loadUiSettings().then(() => {
+      if (stopped) return;
+      initialized = true;
+      schedule(); scheduleCatalog();
+    }).catch(() => {
+      // Until the preferences are known, leave automatic work disarmed.
+    }).finally(() => {
+      preferenceReadPending = false;
+      if (initialized || preferenceAttempt === powerEpoch || stopped || paused) return;
+      // A confirmed Ready arrived while the old read was still settling.
+      initializePreferences();
+      if (initialized) { schedule(); scheduleCatalog(); }
+    });
+  };
   const stopRecovery = startGameTrainerRecovery();
-  const stopLifecycle = subscribeTrainerLifecycle(event => {
-    paused = event !== 'ipc:power.resumed';
+  const stopLifecycle = subscribeTrainerLifecycle(() => {
+    paused = true;
+    ++powerEpoch;
     ++gameEpoch;
     ++catalogEpoch;
     if (timer !== null) clearTimeout(timer);
     if (catalogTimer !== null) clearTimeout(catalogTimer);
     timer = catalogTimer = null;
     retirePreparation();
-    if (event === 'ipc:power.resumed') { schedule(); scheduleCatalog(); }
-  }, () => { if (paused) { paused = false; schedule(); scheduleCatalog(); } });
+  }, () => { if (paused) { paused = false; initializePreferences(); schedule(); scheduleCatalog(); } });
   const stopGame = subscribePolicyGameStatus((next) => {
     const changed = !!game !== !!next || game && next && (game.pid !== next.pid || game.processCreated !== next.processCreated || game.identityGeneration !== next.identityGeneration || trainerTaskKey(detectedGameName(game), game.path) !== trainerTaskKey(detectedGameName(next), next.path));
     if (changed) { gameEpoch++; retirePreparation(); }
@@ -152,7 +185,6 @@ export function startGameTrainerAutoPrepare(): () => void {
   });
   window.addEventListener('ui-settings:changed', onPreferenceChange);
   for (const event of catalogWindowEvents) window.addEventListener(event, onWindowOpened);
-  void loadUiSettings().then(() => { initialized = true; schedule(); scheduleCatalog(); }).catch(() => { /* Unreadable preferences do not start automatic network work. */ });
   return () => {
     stopped = true;
     if (timer !== null) clearTimeout(timer);

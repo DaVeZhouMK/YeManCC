@@ -1323,7 +1323,7 @@ static void appendNativeLifecycleLog(const char* name,const json& row){
 static bool sgStaticScanEnabled(const json&){return false;}
 static void sgStaticScanPreference(bool){effect("sleep");}
 // External wallpaper owner is an inert port in this settings-only consumer.
-static void steamWallpaperForegroundPreference(const json&){effect("wallpaper-preference");}
+static void steamWallpaperForegroundPreference(bool=false){effect("wallpaper-preference");}
 static void steamControllerCursorConfigure(const json&){effect("steam-controller-cursor");}
 static void steamMenuGameConfigure(const json&){effect("steam-menu-game");}
 static bool fxSoundRecoveryEnabled(){return false;}

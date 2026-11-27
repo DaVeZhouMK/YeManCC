@@ -15,6 +15,7 @@
 #undef CloseHandle
 #undef TerminateProcess
 #include <map>
+#include <deque>
 #include <charconv>
 #include <fstream>
 #include <string_view>
@@ -23,6 +24,7 @@
 #include "auto_close_wait.h"
 #include "log_snapshot_state.h"
 #include "input_host_shared_power.h"
+#include "sleep_power_dispatch.h"
 #include "virtual_recovery_intent.h"
 #ifdef YMCC_EXIT_SHUTDOWN_ORDER
 @@VISIBILITY_TYPE@@
@@ -85,7 +87,28 @@ static DWORD memoryMessageWait(DWORD count,const HANDLE* handles,DWORD,DWORD,DWO
 #define MsgWaitForMultipleObjectsEx memoryMessageWait
 #include "exit_cleanup_wait.h"
 #undef MsgWaitForMultipleObjectsEx
+#ifdef YMCC_EXIT_INFLIGHT
+struct InputHostLateHideEpisodeKey;
+#endif
 @@EXIT_GLOBALS@@
+static ymcc::sleeppower::Dispatch g_sleepPowerDispatch;
+// Supply deterministic reader facts to the original capture/current functions.
+// The public reader closes on exit; the old owner's return uses the exact closing grant.
+static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,std::uint32_t bytes) noexcept {
+    using namespace ymcc::sleeppower;
+    if(!out||bytes!=sizeof(*out)||g_exitRequested.load(std::memory_order_acquire))return 0;
+    SharedPowerV1 power;
+    power.generation=g_powerGeneration.load(std::memory_order_acquire);
+    power.publicationRevision=1;
+    power.observedNotificationSequence=g_sleepPowerDispatch.observedSequence();
+    power.suspendSerial=g_sharedPowerSuspendSerial.load(std::memory_order_acquire);
+    power.phase=static_cast<std::uint32_t>(g_powerLifecycle.load(std::memory_order_acquire));
+    power.flags=kKnown|(power.phase==0 ? kHardwareAllowed : 0U)|
+        (g_sleepPowerDispatch.pendingSuspend() ? kNotificationPending : 0U);
+    *out=power;
+    return 1;
+}
+@@RETURN_POWER@@
 static std::vector<std::string> memoryLeaves;
 static std::atomic<unsigned> readyPosts{0};static unsigned captureStopCalls=0;
 // Test-only clock changes only explicit production GetTickCount64/Sleep ports;
@@ -129,7 +152,11 @@ static LRESULT memoryDispatch(const MSG*){return 0;}
 static HRESULT memoryCoInitialize(LPVOID,DWORD){return S_OK;}
 static void memoryCoUninitialize(){}
 static void leaf(const char* name){memoryLeaves.emplace_back(name);}
-struct NamedOwner {const char* name;void stop(){leaf(name);}void shutdown(){leaf(name);}void finishFactReadsForExit(){leaf("steam-fact-reads-memory");}};
+struct NamedOwner {const char* name;void stop(){leaf(name);}void shutdown(){leaf(name);}void finishFactReadsForExit(){leaf("steam-fact-reads-memory");}
+#ifdef YMCC_EXIT_INFLIGHT
+    void cancel(){leaf(name);}void requestExitFence(){leaf("decky-exit-fence-memory");}
+#endif
+};
 static NamedOwner g_optiCatalogStartup{"opti-catalog"},g_deckySidebarRuntime{"decky"},g_steamSettingsObserver{"steam-settings"},g_steamModeObserver{"steam-mode"},g_steamCssGuard{"steam-css-guard"},g_steamCssUse{"steam-css-use"};
 static NamedOwner g_steamCommandCoordinator{"steam-command-coordinator-memory"};
 // External consumers are unarmed in this fixture. These callbacks cannot
@@ -138,6 +165,12 @@ static void steamMenuGameShutdown(){leaf("steam-game-menu-memory");}
 static void steamSourceFactoryShutdown(){leaf("steam-source-factory-memory");}
 static void physicalFeedbackExitCleanup(bool stopOwned){leaf(stopOwned?"physical-feedback-stop-memory":"physical-feedback-observe-memory");}
 static void finishSharedNativeRemotePower(){leaf("shared-remote-power-memory");}
+// This local-owner fixture never publishes a remote power runtime or offer.
+struct UnarmedRemotePowerRuntime {void* providerSlot=nullptr;void*& provider(){return providerSlot;}};
+struct UnarmedRemotePowerGate {UnarmedRemotePowerRuntime* published(){return nullptr;}};
+struct UnarmedRemotePowerOffers {void reset(void** provider){need(provider==nullptr,"remote power provider unarmed");}};
+static UnarmedRemotePowerGate g_sharedNativeRemotePowerRuntimeGate;
+static UnarmedRemotePowerOffers g_inputHostRemotePowerOffers;
 static bool finishSharedMediaDownloadsForExit(){leaf("shared-media-no-armed-downloads-memory");return true;}
 namespace ymcc::steamdocuments::finite {
 struct NoDocumentOwner {
@@ -161,7 +194,17 @@ struct Watcher{};static std::map<int,Watcher*> g_watchers;
 static bool stopWatcher(Watcher*,DWORD){leaf("watcher");return true;}
 static void recoverySnapSetFanHandoffPending(bool){leaf("fan-handoff-snapshot");}
 static void fanLeaseKeepaliveShutdown(){leaf("fan-keepalive");}
-static int fanHostCleanupForAppExit(){leaf("fan-exit-handoff");return 0;}
+#ifdef YMCC_EXIT_INFLIGHT
+static HANDLE fixtureAtFan=nullptr,fixtureResumeExit=nullptr;
+#endif
+static int fanHostCleanupForAppExit(){
+    leaf("fan-exit-handoff");
+#ifdef YMCC_EXIT_INFLIGHT
+    need(SetEvent(fixtureAtFan)!=FALSE,"observe worker at fan handoff before controller cleanup");
+    need(::WaitForSingleObject(fixtureResumeExit,5000)==WAIT_OBJECT_0,"bounded in-flight exit handoff");
+#endif
+    return 0;
+}
 static const char* fanExitHandoffName(int){return "explicit-memory-noncontroller-handoff";}
 static void appendFanLifecycleLog(const char*,const json&){}
 static void oemVendorStackRestore(const char*){leaf("OEM-memory-not-physical-proof");}
@@ -180,7 +223,11 @@ static void poolStop(DWORD){leaf("worker-pool");}
 static void stopTdpDaemonForExit(){leaf("TDP");}
 static void stopTopMonitorForExit(DWORD){leaf("top-monitor");}
 static bool sgCleanupBeforeExit(bool){leaf("sleep-cleanup");return true;}
+#ifdef YMCC_EXIT_INFLIGHT
+static void inputHostRaiseExitFence(const char*);
+#else
 static void inputHostRaiseExitFence(const char*){leaf("exit-fence-already-raised-before-fixture");}
+#endif
 static void recoverySnapSetExitIntent(){leaf("exit-intent-already-raised");}
 // Typed memory leaves for current callers; these grant no device/producer proof.
 // Post-hide writer is explicitly unarmed in this original local-owner fixture.
@@ -210,6 +257,48 @@ static ymcc::captureLifecycle::StopReceipt inputCaptureStop(bool,DWORD workerWai
     receipt.workerExited=captureWorkerExited;receipt.workerHandleClosed=captureHandleClosed;
     receipt.classify();return receipt;
 }
+#ifdef YMCC_EXIT_INFLIGHT
+static void steamControllerCursorShutdown(){leaf("controller-cursor-memory");}
+static void cpuUvTrialStop(const char*){leaf("CPU-UV-memory");}
+static void focusClearSession(){leaf("focus-session-memory");}
+static void physicalReleaseWindowCancelBorrow(const char*){leaf("no-physical-borrow-armed");}
+static void closeScreenTouchpadsForExit(const char*){leaf("screen-pads-memory");}
+static void rogEnsureXboxFaceEnabled(const char*){leaf("ROG-face-memory");}
+namespace ymcc::screenpads {static void quiesceForOwner(){leaf("screen-pads-quiesce-memory");}}
+namespace ymcc::batterycharge {static void seal(){leaf("battery-seal-memory");}}
+struct InertWebview {void put_IsVisible(BOOL){need(false,"WebView unarmed");}};
+static InertWebview* g_ctrl=nullptr;
+static bool g_trayActive=false;
+static int g_nid=0;
+constexpr unsigned NIM_DELETE=2;
+static void Shell_NotifyIconW(unsigned,const int*){need(false,"tray unarmed");}
+struct InertTaskbar {HRESULT HrInit(){return E_FAIL;}void DeleteTab(HWND){need(false,"taskbar unarmed");}};
+using ITaskbarList3=InertTaskbar;
+template<class T> struct ComPtr {T* operator->(){return nullptr;}};
+static int CLSID_TaskbarList=0;
+static HRESULT fixtureCoCreateInstance(int,void*,DWORD,void*){return E_FAIL;}
+static BOOL fixtureShowWindow(HWND,int){return TRUE;}
+static UINT_PTR fixtureSetTimer(HWND,UINT_PTR,UINT,TIMERPROC){return 1;}
+#undef IID_PPV_ARGS
+#define IID_PPV_ARGS(a) (a)
+#define CoCreateInstance fixtureCoCreateInstance
+#define ShowWindow fixtureShowWindow
+#define SetTimer fixtureSetTimer
+@@EXIT_INFLIGHT_WATCHDOG@@
+// Only the two unbound recovery notifications in this case are supplied.
+namespace ymcc::inputHost::queuedPlayerStart {
+static std::string bind(const std::string& reason){
+    need(reason=="wake-rearm"||reason=="late-hide-after-source-return","unbound recovery test input only");
+    return reason;
+}}
+static bool msiNativeRearIntentCurrent(const std::string&){return false;}
+static bool msiNativeForegroundReadyWorkCurrent(const MsiNativeForegroundReadyWork&) noexcept{return false;}
+static bool inputHostLateHideReuseQueuedPublication(InputHostLateHidePublication*,bool){need(false,"no MSI publication armed");return false;}
+static void inputHostLateHideCommitQueuedPublication(InputHostLateHidePublication*){need(false,"no MSI publication armed");}
+static void inputHostSwitchAuditEnqueue(const std::string&,std::size_t){}
+static bool inputHostQueueLifecycleWorkInternal(const char*,bool*,InputHostLateHidePublication* = nullptr,
+    const std::shared_ptr<ymcc::inputHost::sharedPower::Scope>& = {},const std::optional<MsiNativeForegroundReadyWork>& = {});
+#endif
 static bool inputCaptureExitProducerOwnershipReleased() noexcept;
 static bool inputHostTryOrdinaryStopForExit();
 static bool inputHostRetireLocalResourcesForExit();
@@ -234,12 +323,12 @@ namespace ymcc::inputHost::targetReturnRuntime {
 struct FixtureCurrentProofPort {std::vector<ymcc::targetReturn::Origin> proven;};
 static FixtureCurrentProofPort state;
 }
-static bool inputHostTargetReturnAfterRuntimeQuarantineLocked(const std::string&,std::uint64_t){
+static bool inputHostTargetReturnAfterRuntimeQuarantineLocked(const std::string&,std::uint64_t,const InputHostRuntimeReturnPower&){
     throw std::runtime_error("runtime target-return history recovery entered outside the local-retirement fixture boundary");
 }
 static bool domainLogEnabled(const char*){return false;}
 static bool inputHostTargetReturnRuntimeKnownTargetLocked(const std::string&,std::uint64_t){return false;} // No target record is populated in this fixture.
-static bool inputHostTargetReturnBeforeRuntimeRestoreLocked(const std::string&,std::uint64_t){return false;} // Never synthesize target-return proof.
+static bool inputHostTargetReturnBeforeRuntimeRestoreLocked(const std::string&,std::uint64_t,const InputHostRuntimeReturnPower&){return false;} // Never synthesize target-return proof.
 static bool inputHostTargetReturnSdRestorePendingLocked(){return false;}
 static bool inputHostRuntimeMsiReturnRequiredLocked(){need(!ports.msi,"MSI return is outside this local-owner fixture");return false;}
 static bool inputHostRuntimeMsiReturnPrepareLocked(){return false;}
@@ -248,6 +337,11 @@ static bool inputHostRuntimeMsiReturnProofCurrentLocked(){return false;}
 #define hidHideCaptureVisibilitySnapshot fixtureObserveVisibilityReadback
 #endif
 @@PRODUCTION@@
+#ifdef YMCC_EXIT_INFLIGHT
+#undef CoCreateInstance
+#undef ShowWindow
+#undef SetTimer
+#endif
 #ifdef YMCC_EXIT_SHUTDOWN_ORDER
 #undef hidHideCaptureVisibilitySnapshot
 #endif
@@ -271,6 +365,16 @@ static std::wstring managedChildEnv(const wchar_t* name){
     need(length<32768,"managed child environment too long");return length?std::wstring(value,length):std::wstring{};
 }
 static bool managedChildRequested(){return !managedChildEnv(L"YMCC_NATIVE_EXIT_MANAGED_PROGRAM").empty();}
+static DWORD observePrivateChildJobZero(HANDLE job){
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION account{};
+    const auto began=::GetTickCount64();
+    do{
+        need(QueryInformationJobObject(job,JobObjectBasicAccountingInformation,&account,sizeof(account),nullptr)!=FALSE,"private subtree accounting");
+        if(account.ActiveProcesses==0)return 0;
+        ::Sleep(10);
+    }while(::GetTickCount64()-began<1000);
+    return account.ActiveProcesses;
+}
 static void configureManagedChild(std::wstring& application,std::wstring& command){
     const auto program=managedChildEnv(L"YMCC_NATIVE_EXIT_MANAGED_PROGRAM");if(program.empty())return;
     const auto assembly=managedChildEnv(L"YMCC_NATIVE_EXIT_MANAGED_ASSEMBLY"),proof=managedChildEnv(L"YMCC_NATIVE_EXIT_MANAGED_PROOF"),nonce=managedChildEnv(L"YMCC_NATIVE_EXIT_MANAGED_NONCE");
@@ -429,6 +533,7 @@ struct ScopedHostHold {
 struct ScopedPipeHold {
     HANDLE entered=nullptr,release=nullptr,thread=nullptr,source=nullptr;
     ymcc::inputHost::pipeTransport::Result result{};
+    unsigned char firstByte=0;
     explicit ScopedPipeHold(HANDLE pipe):source(pipe){
         entered=CreateEventW(nullptr,TRUE,FALSE,nullptr);release=CreateEventW(nullptr,TRUE,FALSE,nullptr);
         need(entered&&release,"create pipe-holder test events");
@@ -439,6 +544,7 @@ struct ScopedPipeHold {
     static DWORD WINAPI run(LPVOID context){
         auto* self=static_cast<ScopedPipeHold*>(context);unsigned char bytes[8]{};
         self->result=ymcc::inputHost::pipeTransport::processRuntime().run(self->source,ymcc::inputHost::pipeTransport::Kind::Read,bytes,static_cast<DWORD>(sizeof(bytes)),0);
+        self->firstByte=bytes[0];
         return 0;
     }
     void finish(){
@@ -455,6 +561,40 @@ struct ScopedPipeHold {
         memoryApi::entered=nullptr;memoryApi::release=nullptr;
     }
 };
+#ifdef YMCC_EXIT_INFLIGHT
+static json observeExitInflight(bool omitFence,HANDLE pipe){
+    need(!g_exitRequested&&!inputHostExitFenceRaised(),"exit entry starts open, not pre-seeded");
+    const auto began=::GetTickCount64();
+    need(inputHostQueueLifecycleWork("wake-rearm")&&g_inputHostLifecycleWorkQueue.size()==1,"actual work queued before exit");
+    ScopedPipeHold holder(pipe);
+    auto& runtime=ymcc::inputHost::pipeTransport::processRuntime();
+    need(!runtime.snapshot().available,"read owns Runtime before exit avoids an after-the-fact read");
+    if(omitFence)fixtureBeginAsyncExitWithoutFence(g_hwnd,0,"fixture-exit-inflight");
+    else beginAsyncExit(g_hwnd,0,"fixture-exit-inflight");
+    need(::WaitForSingleObject(fixtureAtFan,2000)==WAIT_OBJECT_0,"original worker reached handoff");
+    need(g_exitRequested&&!g_exitSessionId.empty()&&readyPosts.load()==0,"real exit entry has identity before releasing delayed I/O");
+    const auto beforeCompletion=g_inputHostLifecycleWorkQueue.size();
+    const bool fenceAtCompletion=inputHostExitFenceRaised();
+    holder.finish();
+    need(holder.result.admitted&&holder.result.ok&&holder.result.terminal&&holder.firstByte==0x6b,"read admitted before exit actually completed after entry");
+    const bool lateAccepted=inputHostQueueLifecycleWork("late-hide-after-source-return");
+    const auto afterCompletion=g_inputHostLifecycleWorkQueue.size();
+    const auto refusals=g_inputHostExitFenceRefusals.load();
+    const bool policyAccepted=fenceAtCompletion&&beforeCompletion==0&&!lateAccepted&&afterCompletion==0&&refusals==1;
+    if(omitFence){
+        need(!policyAccepted&&!fenceAtCompletion&&beforeCompletion==1&&lateAccepted&&afterCompletion==2&&refusals==0,"omitting only the entry fence must leave old work and admit late work");
+        // No queued recovery is dispatched in this fixture. Restore only after
+        // observing the broken policy so the same worker can retire safely.
+        inputHostRaiseExitFence("fixture-restore-after-negative-observed");
+    }else need(policyAccepted,"real exit drops queued work and refuses late recovery");
+    need(g_inputHostLifecycleWorkQueue.empty()&&!g_inputHostLifecycleWorkRequested,"no queued recovery survives before original worker proceeds");
+    need(SetEvent(fixtureResumeExit)!=FALSE,"release original worker after late completion observation");
+    return {{"exitSessionId",g_exitSessionId},{"fenceAtCompletion",fenceAtCompletion},
+      {"queueBeforeCompletion",beforeCompletion},{"queueAfterCompletion",afterCompletion},{"lateWorkAdmitted",lateAccepted},
+      {"refusals",refusals},{"originalEntryPolicyAccepted",policyAccepted},{"expectedOmissionRejected",omitFence&&!policyAccepted},
+      {"completionAfterEntry",true},{"kernelWire",false},{"dispatchExecuted",false},{"observationWallMs",::GetTickCount64()-began}};
+}
+#endif
 static json r8BusyPipeCase(Child& child,HANDLE processOracle,HANDLE primaryOracle,HANDLE pipe){
     const HANDLE originalProcess=child.process,originalPrimary=child.primary,releaseEvent=child.release,job=child.job;
     need(inputCaptureAwaitStopForExit()&&inputCaptureExitProducerOwnershipReleased(),"actual producer getter ready for independent-owner test");
@@ -633,7 +773,14 @@ int wmain(int argc,wchar_t** argv){
     try{
         need(argc==2,"explicit current scenario required");const std::wstring scenario=argv[1];
         if(scenario==L"coordinator-observer-close"){result=coordinatorObserverCloseCase();std::cout<<result.dump()<<"\n";return 0;}
-        const bool protectedDebt=scenario==L"protected-primary-pipe",healthy=scenario==L"healthy-ordinary";
+        const bool protectedDebt=scenario==L"protected-primary-pipe";
+#ifdef YMCC_EXIT_INFLIGHT
+        const bool omitFence=scenario==L"exit-inflight-no-fence-control";
+        need(omitFence||scenario==L"exit-inflight-recovery","unknown in-flight scenario");
+        const bool healthy=true;
+#else
+        const bool healthy=scenario==L"healthy-ordinary";
+#endif
         bool shutdownRejected=false;
 #ifdef YMCC_EXIT_SHUTDOWN_ORDER
         fixtureLateRetire=scenario==L"shutdown-late-retire-control";
@@ -663,7 +810,10 @@ int wmain(int argc,wchar_t** argv){
 #ifdef YMCC_EXIT_SHUTDOWN_ORDER
         fixtureOriginalProcess=originalProcess;fixtureOriginalPipe=pipe;g_inputHostPipeConnected=true;
 #endif
-        g_exitSessionId="native-exit-owned-current";g_exitRequested=true;g_inputHostExitFence=true;g_captureExitReleased=false;
+        g_captureExitReleased=false;
+#ifndef YMCC_EXIT_INFLIGHT
+        g_exitSessionId="native-exit-owned-current";g_exitRequested=true;g_inputHostExitFence=true;
+#endif
         g_inputCaptureStop=true;g_captureGeneration=7;g_captureMmTimerRetired=true;
         g_hwnd=reinterpret_cast<HWND>(static_cast<std::uintptr_t>(1));
         if(scenario==L"busy-pipe-independent-force"){
@@ -679,7 +829,13 @@ int wmain(int argc,wchar_t** argv){
             need(!inputHostExitLocalOwnershipReleased()&&readyPosts.load()==0&&!g_inputHostExitForceSpent,"managed debt cannot be returned or ready before native owner");
             need(g_inputHostProcess==originalProcess&&g_inputHostPrimaryThread==originalPrimary&&g_inputHostServerPipe==pipe,"same actual managed lifetime handed to original native owner");
         }
+#ifdef YMCC_EXIT_INFLIGHT
+        fixtureAtFan=CreateEventW(nullptr,TRUE,FALSE,nullptr);fixtureResumeExit=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+        need(fixtureAtFan&&fixtureResumeExit,"private exit worker observation events");
+        const auto inflight=observeExitInflight(omitFence,pipe);
+#else
         need(tryStartExitCleanupWorker(g_hwnd),"actual cleanup worker creation");
+#endif
         HANDLE cleanupOracle=nullptr;need(DuplicateHandle(GetCurrentProcess(),g_exitCleanupThread,GetCurrentProcess(),&cleanupOracle,0,FALSE,DUPLICATE_SAME_ACCESS)!=FALSE,"cleanup observation duplicate");
         json beforeRelief=nullptr;
         if(protectedDebt){
@@ -722,7 +878,11 @@ int wmain(int argc,wchar_t** argv){
         need(forceReceipts==(healthy?0u:1u),"force budget not expected zero/once");
         const auto lastOwned=logData("input-host-exit-ownership");
         const auto managedProof=managedMode?result.at("managedRetainedOwnerProof"):json(nullptr);
+#ifdef YMCC_EXIT_INFLIGHT
+        const char* scenarioName=omitFence?"exit-inflight-no-fence-control":"exit-inflight-recovery";
+#else
         const char* scenarioName=healthy?"healthy-ordinary":protectedDebt?"protected-primary-pipe":"unprotected-uncooperative";
+#endif
 #ifdef YMCC_EXIT_SHUTDOWN_ORDER
         if(shutdownRejected)scenarioName=fixtureLateRetire?"shutdown-late-retire-control":"shutdown-rejected-readback";
 #endif
@@ -760,12 +920,19 @@ int wmain(int argc,wchar_t** argv){
             {"peerEofObserved",false},{"physicalAcceptance",false}};
 #endif
         if(managedMode){
-            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION account{};
-            const auto jobWaitStarted=::GetTickCount64();
-            do{need(QueryInformationJobObject(child.job,JobObjectBasicAccountingInformation,&account,sizeof(account),nullptr)!=FALSE,"managed subtree accounting");if(account.ActiveProcesses==0)break;::Sleep(10);}while(::GetTickCount64()-jobWaitStarted<1000);
-            need(account.ActiveProcesses==0,"managed subtree actually gone before observation close");
-            result["managedRetainedOwnerHandoff"]={{"proof",managedProof},{"originalTerminalBlockExecuted",true},{"fixtureGateOpenedBeforeRetirement",false},{"sameOwnedProcessAndPrimary",true},{"nativeOriginalExitOwnerExecuted",true},{"jobActiveProcessesBeforeClose",account.ActiveProcesses},{"forcedOnce",forceReceipts==1},{"fullHostOrSdkAccepted",false}};
+            const auto active=observePrivateChildJobZero(child.job);
+            need(active==0,"managed subtree actually gone before observation close");
+            result["managedRetainedOwnerHandoff"]={{"proof",managedProof},{"originalTerminalBlockExecuted",true},{"fixtureGateOpenedBeforeRetirement",false},{"sameOwnedProcessAndPrimary",true},{"nativeOriginalExitOwnerExecuted",true},{"jobActiveProcessesBeforeClose",active},{"forcedOnce",forceReceipts==1},{"fullHostOrSdkAccepted",false}};
         }
+#ifdef YMCC_EXIT_INFLIGHT
+        const auto active=observePrivateChildJobZero(child.job);
+        need(active==0,"private child Job naturally empty before close");
+        need(forceReceipts==0&&!g_inputHostExitForceSpent,"ordinary exit never spends force allowance");
+        const HANDLE atFan=fixtureAtFan,resume=fixtureResumeExit;
+        need(CloseHandle(atFan)&&CloseHandle(resume)&&!open(atFan)&&!open(resume),"worker observation events returned after worker joined");
+        result["exitInflight"]=inflight;
+        result["exitInflight"]["activePrivateChildProcessesBeforeClose"]=active;
+#endif
         // Product already closed originals. Fixture releases only independent
         // observation duplicates and its unsignaled test event, after joining.
         child.process=nullptr;child.primary=nullptr;

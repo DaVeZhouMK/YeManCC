@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {run,sha,unique,REAL_MONITOR_RUNTIME_LIMIT as LIMIT,verify,nativeTools} from '../../../fixtures/radial_private/scope.mjs';
+import {run,sha,unique,REAL_MONITOR_RUNTIME_LIMIT as LIMIT,verify,nativeTools,freshReviewedOutput} from '../../../fixtures/radial_private/scope.mjs';
 import {
  MODULE,REAL_RENDERER_ID,ORIGINAL_ENTRIES,FIXED_NODE,
  PRODUCT_RENDERER_INPUTS,RENDERER_INPUTS,RENDERER_COMPONENT,rendererReviewBinding,
@@ -243,15 +243,19 @@ function reviewedPrepared(options){
 }
 
 export async function runRealRendererComponent(options){
- need(key(process.execPath)===key(FIXED_NODE),'PINNED_NODE_REQUIRED');const root=freshEvidence(options.evidenceDir),sources=repoPins();let attempted=false;
+ need(key(process.execPath)===key(FIXED_NODE),'PINNED_NODE_REQUIRED');
+ const evidence=absolute(options.evidenceDir,'EXPLICIT_EVIDENCE_ROOT_REQUIRED');
+ need(inside(EVIDENCE,evidence)&&key(evidence)!==key(EVIDENCE),'COMPONENT_CORE_EVIDENCE_SUBDIRECTORY_REQUIRED');
+ const root=freshReviewedOutput(evidence,[REPO,options.preparedRoot??process.env.YMCC_MONITOR_RENDERER_PREPARED_ROOT,rendererReviewBinding().file]),sources=repoPins();let attempted=false;
  const base={schemaVersion:1,id:REAL_RENDERER_ID,lifecycleComponent:RENDERER_COMPONENT,sourceHashes:sources,fullPersistentAcceptance:false,fullPersistentRecoveryAcceptance:false,fullProductAcceptance:false,normalYmccStarted:false,operatingSystemSleep:false};
  try{
-  const input=reviewedPrepared(options),{prepared,runtime}=input,p=prepared.builds[0].preparedOut,r=prepared.builds[1].preparedOut;
-  attempted=true;await original(root,'p-execute',ORIGINAL_ENTRIES[0],['--out',p,'--runtime',runtime.runtimeRoot,'--runtime-version',runtime.runtimeVersion]);
+  const input=reviewedPrepared(options),{prepared,runtime}=input;
+  const [preparedP,preparedR]=prepared.builds.map(build=>build.preparedOut),p=path.join(root,'p'),r=path.join(root,'r');
+  attempted=true;await original(root,'p-execute',ORIGINAL_ENTRIES[0],['--out',preparedP,'--execution-out',p,'--runtime',runtime.runtimeRoot,'--runtime-version',runtime.runtimeVersion]);
   const positiveState=read(path.join(p,'REAL-RENDERER-EXECUTE-PROCESS.json'));
   need(positiveState.status==='ACTUAL_REAL_RENDERER_NINE_CONTROLLERS_RETIRED_LATE_CALLBACKS_AND_NATURAL_BROWSER_EXIT_VERIFIED','ORIGINAL_POSITIVE_EXECUTION_NOT_ACCEPTED');
   const positive=validateRealRendererResult(read(path.join(p,'real-webview-result.json')),read(path.join(p,'real-webview-private-launch.json')),{runtimeVersion:runtime.runtimeVersion,runtimeRoot:runtime.runtimeRoot});
-  await original(root,'r-execute',ORIGINAL_ENTRIES[1],['--out',r,'--runtime',runtime.runtimeRoot,'--runtime-version',runtime.runtimeVersion]);
+  await original(root,'r-execute',ORIGINAL_ENTRIES[1],['--out',preparedR,'--execution-out',r,'--runtime',runtime.runtimeRoot,'--runtime-version',runtime.runtimeVersion]);
   const negativeState=read(path.join(r,'REAL-RENDERER-NEGATIVE-EXECUTE-PROCESS.json'));
   need(negativeState.status==='EXACT_PRODUCT_RENDERER_FRAME_ADMISSION_NEGATIVE_FAILS_AT_ACTUAL_VUE_PRESENTATION','ORIGINAL_NEGATIVE_EXECUTION_NOT_ACCEPTED');
   assert.equal(negativeState.execution.code,2);assert.equal(negativeState.execution.signal,null);assert.equal(negativeState.execution.killed,false);

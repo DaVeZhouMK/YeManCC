@@ -9,9 +9,11 @@ const BINDINGS=`
 const sibling = (name) => () => { calls.push(name); };
 const stopPort = (name) => ({stop:sibling(name)});
 let backgroundPresentationDisposed = false, resumeLifecycleActive = true;
-let videoPowerProbeGeneration = 0, powerChangeRestoreGeneration = 0;
+let videoPowerProbeGeneration = 0;
 let videoPowerProbeTimer = null, dynamicBackgroundNoGameTimer = null, resumeRetryTimer = null;
 let powerChangeRestoreTimer = null, sleepPlanOptimizationTimer = null, resumeVideoTimer = null;
+let powerChangeRestore = null, powerChangeRestoreScope = null;
+const clearPowerChangeRestoreTimer = () => { powerChangeRestoreTimer = null; };
 let sleepPlanOptimizationRequest = null;
 const stopUndervoltRuntime = sibling('stopUndervoltRuntime');
 const cancelBootModeLaunches = sibling('cancelBootModeLaunches');
@@ -19,6 +21,7 @@ const cancelBootModeDeferredMouse = sibling('cancelBootModeDeferredMouse');
 let stopBootModeReceipts = sibling('stopBootModeReceipts');
 let uiPowerReconciliation = stopPort('uiPowerReconciliation');
 let stopSharedPowerWatch = sibling('stopSharedPowerWatch');
+let stopSharedFanWakeWatch = sibling('stopSharedFanWakeWatch');
 let updatePredownloadHost = stopPort('updatePredownloadHost');
 let controllerShortcutRuntime = stopPort('controllerShortcutRuntime');
 let stopWallpaperPower = sibling('stopWallpaperPower');
@@ -28,6 +31,8 @@ let radialHost = stopPort('radialHost');
 let stopDeckySafetyNotifications = sibling('stopDeckySafetyNotifications');
 let deckyMirrorHost = stopPort('deckyMirrorHost');
 let stopAiFanService = sibling('stopAiFanService');
+let stopResumeGameReadinessWatch = sibling('stopResumeGameReadinessWatch');
+const fanWakeRequests = {clear:sibling('fanWakeRequests.clear')};
 const resumeQueue = {invalidate:sibling('resumeQueue')};
 const sleepPlanOptimizationQueue = {invalidate:sibling('sleepPlanOptimizationQueue')};
 let sleepPlanOptimizationConfirmation = stopPort('sleepPlanOptimizationConfirmation');
@@ -43,7 +48,7 @@ let stopUiVisibility = sibling('stopUiVisibility');
 const stopGamepad = sibling('stopGamepad'), stopGyroTelemetry = sibling('stopGyroTelemetry');
 const stopAcWatch = sibling('stopAcWatch'), stopPowerSourceWatch = sibling('stopPowerSourceWatch');
 let stopForegroundPowerSource = sibling('stopForegroundPowerSource');
-const stopResumeWatch = sibling('stopResumeWatch'), stopFanResumeWatch = sibling('stopFanResumeWatch');
+const stopFanResumeWatch = sibling('stopFanResumeWatch');
 const stopSchemeWatch = sibling('stopSchemeWatch');
 let stopStartupPerformanceWatch = sibling('stopStartupPerformanceWatch');
 const inertEvent = () => {};
@@ -55,6 +60,7 @@ const onBackgroundWindowHidden = inertEvent, onBackgroundWindowShown = inertEven
 const onBackgroundVideoPauseChanged = inertEvent, onFanPhysicalSuspending = inertEvent, onFanGuardState = inertEvent;
 const onUiSettingsLoaded = inertEvent, onDynamicBackgroundSettingChanged = inertEvent, onDynamicBackgroundLoaded = inertEvent;
 const onGameRulesChanged = inertEvent, onBackgroundVisibilityChange = inertEvent;
+const onDynamicBackgroundWaiting = inertEvent, onBackgroundFocusChanged = inertEvent, onBackgroundWindowActivation = inertEvent;
 `;
 
 export function projectAppUnmount(bytes,{parse},ts,rendererEntry){

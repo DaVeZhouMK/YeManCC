@@ -22,7 +22,7 @@ import { onSharedPowerLifecycle } from './bridge/powerLifecycleState';
 export interface ScheduledTaskOptions {
   pauseWhenHidden?: boolean;
   runImmediately?: boolean;
-  /** Read-only work must discard its own result when the signal is aborted. */
+  /** Read-only work must discard its own result after power or task retirement. */
   releaseReadOnPowerChange?: boolean;
 }
 
@@ -40,7 +40,7 @@ const tasks = new Map<string, ScheduledTask>();
 let timer: number | null = null;
 let pumping = false;
 let powerReady = false;
-let activeRead: AbortController | null = null;
+let activeRead: { task: ScheduledTask; controller: AbortController } | null = null;
 type LifecycleBinding = { stops: Array<() => void> };
 let lifecycleBinding: LifecycleBinding | null = null;
 
@@ -58,18 +58,24 @@ function ensureVisibilityBinding(): void {
   try {
   let generation: number | undefined;
   let suspendSerial: number | undefined;
+  let notificationSequence: number | undefined;
   bind(() => onSharedPowerLifecycle(state => {
     if (lifecycleBinding !== binding) return;
-    const next = isUiPowerReady(state);
-    const scopeChanged = generation !== state.generation || suspendSerial !== state.suspendSerial;
+    const next = isUiPowerReady(state) && state.scopeReadbackPending !== true;
+    const scopeChanged = generation !== state.generation || suspendSerial !== state.suspendSerial ||
+      notificationSequence !== state.observedNotificationSequence;
     generation = state.generation;
     suspendSerial = state.suspendSerial;
-    if (scopeChanged || !next) activeRead?.abort();
-    if (powerReady === next) return;
+    notificationSequence = state.observedNotificationSequence;
+    const gateChanged = powerReady !== next;
+    // Abort listeners can deliver newer power synchronously. Publish this gate
+    // before calling them and use the current gate after they return.
     powerReady = next;
+    if (scopeChanged || !next) activeRead?.controller.abort();
+    if (!gateChanged || lifecycleBinding !== binding) return;
     scheduleNext();
     if (powerReady) void runPump();
-  }, { observeSuspendSerial: true }));
+  }, { observeSuspendSerial: true, observeNotificationSequence: true }));
   if (lifecycleBinding !== binding) return;
   bind(() => onUiVisibilityChange(() => {
     if (lifecycleBinding === binding) onVisibilityChange();
@@ -151,7 +157,7 @@ async function runPump(): Promise<void> {
       try {
         if (task.releaseReadOnPowerChange) {
           const owner = new AbortController();
-          activeRead = owner;
+          activeRead = { task, controller: owner };
           let retire!: () => void;
           const retired = new Promise<void>(resolve => { retire = resolve; });
           owner.signal.addEventListener('abort', retire, { once: true });
@@ -219,7 +225,9 @@ export function registerScheduledTask(
     nextDueAt: performance.now() + periodMs,
     busy: false,
   };
+  const previous = tasks.get(name);
   tasks.set(name, task);
+  if (previous && activeRead?.task === previous) activeRead.controller.abort();
   try { ensureVisibilityBinding(); }
   catch (error) {
     if (tasks.get(name) === task) tasks.delete(name);
@@ -237,12 +245,13 @@ export function registerScheduledTask(
 function unregisterTaskInstance(task: ScheduledTask): void {
   if (tasks.get(task.name) !== task) return;
   tasks.delete(task.name);
+  if (activeRead?.task === task) activeRead.controller.abort();
   reconcileTimer();
 }
 
 export function unregisterScheduledTask(name: string): void {
-  tasks.delete(name);
-  reconcileTimer();
+  const task = tasks.get(name);
+  if (task) unregisterTaskInstance(task);
 }
 
 export function hasScheduledTask(name: string): boolean {

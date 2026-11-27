@@ -90,11 +90,11 @@ await test('App fires FanHost F5 fire-and-forget on resume-ready, never gating t
   const fanReadyStart = appSource.indexOf('function onFanResumeReady(');
   const fanReadyEnd = appSource.indexOf('\nfunction ', fanReadyStart + 1);
   const fanReadyBody = appSource.slice(fanReadyStart, fanReadyEnd > fanReadyStart ? fanReadyEnd : fanReadyStart + 1800);
-  const transactionStart = appSource.indexOf('const result = await runPowerResumeTransaction(targetGeneration, daemonRequired, {');
+  const transactionStart = appSource.indexOf('= runPowerResumeTransaction(targetGeneration, daemonRequired, {');
   const nativeCommit = appSource.indexOf('completeResume: (resumeGeneration, meta) => powerLifecycle.completeResume(resumeGeneration, meta)', transactionStart);
   assert(resumeReadyStart >= 0 && resumeReadyBody.includes('onFanResumeReady(resumeGeneration)') &&
     resumeReadyBody.includes('scheduleResumeTransaction(resumeGeneration);') &&
-    fanReadyStart > resumeReadyStart && fanReadyBody.includes('void fanHostLifecycle.resumeAfterNativeReady(resumeGeneration).then(') &&
+    fanReadyStart > resumeReadyStart && fanReadyBody.includes('void fanHostLifecycle.resumeAfterNativeReady(resumeGeneration, committedWake).then(') &&
     transactionStart >= 0 && nativeCommit > transactionStart &&
     !appSource.slice(transactionStart, transactionStart + 1200).includes('resumeFanBeforeCommit'),
   'App must start the FanHost F5 fire-and-forget from resume-ready and never gate the native Ready commit on it');
@@ -104,20 +104,32 @@ await test('native commit does not wait for InputHost recovery', async () => {
   const nativeSource = readFileSync('native/main.cpp', 'utf8');
   const resumeComplete = nativeSource.indexOf('ipc_on("power.resumeComplete"');
   const resumeCompleteEnd = nativeSource.indexOf('\n    });', resumeComplete);
-  const helper = nativeSource.indexOf('static bool commitPowerResume(unsigned long long generation, const char* source) {');
+  const helper = nativeSource.indexOf('static bool commitPowerResume(unsigned long long generation, const char* source, uint64_t ticket) {');
   const helperEnd = nativeSource.indexOf('\n}', helper);
+  const gateStart = nativeSource.indexOf('static bool commitPowerResumeGate(');
+  const gateEnd = nativeSource.indexOf('\n}', gateStart);
   const inputDispatch = nativeSource.indexOf('case WM_POWER_RESUME_COMMIT:');
   const inputRecoverCase = nativeSource.indexOf('case WM_POWER_INPUT_RECOVER:');
   assert(resumeComplete >= 0 && resumeCompleteEnd > resumeComplete && helper > resumeCompleteEnd && helperEnd > helper &&
-    inputDispatch > helperEnd && inputRecoverCase > inputDispatch, 'actual IPC, commit helper and post-commit handlers must be present in order');
+    gateStart >= 0 && gateEnd > gateStart && inputDispatch > helperEnd && inputRecoverCase > inputDispatch,
+    'actual IPC, commit helper and post-commit handlers must be present in order');
   const receiver = nativeSource.slice(resumeComplete, resumeCompleteEnd);
   const commit = nativeSource.slice(helper, helperEnd);
-  const ready = commit.indexOf('g_powerLifecycle.compare_exchange_strong(expected,PowerLifecycle::Ready');
+  const gate = nativeSource.slice(gateStart, gateEnd);
+  const receipt = gate.indexOf('powerResumeBoundaryCurrent(receipt.generation,receipt.boundary)');
+  const ready = gate.indexOf('g_powerLifecycle.compare_exchange_strong(expected,PowerLifecycle::Ready');
+  const write = gate.indexOf('g_hardwareWriteGate.store(true');
+  const open = commit.indexOf('if(!commitPowerResumeGate(receipt,notification,restartInput,fanOnly))return false;');
+  const publish = commit.indexOf('publishSharedPowerLifecycle("native-ready-commit")');
   const post = commit.indexOf('sleepPowerPostResumeCommit(g_hwnd,generation)');
-  assert(receiver.includes('commitPowerResume(current, "renderer.resumeComplete")') && ready >= 0 && post > ready &&
+  assert(receiver.includes('phase != PowerLifecycle::Ready') && receiver.includes('captureSharedPowerLifecycle(ready)') &&
+    receiver.includes('ready.generation!=current') && !receiver.includes('commitPowerResume('),
+    'renderer IPC can acknowledge current Ready but cannot commit it');
+  assert(receipt >= 0 && ready > receipt && write > ready && open >= 0 && publish > open && post > publish &&
+    commit.includes('readPowerResumeReady(generation,ticket)') &&
     nativeSource.slice(inputDispatch, inputRecoverCase).includes('PostMessageW(h, WM_POWER_INPUT_RECOVER'),
     'native source must commit the power gate before posting InputHost recovery');
-  assert(!/\b(?:gamepadRecoverAfterResume|inputHostRequestPowerRearm)\s*\(/.test(receiver + commit),
+  assert(!/\b(?:gamepadRecoverAfterResume|inputHostRequestPowerRearm)\s*\(/.test(receiver + commit + gate),
     'power.resumeComplete and the shared commit helper must not synchronously run gamepad/InputHost recovery');
 });
 
@@ -126,9 +138,11 @@ await test('native self-commits the wake gate on resume-ready (HC SystemReady pa
   const readyCase = nativeSource.indexOf('case WM_POWER_RESUME_READY:');
   const readyCaseEnd = nativeSource.indexOf('case WM_POWER_RESUME_COMMIT:', readyCase);
   const body = nativeSource.slice(readyCase, readyCaseEnd > readyCase ? readyCaseEnd : readyCase + 2400);
-  assert(readyCase >= 0 && body.includes('commitPowerResume(generation, "native.resume-ready")'),
-    'WM_POWER_RESUME_READY must self-commit the native Ready gate; the renderer IPC stays an idempotent second caller');
-  const helper = nativeSource.indexOf('static bool commitPowerResume(unsigned long long generation, const char* source) {');
+  const worker = body.indexOf('!readPowerResumeReady(generation,ticket).worker');
+  const commit = body.indexOf('commitPowerResume(generation, "native.resume-ready",ticket)');
+  assert(readyCase >= 0 && worker >= 0 && commit > worker && body.includes('sgSleepRetryActive()'),
+    'WM_POWER_RESUME_READY must self-commit from the current worker receipt after the retry veto');
+  const helper = nativeSource.indexOf('static bool commitPowerResume(unsigned long long generation, const char* source, uint64_t ticket) {');
   assert(helper > nativeSource.indexOf('ipc_on("power.resumeComplete"'),
     'commitPowerResume must stay after the renderer IPC registration (source-order contract)');
 });
@@ -157,24 +171,27 @@ await test('Fan manual wake is a Fan-only same-generation rescue and never opens
     body.includes('const auto current = currentFanPowerGeneration();') &&
     body.includes('const auto generation = requested == 0 ? current : requested;'),
     'manual Fan wake must bind its requested Fan generation separately from the shared power generation');
-  const sharedReadyMarker = body.indexOf('g_resumeReadyGeneration.store(sharedCurrent');
-  const sharedCommit = body.indexOf('commitPowerResume(sharedCurrent, "fan.manual-control")');
   const observation = body.indexOf('if (a.value("observedWakeOnly", false))');
-  const suspending = body.indexOf('if (phase == PowerLifecycle::Suspending)');
+  const suspending = body.indexOf('if (phase == PowerLifecycle::Suspending || newerSleepObserved)');
   const observedRecovery = body.indexOf('fanHostScheduleFanResume(current)', observation);
   const observationGate = body.indexOf('!fanHostPowerMayWrite()', observation);
-  const manualRecovery = body.indexOf('fanHostScheduleFanResume(current,true)', sharedReadyMarker);
-  assert(body.includes('g_powerLifecycle.store(PowerLifecycle::Resuming') &&
-    sharedReadyMarker >= 0 && sharedCommit > sharedReadyMarker &&
-    !body.includes('g_resumeReadyGeneration.store(current') && !body.includes('commitPowerResume(current,'),
-    'manual Fan wake must use the same shared generation for resume-ready and the single native commit');
+  const read = body.indexOf('capturePowerObservation(&readSharedSystemPower,power)', suspending);
+  const pending = body.indexOf('kNotificationPending', read);
+  const current = body.indexOf('powerObservationCurrent(&readSharedSystemPower,power)', pending);
+  const waiting = body.indexOf('"awaiting_wake_evidence"', current);
+  const close = body.indexOf('g_fanPhysicalWake.needsClose(current)', waiting);
+  const manualRecovery = body.indexOf('fanHostScheduleFanResume(current,true)', close);
+  assert(!/\b(?:commitPowerResume(?:Gate)?|recordPowerResumeReady)\s*\(/.test(body) &&
+    !/\b(?:g_powerLifecycle|g_resumeReadyGeneration|g_hardwareWriteGate)\s*\.\s*(?:store|exchange|compare_exchange_\w+)\s*\(/.test(body),
+    'manual Fan wake cannot create or commit a shared Ready receipt');
   assert(observation > body.indexOf('generation != current') && observationGate > observation &&
     observedRecovery > observationGate && suspending > observedRecovery &&
     !body.slice(observation, suspending).includes('commitPowerResume('),
     'observed Fan wake may join only Native admission and must not promote the shared generation');
-  assert(suspending < sharedReadyMarker && manualRecovery > sharedReadyMarker &&
-    sharedCommit > manualRecovery && !body.includes('fanHostScheduleEmergencyResume(current)'),
-    'manual Fan wake must reject stale/Suspending before Fan-generation recovery, then commit only the shared generation');
+  assert(read > suspending && pending > read && current > pending && waiting > current && close > waiting &&
+    manualRecovery > close && body.slice(waiting,close).includes('"awaiting-power"') &&
+    body.slice(waiting,close).includes('{"resumeScheduled",false}') && !body.includes('fanHostScheduleEmergencyResume(current)'),
+    'manual Fan wake must retain a missing or pending observation without scheduling work before current Fan admission');
   assert(!body.includes('realBackend') && !body.includes('hardwareWrite'),
     'manual Fan wake must not write hardware directly or bypass Host admission');
 });
@@ -185,6 +202,7 @@ await test('committed Ready compensates a missed resume-ready through the same q
   const resumedEnd = appSource.indexOf('\nfunction ', resumedStart + 1);
   const resumedBody = appSource.slice(resumedStart, resumedEnd > resumedStart ? resumedEnd : resumedStart + 1200);
   assert(resumedStart >= 0 && resumedEnd > resumedStart && resumedBody.includes('scheduleResumeTransaction(generation);') &&
+    resumedBody.includes('requestFanCommittedResume(generation);') &&
     !resumedBody.includes('onFanResumeReady(') && !resumedBody.includes('fanHostLifecycle.resume()'),
     'shared Ready must compensate missed frontend work through the coalesced queue; Fan F5 stays independently owned');
   assert(appSource.includes('void resumeQueue.run(generation, async (ownsQueue) => {') &&
@@ -210,7 +228,7 @@ await test('a failed background FanHost F5 cannot block the native Ready commit'
   const fanEnd = appSource.indexOf('\nfunction ', fanStart + 1);
   const fanBlock = appSource.slice(fanStart, fanEnd > fanStart ? fanEnd : fanStart + 1800);
   assert(fanStart >= 0 &&
-    fanBlock.includes('void fanHostLifecycle.resumeAfterNativeReady(resumeGeneration).then(') &&
+    fanBlock.includes('void fanHostLifecycle.resumeAfterNativeReady(resumeGeneration, committedWake).then(') &&
     fanBlock.includes("fanDiagnosticLog('lifecycle.resume-fire-and-forget-failed'") &&
     !/\bawait\s+fanHostLifecycle\.(?:resume|resumeAfterNativeReady)\(/.test(fanBlock),
   'the fan resume is fire-and-forget with error swallowing; a failure never returns into the commit path');
@@ -518,6 +536,35 @@ await test('actual App shared source Resuming cannot consume a retained post-com
     assert.deepEqual(f.app.calls.filter((r: any) => r[0] === 'daemon'), [['daemon', 2]]);
   } finally { release('auto'); await f.stop(); }
 });
+await test('actual App shared source restarts only an unsent scheme stage after merged Ready', async () => {
+  let retire!: (v: string) => void, schemes = 0;
+  const held = new Promise<string>(resolve => { retire = resolve; });
+  const f = createSharedAppFixture({ scheme: () => ++schemes === 1 ? held : Promise.resolve('auto') });
+  try {
+    await f.boot(); assert.equal(schemes, 1);
+    f.emit(f.fact('ready', 2, 1)); await flushApp();
+    assert.equal(schemes, 1, 'republishing Ready alone does not restart the stage');
+    f.emit(f.fact('ready', 3, 2)); retire('retry-on-ready'); await flushApp();
+    assert.equal(schemes, 2);
+    assert.deepEqual(f.app.calls.filter((r: any) => ['commit', 'daemon', 'policy', 'performance'].includes(r[0])),
+      [['commit', 2], ['daemon', 2], ['policy', 2], ['performance', 2]]);
+    assert.equal(f.app.state().followup.completed, true);
+  } finally { retire('retry-on-ready'); await f.stop(); }
+});
+await test('actual App shared source an unconfirmed scheme write stays spent after restored Ready', async () => {
+  let finish!: (v: string) => void, schemes = 0;
+  const held = new Promise<string>(resolve => { finish = resolve; });
+  const f = createSharedAppFixture({ scheme: () => { schemes++; return held; } });
+  try {
+    await f.boot();
+    f.emit(f.fact('ready', 2, 1, { hardwareWritesAllowed: false }));
+    f.emit(f.fact('ready', 3, 2)); await flushApp();
+    assert.equal(schemes, 1); assert.equal(f.app.state().followup.completed, false);
+    finish('unconfirmed'); await flushApp();
+    assert.equal(schemes, 1); assert.equal(f.app.state().followup.completed, true);
+    assert.deepEqual(f.app.calls.filter((r: any) => r[0] === 'performance'), [['performance', 2]]);
+  } finally { finish('unconfirmed'); await f.stop(); }
+});
 await test('actual App shared source non-admitted Ready holds and hardware admission alone releases continuation', async () => {
   let release!: (v: string) => void, schemes = 0;
   const held = new Promise<string>(resolve => { release = resolve; });
@@ -679,6 +726,21 @@ await test('actual App shared source first flight retains one performance action
     const actions = structuredClone(f.app.calls); f.emit(f.fact('ready', 4, 2)); f.app.ready(2); await flushApp(); assert.deepEqual(f.app.calls, actions);
   } finally { release(); await f.stop(); }
 });
+await test('actual App shared source merged Ready retries only the zero-action performance stage', async () => {
+  let retire!: (result: string) => void, applications = 0, schemes = 0;
+  const held = new Promise<string>(resolve => { retire = resolve; });
+  const f = createSharedAppFixture({ scheme: async () => { schemes++; return 'auto'; },
+    performance: () => ++applications === 1 ? held : Promise.resolve('settled') });
+  try {
+    await f.boot(); assert.equal(applications, 1);
+    f.emit(f.fact('ready', 2, 1)); await flushApp(); assert.equal(applications, 1);
+    f.emit(f.fact('ready', 3, 2)); retire('retry-on-ready'); await flushApp();
+    assert.equal(applications, 2); assert.equal(schemes, 1);
+    assert.deepEqual(f.app.calls.filter((r: any) => ['commit', 'daemon', 'policy'].includes(r[0])),
+      [['commit', 2], ['daemon', 2], ['policy', 2]]);
+    assert.equal(f.app.state().followup.completed, true);
+  } finally { retire('retry-on-ready'); await f.stop(); }
+});
 await test('actual App shared source first flight a new generation bypasses old stage and stop blocks late Ready', async () => {
   let release!: (v: string) => void, schemes = 0;
   const held = new Promise<string>(resolve => { release = resolve; });
@@ -723,6 +785,127 @@ await test('actual App shared source merged suspend retires an unfinished pre-co
       assert.deepEqual(f.app.calls.filter((r: any) => r[0] === 'commit'), [['commit', 2]], 'late ownership read must not submit an old commit');
       assert.deepEqual(f.app.calls.filter((r: any) => r[0] === 'performance'), [['performance', 2]]);
     } finally { release('auto'); await f.stop(); }
+  }
+});
+
+await test('actual App shared source newer scoped hint fences unfinished Ready work until current readback', async () => {
+  for (const stage of ['mode', 'ownership'] as const) {
+    let release!: (value: string) => void, attempts = 0;
+    const held = new Promise<string>(resolve => { release = resolve; });
+    const answer = stage === 'mode' ? 'ac' : 'none';
+    const f = createSharedAppFixture({ [stage]: () => ++attempts === 1 ? held : Promise.resolve(answer) });
+    const calls = (name: string) => f.app.calls.filter((row: any) => row[0] === name);
+    const suspendSerial = stage === 'mode' ? 0 : 1;
+    const provisional = f.fact('ready', 2, 1, { hardwareWritesAllowed: false, inputReady: false });
+    try {
+      await flushApp(); assert.equal(f.pending.length, 1);
+      f.pending.shift().resolve(f.fact('resuming', 1, 1, { resumeReady: false })); await flushApp();
+      f.emit(provisional); await flushApp();
+      assert.equal(attempts, 1); assert.equal(calls('commit').length, 0);
+      f.wire('power.resumed', { generation: 2, readbackScope: { suspendSerial, notificationSequence: 2 } });
+      assert.equal(f.observed.at(-1).scopeReadbackPending, true);
+      assert.equal(f.observed.at(-1).phase, 'ready'); assert.equal(f.observed.at(-1).suspendSerial, 0);
+      // Simulate a late old Ready publication while the scoped read is pending.
+      f.emit(f.fact('ready', 3, 1)); await flushApp();
+      if (stage === 'mode') { release(answer); await flushApp(); }
+      assert.equal(f.source.getSharedPowerLifecycle().scopeReadbackPending, true);
+      assert.deepEqual(f.app.calls, [], 'an obsolete Ready must not send resumeComplete or run follow-up work');
+
+      assert.equal(f.timers.size, 1);
+      const [id, retry] = [...f.timers][0] as [number, {fn:()=>void}];
+      f.timers.delete(id); retry.fn(); await flushApp();
+      assert.equal(f.pending.length, 1);
+      f.pending.shift().resolve(f.fact('ready', 4, 2, { suspendSerial })); await flushApp();
+      assert.equal(f.source.getSharedPowerLifecycle().scopeReadbackPending, undefined);
+      assert.equal(attempts, 2, 'current Ready should resume even before the obsolete read returns');
+      assert.deepEqual(calls('commit'), [['commit', 2]]);
+      assert.deepEqual(calls('performance'), [['performance', 2]]);
+      release(answer); f.emit(f.fact('ready', 5, 2, { suspendSerial })); await flushApp();
+      assert.deepEqual(calls('commit'), [['commit', 2]], 'a late result must not replay resumeComplete');
+      assert.deepEqual(calls('performance'), [['performance', 2]]);
+    } finally { release(answer); await f.stop(); }
+  }
+});
+
+await test('actual App shared source merged suspend preserves the acknowledged commit during daemon recovery', async () => {
+  let release!: (ready: boolean) => void;
+  const held = new Promise<boolean>(resolve => { release = resolve; });
+  const f = createSharedAppFixture({ daemon: () => held });
+  const calls = (name: string) => f.app.calls.filter((row: any) => row[0] === name);
+  try {
+    await f.boot(false);
+    assert.deepEqual(calls('commit'), [['commit', 2]]);
+    assert.deepEqual(calls('daemon'), [['daemon', 2]]);
+    f.emit(f.fact('ready', 1, 2, { suspendSerial: 1, resumeReady: true })); await flushApp();
+    assert.deepEqual(calls('commit'), [['commit', 2]], 'merged Ready must not resend an acknowledged Native commit');
+    assert.deepEqual(calls('daemon'), [['daemon', 2]], 'the current queue must retain the dispatched daemon attempt');
+    assert.deepEqual(calls('performance'), [], 'remaining stages keep their order');
+    release(true); await flushApp();
+    assert.deepEqual(calls('policy'), [['policy', 2]]);
+    assert.deepEqual(calls('performance'), [['performance', 2]]);
+    assert.equal(f.app.state().followup.completed, true);
+    f.emit(f.fact('ready', 2, 2, { suspendSerial: 2, resumeReady: true })); await flushApp();
+    assert.deepEqual(calls('commit'), [['commit', 2]]);
+    assert.deepEqual(calls('performance'), [['performance', 2]], 'a revocation watermark alone cannot replay a settled stage');
+    const backgroundChecks = calls('background-refresh').length;
+    f.app.holdBackground();
+    f.emit(f.fact('ready', 3, 2, { suspendSerial: 2, resumeReady: true })); await flushApp();
+    assert.equal(calls('background-refresh').length, backgroundChecks, 'revision-only Ready does not replace the background read');
+    f.emit(f.fact('ready', 4, 3, { suspendSerial: 2, resumeReady: true })); await flushApp();
+    assert.equal(calls('background-refresh').length, backgroundChecks + 1, 'the interrupted background read must get a current-scope successor');
+    f.emit(f.fact('ready', 5, 4, { suspendSerial: 2, resumeReady: true })); await flushApp();
+    assert.equal(calls('background-refresh').length, backgroundChecks + 1, 'an idle new observation does not queue a second refresh');
+    assert.deepEqual(calls('commit'), [['commit', 2]], 'background recovery has no effect on the shared wake commit');
+  } finally { release(true); await f.stop(); }
+});
+
+await test('actual App shared source keeps a zero-action game restore eligible until recognition', async () => {
+  for (const boundary of ['recognition', 'early-recognition', 'power-pending', 'new-sleep', 'unmount']) {
+    let gameReady = false, attempts = 0, writes = 0;
+    let release!: (value: string) => void;
+    const original = new Promise<string>(resolve => { release = resolve; });
+    const listeners = new Set<(ready: boolean) => void>();
+    const publishReadiness = (ready: boolean) => {
+      gameReady = ready;
+      for (const listener of [...listeners]) listener(ready);
+    };
+    const f = createSharedAppFixture({
+      gameReady: () => gameReady,
+      subscribeGameReadiness(listener: (ready: boolean) => void) {
+        listeners.add(listener); listener(gameReady);
+        return () => { listeners.delete(listener); };
+      },
+      performance: () => {
+        if (++attempts === 1) return original;
+        assert.equal(gameReady, true, 'a pending game observation may not send another attempt');
+        writes++;
+        return 'settled';
+      },
+    });
+    try {
+      await f.boot(); assert.equal(attempts, 1); assert.equal(writes, 0);
+      if (boundary === 'early-recognition') publishReadiness(true);
+      if (boundary === 'power-pending') f.emit(f.fact('ready', 2, 2, { hardwareWritesAllowed: false }));
+      release('retry-on-game-ready'); await flushApp();
+      if (boundary !== 'early-recognition') {
+        assert.equal(f.app.state().followup.completed, false, 'zero actions must not seal this wake');
+        if (boundary !== 'power-pending') f.emit(f.fact('ready', 2, 2));
+        await flushApp();
+        assert.equal(attempts, 1, 'power metadata alone cannot retry an unconfirmed game');
+      }
+      if (boundary === 'new-sleep') f.emit(f.fact('suspending', 3, 3, { generation: 3, suspendSerial: 1 }));
+      if (boundary === 'unmount') await f.stop();
+      publishReadiness(true); await flushApp();
+      if (boundary === 'power-pending') {
+        assert.equal(attempts, 1, 'game readiness alone cannot bypass closed public admission');
+        f.emit(f.fact('ready', 3, 2)); await flushApp();
+      }
+      const retired = boundary === 'unmount' || boundary === 'new-sleep';
+      assert.equal(attempts, retired ? 1 : 2, boundary);
+      assert.equal(writes, retired ? 0 : 1, boundary);
+      assert.deepEqual(f.app.calls.filter((row: any) => row[0] === 'commit'), [['commit', 2]]);
+      assert.deepEqual(f.app.calls.filter((row: any) => row[0] === 'daemon'), [['daemon', 2]]);
+    } finally { release('retry-on-game-ready'); await f.stop(); assert.equal(listeners.size, 0); }
   }
 });
 

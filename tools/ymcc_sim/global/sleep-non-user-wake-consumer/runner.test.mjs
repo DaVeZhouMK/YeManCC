@@ -48,7 +48,7 @@ function joinedSenderCatalog(){
   const declaration=/^\s*run\("([a-z0-9-]+)",/.exec(line);
   assert(declaration,'Malformed original joined run declaration: '+line);return declaration[1];
  });
- assert.equal(names.length,103);assert.equal(new Set(names).size,names.length);
+ assert.equal(names.length,133);assert.equal(new Set(names).size,names.length);
  return {source,declarations,names};
 }
 
@@ -170,6 +170,7 @@ function originalToolPreflight(tool,{hashes=new Map(),errors=new Map()}={}){
   process:{execPath:process.execPath},toolchainSpec:()=>tool,
   need:(ok,code)=>{if(!ok)throw Error(code);},
   hash:file=>{seen.push(file);if(errors.has(file))throw errors.get(file);assert(pins.has(file),'Unexpected preflight read: '+file);return hashes.has(file)?hashes.get(file):pins.get(file);},
+  verifyPublicWakeSource:()=>({source:{directHash:relative=>pins.get(path.join(REPO,relative)),verifyOriginalSourceReview:verify=>verify()},launch:()=>({receipt:null}),receipt:null}),
   verifyCurrentSleepSourceReview:()=>({status:'MEMORY_PORT_ONLY'}),fs:{mkdirSync(){throw reached;}}};
  const keys=Object.keys(dependencies);
  const run=vm.compileFunction('return ('+runNonUserWake.toString()+');',keys)(...keys.map(key=>dependencies[key]));
@@ -275,7 +276,7 @@ test('original runner binds receipt parameters and retains unproven or forced re
    process:{execPath:process.execPath,env:{}},verifyCurrentSleepSourceReview:()=>({status:'MEMORY_PORT_ONLY'}),
    verifyPublicWakeSource:()=>({source:{directHash:()=> 'source',verifyOriginalSourceReview:()=>({status:'MEMORY_PORT_ONLY'})},launch:()=>({receipt:{status:'MEMORY_PORT_ONLY'}}),receipt:{status:'MEMORY_PORT_ONLY'}}),
    fs:fakeFs,captureInputs:()=>({sources:[],selection:'legacy'}),allocateScratch:()=>({markerSha256:'marker'}),
-   write,prepareExecution:()=>scratch,spawnSync,verifyScratch:()=>{},verifyExecutedArtifacts:()=>{},
+   write,prepareExecution:()=>scratch,spawnSync,verifyScratch:()=>{},verifyExecutedArtifacts:()=>{},verifyOwnedPhases:()=>{},
    inspectNonUserWakeOwnedJob,archiveScratch:()=>{++counts.archive;return{files:[]};},
    cleanupScratch:()=>{++counts.cleanup;return{cleaned:true};},walk:()=>[],console:{log(){}}};
   const keys=Object.keys(dependencies);

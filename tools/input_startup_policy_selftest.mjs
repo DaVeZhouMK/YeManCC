@@ -20,6 +20,8 @@ const personas=load('src/bridge/controllerPersona.ts');
 const policy=load('src/bridge/inputStartupPolicy.ts',{'./controllerPersona':personas}), hash=load('src/bridge/inputConfigHash.ts'), hc=load('src/bridge/hcInputUtils.ts');
 const baseline=load('src/bridge/settingsBaseline.ts',{'../../PowerControl/settings-baseline.json':JSON.parse(fs.readFileSync(path.join(root,'PowerControl/settings-baseline.json'),'utf8'))});
 const repoImports={'./settingsBaseline':baseline,'./controllerPersona':personas,'./settingsSnapshot':load('src/bridge/settingsSnapshot.ts'),'./quickAppDefaults':load('src/bridge/quickAppDefaults.ts'),'./api':{},'./inputStartupPolicy':policy,'./inputConfigHash':hash,'./hcInputUtils':hc};
+repoImports['./bootModeGlobalPreferences']=load('src/bridge/bootModeGlobalPreferences.ts',{'./inputConfigHash':hash,'./settingsBaseline':baseline});
+repoImports['./bootModeSharedShortcuts']=load('src/bridge/bootModeSharedShortcuts.ts',{'./settingsSnapshot':repoImports['./settingsSnapshot']});
 const repo=load('src/bridge/settingsRepository.ts',repoImports);
 const plain=value=>JSON.parse(JSON.stringify(value));
 await check('4个开机手柄、5个陀螺仪选项，默认与损坏配置均关闭',()=>{
@@ -35,7 +37,7 @@ const evidenceDir=process.argv[2]||fs.mkdtempSync(path.join(os.tmpdir(),'ymcc-in
 fs.mkdirSync(evidenceDir,{recursive:true});
 const {model:bootModel,boot,ports}=await runtimeBundle(evidenceDir);
 if(!globalThis.window)globalThis.window=new EventTarget();
-const scene=async()=>{ports.reset();return bootModel.createBootModeDocument(await boot.captureBootModeSnapshot());};
+const scene=async()=>{ports.reset();const {document}=await boot.loadBootModes({editorOnly:true});ports.calls.length=0;return document;};
 await check('模式草稿选择与启动保存均不操作当前人格、gyro或设备',async()=>{
  const document=await scene(),before=JSON.stringify(ports.settings.input);document.scenes.steam.overrides.input={...structuredClone(document.global.input),persona:'steamdeck',mouse:'steamdeck'};document.scenes.steam.overrides.gyro={motion:{enabled:true,preset:'racing'}};
  const saved=await boot.saveBootModes(document);assert.equal(JSON.stringify(ports.settings.input),before);const next=await boot.chooseBootMode('steam',saved,true);assert.equal(next.current,'global');assert.equal(next.boot,'steam');assert.equal(next.bootEnabled,true);assert.equal(JSON.stringify(ports.settings.input),before);assert(ports.calls.every(c=>c.op==='settings.update'||c.op==='ipc.bootMode.startup.identity'||c.op.startsWith('startup.')||c.op==='fx.set'&&c.value===false||c.op==='addon.set'&&c.value.enabled===false||c.op==='legacy.desktop.remove'&&c.value==='桌面模式-开机设置为桌面模式'||c.op==='registry.read'&&c.value.hive==='HKCU'&&c.value.key===String.raw`Software\Microsoft\Windows\CurrentVersion\Run`&&c.value.name==='Joyxoff'));

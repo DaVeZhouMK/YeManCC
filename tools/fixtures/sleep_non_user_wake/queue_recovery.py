@@ -1,5 +1,5 @@
 from pathlib import Path
-import json
+import json,re
 
 def pair(g):
     p=g['preamble'];f=g['functions'];extract=g['function'];header=g['wake_recovery_source'];source=g['source']
@@ -11,18 +11,36 @@ def pair(g):
     one('void sgRecordFact(const char* event,const json& details=json::object()){facts.emplace_back(event,details);}',
         'static std::function<void()> queueJournalHook,queueBeforePrepareHook;\nvoid sgRecordFact(const char* event,const json& details=json::object()){facts.emplace_back(event,details);if(std::strcmp(event,"sleep-game-recovery-canceled")==0&&queueJournalHook){auto hook=std::exchange(queueJournalHook,{});hook();}}')
     old='static void sgCancelWakeGameRecoveryUnlocked(const char* reason){++recoveryCancelCalls;g_sgWakeRecoveryPending=false;g_sgWakeRecovery={};sgReconcileSleepGameFlagsAfterRecoveryCancel(reason);}'
-    guarded='const std::function<bool()>& requestCurrent' in extract('sgPrepareWakeRecoveryForSleep',header,'native/wake_game_recovery.h')
-    prototypes='using SgWakeRecoveryEntry=RecoveryEntry;\nstd::string sgReadFile(const std::wstring&){return markerExists?"retained-marker":std::string{};}\n'
-    prototypes+='static void sgCancelWakeGameRecoveryUnlocked(const char*'+(',const std::function<bool()>&' if guarded else '')+');\n'
-    actual='\n'.join(extract(n,header,'native/wake_game_recovery.h') for n in ['sgWakeRecoveryMarker','sgWakeRecoveryClearTarget','sgCancelWakeGameRecoveryUnlocked'])
-    one(old,prototypes+actual)
+    origin='native/wake_game_recovery.h'
+    actualPrepare=extract('sgPrepareWakeRecoveryForSleep',header,origin)
+    guarded='const std::function<bool()>& requestCurrent' in actualPrepare
+    ports='' if 'using SgWakeRecoveryEntry=RecoveryEntry;' in p else 'using SgWakeRecoveryEntry=RecoveryEntry;\n'
+    ports+='std::string sgReadFile(const std::wstring&){return markerExists?"retained-marker":std::string{};}\n'
+    actual=[]
+    names=['sgWakeRecoveryMarker','sgWakeRecoveryClearTarget']
+    cancel=extract('sgCancelWakeGameRecoveryUnlocked',header,origin)
+    if 'sgRetireAcceptedWakeMarkerUnlocked(' in cancel:
+        retirement=re.findall(r'^enum class SgWakeMarkerRetirement \{[^\n]*\};$',header,re.M)
+        assert len(retirement)==1
+        journal=(g['args'].source.resolve().parent/'sleep_legacy_resume_journal.h').read_text(encoding='utf-8-sig')
+        handle=re.findall(r'^struct Close \{[^}]*\{[^}]*\}[^}]*\};\s*using File = [^;]+;',journal,re.M)
+        assert len(handle)==1
+        ports+='namespace ymcc::sleepLegacyResume {\n'+handle[0]+'\n}\n'
+        actual.extend(retirement)
+        names.append('sgRetireAcceptedWakeMarkerUnlocked')
+    one(old,ports)
+    actual.extend(extract(n,header,origin) for n in names)
+    actual.extend([cancel,actualPrepare])
     opening=p.rfind('static ',0,p.index(' sgPrepareWakeRecoveryForSleep('));br=p.index('{',opening);end=br+1;depth=1
     while depth:depth+=(p[end]=='{')-(p[end]=='}');end+=1
-    actualPrepare=extract('sgPrepareWakeRecoveryForSleep',header,'native/wake_game_recovery.h')
     bridge='\nstatic bool queuePrepareBridge(unsigned long long generation'+(',const std::function<bool()>& current' if guarded else '')+'){if(queueBeforePrepareHook){auto hook=std::exchange(queueBeforePrepareHook,{});hook();}'
     bridge+=('return sgPrepareWakeRecoveryForSleep(generation,current);' if guarded else 'sgPrepareWakeRecoveryForSleep(generation);return true;')+'}\n'
-    p=p[:opening]+actualPrepare+bridge+p[end:]
-    f='#define sgPrepareWakeRecoveryForSleep queuePrepareBridge\n'+f+'\n#undef sgPrepareWakeRecoveryForSleep\n'
+    p=p[:opening]+p[end:]
+    # Bind cancellation after the real marker reader and retained-delivery helpers.
+    marker_reader_end=f.index('static bool sgResumeMarkerDefinitelyStale(')
+    f=f[:marker_reader_end]+'\n'.join(actual)+'\n'+bridge+'\n'+f[marker_reader_end:]
+    worker=f.index('void runProductionSuspendPause(')
+    f=f[:worker]+'#define sgPrepareWakeRecoveryForSleep queuePrepareBridge\n'+f[worker:]+'\n#undef sgPrepareWakeRecoveryForSleep\n'
     checks=g['checks'];checks=checks[:checks.index('int main(){')]
     checks+=r'''
 int main(){
@@ -34,8 +52,10 @@ int main(){
   sgQueueWork(SgWork::Suspend,7,200);assert(g_sgWorkQ.size()==1);auto item=g_sgWorkQ.front();g_sgWorkQ.pop_front();
   if(mode=="stale-returned-auto")item={SgWork::Suspend,7,200,100,100,1234};
   g_sgWakeRecoveryPending=true;g_sgWakeRecovery.generation=mode=="current-same-generation"?7:6;
-  g_sgWakeRecovery.entries.push_back({SG_SLEEP_LEASE_DIR,100,1234,6,"retained-marker",false,false});
+  auto& retained=g_sgWakeRecovery.entries.emplace_back();
+  retained.dir=SG_SLEEP_LEASE_DIR;retained.pid=100;retained.created=1234;retained.sleepOwnerGeneration=6;
   markerExists=true;markerCreated=1234;markerGeneration=6;freezeDepth=1;g_sgSleepTarget={100,1234,11,6,true,true};g_sgInSuspend=true;g_sgGameActuallySuspended=true;
+  assert(sgReadResumeMarkerChecked(sgWakeRecoveryMarker(retained),retained.markerText));
   if(mode=="current-no-pending")g_sgWakeRecoveryPending=false;
   if(mode=="query-auto"||mode=="current-running-retire"){
    g_sgWakeRecovery.entries.front().acceptedOnce=true;WakeGameResume::pauseThreadState={true,3,0};freezeDepth=0;
@@ -69,6 +89,7 @@ int main(){
   else if(mode=="current-no-pending")assert(!g_sgWakeRecoveryPending&&canceled==0);
   else assert(!g_sgWakeRecoveryPending&&canceled==1);
   if(mode=="current-running-retire")assert(suspendCalls==1&&freezeDepth==1&&markerGeneration==7);
+  if(mode=="query-auto")assert(pauseThreadQueries==1&&"wake was not delivered at the thread query");
  }
  std::cout<<"QUEUE_RECOVERY_MATRIX "<<json({{"status","PASS_ORIGINAL_QUEUE_RECOVERY_OWNERSHIP"},{"count",rows.size()},{"cases",rows},{"physicalCalls",0}}).dump()<<std::endl;return 0;
 }
@@ -76,5 +97,5 @@ int main(){
     direct='sgPrepareWakeRecoveryForSleep(7, [&]{return sgOrdinaryPauseCurrent(item);});' if guarded else 'sgPrepareWakeRecoveryForSleep(7);'
     checks=checks.replace('QUEUE_DIRECT_PREPARE',direct)
     task=g['out']/'QUEUE-RECOVERY-BINDING.json'
-    with task.open('x',encoding='utf-8') as out:json.dump(dict(actualHeaderFunctions=['sgWakeRecoveryMarker','sgWakeRecoveryClearTarget','sgCancelWakeGameRecoveryUnlocked','sgPrepareWakeRecoveryForSleep','sgReconcileSleepGameFlagsAfterRecoveryCancel'],unrewrittenBodies=True,actualWorkerPauseFragment=True,actualPublicDispatchSecondTu=True,callerYieldMacroOnly=True,actualMutexHeldDuringIngress=True,realWindowsInputOrSleep=False,guardedSource=guarded),out,indent=2)
+    with task.open('x',encoding='utf-8') as out:json.dump(dict(actualHeaderFunctions=names+['sgCancelWakeGameRecoveryUnlocked','sgPrepareWakeRecoveryForSleep','sgReconcileSleepGameFlagsAfterRecoveryCancel'],unrewrittenBodies=True,actualWorkerPauseFragment=True,actualPublicDispatchSecondTu=True,callerYieldMacroOnly=True,actualMutexHeldDuringIngress=True,realWindowsInputOrSleep=False,guardedSource=guarded),out,indent=2)
     return p,f,checks

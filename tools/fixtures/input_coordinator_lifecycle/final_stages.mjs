@@ -59,6 +59,56 @@ export function observeFinalStages(original){
  assert.equal(restored,original,'EXACT_ORIGINAL_RESTORE_REQUIRED');
  return {text,originalSha256:sha(original),observedSha256:sha(text),wholeOriginalRestored:true,originalAssertionsUnchanged:true,originalReportExpressionUnchanged:true,nativeBudgetMs:60000,budgetChanged:false,acceptanceChanged:false,originalSourceModified:false,diagnosticOnly:true,observerTimingTransparent:false,scope:'Private opt-in final-stage stream. The original full report expression, report.dump(2), checks, ordered cases, process semantics and admission remain. Missing stages/lost observations are UNKNOWN; a main-return marker is not natural process exit or resource destruction.'};
 }
+// The original per-child process handle is used before it is closed. This
+// diagnostic stream is separate from the final report and all acceptance checks.
+export function observeChildStages(original){
+ assert(!original.includes('fixtureChildStage'),'CHILD_STAGE_OBSERVER_ALREADY_PRESENT');
+ const nl=original.includes('\r\n')?'\r\n':'\n';
+ const helper=String.raw`#include <cerrno>
+struct FixtureChildErrorState {
+ DWORD win=GetLastError();int crt=errno;
+ ~FixtureChildErrorState() noexcept{errno=crt;SetLastError(win);}
+};
+static long long fixtureChildClock() noexcept {
+ FixtureChildErrorState preserve;LARGE_INTEGER qpc{};
+ return QueryPerformanceCounter(&qpc)?qpc.QuadPart:0;
+}
+struct FixtureChildIdentity {DWORD pid=0;unsigned long long birth=0;};
+static FixtureChildIdentity fixtureChildIdentity(HANDLE process) noexcept {
+ FixtureChildErrorState preserve;FILETIME born{},ended{},kernel{},user{};
+ if(!GetProcessTimes(process,&born,&ended,&kernel,&user))return {};
+ return {GetProcessId(process),(static_cast<unsigned long long>(born.dwHighDateTime)<<32)|born.dwLowDateTime};
+}
+static void fixtureChildStage(const char* stage,FixtureChildIdentity child,long long start,long long end,DWORD wait=0) noexcept {
+ FixtureChildErrorState preserve;
+ try {
+  LARGE_INTEGER frequency{};
+  if(!child.pid||!child.birth||start<=0||end<start||!QueryPerformanceFrequency(&frequency))return;
+  static std::ofstream stream{fspath::path(g_yemanccDataDir)/L"native-child-stages.jsonl",std::ios::binary|std::ios::out};
+  stream<<"{\"schemaVersion\":1,\"stage\":\""<<stage<<"\",\"parentPid\":"<<GetCurrentProcessId()<<",\"pid\":"<<child.pid<<",\"birth\":\""<<child.birth<<"\",\"start\":\""<<start<<"\",\"end\":\""<<end<<"\",\"frequency\":\""<<frequency.QuadPart<<"\",\"wait\":"<<wait<<"}\n";
+  stream.flush();
+ }catch(...){/* The observer cannot change the original result. */}
+}
+`;
+ const create=' if(!CreateProcessW(dotnet.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&si,&pi))return FALSE;';
+ const wait='const auto wait=WaitForSingleObject(observation,8000);';
+ const parse='json child;std::ifstream file(exactReceipt.empty()?fullPipeReceipts.back():exactReceipt);if(file)file>>child;';
+ const close='const bool nativeObserverCloseSucceeded=CloseHandle(observation)!=FALSE;';
+ const mark=(stage,id,first,last,waitResult='')=>`fixtureChildStage("${stage}",${id},${first},${last}${waitResult});`;
+ const edits=[
+  ['struct FullPipePrivateChild {',helper+'struct FullPipePrivateChild {'],
+  [create,' const auto launchStart=fixtureChildClock();\n'+create+'\n const auto launchEnd=fixtureChildClock();\n '+mark('launch','fixtureChildIdentity(pi.hProcess)','launchStart','launchEnd')],
+  [wait,'const auto timingOwner=fixtureChildIdentity(observation);const auto waitStart=fixtureChildClock();'+wait+'const auto waitEnd=fixtureChildClock();'+mark('exit-wait','timingOwner','waitStart','waitEnd',',wait')],
+  [parse,'const auto receiptStart=fixtureChildClock();'+parse+'const auto receiptEnd=fixtureChildClock();'+mark('receipt-parse','timingOwner','receiptStart','receiptEnd')],
+  [close,'const auto closeStart=fixtureChildClock();'+close+'const auto closeEnd=fixtureChildClock();'+mark('observer-close','timingOwner','closeStart','closeEnd')]
+ ].map(pair=>pair.map(text=>text.replace(/\r?\n/g,nl)));
+ let text=original;
+ for(const [from,to] of edits){one(text,from,'CHILD_STAGE_ANCHOR');text=text.replace(from,()=>to);}
+ let restored=text;
+ for(const [from,to] of edits.toReversed()){one(restored,to,'CHILD_STAGE_INVERSE');restored=restored.replace(to,()=>from);}
+ assert.equal(restored,original,'CHILD_STAGE_EXACT_ORIGINAL_RESTORE_REQUIRED');
+ return {text,originalSha256:sha(original),observedSha256:sha(text),wholeOriginalRestored:true};
+}
 export function makePrivateFixture(input,output){
  input=path.resolve(input);output=path.resolve(output);
  assert(input!==output,'PRIVATE_OUTPUT_MUST_DIFFER');

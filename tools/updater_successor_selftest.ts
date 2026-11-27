@@ -19,27 +19,28 @@ const win=new EventTarget() as any;win.chrome={webview:{addEventListener(_name:s
 });}}};installUpdaterFixtureEnvironment(win, event => receive(event));
 (globalThis as any).window=win;
 const m=await import('../src/bridge/updateManager');let checks=0;
+const power={generation:61,suspendSerial:2,observedNotificationSequence:13};
 function check(label:string,fn:()=>void){fn();checks++;console.log('PASS '+label);}
 const flush=async()=>{for(let i=0;i<30;i++)await Promise.resolve();};
 await m.ensureUpdateManager();const task=m.prepareUpdate({background:true});await flush();
-await m.probeBackgroundSuccessor();
-check('successor hint is durable before cancelling an incomplete old version',()=>{assert.equal(hints[0].args.version,B.version);assert.ok(calls.indexOf(hints[0])<calls.findIndex(x=>x.cmd==='app.cancelUpdateDownload'));assert.equal(downloads.length,1);});
-manifest=C;await m.probeBackgroundSuccessor();
+await m.probeBackgroundSuccessor(power);
+check('successor hint is durable before cancelling an incomplete old version',()=>{assert.equal(hints[0].args.version,B.version);assert.deepEqual(hints[0].args.power,power);assert.ok(calls.indexOf(hints[0])<calls.findIndex(x=>x.cmd==='app.cancelUpdateDownload'));assert.equal(downloads.length,1);});
+manifest=C;await m.probeBackgroundSuccessor(power);
 check('several releases arriving during cancellation collapse to the newest target',()=>{assert.equal(hints[1].args.version,C.version);assert.equal(downloads.length,1);});
 const old=downloads[0];receive({data:{id:old.id,error:'Background download paused'}});await flush();
 check('new target starts only after the old native task acknowledges termination',()=>{assert.equal(downloads.length,2);assert.equal(downloads[1].args.version,C.version);assert.equal(downloads.some(x=>x.args.version===B.version),false);assert.equal(m.updateSnapshot.version,C.version);});
 receive({data:{event:'update.progress',data:{operationId:old.args.operationId,phase:'downloaded',version:A.version,percent:100}}});
 check('late old completion cannot mark the new target ready',()=>{assert.equal(m.updateSnapshot.phase,'downloading');assert.equal(m.updateSnapshot.version,C.version);});
-manifest=A;const hintCount=hints.length;await m.probeBackgroundSuccessor();
+manifest=A;const hintCount=hints.length;await m.probeBackgroundSuccessor(power);
 check('an older manifest cannot downgrade the active background target',()=>assert.equal(hints.length,hintCount));
-failProbe=true;await assert.rejects(m.probeBackgroundSuccessor(),/offline/);failProbe=false;
+failProbe=true;await assert.rejects(m.probeBackgroundSuccessor(power),/offline/);failProbe=false;
 check('failed manifest probe keeps a healthy current transfer running',()=>{assert.equal(downloads.length,2);assert.equal(m.updateSnapshot.phase,'downloading');});
 receive({data:{id:downloads[1].id,result:'inert verified C'}});await task;
 check('shared prepare resolves only for the actual final version with no installation',()=>{assert.equal(m.updateSnapshot.phase,'downloaded');assert.equal(m.updateInfo.value?.version,C.version);assert.equal(calls.some(x=>x.cmd==='app.installUpdate'),false);});
 // A game starts while successor persistence is in flight. No late response may
 // turn the paused download into a new request.
 m.updateInfo.value=A;Object.assign(m.updateSnapshot,{phase:'available',stage:'download'});manifest=B;holdHint=true;
-const gameTask=m.prepareUpdate({background:true});await flush();const probe=m.probeBackgroundSuccessor();await flush();
+const gameTask=m.prepareUpdate({background:true});await flush();const probe=m.probeBackgroundSuccessor(power);await flush();
 m.setBackgroundGamePaused(true);response(hints.at(-1)!.id,true);await probe;receive({data:{id:downloads.at(-1)!.id,error:'game pause'}});await gameTask;await flush();
 const afterGame=downloads.length;
 check('game entry cancels auto work and ignores a late successor-save receipt',()=>{assert.equal(downloads.length,afterGame);assert.equal(m.updateSnapshot.phase,'interrupted');});

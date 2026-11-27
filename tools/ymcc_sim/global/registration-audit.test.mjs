@@ -59,3 +59,35 @@ test('same id with a different source entry cannot reuse a still-existing old fi
 test('source-contract evidence cannot become behavioral acceptance by only changing the registration scope',()=>{const before=report([{id:'fan.a',status:'PASS',execution:{source:'fixtures/fan.a.mjs',scope:'source-contract',sourceInputs:['fixtures/fan.a.mjs']}}]);const result=auditRegisteredScope(before,[registry[0]]);assert.equal(result.cases[0].status,'STALE_REGISTRATION');assert(result.cases[0].registrationMismatches.some(row=>row.code==='REGISTERED_SCOPE_CHANGED'));assert.equal(before.cases[0].status,'PASS');});
 test('new required production inputs and result files need actual recorded evidence',()=>{const before=report();const result=auditRegisteredScope(before,[{...registry[0],evidenceInputs:['src/new-consumer.ts'],resultFiles:['new/result.json']}]);assert.equal(result.registeredScope.complete,false);assert(result.cases[0].registrationMismatches.some(row=>row.code==='REGISTERED_REQUIRED_SOURCE_NOT_EXECUTED'));assert(result.cases[0].registrationMismatches.some(row=>row.code==='REGISTERED_REQUIRED_RESULT_NOT_RECORDED'));});
 test('current required result identity is matched inside the same executed case directory',()=>{const caseDir=path.join(repo,'source-record-case');const before=report([{id:'fan.a',status:'PASS',caseDir,structuredEvidence:[{path:path.join(caseDir,'result.json')}]}]);const result=auditRegisteredScope(before,[{...registry[0],resultFiles:['result.json']}]);assert.equal(result.status,'CURRENT_RECEIPTS_VALID');assert.equal(result.registeredScope.complete,true);});
+
+const preparedArtifact=path.join(repo,'fixture-recorded-prepared-artifact');
+const preparedReport=()=>report([{id:'fan.a',status:'PASS',execution:{
+ source:registry[0].path,scope:registry[0].scope,sourceInputs:[registry[0].path],
+ candidateArtifacts:[{path:preparedArtifact,sha256:'a'.repeat(64)}],
+}}]);
+test('registered prerequisite blocks acceptance without comparing an incomplete artifact declaration',()=>{
+ const original=preparedReport(),before=structuredClone(original),reason='EXACT_PREPARED_ROOT_REQUIRED';
+ const result=auditRegisteredScope(original,[{...registry[0],blockedReason:reason,artifactInputs:[]}]);
+ assert.equal(result.status,'REVALIDATION_REQUIRED');assert.equal(result.registeredScope.complete,false);
+ assert.equal(result.cases[0].status,'STALE_REGISTRATION');assert.equal(result.summary.currentPass,0);
+ assert.deepEqual(result.cases[0].registrationMismatches,[{code:'REGISTERED_PREREQUISITE_UNAVAILABLE',reason}]);
+ assert.deepEqual(result.registeredScope.prerequisites,[{id:'fan.a',reason}]);
+ assert.deepEqual(result.needsRerun,[]);assert.equal(result.executedTests,0);assert.deepEqual(original,before);
+});
+test('registered prerequisite does not mask an independent source mismatch or original failure',()=>{
+ const row={...registry[0],blockedReason:'EXACT_PREPARED_ROOT_REQUIRED',evidenceInputs:['native/new-input.h'],artifactInputs:[]};
+ const result=auditRegisteredScope(preparedReport(),[row]);
+ assert.deepEqual(result.cases[0].registrationMismatches.map(x=>x.code),['REGISTERED_PREREQUISITE_UNAVAILABLE','REGISTERED_REQUIRED_SOURCE_NOT_EXECUTED']);
+ assert.deepEqual(result.needsRerun,['fan.a']);
+ const failed={...report([{id:'fan.a',status:'FAIL'}]),status:'FAIL',needsRerun:['fan.a']};
+ const rejected=auditRegisteredScope(failed,[row]);
+ assert.equal(rejected.status,'FAIL');assert.equal(rejected.cases[0].status,'FAIL');assert.deepEqual(rejected.needsRerun,['fan.a']);
+});
+test('registered prerequisite restoration resumes exact artifact matching',()=>{
+ const original=preparedReport();
+ const matching=auditRegisteredScope(original,[{...registry[0],artifactInputs:[preparedArtifact]}]);
+ assert.equal(matching.status,'CURRENT_RECEIPTS_VALID');assert.equal(matching.registeredScope.complete,true);
+ const changed=auditRegisteredScope(original,[{...registry[0],artifactInputs:[]}]);
+ assert.equal(changed.cases[0].status,'STALE_REGISTRATION');assert.deepEqual(changed.needsRerun,['fan.a']);
+ assert.deepEqual(changed.cases[0].registrationMismatches[0].extra,[preparedArtifact]);
+});

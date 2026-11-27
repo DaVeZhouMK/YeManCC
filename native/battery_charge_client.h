@@ -6,6 +6,7 @@
 #include <fstream>
 #include <cstdio>
 #include <mutex>
+#include <string_view>
 #include <thread>
 #include <vector>
 #include "json.hpp"
@@ -52,8 +53,40 @@ inline bool validSetRequest(const Json& args){
     for(const auto ch:fence)if(!((ch>='0'&&ch<='9')||(ch>='a'&&ch<='f')||(ch>='A'&&ch<='F')))return false;
     return true;
 }
+inline const char* readSourceTag(const Json& args){
+    if(!args.is_object())return nullptr;
+    const auto key=args.find("readSource");
+    if(key==args.end()||!key->is_string())return nullptr;
+    const auto& value=key->get_ref<const std::string&>();
+    for(const char* tag:{"settings-edge","settings-poll","settings-retry","boot-capture","boot-preflight"})
+        if(value==tag)return tag;
+    return nullptr;
+}
+inline void compactRequestResultIdentity(Json& detail){
+    const auto runtime=detail.find("runtime"),host=detail.find("hostIdentity");
+    if(runtime==detail.end()||host==detail.end()||!runtime->is_object()||!host->is_object()||
+        detail.contains("hostIdentitySharesRuntimeV1"))return;
+    const auto execution=runtime->find("execution");
+    if(execution==runtime->end()||*execution!="in-process")return;
+    struct Field {const char* host;const char* runtime;bool integer;};
+    constexpr Field fields[]={{"assemblyPath","componentPath",false},{"processPath","nativePath",false},
+        {"execution","execution",false},{"implementation","implementation",false},{"sourceId","sourceId",false},
+        {"protocol","protocol",true},{"pollingIntervalMs","pollingIntervalMs",true}};
+    for(const auto& field:fields){
+        const auto actual=host->find(field.host),copy=runtime->find(field.runtime);
+        if(actual==host->end()||copy==runtime->end())return;
+        if(field.integer){
+            if(!actual->is_number_integer()||!copy->is_number_integer()||*actual<1||*copy<1||
+                *actual>9007199254740991ULL||*copy>9007199254740991ULL)return;
+        }else if(!actual->is_string()||!copy->is_string())return;
+        if(*actual!=*copy)return;
+    }
+    detail.emplace("hostIdentitySharesRuntimeV1",true);
+    for(const auto& field:fields)host->erase(field.host);
+}
 inline void trace(const std::wstring& stateRoot,const char* event,Json detail) noexcept {
     try {
+        if(std::string_view(event)=="request-result")compactRequestResultIdentity(detail);
         const auto root=std::filesystem::path(stateRoot);std::filesystem::create_directories(root);
         const auto path=root/L"battery-charge-client.log";
         if(std::filesystem::exists(path)&&std::filesystem::file_size(path)>=256*1024) {
@@ -124,7 +157,7 @@ inline Json shutdown(const std::wstring& stateRoot){
         trace(stateRoot,"in-process-stop",result);return result;
     }catch(const std::exception& e){Json result{{"ok",false},{"reason",e.what()},{"recoveryJournalPreserved",true}};trace(stateRoot,"in-process-stop-failed",result);return result;}
 }
-inline Json request(const std::wstring& powerRoot,const std::wstring& stateRoot,const Json& input,const std::function<bool()>& isCurrent={}){
+inline Json request(const std::wstring& powerRoot,const std::wstring& stateRoot,const Json& input,const std::function<bool()>& isCurrent={},const char* readSource=nullptr){
     if(stopping().load(std::memory_order_acquire))return failure("充电组件正在退出");
     if(!currentRequest(isCurrent))return failure("BOOT_CHARGE_REQUEST_EXPIRED");
     std::unique_lock<std::timed_mutex> serial(lock(),std::defer_lock);
@@ -132,10 +165,11 @@ inline Json request(const std::wstring& powerRoot,const std::wstring& stateRoot,
     if(!currentRequest(isCurrent))return failure("BOOT_CHARGE_REQUEST_EXPIRED");
     const auto start=GetTickCount64();
     Json detail{{"operation",input.value("op","")}};if(input.contains("target"))detail["target"]=input["target"];
+    if(readSource&&detail["operation"]=="get")detail["readSource"]=readSource;
     trace(stateRoot,"request-start",detail);
     auto result=requestCore(powerRoot,stateRoot,input,detail,isCurrent);detail["elapsedMs"]=GetTickCount64()-start;
     for(const auto* key:{"ok","supported","batteryPresent","model","family","currentLimit","requestedLimit","managed","verification","reason"})if(result.contains(key))detail[key]=result[key];
-    trace(stateRoot,"request-result",detail);return currentRequest(isCurrent)?result:failure("BOOT_CHARGE_REQUEST_EXPIRED");
+    trace(stateRoot,"request-result",std::move(detail));return currentRequest(isCurrent)?result:failure("BOOT_CHARGE_REQUEST_EXPIRED");
 }
 inline void restoreAtStartup(const std::wstring& powerRoot,const std::wstring& stateRoot){
     // No preference/recovery file means zero component loading or hardware work.

@@ -262,6 +262,43 @@ async function trainerPaths(): Promise<{ cacheRoot: string; script: string }> {
   }
   return pathsPromise;
 }
+const catalogScheduleFile = 'catalog-schedule.json';
+const catalogScheduleLimitMs = 86_400_000;
+async function scopedCatalogSchedulePath(cacheRoot: string, script: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(script));
+  const key = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+  return `${cacheRoot}\\catalog-schedule-${key}.json`;
+}
+export async function readGameTrainerCatalogDueAt(): Promise<number> {
+  const generation = syncTrainerSource();
+  try {
+    const { cacheRoot, script } = await trainerPaths();
+    const read = (path: string) => fs.readTextFile(path, 4096, { bounded: true, timeoutMs: TRAINER_CONFIG_IO_MS });
+    let stored: string;
+    try { stored = await read(await scopedCatalogSchedulePath(cacheRoot, script)); }
+    catch { stored = await read(`${cacheRoot}\\${catalogScheduleFile}`); }
+    assertTrainerSource(generation);
+    const hint: unknown = JSON.parse(stored);
+    const now = Date.now();
+    if (trainerObject(hint) && hint.schema === 1 && hint.script === script &&
+        Number.isSafeInteger(hint.checkedAt) && Number.isSafeInteger(hint.dueAt) &&
+        hint.checkedAt > 0 && hint.checkedAt <= now && hint.dueAt > now &&
+        hint.dueAt - hint.checkedAt <= catalogScheduleLimitMs) return hint.dueAt;
+  } catch { /* A missing or unreadable advisory hint leaves the normal check scheduled. */ }
+  return 0;
+}
+async function rememberGameTrainerCatalogSchedule(result: GcmSearchResult, cacheRoot: string, script: string, generation: number): Promise<void> {
+  const checkedAt = Date.now();
+  const dueAt = result.retryAfter;
+  if (!result.catalog || typeof dueAt !== 'number' || !Number.isSafeInteger(dueAt) ||
+      dueAt <= checkedAt || dueAt - checkedAt > catalogScheduleLimitMs) return;
+  try {
+    // Another launcher can share the app data root without owning this script's deadline.
+    const path = await scopedCatalogSchedulePath(cacheRoot, script);
+    assertTrainerSource(generation);
+    await fs.writeTextFileAtomic(path, JSON.stringify({ schema: 1, script, checkedAt, dueAt }), TRAINER_CONFIG_IO_MS);
+  } catch { /* This hint is optional; the backend owns the refresh budget. */ }
+}
 function publish(state: GcmSearchResult, job: Pick<PreparationJob, 'key' | 'mode' | 'sourceGeneration' | 'listeners'>): void {
   if (job.sourceGeneration !== syncTrainerSource() || job.mode === 'RefreshData') return;
   const key = job.key;
@@ -351,7 +388,11 @@ export async function findInstalledGameTrainer(gameName:string):Promise<Installe
 // Disk preparation receipts can outlive a renderer or a sleep-interrupted wait.
 // Rejoin only the exact still-selected instance; never run a worker or download here.
 export type GameTrainerCacheFault = 'read' | 'corrupt' | 'future' | 'oversize';
-interface LocalTrainerRestore { promise: Promise<InstalledGameTrainer | null>; fault?: GameTrainerCacheFault }
+interface LocalTrainerRestore {
+  promise: Promise<InstalledGameTrainer | null>;
+  canJoin: () => boolean;
+  fault?: GameTrainerCacheFault;
+}
 const localRestores = new Map<string, LocalTrainerRestore>();
 export function restoreReadyGameTrainer(gameName: string, processPath: string, options: {
   processTarget: GameTrainerProcessTarget; isTargetCurrent: () => boolean;
@@ -362,19 +403,24 @@ export function restoreReadyGameTrainer(gameName: string, processPath: string, o
   if (!trainerGameKey(title) || title.length > 240 || !/^(?:[a-z]:[\\/]|\\\\)/i.test(processPath)
     || !Number.isSafeInteger(target.pid) || target.pid <= 0 || !/^[1-9][0-9]*$/.test(target.processCreated)) return Promise.resolve(null);
   const requestKey = JSON.stringify([generation, key, target.pid, target.processCreated]);
+  const lifecycleEpoch = getTrainerLifecycleEpoch();
+  const scopeCurrent = () => generation === getSettingsGeneration() && lifecycleEpoch === getTrainerLifecycleEpoch();
+  const observerCurrent = () => options.isTargetCurrent() && scopeCurrent();
+  if (!observerCurrent()) return Promise.resolve(null);
   // Every current subscriber observes a shared read fault, including one that
   // joins an in-flight restore originally requested without a callback.
   const observe = (restore: LocalTrainerRestore) => restore.promise.then(value => {
-    if (generation !== getSettingsGeneration() || !options.isTargetCurrent()) return null;
+    if (!observerCurrent()) return null;
     if (restore.fault) { try { options.onCacheFault?.(restore.fault); } catch { /* Observer only. */ } }
     return value;
   });
   const pending = localRestores.get(requestKey);
-  if (pending) return observe(pending);
-  const restore: LocalTrainerRestore = { promise: Promise.resolve(null) };
+  // The same process can survive a sleep cycle. Its new owner must not wait
+  // for an in-flight read that has already lost permission to publish.
+  if (pending?.canJoin()) return observe(pending);
   const before = states.get(key);
-  const current = () => generation === getSettingsGeneration() && options.isTargetCurrent()
-    && !jobs.has(key) && states.get(key) === before;
+  const current = () => observerCurrent() && !jobs.has(key) && states.get(key) === before;
+  const restore: LocalTrainerRestore = { promise: Promise.resolve(null), canJoin: current };
   const operation = (async (): Promise<InstalledGameTrainer | null> => {
     if (!current()) return null;
     const ready = getReadyGameTrainer(title, processPath, target);
@@ -388,6 +434,7 @@ export function restoreReadyGameTrainer(gameName: string, processPath: string, o
     if (!current() || exists === false) return null; // Only a confirmed absence is healthy missing data.
     if (exists !== true) throw new TrainerReadFaultError('修改器缓存存在性回执无效');
     const index = await readTrainerDocument(indexPath, 8 << 20,true);
+    if (!current()) return null;
     if (Object.keys(index).length > 4096) throw new TrainerOversizeConfigError('修改器缓存条目超过读取限制');
     const candidates = new Map<string, GcmSearchResult>();
     let candidateFault: unknown;
@@ -424,7 +471,7 @@ export function restoreReadyGameTrainer(gameName: string, processPath: string, o
   })().catch(error => {
     // Fault ownership is shared; cancellation of the first subscriber must not
     // hide it from another still-current observer of the same read.
-    if (generation === getSettingsGeneration() && !jobs.has(key) && states.get(key) === before
+    if (localRestores.get(requestKey) === restore && scopeCurrent() && !jobs.has(key) && states.get(key) === before
       && !(error instanceof GameTrainerCancelledError)) {
       restore.fault = error instanceof TrainerFutureConfigError ? 'future'
         : error instanceof TrainerOversizeConfigError ? 'oversize'
@@ -511,6 +558,7 @@ async function runPreparation(job: PreparationJob): Promise<GcmSearchResult> {
         if (terminal.has(parsed.state)) {
           completed = true;
           if (parsed.state === 'cancelled') throw new GameTrainerCancelledError();
+          if (job.mode === 'RefreshData') void rememberGameTrainerCatalogSchedule(parsed, cacheRoot, script, job.sourceGeneration);
           return parsed;
         }
       }

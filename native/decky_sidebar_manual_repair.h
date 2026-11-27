@@ -27,6 +27,31 @@ inline bool cleanupAccountConfirmed(const steamsession::Session& session,const J
             deckysession::positiveAccount(mode.value("observedAccount",Json()))==account.value;
     }catch(...){return false;}
 }
+// This is a read-only preflight inside the original child. No command grant,
+// durable reservation or account decision may be retried here.
+inline const char* cleanupModeReadTransient(const Json& result){
+    if(!result.is_object()||result.value("ok",Json{})!=false||result.value("mutated",Json{})!=false||
+       (result.contains("uncertain")&&result["uncertain"]!=false))return nullptr;
+    const auto why=result.find("reason");
+    if(why!=result.end()&&why->is_string())
+        for(const auto* label:{"live-busy","live-debug-unavailable","live-context-unavailable","live-read-unavailable"})
+            if(*why==label)return label;
+    return nullptr;
+}
+inline constexpr DWORD cleanupModeReadMs=4000;
+template<class Read,class Current,class Now,class Wait>
+Json readModeBeforeRebuild(Read&& read,Current&& current,Now&& now,Wait&& wait,bool& retried){
+    constexpr DWORD settleMs=500; // Same cancellation-aware readback interval as Big Picture recovery.
+    retried=false;
+    const auto started=now();
+    auto result=read(cleanupModeReadMs);
+    if(!cleanupModeReadTransient(result)||!current()||now()-started>=cleanupModeReadMs-settleMs||
+       !wait(settleMs)||!current())return result;
+    const auto elapsed=now()-started;
+    if(elapsed>=cleanupModeReadMs)return result;
+    retried=true;
+    return read(static_cast<DWORD>(cleanupModeReadMs-elapsed));
+}
 // This bounded ledger is YMCC recovery metadata, never plugin/user settings.
 // Corrupt or foreign metadata cannot refill a consumed cleanup reservation.
 inline bool cleanupAvailable(const Json& ledger,const steamsession::Session& session,const std::string& document={}){

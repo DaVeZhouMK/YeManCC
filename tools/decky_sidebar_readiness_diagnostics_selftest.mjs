@@ -10,9 +10,9 @@ const defer=()=>{let resolve,reject;const promise=new Promise((r,j)=>{resolve=r;
 function updaterHostPowerFixture(install=()=>()=>{}){
  const events=new Map(),timers=new Map();let serial=0,revision=1,reads=0;
  let fact={phase:'ready',known:true,generation:1,hardwareWritesAllowed:true,inputReady:true,notificationPending:false,publicationRevision:revision,observedNotificationSequence:revision};
- const module=load(src('src/bridge/powerLifecycleState.ts'),{'./ipc':{invoke:()=>{throw Error('private native read forbidden');},on:()=>{throw Error('private native listener forbidden');}}});
+ const module=load(src('src/bridge/powerLifecycleState.ts'),{'./ipc':{invoke:()=>{throw Error('private native read forbidden');},on:()=>{throw Error('private native listener forbidden');}}},{AbortController});
  const source=module.createSharedPowerLifecycleSource({read:async()=>{reads++;return {...fact};},listen:(name,callback)=>{assert(!events.has(name));events.set(name,callback);return()=>events.delete(name);},clock:{setTimeout:(callback,delay)=>{const id=++serial;timers.set(id,{callback,delay});return id;},clearTimeout:id=>timers.delete(id)}});
- const ports={...source,isSharedPowerLifecycleAdmitted:module.isSharedPowerLifecycleAdmitted,onSharedPowerLifecycle:callback=>{const release=install('power',callback);let stop;try{stop=source.onSharedPowerLifecycle(callback);}catch(error){release();throw error;}return()=>{try{stop();}finally{release();}};}};
+ const ports={...source,isSharedPowerLifecycleAdmitted:module.isSharedPowerLifecycleAdmitted,onSharedPowerLifecycle:(callback,options)=>{const release=install('power',callback);let stop;try{stop=source.onSharedPowerLifecycle(callback,options);}catch(error){release();throw error;}return()=>{try{stop();}finally{release();}};}};
  return {ports,source,events,timers,get reads(){return reads;},fact:()=>({...fact}),publish:(change={},notify=true)=>{fact={...fact,...change,publicationRevision:++revision,observedNotificationSequence:revision};if(notify)events.get('power.lifecycleChanged')?.({...fact});return {...fact};},deliver:value=>events.get('power.lifecycleChanged')?.({...value}),retry:async()=>{assert.equal(timers.size,1,'one shared retry owns missing Ready');const [id,timer]=timers.entries().next().value;timers.delete(id);timer.callback();await flush();},assertClosed:()=>{assert.equal(events.size,0);assert.equal(timers.size,0);assert.equal(source.getSharedPowerLifecycleDiagnostics().subscriberCount,0);}};
 }
 async function exerciseUpdaterPowerBoundary(selectedMode=''){
@@ -35,7 +35,7 @@ async function exerciseUpdaterPowerBoundary(selectedMode=''){
    './gamePolicyTarget':{isPolicyGameInitialized:()=>true,getPolicyGame:()=>null,subscribePolicyGameStatus:callback=>install('game',callback)},
    './updateManager':{ensureUpdateManager:async()=>{},updateSnapshot:state,updateInfo:{value:target},checkForUpdate:async()=>{checks++;},prepareUpdate:async()=>{downloads++;return true;},downloadAndInstall:async()=>{installs++;}},
    './deckyMirrorExtensions':{registerDeckyMirrorExtension:value=>{extension=value;return multiplex.registerDeckyMirrorExtension(value);}},'./deckyUpdaterService':updater
-  });
+  },{AbortController});
   const host=startDeckyUpdaterHost(()=>true),status=()=>extension.request({...peer,request:{command:'updater.status',runId,subscribe:true}}),request=()=>extension.request({...peer,request:{command:'updater.request',runId,clientId:'aabbccdd-1122-3344-5566-778899aabbcc',id:++id,action:'install',...target}}),view=()=>messages.filter(r=>r.message.type==='ymcc-updater').at(-1)?.message.view;
   try{
    multiplex.dispatchDeckyMirrorPeer(peer);status();await flush();assert.equal(view().canInstall,true,'initial admitted package remains installable');
@@ -1018,11 +1018,12 @@ await check('updater host releases every independent observation after one teard
  for(const boundary of ['pause','disconnect','stop'])for(const failAt of ['none','state','game','power']){
   const observers=new Map(),stopCalls=[],messages=[];let extension=null,effects=0,ensureCalls=0;
   const install=(kind,callback)=>{assert(!observers.has(kind));observers.set(kind,callback);return()=>{stopCalls.push(kind);observers.delete(kind);if(failAt===kind)throw Error('inert '+kind+' unsubscribe failure');};};
+  const power=updaterHostPowerFixture(install);
   const multiplex=load(src('src/bridge/deckyMirrorExtensions.ts'));
   const {startDeckyUpdaterHost}=load(src('src/bridge/deckyUpdaterHost.ts'),{
    vue:{watch:(_source,callback)=>install('state',callback)},'@/version':{APP_VERSION:'0.0.39'},
    './ipc':{invoke:async(command,args)=>{assert.equal(command,'deckySidebar.mirrorReply');messages.push(structuredClone(args));return true;},on:(event,callback)=>install(event==='power.suspending'?'suspend':'resume',callback)},
-   './powerLifecycleState':updaterHostPowerFixture(install).ports,
+   './powerLifecycleState':power.ports,
    './api':{powerLifecycle:{get:async()=>({phase:'ready'})}},
    './gamedetect':{refreshGameStatusStrict:async()=>{effects++;return null;}},
    './gamePolicyTarget':{isPolicyGameInitialized:()=>true,getPolicyGame:()=>null,subscribePolicyGameStatus:callback=>install('game',callback)},
@@ -1031,7 +1032,9 @@ await check('updater host releases every independent observation after one teard
    './deckyUpdaterService':updater
   });
   const host=startDeckyUpdaterHost(()=>true),request=subscribe=>extension.request({...peer,request:{command:'updater.status',runId,subscribe}});
+  const release=power.source.onSharedPowerLifecycle(()=>{});
   try{
+   await flush();assert.equal(power.source.getSharedPowerLifecycle().phase,'ready');
    multiplex.dispatchDeckyMirrorPeer(peer);request(true);await flush();assert.equal(observers.size,3);assert.equal(ensureCalls,1);
    if(boundary==='pause')request(false);else if(boundary==='disconnect')multiplex.dispatchDeckyMirrorPeer({...peer,connected:false});else host.stop();
    await flush();const row={boundary,failAt,remaining:[...observers.keys()],stopCalls:[...stopCalls],effects};rows.push(row);console.log(JSON.stringify({updaterAdapterCleanupMeasurement:row}));
@@ -1039,7 +1042,7 @@ await check('updater host releases every independent observation after one teard
    assert.deepEqual(stopCalls,['state','game','power']);
    const count=messages.length;for(let n=0;n<1000;n++)for(const fn of observers.values())fn();await flush();assert.equal(messages.length,count);assert.equal(effects,0);
    if(boundary!=='stop'){if(boundary==='disconnect')multiplex.dispatchDeckyMirrorPeer(peer);request(true);await flush();assert.equal(observers.size,3);host.stop();assert.equal(observers.size,0);}
-  }finally{host.stop();}
+  }finally{host.stop();release();power.assertClosed();}
   assert.equal(observers.size,0);
  }
  assert.equal(rows.length,12);
@@ -1055,11 +1058,12 @@ await check('retired updater initialization cannot clear the current connection 
   let extension=null,ensureCalls=0,checks=0,downloads=0,installs=0,installValidations=0,powerReads=0;
   const state={phase:'idle',message:'inert current idle',percent:0};
   const install=(kind,callback)=>{observers.set(kind,callback);return()=>{retiredCallbacks.push({kind,callback});if(observers.get(kind)===callback)observers.delete(kind);};};
+  const power=updaterHostPowerFixture(install);
   const multiplex=load(src('src/bridge/deckyMirrorExtensions.ts'));
   const {startDeckyUpdaterHost}=load(src('src/bridge/deckyUpdaterHost.ts'),{
    vue:{watch:(_source,callback)=>install('state',callback)},'@/version':{APP_VERSION:'0.0.39'},
    './ipc':{invoke:async(command,args)=>{assert.equal(command,'deckySidebar.mirrorReply');messages.push(structuredClone(args));return true;},on:(event,callback)=>install(event==='power.suspending'?'suspend':'resume',callback)},
-   './powerLifecycleState':updaterHostPowerFixture(install).ports,
+   './powerLifecycleState':power.ports,
    './api':{powerLifecycle:{get:async()=>{powerReads++;return {phase:'ready'};}}},
    './gamedetect':{refreshGameStatusStrict:async()=>{installValidations++;return null;}},
    './gamePolicyTarget':{isPolicyGameInitialized:()=>true,getPolicyGame:()=>null,subscribePolicyGameStatus:callback=>install('game',callback)},
@@ -1067,7 +1071,9 @@ await check('retired updater initialization cannot clear the current connection 
    './deckyMirrorExtensions':{registerDeckyMirrorExtension:value=>{extension=value;return multiplex.registerDeckyMirrorExtension(value);}},'./deckyUpdaterService':updater
   });
   const host=startDeckyUpdaterHost(()=>true),status=p=>extension.request({...p,request:{command:'updater.status',runId:p.runId,subscribe:true}});
+  const release=power.source.onSharedPowerLifecycle(()=>{});
   try{
+   await flush();assert.equal(power.source.getSharedPowerLifecycle().phase,'ready');
    multiplex.dispatchDeckyMirrorPeer(peer);status(peer);await flush();assert.equal(observers.size,3);assert.equal(ensureCalls,1);
    const current=boundary==='peer-replacement'?{...peer,connection:'2',runId:'c'.repeat(32)}:{...peer};
    if(boundary==='pause-reopen')extension.request({...peer,request:{command:'updater.status',runId,subscribe:false}});
@@ -1086,7 +1092,7 @@ await check('retired updater initialization cannot clear the current connection 
    state.phase='failed';state.error='fresh current update owner status';observers.get('state')();await flush();
    const fresh=messages.filter(r=>r.message.type==='ymcc-updater').at(-1);assert.equal(fresh.message.view.message,state.error);assert(protocol.validUpdaterView(fresh.message.view));assert.equal(fresh.connection,current.connection);
    assert.equal(checks,1);assert.equal(downloads,0);assert.equal(installs,0);assert.equal(installValidations,0);
-  }finally{lateInitialization.resolve();host.stop();await flush();}
+  }finally{lateInitialization.resolve();host.stop();release();await flush();power.assertClosed();}
   assert.equal(observers.size,0);
  }
  assert.equal(measurements.length,3);

@@ -1,4 +1,4 @@
-param([string]$Candidate,[string]$Evidence,[ValidateSet('final-admission','final-healthy','final-request','final-flow','final-contract')][string]$CaseGroup)
+param([string]$Candidate,[string]$Evidence,[ValidateSet('final-admission','final-healthy','final-request','final-flow','final-contract','network-task')][string]$CaseGroup)
 $ErrorActionPreference='Stop'
 $env:PSModulePath=(Join-Path $PSHOME 'Modules')+';'+$env:PSModulePath
 $text=[IO.File]::ReadAllText($Candidate,[Text.Encoding]::UTF8)
@@ -10,8 +10,7 @@ if($errors.Count){throw ('Candidate parse errors: '+($errors.Message -join ';'))
 $definitions=@($ast.FindAll({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst]},$false))
 foreach($fn in $definitions){
     $code=$fn.Extent.Text
-    if($CaseGroup) {
-        if($fn.Name -eq 'Invoke-BootSteamDispatch') {
+    if($CaseGroup -and $CaseGroup -ne 'network-task') {        if($fn.Name -eq 'Invoke-BootSteamDispatch') {
             $literal="'Local\YeManCC-UnifiedSettings'"
             if(($code.Split(@($literal),[StringSplitOptions]::None).Length-1) -ne 1){throw 'one original settings mutex literal required'}
             $code=$code.Replace($literal,"`$script:fixtureMutex")
@@ -26,7 +25,51 @@ foreach($fn in $definitions){
     . ([scriptblock]::Create($code))
 }
 $script:checks=0
-function Assert($Ok,$Message){$script:checks++;if(-not $Ok){throw $Message}}
+function Assert($Ok,$Message){$script:checks++;if(-not $Ok){throw $Message}}if($CaseGroup -eq 'network-task') {
+    $legacy=[IO.File]::ReadAllText((Join-Path (Split-Path -Parent $Candidate) 'Steamcommunity_302.xml'))
+    $v15=$legacy.Replace('</Command>','</Command><Arguments>--start-service</Arguments>')
+    $folder=[pscustomobject]@{Tasks=@{}}
+    $folder | Add-Member ScriptMethod GetTask {
+        param($Name)
+        if(-not $this.Tasks.ContainsKey($Name)){throw [Runtime.InteropServices.COMException]::new('Missing',-2147024894)}
+        if($this.Tasks[$Name] -eq 'DENIED'){throw [Runtime.InteropServices.COMException]::new('Denied',-2147024891)}
+        [pscustomobject]@{Xml=$this.Tasks[$Name]}
+    }
+    $old='Steamcommunity_302';$new='Steamcommunity302 V15'
+    Assert (-not (Select-BootNetworkTask $folder).ready) 'absent tasks cannot start anything'
+    $folder.Tasks[$old]=$legacy
+    Assert ((Select-BootNetworkTask $folder).task -ceq "\$old") 'legacy alone with no arguments remains supported'
+    $folder.Tasks[$new]=$v15
+    Assert ((Select-BootNetworkTask $folder).task -ceq "\$new") 'V15 wins when both are enabled'
+    $folder.Tasks[$new]=$v15.Replace('</Settings>','<Enabled>false</Enabled></Settings>').Replace('<Enabled>true</Enabled>','')
+    Assert ((Select-BootNetworkTask $folder).task -ceq "\$old") 'disabled V15 falls back to enabled legacy'
+    $folder.Tasks[$new]='DENIED';$denied=$false
+    try{$null=Select-BootNetworkTask $folder}catch{$denied=$true}
+    Assert $denied 'access denied never falls back to launch a second owner'
+    foreach($bad in @($v15.Replace('--start-service','--unexpected'),$v15.Replace('IgnoreNew','Parallel'),$v15.Replace('>C:\SOFT\steamcommunity</WorkingDirectory>','>C:\Windows</WorkingDirectory>'))) {
+        $folder.Tasks[$new]=$bad
+        Assert (-not (Select-BootNetworkTask $folder).ready) 'malformed V15 definition must not authorize fallback'
+    }
+    $folder.Tasks[$old]=$v15;$folder.Tasks.Remove($new)
+    Assert (-not (Select-BootNetworkTask $folder).ready) 'legacy alias still rejects V15-only arguments'
+    $folder.Tasks[$old]=$legacy;$folder.Tasks[$new]=$v15
+    $state=@{Reads=0;Requests=@();Sequence=@('absent','absent');Log=@()}
+    $ports=@{Task={Select-BootNetworkTask $folder};Process={ [pscustomobject]@{state=$state.Sequence[$state.Reads++];pid=42;birth=1} }
+        Request={param($Name)$state.Requests+=@($Name);[pscustomobject]@{Code=0;Text=''}}
+        Log={param($Event,$Detail)$state.Log+=@($Event+' '+$Detail)}}
+    Invoke-BootNetworkAcceleration $ports
+    Assert ($state.Reads -eq 2 -and $state.Requests.Count -eq 1 -and $state.Requests[0] -ceq "\$new") 'selected name reaches the one request after two absence checks'
+    $state.Reads=0;$state.Requests=@();$state.Sequence=@('absent','running')
+    Invoke-BootNetworkAcceleration $ports
+    Assert ($state.Reads -eq 2 -and $state.Requests.Count -eq 0) 'a concurrently started process prevents submission'
+    $raw=[ordered]@{status='PASS';selection=$CaseGroup;checks=$script:checks;realTaskQueries=0;realTaskRuns=0;realProcessScans=0}
+    $json=$raw|ConvertTo-Json
+    $stream=[IO.File]::Open((Join-Path $Evidence 'network-task-result.json'),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
+    try{$bytes=[Text.UTF8Encoding]::new($false).GetBytes($json);$stream.Write($bytes,0,$bytes.Length)}finally{$stream.Dispose()}
+    $json
+    return
+}
+
 function Reset-Flow {
     $script:sim=[pscustomobject]@{Time=0L;Events=[Collections.Generic.List[string]]::new();Kills=[Collections.Generic.List[long]]::new();SteamAt=1000L;WindowAt=2000L;XboxAt=@(0L,1500L,6500L);AlwaysXbox=$false;Denied=$false;Addons=@('addon-a','addon-b');Affinity=0;Shows=0;Cold=0;InputAt=0L;InputState='local-target-admitted';Focus=0;FocusAt=[Collections.Generic.List[long]]::new();FocusStages=[Collections.Generic.List[string]]::new();FocusRounds=[Collections.Generic.List[int]]::new();CSS=0;YMCC=0;Network=0;Closes=0;Snapshots=0;AdmissionReads=0;AdmissionReader=$null;AdmissionSettings=('{"extensions":{"bootModes":{"schema":1,"boot":"steam","bootEnabled":true}}}'|ConvertFrom-Json)}
 }
@@ -490,4 +533,4 @@ try {
 } finally {
     [Environment]::SetEnvironmentVariable('YEMAN_STARTUP_SOURCE',$sourceBefore,'Process')
 }
-[ordered]@{status='PASS';checks=$script:checks;consumer='actual startup controller; CSS exclusively delegated to YMCC';effects='memory-only effect terminals; isolated settings files';secondBatExecuted=$false;applicationsStartedOrStopped=$false;systemSettingsChanged=$false;admissionCases=$admissionCases.Count;malformedAdmissionCases=$malformedAdmissionCases.Count;startEntry='AST-only; never invoked';isolatedSettingsPreserved=$true}|ConvertTo-Json -Depth 4|Tee-Object -FilePath (Join-Path $Evidence 'selftest-result.json')
+[ordered]@{status='PASS';checks=$script:checks;consumer='actual startup controller; CSS exclusively delegated to YMCC';effects='memory-only effect terminals; isolated settings files';secondBatExecuted=$false;applicationsStartedOrStopped=$false;systemSettingsChanged=$false;admissionCases=$admissionCases.Count;malformedAdmissionCases=$malformedAdmissionCases.Count;startEntry='AST-only; never invoked';isolatedSettingsPreserved=$true}|ConvertTo-Json -Depth 4|Tee-Object -FilePath (Join-Path $Evidence 'selftest-result.json')

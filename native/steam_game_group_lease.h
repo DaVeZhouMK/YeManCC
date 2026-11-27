@@ -31,7 +31,7 @@ struct ProcessGroupCapture {
     std::uint32_t rejectedPid=0;
 };
 namespace group_detail {
-inline std::wstring utf16(const std::string& value){
+inline std::wstring utf16(const std::string& value,bool requireAbsolute=true){
     if(value.empty()||value.size()>131068||value.find('\0')!=value.npos)return {};
     const int count=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,value.data(),static_cast<int>(value.size()),nullptr,0);
     if(count<=0||count>32767)return {};
@@ -39,7 +39,34 @@ inline std::wstring utf16(const std::string& value){
     if(MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,value.data(),static_cast<int>(value.size()),out.data(),count)!=count)return {};
     const bool drive=out.size()>3&&out[1]==L':'&&(out[2]==L'\\'||out[2]==L'/');
     const bool unc=out.size()>4&&out[0]==L'\\'&&out[1]==L'\\';
-    return drive||unc?out:std::wstring{};
+    return !requireAbsolute||drive||unc?out:std::wstring{};
+}
+inline bool scriptPairToolImage(const std::wstring& spelling,const std::wstring& image,std::size_t toolSlash){
+    if(spelling.size()<=4||_wcsicmp(spelling.c_str()+spelling.size()-4,L".exe")!=0)return false;
+    if(spelling.find_first_of(L"\\/:")!=std::wstring::npos)return samePath(spelling,image);
+    return samePath(spelling,image.substr(toolSlash+1));
+}
+inline bool scriptPairToolCommand(const std::wstring& spelling,const std::wstring& command,
+    const std::wstring& image,std::size_t toolSlash){
+    if(spelling.empty()||spelling!=command||spelling.front()==L' '||spelling.front()==L'\t')return false;
+    int count=0;const auto args=CommandLineToArgvW(command.c_str(),&count);
+    const auto freeArguments=[](LPWSTR* value) noexcept { LocalFree(value); };
+    const std::unique_ptr<LPWSTR,decltype(freeArguments)> ownedArguments(args,freeArguments);
+    return args&&count>1&&scriptPairToolImage(args[0],image,toolSlash);
+}
+inline bool scriptPairChildTool(const std::string& logPath,const ProcessWitness& tool,
+    const ProcessWitness& game,DWORD parent,HANDLE process=nullptr){
+    if(parent!=game.pid||tool.created<=game.created)return false;
+    const auto gameSlash=game.image.find_last_of(L"\\/"),toolSlash=tool.image.find_last_of(L"\\/");
+    if(gameSlash==std::wstring::npos||toolSlash==std::wstring::npos||
+        !samePath(game.image.substr(0,gameSlash),tool.image.substr(0,toolSlash))||samePath(game.image,tool.image))return false;
+    const auto spelling=utf16(logPath,false);
+    if(scriptPairToolImage(spelling,tool.image,toolSlash))return true;
+    // An unquoted Steam tracker payload can include the tool's arguments.
+    // Require the held process's exact command line before using argv[0].
+    if(!process||spelling.find_first_of(L" \t")==std::wstring::npos)return false;
+    const auto command=detail::commandLine(process);
+    return command&&scriptPairToolCommand(spelling,*command,tool.image,toolSlash);
 }
 inline std::string localSecond(std::uint64_t value){
     if(!value)return {};ULARGE_INTEGER raw{};raw.QuadPart=value;
@@ -145,7 +172,7 @@ public:
 };
 
 inline ProcessGroupCapture ProcessOwner::acquireGroup(const std::shared_ptr<ProcessLease>& selected,
-    const ProcessGroupSeed& source)const{
+    const ProcessGroupSeed& source,DWORD nativePrimaryPid)const{
     ProcessGroupCapture out;
     const auto refuse=[&](ProcessGroupRejection why,std::uint32_t pid=0){out.rejection=why;out.rejectedPid=pid;return out;};
     try{
@@ -155,7 +182,14 @@ inline ProcessGroupCapture ProcessOwner::acquireGroup(const std::shared_ptr<Proc
         if(source.selectedPid!=selected->gameWitness().pid)return refuse(ProcessGroupRejection::SelectionMismatch);
         const auto& request=selected->request_;
         if(!request->observer_->sameIdentityEpoch(request->expected_))return refuse(ProcessGroupRejection::ContextChanged);
-        ymcc::steamgameroles::Graph graph;graph.count=static_cast<std::uint32_t>(source.members.size());graph.selectedPid=source.selectedPid;
+        // Steam can put a system VBS launcher and the game's own child tools in
+        // one shortcut row set. Prove those tools belong to the selected game,
+        // but keep them out of the launcher/game role tuple.
+        const auto launcher=std::find_if(source.members.begin(),source.members.end(),[&](const auto& row){return row.pid==nativePrimaryPid;});
+        const bool scriptPair=source.members.size()>2&&(source.fullGameId&0xffffffffULL)==0x02000000ULL&&
+            nativePrimaryPid&&nativePrimaryPid!=source.selectedPid&&launcher!=source.members.end()&&
+            detail::windowsScriptHostImage(group_detail::utf16(launcher->path));
+        ymcc::steamgameroles::Graph graph;graph.count=scriptPair?2u:static_cast<std::uint32_t>(source.members.size());graph.selectedPid=source.selectedPid;
         std::array<ProcessWitness,32> witnesses{};std::vector<detail::PinnedProcess> members;
         members.reserve(source.members.size()-1);
         unsigned selectedRows=0;for(const auto& seed:source.members)if(seed.pid==source.selectedPid)++selectedRows;
@@ -164,10 +198,12 @@ inline ProcessGroupCapture ProcessOwner::acquireGroup(const std::shared_ptr<Proc
         for(const auto& seed:source.members){
             out.rejectedPid=seed.pid;
             if(!seed.pid||seed.pid==selected->steamWitness().pid||!seed.sourceLine||seed.at.empty())return refuse(ProcessGroupRejection::InvalidMember,seed.pid);
-            const auto path=group_detail::utf16(seed.path);if(path.empty())return refuse(ProcessGroupRejection::InvalidMember,seed.pid);
+            const bool helper=scriptPair&&seed.pid!=source.selectedPid&&seed.pid!=nativePrimaryPid;
+            const auto path=group_detail::utf16(seed.path);
+            if(path.empty()&&!helper)return refuse(ProcessGroupRejection::InvalidMember,seed.pid);
             for(std::uint32_t i=0;i<next&&i<graph.count;++i)if(witnesses[i].pid==seed.pid)return refuse(ProcessGroupRejection::InvalidMember,seed.pid);
             const bool original=seed.pid==source.selectedPid;
-            const std::uint32_t index=original?0:next++;
+            const std::uint32_t index=original||helper?0:next++;
             if(index>=graph.count)return refuse(ProcessGroupRejection::InvalidMember,seed.pid);
             HANDLE handle=nullptr;detail::PinnedProcess observed;
             if(original){
@@ -183,12 +219,22 @@ inline ProcessGroupCapture ProcessOwner::acquireGroup(const std::shared_ptr<Proc
                 if(!ProcessIdToSessionId(seed.pid,&observed.windowsSession))return refuse(ProcessGroupRejection::PathOrSessionMismatch,seed.pid);
             }
             if(!detail::complete(observed.witness)||observed.witness.pid!=seed.pid||
-                !samePath(path,observed.witness.image)||observed.windowsSession!=selected->windowsSession()||
+                observed.windowsSession!=selected->windowsSession()||
                 observed.witness.created<selected->steamWitness().created||!detail::alive(handle))
                 return refuse(ProcessGroupRejection::PathOrSessionMismatch,seed.pid);
             if(!group_detail::launchWindow(observed.witness.created,seed.at))return refuse(ProcessGroupRejection::BirthWindowMismatch,seed.pid);
             const auto parent=detail::parent(handle);
             if(!parent||parent==seed.pid)return refuse(ProcessGroupRejection::ParentUnavailable,seed.pid);
+            if(helper){
+                if(!group_detail::scriptPairChildTool(seed.path,observed.witness,selected->gameWitness(),parent,handle)||
+                    !selected->processCurrent()||!detail::alive(handle))
+                    return refuse(ProcessGroupRejection::InvalidTopology,seed.pid);
+                continue;
+            }
+            if(!samePath(path,observed.witness.image))return refuse(ProcessGroupRejection::PathOrSessionMismatch,seed.pid);
+            if(scriptPair&&((original&&parent!=nativePrimaryPid)||(!original&&
+                detail::scriptHostVbsOperand(handle,observed.witness.image,selected->steamWitness().pid).empty())))
+                return refuse(ProcessGroupRejection::InvalidTopology,seed.pid);
             graph.members[index]={seed.pid,observed.windowsSession,parent,observed.witness.created};
             witnesses[index]=observed.witness;
             if(!original)members.push_back(std::move(observed));

@@ -13,14 +13,14 @@ export const gameProfileImportSource=(s:ContinuousPerformanceSnapshot)=>JSON.str
 export interface ProfileMirrorDeps {
   allowed:()=>boolean;game:()=>DetectedGame|null;label:(game:DetectedGame)=>string;
   settingsGeneration:()=>number;
-  power:()=>Promise<{phase:string;hardwareWritesAllowed:boolean;generation:number}>;
+  power:(context:RelayMutationContext)=>Promise<{phase:string;hardwareWritesAllowed:boolean;generation:number}>;
   acquire:(label:string)=>(()=>void)|null;load:()=>Promise<GameCustomConfig>;
   schedule:()=>Promise<PerformanceScheduleConfig>;currentSchedule:()=>PerformanceScheduleConfig|null;
   snapshot:()=>Promise<ContinuousPerformanceSnapshot>;gyro?:()=>Promise<GameMirrorGyroDefaults>;
   targetPolicy?:()=>VirtualTargetPolicy|null;
   import:(target:GameCustomProfileTarget,revision:string,entry:GameCustomProfile,frames:FrameRatePair,checkpoint:()=>void)=>Promise<void>;
   remove:(target:GameCustomProfileTarget,revision:string)=>Promise<void>;
-  restore:()=>Promise<string>;
+  restore:(current:()=>boolean)=>Promise<string>;
 }
 export function createProfileMirrorActions(deps:ProfileMirrorDeps) {
  return {async execute(args:Record<string,unknown>,context:RelayMutationContext) {
@@ -31,7 +31,7 @@ export function createProfileMirrorActions(deps:ProfileMirrorDeps) {
   if(!captured||!gamePolicyKey(captured)||captured.pid<=0||!captured.processCreated||gameMirrorIdentity(captured)!==context.gameIdentity)throw Error('GAME_PROFILE_TARGET_CHANGED');
   const game=structuredClone(captured),key=gamePolicyKey(game),target=captureGameCustomProfileTarget(game,deps.settingsGeneration());
   const checkpoint=()=>{context.checkpoint();if(!deps.allowed()||gameMirrorIdentity(deps.game())!==context.gameIdentity||deps.settingsGeneration()!==target.generation)throw Error('GAME_PROFILE_TARGET_CHANGED');};
-  const gate=async()=>{checkpoint();const p=await deps.power();checkpoint();if(p.phase!=='ready'||p.hardwareWritesAllowed!==true||p.generation!==context.generation)throw Error('GAME_PROFILE_POWER_NOT_READY');};
+  const gate=async()=>{checkpoint();const p=await deps.power(context);checkpoint();if(p.phase!=='ready'||p.hardwareWritesAllowed!==true||p.generation!==context.generation)throw Error('GAME_PROFILE_POWER_NOT_READY');};
   await gate();const release=deps.acquire('decky-game-profile');if(!release)throw Error('GAME_PROFILE_BUSY');
   try {
    const config=await deps.load();checkpoint();if(gameProfileRevision(config,key)!==admission.profile)throw Error('GAME_PROFILE_SOURCE_CHANGED');
@@ -52,7 +52,11 @@ export function createProfileMirrorActions(deps:ProfileMirrorDeps) {
    }
    // The file commit has succeeded. A later apply failure must not be reported as an unsaved edit.
    const notice=args.value==='global'?'已删除游戏专属配置，恢复全局配置':'已将当前配置导入游戏专属';
-   try {const owner=await deps.restore();return {saved:true,applied:owner!=='none',pending:owner==='none',notice:owner==='none'?notice+'；等待 YMCC 应用':notice};}
+   try {
+    await gate();
+    const owner=await deps.restore(()=>{try{checkpoint();return true;}catch{return false;} });
+    return {saved:true,applied:owner!=='none',pending:owner==='none',notice:owner==='none'?notice+'；等待 YMCC 应用':notice};
+   }
    catch(error) {return {saved:true,applied:false,pending:true,notice:notice+'；应用未完成：'+(error as Error).message};}
   } finally {release();}
  }};

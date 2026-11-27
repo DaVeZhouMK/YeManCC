@@ -1,3 +1,4 @@
+import {verifySharedLeafPins} from '../sleep-native-recovery-consumer/shared-leaf-successor.mjs';
 import {verifyCompilerSourceReview,verifyWorkerEsmCoverage} from '../sleep-exit-inflight-consumer/compiler-source-review.mjs';
 import fs from'node:fs';import path from'node:path';import{spawnSync}from'node:child_process';import{createHash}from'node:crypto';import{fileURLToPath}from'node:url';
 import{REPO,MODULE,CASE_ID,inputFiles,toolchainSpec}from'./adapter.mjs';
@@ -36,13 +37,13 @@ function walk(dir){const rows=[];for(const entry of fs.readdirSync(dir,{withFile
 export function runSleepStartupExit(value,{prototype=false}={}){
  const root=evidencePath(value),spec=read(path.join(REPO,MODULE,'spec.json'));
  need(hash(path.join(REPO,spec.fixture.path))===spec.fixture.sha256,'STARTUP_EXIT_FIXTURE_NEEDS_REVIEW');
- for(const row of spec.reviewedSharedLeafIdentities)need(hash(path.join(REPO,row.path))===row.sha256,'STARTUP_EXIT_SHARED_LEAF_CHANGED:'+row.path);
+ const sharedReview=verifySharedLeafPins(spec,relative=>fs.readFileSync(path.join(REPO,relative)),'STARTUP_EXIT');
  const compilerSourceReview=verifyCompilerSourceReview(REPO);
  const tool=toolchainSpec(REPO);
  need(path.resolve(process.execPath).toLowerCase()===path.resolve(tool.nodeExecutable).toLowerCase(),'STARTUP_EXIT_NODE_NOT_PINNED');
  for(const row of tool.files)need(hash(row.path)===row.sha256,'STARTUP_EXIT_TOOL_CHANGED:'+row.path);
- fs.mkdirSync(root,{recursive:true});const sources=inputFiles(REPO).sort().map(relative=>{const saved=path.join(root,'input-sources',relative);fs.mkdirSync(path.dirname(saved),{recursive:true});fs.copyFileSync(path.join(REPO,relative),saved,fs.constants.COPYFILE_EXCL);return{path:relative,saved,sha256:hash(saved)};}),snapshot={schemaVersion:1,module:MODULE,evidenceRoot:root,createdAt:new Date().toISOString(),sources,tool};write(root+'/input-snapshot.json',snapshot);
- const captured=new Map(sources.map(x=>[x.path,x.sha256]));for(const row of [...spec.reviewedSharedLeafIdentities,spec.fixture])need(captured.get(row.path)===row.sha256,'STARTUP_EXIT_CAPTURED_REVIEW_CHANGED:'+row.path);
+ fs.mkdirSync(root,{recursive:true});const sources=inputFiles(REPO).sort().map(relative=>{const saved=path.join(root,'input-sources',relative);fs.mkdirSync(path.dirname(saved),{recursive:true});fs.copyFileSync(path.join(REPO,relative),saved,fs.constants.COPYFILE_EXCL);return{path:relative,saved,sha256:hash(saved)};}),snapshot={schemaVersion:1,module:MODULE,evidenceRoot:root,createdAt:new Date().toISOString(),sources,tool,sharedLeafReview:sharedReview.receipt()};write(root+'/input-snapshot.json',snapshot);
+ const captured=new Map(sources.map(x=>[x.path,x.sha256]));for(const [name,sha256] of sharedReview.pins)need(captured.get(name)===sha256,'STARTUP_EXIT_CAPTURED_REVIEW_CHANGED:'+name);need(captured.get(spec.fixture.path)===spec.fixture.sha256,'STARTUP_EXIT_CAPTURED_REVIEW_CHANGED:'+spec.fixture.path);
  const owner=allocateScratch(root),scratch=verifyScratch(owner,root);write(root+'/scratch-allocation.json',owner);const executed=sources.map(row=>{const saved=path.join(scratch,'input-sources',row.path);fs.mkdirSync(path.dirname(saved),{recursive:true});fs.copyFileSync(row.saved,saved,fs.constants.COPYFILE_EXCL);need(hash(saved)===row.sha256,'STARTUP_EXIT_EXECUTION_COPY_CHANGED');return{...row,saved};});write(scratch+'/input-snapshot.json',{...snapshot,sources:executed});write(scratch+'/execution-owner.json',owner);
  const args=root+'/job-arguments.json',jobReceiptPath=root+'/owned-job.json';write(args,[path.join(scratch,'input-sources',MODULE,'worker.mjs'),scratch]);const env={...process.env};delete env.NODE_OPTIONS;delete env.NODE_PATH;env.NODE_V8_COVERAGE=path.join(scratch,'esm-coverage');fs.mkdirSync(env.NODE_V8_COVERAGE);
  const jobDeadlineEpochMs=Date.now()+200000,jobCleanupReserveMs=8000;

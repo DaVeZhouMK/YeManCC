@@ -16,15 +16,17 @@ namespace YeMan.Setup {
      else Json.Save(Path.Combine(directory,"detection.json"),WebSetupForm.DetectionSnapshot(Plan.InstallRoot));
      Json.Save(Path.Combine(directory,"scope.json"),new{Utc=DateTime.UtcNow.ToString("o"),Mode=advancedSteam?"READ_ONLY_ADVANCED_STEAM_PATHS":"READ_ONLY_INSTALLATION_DETECTION",SystemActions="NOT_RUN",ProductProcessesStarted=0,SecurityChanges=0,FullCompatibilityAcceptance=false});return 0;
     }
-    Native.RequireSupportedSystem();
-    if(args.Length==2&&args[0]=="--validate") {string root=SafeFiles.Full(args[1]);var b=Resources.Unpack(root,s=>{});Json.Save(Path.Combine(root,"validation.json"),new {Status="LOCAL_PAYLOAD_VERIFIED",b.Version,b.CoreVersion,WebViewRuntimeBundled=false,WebViewBootstrapperBundled=true,NetworkPolicy="WEBVIEW2_IF_MISSING_ONLY",FirstInstallOnly=false,LocalUpdate=true,UiSha256=WebAssets.HtmlHash,SystemActions="NOT_RUN"});return 0;}
-    Plan plan=new Plan();bool apply=false,preview=args.Length==1&&args[0]=="--preview";string capture=null;
+    if(args.Length==2&&args[0]=="--validate") {string root=SafeFiles.Full(args[1]);var b=Resources.Unpack(root,s=>{});Json.Save(Path.Combine(root,"validation.json"),new {Status="LOCAL_PAYLOAD_VERIFIED",b.Version,b.CoreVersion,WebViewRuntimeBundled=false,WebViewBootstrapperBundled=true,NetworkPolicy="OFFLINE_BY_DEFAULT_WEBVIEW2_OPT_IN",FirstInstallOnly=false,LocalUpdate=true,UiSha256=WebAssets.HtmlHash,SystemActions="NOT_RUN"});return 0;}
+    Plan plan=new Plan();bool apply=false,native=false,preview=args.Length==1&&(args[0]=="--preview"||args[0]=="--preview-offline");string capture=null;
+    if(preview)native=args[0]=="--preview-offline";
     if(args.Length==2&&args[0]=="--capture-ui") {preview=true;capture=SafeFiles.Full(args[1]);if(Directory.Exists(capture))throw new IOException("截图证据目录必须为新目录");SafeFiles.NoLinks(capture);Directory.CreateDirectory(capture);errorPath=Path.Combine(capture,"ERROR.json");}
-    else if(args.Length==2&&args[0]=="--apply"){plan=Json.Read<Plan>(Encoding.UTF8.GetString(Convert.FromBase64String(args[1])));Plan.Validate(plan);if(!Native.IsAdmin)throw new IOException("没有获得安装权限");apply=true;}
+    else if(args.Length==2&&(args[0]=="--apply"||args[0]=="--apply-native")){plan=Json.Read<Plan>(Encoding.UTF8.GetString(Convert.FromBase64String(args[1])));Plan.Validate(plan);if(!Native.IsAdmin)throw new IOException("没有获得安装权限");apply=true;native=args[0]=="--apply-native";}
     else if(args.Length!=0&&!preview)throw new IOException("不支持的设置中心参数");
     if(!apply)plan.Root=Plan.InstallRoot;
-    if(!Runtimes.WebView()){if(capture!=null)throw new IOException("缺少 WebView2，真实截图未执行；预览不会安装环境");using(var bootstrap=new BootstrapForm(preview)){if(bootstrap.ShowDialog()!=DialogResult.OK)return 0;}}
-    return RunWeb(plan,preview,apply,capture);
+    bool webReady=!native&&Runtimes.Observe("WebView2",Runtimes.WebView).ready==true;
+    if(!webReady&&capture!=null)throw new IOException("缺少 WebView2，H5 截图未执行");
+    if(webReady){int code=RunWeb(plan,preview,apply,capture);if(code!=2||capture!=null)return code;}
+    using(var fallback=new BootstrapForm(plan,preview,apply)){Application.Run(fallback);return 0;}
    }catch(Exception e){if(errorPath!=null)Json.Save(errorPath,new{Error=e.ToString(),SystemActions="NOT_RUN"});else MessageBox.Show(e.Message,WebAssets.ProductName,MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
   }
   [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]

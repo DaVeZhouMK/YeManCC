@@ -16,6 +16,7 @@
     "native/log_snapshot_state.h",
     "native/main.cpp",
     "native/screen_touchpads.h",
+    "native/sleep_power_dispatch.h",
     "native/sleep_power_observation.h",
     "native/sleep_power_revocation.h",
     "native/sleep_power_state.h",

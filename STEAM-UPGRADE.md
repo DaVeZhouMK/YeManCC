@@ -32058,6 +32058,8 @@ Win5记录中的CrashLogsGenerator.exe和codCrashHandler.exe曾被识别为高�
 
 手柄规则中的 Steam 键和三点键由旧虚拟脉冲／Ctrl+1 分支统一为触摸既有 `menu.button` 通道，两入口共同调用 `nativeSteamMenuButton`。虚拟模式独立，来源、规则、OEM/WMI、录制、退出、电源和不确定结果边界保留；新菜单仅终止接纳时已有触摸补发，不误取消后来触摸。普通快捷动作保持单发，触摸原 3 秒补发不改。PS/Xbox/Gamebar 原路径保留，动作说明和失败提示同步。
 
+2026-11-27：两个键收到 Steam 明确的 `keyDelivered:true` 回执后，在 `nativeSteamMenuButton` 共用一次 Decky 完成通知。仅在原输入和电源范围、公共 Steam 会话仍有效且 Decky 开启时，交给公共 `ModeObserver` 原读槽合并，再唤醒现有 Decky 健康检查；无插件页面或 Loader 时也可请求共享读，启动仍由原大屏发布和 Runtime 准入决定。不重发菜单键，不用回执代替可见或可操作证明，不新增轮询、重启权限或恢复次数。诊断用 `connection-check` / `steam-menu-completion` 区分两键来源和读槽状态。
+
 原生定向235、原Steam接收端137、现有映射Vue18项及私有完整来源类型检查通过，旧源通道差异反例复现。环境及闭包初次失败保持原件；完整EXE、打包、部署与实物手柄/游戏画面未验收。见 `docs/screen-standalone-steam-global-keys-20261011.md` 与 `Testing/YMCC/Evidence/ControllerSteamMenuChannel-20261111`。
 
 

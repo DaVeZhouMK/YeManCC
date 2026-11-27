@@ -1,6 +1,7 @@
 // Static operation snapshots only: no subscriptions, timers or hardware probes.
 import { invoke } from './ipc';
 export type TdpRequestSource = 'ui' | 'decky' | 'hotkey' | 'schedule' | 'startup' | 'resume' | 'autofloat' | 'unspecified';
+type TdpLifecycleStep = 'power-write-gate' | 'config-saved' | 'daemon-write-receipt' | 'completion-currentness';
 export interface TdpObservationContext {
   operationId: string; source: TdpRequestSource; requestedW: number | null; clampedW: number | null;
   requestedMode: 'ac' | 'dc' | null; observedMode: 'ac' | 'dc' | null; apply: boolean; save: boolean; vendor?: string; configSaved?: boolean; policy?: string;
@@ -57,11 +58,12 @@ export function beginTdpObservation(detail: Omit<TdpObservationContext, 'operati
   // causal rows together at completion. No timer, observer or background work.
   const pending: Array<{ event: string; detail: Record<string, unknown> }> = [];
   const deliver = sendDiagnostic;
-  const emit = (event: string, fields: Record<string, unknown> = {}): void => {
+  const emit = (event: string, fields: Record<string, unknown> = {}, lifecycleStep?: TdpLifecycleStep): void => {
     try {
       Object.assign(state, fields);
       if (typeof fields.configSaved === 'boolean') context.configSaved = fields.configSaved;
       const row = { event, detail: { ...context, ...state, durationMs: performance.now() - started } };
+      if (lifecycleStep) Object.assign(row.detail, { lifecycleStep });
       if (event === 'tdp.request') { deliver([row]); return; }
       pending.push(row);
       if (pending.length >= 16 || ['tdp.completed', 'tdp.failed', 'tdp.skipped', 'tdp.unverified'].includes(event))
@@ -69,7 +71,8 @@ export function beginTdpObservation(detail: Omit<TdpObservationContext, 'operati
     } catch { delivery.senderExceptionRows = add(delivery.senderExceptionRows, 1); failedRows(1); }
   };
   emit('tdp.request', { configSaved: false, processStarted: false, hardwareCommandReturned: 'not-observed', readbackMatched: 'not-observed' });
-  return { context, state, emit };
+  const emitLifecycle = (step: TdpLifecycleStep, fields: Record<string, unknown>): void => emit('tdp.lifecycle', fields, step);
+  return { context, state, emit, emitLifecycle };
 }
 export function tdpDiagnosticDeliveryFailures(): number { return failedLogDeliveries; }
 // Operator annotation is a marker, not an OEM mode request or a hardware fact.

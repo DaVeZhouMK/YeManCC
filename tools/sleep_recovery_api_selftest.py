@@ -263,6 +263,14 @@ tests=r'''
  resetApi();marker(100);fspath::remove(SG_SLEEP_LEASE_DIR+L"\\100.txt");report=sleepRecoveryInspect({});owner.powerGeneration=9;receipt=sleepRecoveryRepair({{"inspectionToken",report["inspectionToken"]},{"confirmed",true}});assert(!receipt["accepted"]&&!exists(100));pass("changed memory owner cannot authorize synthetic-marker reconstruction");
  resetApi();hostAlive=false;g_inputHostPrepared=false;report=sleepRecoveryInspect({});receipt=sleepRecoveryRepair({{"inspectionToken",report["inspectionToken"]},{"confirmed",true}});assert(receipt["flagsReconciled"]&&!receipt["inputQueued"]&&queuedInput.empty()&&!g_sgInSuspend&&!g_sgGameActuallySuspended);pass("stale flags reconcile without creating a dead or disabled input target");
  resetApi();marker(100);retry=true;report=sleepRecoveryInspect({});assert(!report["repair"]["allowed"]);retry=false;sgBeginWakeGameRecovery(7);report=sleepRecoveryInspect({});assert(!report["repair"]["allowed"]);pass("re-sleep and automatic pending recovery disable user repair");
+ resetApi();marker(100);marker(101,true);report=sleepRecoveryInspect({});assert(report["repair"]["allowed"]);
+ assert(sgBeginWakeGameRecovery(7));fixturePublicGameWakeAllowed=false;at(10000);
+ assert(g_sgWakeRecoveryParked&&!g_sgWakeRecoveryPending);fixturePublicGameWakeAllowed=true;
+ auto parkedRepair=sleepRecoveryRepair({{"inspectionToken",report["inspectionToken"]},{"confirmed",true}});
+ assert(!parkedRepair["accepted"]&&g_sgWakeRecoveryParked&&fixtureNtDispatches.empty()&&queuedInput.empty());
+ assert(!sleepRecoveryInspect({})["repair"]["allowed"]);
+ sgNotifyParkedWakeGameRecovery();at(12500);
+ assert(!sgWakeGameRecoveryHasWork()&&!owner.markerOwned&&!exists(100)&&!exists(101,true)&&fixtureOpenHandles==0);
  resetApi();for(int n=0;n<65;++n)marker(100+n);report=sleepRecoveryInspect({});assert(report["state"]["markerLimit"]&&!report["repair"]["allowed"]);pass("lease scanning is bounded and incomplete scan never authorizes repair");
  resetApi();procs[100]={};sgWriteFileAtomic(SG_SLEEP_LEASE_DIR+L"\\100.txt","pid=100|created=1234|created=5678|state=suspended|generation=7");report=sleepRecoveryInspect({});assert(!report["repair"]["allowed"]);pass("ambiguous persisted marker is retained and reported, never recovered");
  resetApi();std::string big(2*1024*1024+100,'x');sgWriteFileAtomic(SG_FACT_LOG,big);auto tail=SleepRecoveryApi::readTail(SG_FACT_LOG);assert(tail.bytes.size()==2*1024*1024&&tail.meta["truncated"]);pass("feedback log tails are byte bounded with explicit truncation evidence");

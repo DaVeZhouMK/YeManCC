@@ -38,6 +38,11 @@ try{
 
  }
  if(!receiptBoundaryOnly){
+ for(const [endpoint,mode] of [['acquire','acquire'],['enable','post']]){
+  const old=`receiver-async-write-retired-${endpoint}`,fresh=`receiver-async-write-current-${endpoint}`;
+  await test(old,mode,r=>{assert.match(r.error,/POWER_RESUMING/);assert.equal(requests.get(old)??0,0);assert.equal(r.armed,0);});
+  await test(fresh,mode,r=>{assert.equal(r.status,200);assert.equal(requests.get(fresh),1);});
+ }
  for(const kind of ['shared-pending-post','shared-unknown-post','shared-queue-serial','shared-queue-sequence','shared-missing-receipt'])await test(kind,'post',r=>{assert.equal(r.threw,true,'unadmitted current power reached HTTP transport: '+kind);assert.match(r.error,/POWER_RESUMING/);assert.equal(requests.get(kind)??0,0,'retired request reached loopback server');assert.equal(r.armed,0);});
  await test('shared-publication-post','post',r=>{assert.equal(r.status,200);assert.equal(r.armed,1);assert.equal(requests.get('shared-publication-post'),1);});
  await test('shared-unknown-get','get',r=>{assert.equal(r.status,200);assert.equal(requests.get('shared-unknown-get'),1);});

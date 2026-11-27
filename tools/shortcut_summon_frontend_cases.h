@@ -1,3 +1,21 @@
+// Feed a recorded key through the owner's hook and UI drain, not a sampled held key.
+static void shortcutFrontendRecordedKey(const json& keyboard) {
+    resetRoute(json::array({keyboard}));
+    tick(0,10000);
+#if defined(YMCC_OEM_CONSUME_SOURCE) && defined(YMCC_SHORTCUT_EDGE_SOURCE)
+    oemBackMappingReconcileOnUi();
+    tick(0,10001);
+    KBDLLHOOKSTRUCT key{};key.vkCode='K';key.scanCode='K';
+    ++fixtureTick;oemBackHookProc(HC_ACTION,WM_KEYDOWN,reinterpret_cast<LPARAM>(&key));
+    key.flags=LLKHF_UP;
+    ++fixtureTick;oemBackHookProc(HC_ACTION,WM_KEYUP,reinterpret_cast<LPARAM>(&key));
+    deliverPhysicalReceipts();nativeDesktopFunctionDrain();
+#else
+    fixtureDesktopDown.insert('K');tick(0,10020);
+#endif
+    flushJobs();
+}
+
 // Original frontend consumer, extended for the common touch/shortcut transport.
 static void shortcutSteamMenuCases() {
     for(int button:{1,5})for(const auto* persona:{"disabled","steamdeck","dualsense-edge","elite"})for(bool prepared:{false,true}) {
@@ -7,6 +25,9 @@ static void shortcutSteamMenuCases() {
         const auto before=fixtureInput.dump();tick(0,10000);tick(XINPUT_GAMEPAD_A,10020);flushJobs();
         tick(XINPUT_GAMEPAD_A,10100);flushJobs();
         check(fixtureSteamAttempts==1 && fixtureSteamRequests.size()==1,"held controller action dispatches exactly one native Steam key for every virtual mode");
+        check(fixtureDeckyRefreshes==1&&fixtureDeckyChecks==1&&
+            fixtureDeckyMenuDiagnostic.value("source","")== (button==1?"ymcc-steam-button":"ymcc-quick-access"),
+            "each delivered Steam key queues one shared Decky health check even with no attached frontend");
         const auto& request=fixtureSteamRequests[0];
         check(request.value("operation","")=="menu.button" && request.value("menu","")==(button==1?"main":"quick-access") && !request.contains("qamFollowup"),"controller selects exact shared main/QAM request without touch recovery ticket");
         check(!g_frontendButtonPulse.pending() && fixtureSendInputs.empty() && fixtureOwnActions.empty(),"Steam sends no Guide, Ctrl shortcut, focus mutation or second route");
@@ -60,6 +81,7 @@ static void shortcutSteamMenuCases() {
             if(fault==5)fixtureSteamThrows=true;
             nativeYmccShortcutEmit("input.frontendButton",button);flushJobs();
             check(fixtureSteamAttempts==1 && fixtureSteamRequests.size()==1 && fixtureSendInputs.empty() && !g_frontendButtonPulse.pending(),"failure/malformed/uncertain transport has one attempt and no fallback");
+            check(!fixtureDeckyRefreshes&&!fixtureDeckyChecks,"undelivered or uncertain key does not queue a completed-menu health check");
             const std::string reason=fault==0?"steam-menu-unavailable":"steam-menu-result-uncertain";
             check(std::any_of(fixtureLogs.begin(),fixtureLogs.end(),[&](const json& row){return row.value("event","")=="shortcut-frontend-button" && !row.value("ok",true) && row.value("reason","")==reason;}),"Steam failure settles through existing frontend receipt");
         }
@@ -70,13 +92,40 @@ static void shortcutSteamMenuCases() {
         const auto result=nativeSteamMenuButton(quick,[]{return true;},ticket);
         check(result.value("ok",false) && fixtureSteamRequests.size()==1 && fixtureSteamRequests[0].value("operation","")=="menu.button","touch-style call executes the same actual native sender");
         check(quick?fixtureSteamRequests[0]["qamFollowup"]==ticket:!fixtureSteamRequests[0].contains("qamFollowup"),"touch recovery ticket is preserved exactly and only for QAM");
+        check(fixtureDeckyRefreshes==1&&fixtureDeckyChecks==1,"touch shares the same once-per-key health completion");
         fixtureSteamRequests.clear();nativeSteamMenuButton(quick,[]{return false;},ticket);
         check(fixtureSteamRequests.empty(),"shared sender rejects invalid touch lifecycle before entering transport");
     }
+    for(int boundary=0;boundary<6;++boundary) {
+        resetRoute(json::array());
+        fixtureSteamAfterSend=[boundary]{
+            if(boundary==0)++fixtureSteamSession.created; // PID reuse after dispatch.
+            if(boundary==1)++fixturePowerGeneration;
+            if(boundary==2)fixtureDeckyEnabled=false;
+            if(boundary==3)fixtureDeckyFenced=true;
+            if(boundary==4)fixtureDeckyModeDemand=false;
+            if(boundary==5)g_aiFanMockSession.isolated=true;
+        };
+        const auto result=nativeSteamMenuButton(true,[]{return true;});
+        check(result==fixtureSteamResult&&fixtureSteamRequests.size()==1&&!fixtureDeckyRefreshes&&!fixtureDeckyChecks,
+            "stale or disabled health demand cannot change a delivered QAM receipt or repeat the key");
+    }
 #endif
+    for (unsigned variant=0;variant<5;++variant) {
+        resetRoute(json::array());
+        const bool quick=variant!=4;
+        fixtureSteamResult["runtimeAccepted"]=variant!=1;
+        fixtureSteamResult["before"]=variant==2?0:quick?2:1;
+        fixtureSteamResult["menu"]=variant==3?2:0;
+        const auto reply=nativeSteamMenuButton(quick,[]{return true;});
+        check(reply==fixtureSteamResult&&fixtureSteamRequests.size()==1&&fixtureDeckyRefreshes==1&&
+              fixtureDeckyChecks==(variant==0?0u:1u)&&fixtureDeckyMenuDiagnostic.value("readReusedHealthy",false)==(variant==0),
+              "only a confirmed QAM close may reuse health; all key receipts stay unchanged");
+    }
     auto keyboard=rule("input.frontendButton","","press","keyboard","KeyK");keyboard["params"]={{"button","steamQuickAccess"}};
-    resetRoute(json::array({keyboard}));tick(0,10000);fixtureDesktopDown.insert('K');tick(0,10020);flushJobs();
+    shortcutFrontendRecordedKey(keyboard);
     check(fixtureSteamRequests.size()==1 && fixtureSteamRequests[0].value("menu","")=="quick-access","recorded keyboard source shares controller and touch Steam channel");
+    check(fixtureDeckyRefreshes==1&&fixtureDeckyChecks==1,"recorded keyboard Steam receipt uses the same Decky completion exactly once");
 }
 
 // Memory-only coverage of the production dispatcher, shared predicate and pulse.
@@ -173,7 +222,7 @@ static void shortcutSummonFrontendCases() {
     resetRoute(json::array());fixtureSendCount=1;nativeYmccShortcutEmit("input.frontendButton",4);flushJobs();
     check(fixtureSendInputs.size()==2 && fixtureSendInputs[1].size()==2 && fixtureSendInputs[1][1].ki.dwFlags==KEYEVENTF_KEYUP,"partial Gamebar injection attempts key-release cleanup");
     auto keyboard=rule("input.frontendButton","","press","keyboard","KeyK");keyboard["params"]={{"button","gamebar"}};
-    resetRoute(json::array({keyboard}));tick(0,10000);fixtureDesktopDown.insert('K');tick(0,10020);flushJobs();
+    shortcutFrontendRecordedKey(keyboard);
     check(fixtureSendInputs.size()==1 && fixtureSendInputs[0].size()==4,"keyboard source dispatches actual frontend Gamebar action");
 #if defined(YMCC_ROG_CLICK_SOURCE)
     auto frontendOem=rule("input.frontendButton","","press","oem","lib");frontendOem["params"]={{"button","steam"}};

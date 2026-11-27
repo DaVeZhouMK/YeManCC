@@ -53,8 +53,8 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
   let disposed=false,transportAvailable=true,enabled=false,nativeAdmission=false,playbackKnown=false,needReady=true,wallpaperDemand=false,sequence=0,current:WallpaperSelection|null=null,currentSeq=0,currentVisible=false,currentOwner:any=null,frame:any=null,contextPending=false,resumeGeneration=0,stateRevision=0,stateOwner:string|null=null;
   const retiredStateOwners=new Set<string>();
   let wakeReceipt:{owner:object;appId:string;started:number}|null=null;
-  const noteVideoReveal=(shown:WallpaperVideoFrame,owner:object)=>{
-    trace('video-ready',{appId:shown.appId,seq:shown.contextSeq});
+  const noteVideoReveal=(shown:WallpaperVideoFrame,owner:object,timing:Record<string,unknown>)=>{
+    trace('video-ready',{appId:shown.appId,seq:shown.contextSeq,...timing});
     if(!wakeReceipt||disposed||!enabled||!nativeAdmission||!currentVisible||currentOwner!==owner||
        wakeReceipt.owner!==owner||wakeReceipt.appId!==shown.appId||shown.contextSeq!==currentSeq)return;
     const {started}=wakeReceipt;wakeReceipt=null;
@@ -305,7 +305,7 @@ export function installSteamWallpaper({host,react:React,reactDom,ui,routerHook,c
         const sent=client.sendWallpaper('wallpaper.status',{contextSeq:failed.contextSeq,appId:failed.appId,assetId:failed.entry.assetId,bindingRevision:failed.entry.bindingRevision,status});
         trace('playback-failed',{appId:failed.appId,seq:failed.contextSeq,sent,...(temporary?{temporary:true}:{})});return sent;
       },{
-        entrance,allowed:()=>admitted.current,presented:shown=>noteVideoReveal(shown,owner),
+        entrance,allowed:()=>admitted.current,presented:(shown,timing)=>noteVideoReveal(shown,owner,timing),
         observeComposition:reserveComposition,
         composited:(shown,{sinceRevealMs,presentedFrames})=>{
           if(disposed||!enabled||!admitted.current||currentOwner!==owner||!currentVisible||shown.contextSeq!==currentSeq||shown.appId!==current?.appId)return;

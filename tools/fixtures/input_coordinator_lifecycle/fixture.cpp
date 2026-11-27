@@ -19,6 +19,7 @@
 #include <thread>
 #include <atomic>
 #include <chrono>
+#include <cwchar>
 #ifdef YMCC_FIXTURE_OEM_AFTER_OFF
 #include <mutex>
 static std::recursive_mutex fixtureOemLogMx;
@@ -100,6 +101,11 @@ static std::uint64_t startProtectionClock=100000;
 static const char* throwLogEvent=nullptr;
 static std::vector<nlohmann::json> fixtureEvents;
 static bool fixtureFullPipe=false;
+#ifdef YMCC_FIXTURE_PS_EXIT_RECEIPT
+static bool fixturePsExitWorkerRequested=false;
+static bool fixturePsExitSkipPostProbeAdmission=false;
+static void fixturePsExitWire(bool write,const void* data,DWORD bytes);
+#endif
 #ifdef YMCC_PREPARE_REJECTION_COLD_CASE
 static bool fixturePrepareRejectionCapture=false;
 static nlohmann::json fixturePrepareRejectionWire=nlohmann::json::array();
@@ -242,6 +248,7 @@ static bool fixtureRuntimeRecoveryFirstHelloOnly=false;
 static HANDLE fixtureRuntimeRecoveryOldHost=nullptr;
 static std::optional<ymcc::targetReturn::ProcessIdentity> fixtureRuntimeRecoveryOldOwner;
 static std::string fixtureRuntimeRecoveryCensus="unknown";
+static std::function<void()> fixtureRuntimeReturnCensusCompleted,fixtureRuntimeReturnSettled;
 static unsigned fixtureRuntimeRecoveryFaultCalls=0,fixtureRuntimeRecoveryWriterCalls=0,fixtureRuntimeRecoveryCensusCalls=0;
 static nlohmann::json fixtureRuntimeRecoveryOsObservations=nlohmann::json::array();
 static std::function<void()> fixtureRuntimeRecoveryWriterPathCallback;
@@ -327,6 +334,9 @@ static CONFIGRET fixtureXboxStatus(PULONG,PULONG,DEVINST,ULONG);
 static BOOL fixtureOwnedHostExitCode(HANDLE,LPDWORD);
 static void ymStartSeamTrace(const std::string&);
 static bool fixtureGpdPostHideFullStart=false;
+static bool fixtureGpdHandoffTransferred=false,fixtureGpdHandoffReturnProven=false;
+static ymcc::targetReturn::physicalPath::Result fixtureGpdHandoffPath(const std::string&,const std::string&);
+static bool fixtureGpdHandoffSettleVisibility();
 static std::atomic<bool> fixtureGpdFullCycleObserving{false};
 static std::mutex fixtureGpdFullCycleObservationMx;
 static nlohmann::json fixtureGpdFullCycleSourceReads=nlohmann::json::array();
@@ -376,6 +386,25 @@ static bool fixturePreHideSleep(DWORD);
 static bool fixturePreHideApply(const std::string&,bool);
 #endif
 
+#if __has_include("hidhide_installed_version.h")
+// Compile the real HidHide decisions with private registry answers. Do not
+// redirect other production registry operations in the translation unit.
+static LSTATUS fixtureHidHideMaintenanceRead = ERROR_FILE_NOT_FOUND;
+static LSTATUS WINAPI fixtureHidHideRegGetValue(HKEY root,LPCWSTR key,LPCWSTR value,DWORD flags,
+                                               LPDWORD type,PVOID data,LPDWORD bytes) {
+    if (root==HKEY_LOCAL_MACHINE && key && value && bytes && !type) {
+        if (std::wcscmp(key,L"SOFTWARE\\YeManCC\\HidHideMaintenance")==0 && std::wcscmp(value,L"State")==0 &&
+            flags==(RRF_RT_ANY|RRF_SUBKEY_WOW6464KEY) && !data) return fixtureHidHideMaintenanceRead;
+        if (std::wcscmp(key,L"SYSTEM\\CurrentControlSet\\Services\\HidHide")==0 && std::wcscmp(value,L"Type")==0 &&
+            flags==(RRF_RT_REG_DWORD|RRF_SUBKEY_WOW6464KEY) && data && *bytes==sizeof(DWORD)) return ERROR_FILE_NOT_FOUND;
+    }
+    fixtureCountForbiddenIo("unexpected-HidHide-registry-query");
+    return ERROR_ACCESS_DENIED;
+}
+#define RegGetValueW fixtureHidHideRegGetValue
+#include "hidhide_installed_version.h"
+#undef RegGetValueW
+#endif
 #include "main.inert.cpp"
 
 #if defined(YMCC_FIXTURE_SD_OFF_SOURCE_LOST)
@@ -984,6 +1013,7 @@ static bool fixtureGpdPostHideSnapshot(HidHideVisibilitySnapshot& snapshot){
  if(!fixtureGpdPostHideApplied)return false;
  snapshot={};snapshot.valid=true;snapshot.cloaking=true;snapshot.inverseRaw="off";
  snapshot.hidden={U2W(fixtureGpdPostHideRoot()),U2W(fixtureGpdPostHideGame())};
+ if(fixtureGpdPostHideFullStart)snapshot.hidden.push_back(L"HID\\FOREIGN-PREHIDDEN\\OTHER-PORT");
  const auto module=hidHideCurrentModulePath();if(!module.empty())snapshot.applications={module};
  return true;
 }
@@ -999,6 +1029,20 @@ static bool fixtureGpdPostHideApply(const std::string& transactionId,bool powerC
  journal.before.cloaking=true;journal.before.inverseRaw="off";
  const auto module=hidHideCurrentModulePath();if(!module.empty())journal.before.applications={module};
  journal.hiddenByUs={U2W(fixtureGpdPostHideRoot()),U2W(fixtureGpdPostHideGame())};
+ if(fixtureGpdPostHideFullStart){
+  // The hide/readback leaves are controlled; actual reservation and acceptance own the transfer.
+  journal.before.hidden={L"HID\\FOREIGN-PREHIDDEN\\OTHER-PORT"};
+  journal.hiddenByUs.clear();
+  HidHideVisibilitySnapshot after;std::vector<std::wstring> reserved;
+  if(!fixtureGpdPostHideSnapshot(after))return false;
+  const bool accepted=inputHostTargetReturnBeforeNativeHandoffLocked(journal.physicalSources,after,journal.transactionId,&reserved);
+  journal.hiddenByUs=std::move(reserved);
+  if(!accepted||journal.hiddenByUs.size()!=2||!msiNativeForegroundAcceptVirtualJournal(after))return false;
+  fixtureGpdHandoffTransferred=!g_msiNativeForegroundLease.active &&
+   journal.nativeHandoffCycleRequest==g_inputHostStartProtectionBoundTicket &&
+   journal.nativeHandoffCyclePower==currentPowerGeneration() && journal.nativeHandoffCycleEpoch==g_inputHostEpoch;
+  if(!fixtureGpdHandoffTransferred)return false;
+ }
  g_msiForegroundTestIo.locations=[](const std::string& root){
    return root==fixtureGpdPostHideRoot()?std::vector<std::wstring>{fixtureGpdPostHideLocation()}:std::vector<std::wstring>{};
  };
@@ -1035,6 +1079,17 @@ static bool fixtureGpdPostHideApply(const std::string& transactionId,bool powerC
  g_msiNativeForegroundTestIo.postHideReadmit=[](){return 0;};
  g_msiNativeForegroundTestIo.postHideAdmitSelectedSource=[](){return true;};
  (void)powerCycle;return true;
+}
+static ymcc::targetReturn::physicalPath::Result fixtureGpdHandoffPath(const std::string& root,const std::string& target){
+ using namespace ymcc::targetReturn::physicalPath;
+ if(root==fixtureGpdPostHideRoot()&&(target==root||target==fixtureGpdPostHideGame()))return {State::Proven,Reason::RootMatched,0,CR_SUCCESS};
+ return {State::Rejected,Reason::TreeEnded,0,CR_SUCCESS};
+}
+static bool fixtureGpdHandoffSettleVisibility(){
+ auto after=g_hidHideVisibilityJournal.before;
+ if(!fixtureGpdHandoffTransferred||!after.valid)return false;
+ fixtureGpdHandoffReturnProven=inputHostTargetReturnAfterPhysicalRestoreLocked(after,true,g_hidHideVisibilityJournal.hiddenByUs,{});
+ return fixtureGpdHandoffReturnProven;
 }
 static std::uint64_t fixtureActiveExecutionDeadline(){return g_inputHostSwitchRecoveryStartDeadline;}
 static BOOL fixtureOwnedHostExitCode(HANDLE process,LPDWORD exitCode){
@@ -1100,6 +1155,7 @@ static ymcc::targetReturn::pnpAbsence::Result fixtureRuntimeRecoveryAbsence(cons
   {"reason",proof::reasonName(result.reason)},{"enumerations",reader.enumerations},
   {"properties",reader.properties},{"closes",reader.closes},{"physicalXboxNodeIncluded",reader.physicalXbox},{"ledgerMutatedByFixture",false}});
  if(reader.closes!=1)throw std::logic_error("runtime-PnP-owned-set-not-closed");
+ if(fixtureRuntimeReturnCensusCompleted){auto callback=std::move(fixtureRuntimeReturnCensusCompleted);fixtureRuntimeReturnCensusCompleted={};callback();}
  return result;
 }
 static void fixtureRuntimeRecoveryWriterPathBoundary(){
@@ -3337,11 +3393,76 @@ static void gpdFirstOnWakeHelperProbe(bool expiredOrigin,std::uint64_t ticket){
 }
 #endif
 
-static constexpr const char* gpdFirstOnExpiredWakeVariants[]={"pending-control","expired-first-on","off-before-start","new-power-before-start","new-request-before-start","unknown-writer","intent-before-start","wake-budget-before-start"};
+static void gpdAlreadyOffWakeCase(const personaLifecycle140::ControlledDmi& dmi){
+ namespace wake=ymcc::inputHost::wakeExecutionRuntime;
+ const auto beforeFailures=failures.size();
+ personaLifecycle140::prepare(2,"gpd-first-on-expired-wake/already-off-at-resume",&dmi);
+ fixtureFullPipe=false;fixtureXinputSourceLive=false;
+ auto& row=cases.back();row["realManagedPipe"]=false;
+ row["selectedParameter"]="gpd-first-on-expired-wake";
+ row["acceptanceScope"]="actual wake and late-hide submission; controlled physical slot return; no Managed Host or driver";
+ g_realStickTest.virtualTargetEnabled=false;
+ g_powerLifecycle=PowerLifecycle::Suspended;g_inputReady=false;
+ const auto origin=g_virtualStartProtection.view(startProtectionClock);
+ const auto seq=g_inputHostSequence;
+ const auto spawns=fullPipeSpawnCount,hides=fixtureWakeHideCalls;
+ const auto idle=[](){std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);
+  return !g_inputHostLifecycleWorkRequested.load()&&!g_inputHostLifecycleWorkInFlight.load()&&g_inputHostLifecycleWorkQueue.empty();};
+ check(origin.requestId==0&&!origin.locked&&!g_inputHostProcess&&!g_inputHostPrepared&&
+   inputHostEpochToken()==0&&g_inputHostRunId.empty()&&!g_xinputConnectedMask&&!fixtureXinputSourceLive&&idle(),
+   "Win5 already-OFF begins asleep without a request, Host, physical slot, or lifecycle work");
+ const auto generation=currentPowerGeneration()+1;g_powerGeneration=generation;
+ g_powerLifecycle=PowerLifecycle::Resuming;
+ inputHostRequestWakeRescan(generation);
+ const auto armed=wake::episode;
+ check(armed.serial&&armed.generation==generation&&armed.requestId==0&&!armed.protectedPlayer&&
+   g_wakeRescanRequested.load(),"Win5 already-OFF still observes the original new wake notification");
+ inputHostConsumeWakeRescan();
+ check(wake::episode.serial==armed.serial&&wake::episode.completed&&!g_wakeRescanRequested.load()&&idle(),
+   "Win5 already-OFF retires the arm before it can enter any lifecycle queue");
+ g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;
+ check(!g_inputHostProcess&&!g_inputHostPrepared&&inputHostEpochToken()==0&&!g_xinputConnectedMask,
+   "Win5 Ready precedes physical source return and still has no Host");
+ // Inject the slot observation at the original xinput-connect consumer, not at its decision.
+ fixtureXinputSourceLive=true;g_xinputConnectedMask=1;g_xinputPrimarySlot=0;
+ g_wakeHoldPhysicalUnhide=true;
+ inputHostQueueWakePhysicalHide("xinput-connect");
+ inputHostRequestWakeRescan(generation);
+ inputHostConsumeWakeRescan();
+ {FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
+ unsigned retired=0,skipped=0;
+ for(const auto& event:fixtureEvents){
+  const auto name=event.value("event","");const auto& detail=event.at("detail");
+  if(name=="input-host-wake-execution"&&detail.value("stage","")=="retired"&&
+     detail.value("reason","")=="player-intent-off"&&detail.value("wakeSerial",0ULL)==armed.serial&&
+     detail.value("requestId",1ULL)==0&&detail.value("hostEpoch",1ULL)==0)++retired;
+  if(name=="input-host-late-hide-decision"&&detail.value("reason","")=="xinput-connect"&&
+     detail.value("outcome","")=="skipped"&&detail.value("gate","")=="virtual-target-not-enabled"&&
+     detail.value("powerGen",0ULL)==generation&&detail.value("hostGen",1ULL)==0&&
+     detail.value("wakeHold",false)&&!detail.value("virtualTargetEnabled",true))++skipped;
+ }
+ check(retired==1&&skipped==1,"Win5 already-OFF records one matching retirement and one late-hide refusal");
+ const auto after=g_virtualStartProtection.view(startProtectionClock);
+ check(wake::episode.serial==armed.serial&&wake::episode.completed&&!g_wakeRescanRequested.load()&&idle()&&
+   wake::episode.startAttempts==0&&wake::episode.recreateAttempts==0&&after.requestId==0&&after.fallbackAttempts==0&&
+   fullPipeSpawnCount==spawns&&fixtureWakeHideCalls==hides&&g_inputHostSequence==seq&&g_startEntrySeam.trace.empty()&&
+   !g_inputHostProcess&&!g_inputHostPrepared&&!g_hidHideVisibilityJournal.active&&g_xinputVirtualEndpointMask==0&&
+   (g_xinputConnectedMask&1)&&!g_realStickTest.virtualTargetEnabled&&fullPipeChildObservers.empty()&&forbiddenIo==0,
+   "Win5 returned slot and duplicate wake cannot start, rebuild, hide, or spend a fallback while OFF");
+ row["retirementCount"]=retired;row["lateHideRefusalCount"]=skipped;row["nativeEvents"]=fixtureEvents;
+ g_wakeHoldPhysicalUnhide=false;
+ row["cleanup"]=cleanup();
+ check(!g_inputHostProcess&&!g_inputHostPrepared&&fullPipeChildObservers.empty(),
+   "Win5 already-OFF native teardown leaves no fixture-owned Host handles");
+ row["passed"]=failures.size()==beforeFailures;
+}
+
+static constexpr const char* gpdFirstOnExpiredWakeVariants[]={"already-off-at-resume","pending-control","expired-first-on","off-before-start","new-power-before-start","new-request-before-start","unknown-writer","intent-before-start","wake-budget-before-start"};
 static void gpdFirstOnExpiredWakeCases(){
  namespace wake=ymcc::inputHost::wakeExecutionRuntime;
  const personaLifecycle140::ControlledDmi dmi={"GPD","G1618-05","HandheldCompanion.Devices.GPDWin5","/physicalModels/0"};
  for(const std::string variant:gpdFirstOnExpiredWakeVariants){
+  if(variant=="already-off-at-resume"){gpdAlreadyOffWakeCase(dmi);continue;}
   const bool expiredOrigin=variant!="pending-control";
   const bool cancelled=variant=="off-before-start"||variant=="new-power-before-start"||variant=="new-request-before-start"||variant=="intent-before-start"||variant=="wake-budget-before-start";
   const bool unknownWriter=variant=="unknown-writer";
@@ -3686,7 +3807,13 @@ int wmain(int argc,wchar_t**argv){try{
 #ifndef YMCC_FIXTURE_OEM_AFTER_OFF
  if(argc==5&&mode==L"persona-lifecycle"&&std::wstring_view(argv[3])==L"case:oem-after-off")return 2;
 #endif
- if(argc==5){selectedCase=argv[3];if(!((mode==L"off-lifecycle"&&fixtureSdOffSourceLostSelector(selectedCase))||(mode==L"full-pipe-core"&&((selectedCase==L"case:wake-kept-source"||(selectedCase.rfind(L"case:wake-kept-source:",0)==0&&fixtureWakeSourceSelectionKnown(W2U(selectedCase.substr(std::wstring(L"case:wake-kept-source:").size())))))||selectedCase==L"case:wake-kept-visibility"||(selectedCase==L"case:gpd-expired-first-on-full-cycle"||selectedCase==L"case:gpd-expired-first-on-full-cycle:native-writer")))||(mode==L"persona-lifecycle"&&(selectedCase==L"case:gpd-live-sd-transfer"||selectedCase==L"case:oem-after-off"))||(mode==L"family-lifecycle"&&(selectedCase==L"case:onex-parameterized"||selectedCase==L"case:classified-fault-cleanup-elite"||selectedCase==L"case:classified-fault-cleanup-ps"||selectedCase.rfind(L"case:runtime-after-final:",0)==0))||(mode==L"target-return"&&(fixturePrepareRejectionSelector(selectedCase)||selectedCase==L"case:ps-return-root"||selectedCase==L"case:ps-return-proof"||selectedCase==L"case:ps-nopin-proof"||selectedCase==L"case:ps-return-all"))))return 2;fixtureManagedDll=argv[4];}
+#ifdef YMCC_FIXTURE_PS_EXIT_RECEIPT
+ if(argc==5&&mode==L"full-pipe-core"&&(std::wstring_view(argv[3])==L"case:ps-exit-held-ownership-receipt"||
+    std::wstring_view(argv[3])==L"case:ps-exit-held-ownership-receipt:skip-post-probe-admission")){
+  selectedCase=argv[3];fixtureManagedDll=argv[4];
+ }else
+#endif
+ if(argc==5){selectedCase=argv[3];if(!((mode==L"off-lifecycle"&&fixtureSdOffSourceLostSelector(selectedCase))||(mode==L"full-pipe-core"&&((selectedCase==L"case:wake-kept-source"||(selectedCase.rfind(L"case:wake-kept-source:",0)==0&&fixtureWakeSourceSelectionKnown(W2U(selectedCase.substr(std::wstring(L"case:wake-kept-source:").size())))))||selectedCase==L"case:gpd-settled-first-on-full-cycle"||selectedCase==L"case:wake-kept-visibility"||(selectedCase==L"case:gpd-expired-first-on-full-cycle"||selectedCase==L"case:gpd-expired-first-on-full-cycle:native-writer")))||(mode==L"persona-lifecycle"&&(selectedCase==L"case:gpd-live-sd-transfer"||selectedCase==L"case:oem-after-off"))||(mode==L"family-lifecycle"&&(selectedCase==L"case:onex-parameterized"||selectedCase==L"case:classified-fault-cleanup-elite"||selectedCase==L"case:classified-fault-cleanup-ps"||selectedCase.rfind(L"case:runtime-after-final:",0)==0))||(mode==L"target-return"&&(fixturePrepareRejectionSelector(selectedCase)||selectedCase==L"case:ps-return-root"||selectedCase==L"case:ps-return-proof"||selectedCase==L"case:ps-nopin-proof"||selectedCase==L"case:ps-return-all"))))return 2;fixtureManagedDll=argv[4];}
  else if(argc==4&&std::wstring_view(argv[3]).rfind(L"case:",0)==0){selectedCase=argv[3];
 #if defined(YMCC_FIXTURE_GPD_PENDING_BEFORE_HIDE)
  if(selectedCase.rfind(L"case:gpd-pending-before-hide:",0)==0){if(mode!=L"family-lifecycle")return 2;}else
@@ -3697,6 +3824,13 @@ int wmain(int argc,wchar_t**argv){try{
  if(mode!=L"switch-recovery"||(selectedCase!=L"case:source-reconfirm-collection"&&selectedCase.rfind(L"case:source-reconfirm-collection:",0)!=0&&selectedCase!=L"case:gpd-first-on-expired-wake"&&selectedCase!=L"case:owned-readback-cli-current"&&selectedCase!=L"case:owned-readback-cli-boundary:host-journal"&&selectedCase!=L"case:owned-readback-cli-boundary"&&selectedCase!=L"case:partial-start-cleanup-owner"&&selectedCase!=L"case:partial-start-cleanup-preflight"&&selectedCase!=L"case:startup-exception-owner"&&selectedCase!=L"case:serial-thread-start"&&selectedCase!=L"case:serial-entry-diagnostic"&&selectedCase!=L"case:serial-exit-owner"&&selectedCase!=L"case:serial-power-action"&&selectedCase!=L"case:serial-config-action"&&selectedCase!=L"case:switch-return-boundaries"))return 2;}else if(argc==4)fixtureManagedDll=argv[3];g_yemanccDataDir=argv[1];g_appDataDir=argv[1];fspath::create_directories(g_yemanccDataDir);fixturePersistOffCheckpoints=mode==L"off-lifecycle"||mode==L"switch-recovery";if(fixturePersistOffCheckpoints){std::set_terminate(fixtureOffTerminate);_set_invalid_parameter_handler(fixtureOffInvalidParameter);}fixtureOffCheckpoint("consumer-entry");fixtureTargetReturnIndependentCase();g_machineIdentity.attempted=true;g_machineIdentity.resolved=true;
  g_msiControllerTraceInventoryForTest=[](){return json{{"known",false},{"scope","offline"}};};g_msiControllerOfficialStackForTest=[](){return json{{"scope","offline"},{"modeWriterProven",false}};};
  bool expectedFailure=false,ok=false;
+#ifdef YMCC_FIXTURE_PS_EXIT_RECEIPT
+ if(mode==L"full-pipe-core"&&(selectedCase==L"case:ps-exit-held-ownership-receipt"||
+    selectedCase==L"case:ps-exit-held-ownership-receipt:skip-post-probe-admission")){
+  expectedFailure=selectedCase==L"case:ps-exit-held-ownership-receipt:skip-post-probe-admission";
+  fullPipePsExitHeldReceipt(expectedFailure);ok=failures.empty();
+ }else
+#endif
  if(mode==L"entry"||mode==L"mutation1"||mode==L"mutation2"){const int mutation=mode==L"entry"?0:mode==L"mutation1"?1:2;expectedFailure=mutation!=0;ok=msiStartOrderEntrySelfTest(mutation);}
  else if(mode==L"rollback"){rollbackCases();fixtureTargetReturnNativeCases();ok=failures.empty();}
  else if(mode==L"queued-exception"){queuedExceptionCase(false);ok=failures.empty();}
@@ -3746,7 +3880,7 @@ int wmain(int argc,wchar_t**argv){try{
  else if(mode==L"cold-msi-archive"){coldMsiArchiveCases();ok=failures.empty();}
  else if(mode==L"focus-recovery"){focusRecoveryCases();ok=failures.empty();}
  else if(mode==L"input-application"){fullPipeInputApplicationCases();ok=failures.empty();}
- else if(mode==L"full-pipe-core"){if(selectedCase==L"case:gpd-expired-first-on-full-cycle"||selectedCase==L"case:gpd-expired-first-on-full-cycle:native-writer")fullPipeGpdExpiredFirstOnSelectedCases(selectedCase==L"case:gpd-expired-first-on-full-cycle:native-writer");else if(selectedCase==L"case:wake-kept-source")fullPipeWakeKeptSourceSelectedCases();else if(selectedCase.rfind(L"case:wake-kept-source:",0)==0)fullPipeWakeKeptSourceSelectedCases(W2U(selectedCase.substr(std::wstring(L"case:wake-kept-source:").size())));else if(selectedCase==L"case:wake-kept-visibility")fullPipeWakeKeptSelectedCases();else fullPipeCases();ok=failures.empty();}
+ else if(mode==L"full-pipe-core"){if(selectedCase==L"case:gpd-settled-first-on-full-cycle")fullPipeGpdExpiredFirstOnSelectedCases(false,true);else if(selectedCase==L"case:gpd-expired-first-on-full-cycle"||selectedCase==L"case:gpd-expired-first-on-full-cycle:native-writer")fullPipeGpdExpiredFirstOnSelectedCases(selectedCase==L"case:gpd-expired-first-on-full-cycle:native-writer");else if(selectedCase==L"case:wake-kept-source")fullPipeWakeKeptSourceSelectedCases();else if(selectedCase.rfind(L"case:wake-kept-source:",0)==0)fullPipeWakeKeptSourceSelectedCases(W2U(selectedCase.substr(std::wstring(L"case:wake-kept-source:").size())));else if(selectedCase==L"case:wake-kept-visibility")fullPipeWakeKeptSelectedCases();else fullPipeCases();ok=failures.empty();}
 #ifdef YMCC_PREPARE_REJECTION_COLD_CASE
  else if(mode==L"target-return"&&fixturePrepareRejectionSelector(selectedCase)){fullPipePrepareRejectionColdCase();ok=failures.empty();}
 #endif

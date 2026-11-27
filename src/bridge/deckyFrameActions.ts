@@ -20,7 +20,7 @@ export function editMirrorFrameSetting(current:FrameRateSetting,kind:'fps'|'ceil
   return frameRateSetting({...current,fps,lastFps:fps,ceiling:numeric});
 }
 export function createFrameMirrorActions(deps:{
-  allowed:()=>boolean;game:()=>DetectedGame|null;side:()=> 'ac'|'dc'|null;power:()=>Promise<PowerLifecycleState>;
+  allowed:()=>boolean;game:()=>DetectedGame|null;side:()=> 'ac'|'dc'|null;power:(context:RelayMutationContext)=>Promise<PowerLifecycleState>;
   acquire:(owner:string)=>(()=>void)|null;read:()=>Promise<FrameMirrorRead>;key:(game:DetectedGame)=>string;
   label:(game:DetectedGame)=>string;gyro:()=>Promise<GameMirrorGyroDefaults>;
   save:(config:GameCustomConfig,verify?:()=>void)=>Promise<void>;saveGlobal:(side:'ac'|'dc',value:FrameRateSetting)=>Promise<unknown>;
@@ -32,7 +32,7 @@ export function createFrameMirrorActions(deps:{
   const checkpoint=()=>{context.checkpoint();if(!deps.allowed()||deps.side()!==side||gameMirrorIdentity(deps.game())!==identity)throw Error('FRAME_MIRROR_TARGET_CHANGED');};
   checkpoint();if(typeof source!=='string')throw Error('FRAME_MIRROR_SOURCE_REQUIRED');
   const release=deps.acquire('decky-independent-frame-rate');if(!release)throw Error('FRAME_MIRROR_BUSY');
-  const requirePower=async()=>{checkpoint();const power=await deps.power();checkpoint();if(power.generation!==context.generation||power.phase!=='ready'||!power.hardwareWritesAllowed)throw Error('FRAME_MIRROR_POWER_NOT_READY');};
+  const requirePower=async()=>{checkpoint();const power=await deps.power(context);checkpoint();if(power.generation!==context.generation||power.phase!=='ready'||!power.hardwareWritesAllowed)throw Error('FRAME_MIRROR_POWER_NOT_READY');};
   try {
     await requirePower();const read=await deps.read();checkpoint();
     if(read.source!==source)throw Error('FRAME_MIRROR_SOURCE_CHANGED');

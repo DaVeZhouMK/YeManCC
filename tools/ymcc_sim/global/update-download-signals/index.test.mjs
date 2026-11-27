@@ -39,8 +39,8 @@ async function ownedLiveRoot(){
 
 // Shape-only rows. They exercise the receipt reader and make no execution claim.
 const cases=['scheduler.ready-once','scheduler.failure-backoff','scheduler.offline-and-resume','scheduler.concurrent-dedup','scheduler.disable-late-check','scheduler.stop-late-refresh','scheduler.initialize-retry','scheduler.bad-policy','scheduler.cancel-during-notice','scheduler.target-changed-in-notice','scheduler.fractional-backoff-policy','scheduler.schedule-write-failure','scheduler.pause-not-failure','provider.fresh-subscription-beats-old-read-error','provider.invalid-receipt','provider.replacement-late-read','provider.write-failure-feedback','service.rejected-activity-ack','service.idle-resync-preserves-transfer','manager.unknown-post-owner','manager.cancel-timeout-no-replay','manager.native-proof-recovers-unknown-post','manager.export-version-fence'];
-const stability={'missing-start':2,'active-stall':2,'transport-reset':2,'slow-progress':1,'cleanup-running':2,'cleanup-probe':2,'cleanup-no-proof':1,'cleanup-error':2,'cleanup-busy':2,'cleanup-idle':2,'late-check':1,'late-initialize':1,'manual-protection':3,'scheduler-quiet':2,'game-recovery':10};
-const originals={'scheduler-original':30,'integration-original':8,'service-original':8,'successor-original':11};
+const stability={'missing-start':2,'active-stall':2,'transport-reset':2,'slow-progress':1,'cleanup-running':2,'cleanup-probe':2,'cleanup-no-proof':1,'cleanup-error':2,'cleanup-busy':2,'cleanup-idle':2,'late-check':1,'late-initialize':1,'manual-protection':3,'scheduler-quiet':2,'game-recovery':13};
+const originals={'scheduler-original':43,'integration-original':8,'service-original':8,'successor-original':11};
 const compatibility=['updateManager','updatePredownloadService','updatePredownloadScheduler','updatePredownload','yeman','ipc','gamePolicyHysteresis'].map(s=>'src/bridge/'+s+'.ts');
 function contractSample(){
  const terminal={
@@ -81,7 +81,7 @@ test('automatic install command, forbidden network and missing guard cannot pass
  for(const mutate of [copy=>{copy.ioGuards[0].fetch=1;},copy=>{copy.ioGuards=[];}])refuses(mutate,'FORBIDDEN_IO_OR_GUARD_RECEIPT_MISSING');
 });
 test('missing original assertions, missing compiled input and duplicate/missing cases fail',()=>{
- for(const [mutate,issue] of [[copy=>copy.originalTests[0].checks=29,'ORIGINAL_ASSERTIONS_MISSING:scheduler-original'],[copy=>copy.compiledInputs=[],'EXACT_COMPILED_INPUTS_MISSING'],[copy=>copy.checks.pop(),'BEHAVIOR_FEEDBACK_INCOMPLETE'],[copy=>copy.checks[0].id=copy.checks[1].id,'BEHAVIOR_FEEDBACK_INCOMPLETE'],[copy=>copy.compatibility=null,'COMPATIBILITY_CONTRACT_MISSING'],[copy=>copy.status='BLOCKED','WORKER_NOT_PASS']])refuses(mutate,issue);
+ for(const [mutate,issue] of [[copy=>copy.originalTests[0].checks=30,'ORIGINAL_ASSERTIONS_MISSING:scheduler-original'],[copy=>copy.compiledInputs=[],'EXACT_COMPILED_INPUTS_MISSING'],[copy=>copy.checks.pop(),'BEHAVIOR_FEEDBACK_INCOMPLETE'],[copy=>copy.checks[0].id=copy.checks[1].id,'BEHAVIOR_FEEDBACK_INCOMPLETE'],[copy=>copy.compatibility=null,'COMPATIBILITY_CONTRACT_MISSING'],[copy=>copy.status='BLOCKED','WORKER_NOT_PASS']])refuses(mutate,issue);
  assert.equal(validateUpdateDownloadReceipt(null).status,'FAIL');
 });
 test('actual isolated source bytes changed or removed are not accepted',async()=>{

@@ -48,6 +48,8 @@ let rtssOwnerWireContext:any;let rtssOwnerNativeWireChecks=0;
           case 'shell.run': if(message.args.program==='powershell.exe'&&message.args.args.includes('-File'))running=true;result = {exitCode: 0, stdout: rtssInstalled ? dir : '', stderr: ''}; break;
           case 'shell.hidden': running = true; result = {exitCode:0,stdout:'',stderr:''}; break;
           case 'proc.identities': result = {known:true,processes:[],reason:'',error:0}; break;
+          case 'env.get': result = null; break;
+          case 'rtss.findRegisteredInstall': result = {known:true,directory:rtssInstalled?dir:''}; break;
           case 'fs.exists': result = rtssInstalled; break;
           case 'proc.running': result = {RTSS: running}; break;
           case 'power.lifecycle': result = {known:true,phase:'ready',generation:1,inputReady:true,hardwareWritesAllowed:true,publicationRevision:1,observedNotificationSequence:0,notificationPending:false}; break;
@@ -96,7 +98,7 @@ let rtssOwnerWireContext:any;let rtssOwnerNativeWireChecks=0;
 };
 
 async function main() {
-  const scopes=['--boot-output-owner-only','--bridge-readiness-only','--atomic-reload-cancellation-only'].filter(flag=>process.argv.includes(flag));
+  const scopes=['--boot-output-owner-only','--bridge-readiness-only','--atomic-reload-cancellation-only','--power-write-preparation-only'].filter(flag=>process.argv.includes(flag));
   assert(scopes.length<=1,'Choose one explicit RTSS scope');
   assert(!process.argv.some(value=>value.startsWith('--rtss-owner-'))||process.argv.includes('--boot-output-owner-only'),'RTSS owner selectors require their explicit scope');
   if(process.argv.includes('--boot-output-owner-only')){
@@ -189,6 +191,65 @@ async function main() {
     }
     const result={suite:'rtss_overlay_selftest',option:'--atomic-reload-cancellation-only',selected:results.length,passed:results.filter(row=>row.status==='PASS').length,failed:results.filter(row=>row.status==='FAIL').length,cases:results,sourceBindings:['src/bridge/yeman.ts','src/bridge/api.ts','src/bridge/ipc.ts','src/bridge/rtssOverlay.ts'].map(file=>({file,sha256:createHash('sha256').update(readFileSync(file)).digest('hex')})),identityClosureComplete:false,actualYemanApiIpc:true,nativeBoundary:'original in-memory WebView IPC transport; no native shell or RTSS',fullOriginalSuiteExecuted:false};
     const output=process.env.YEMAN_RTSS_AWAIT_TEST_OUT;if(!output)throw Error('OWNED_TEST_OUTPUT_REQUIRED');mkdirSync(output,{recursive:true});writeFileSync(output+'/rtss-results.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({suite:result.suite,option:result.option,passed:result.passed,failed:result.failed}));if(result.failed)process.exitCode=1;return;
+  }
+
+  if(process.argv.includes('--power-write-preparation-only')){
+    const {setRtssLimit,setPowerControlDir}=await import('@/bridge/yeman');
+    const {createSharedPowerLifecycleSource,isSharedPowerLifecycleAdmitted}=await import('@/bridge/powerLifecycleState');
+    setPowerControlDir('C:/TestYMCC/PowerControl');rtssInstalled=true;
+    const results:any[]=[];
+    const bounded=async<T>(promise:Promise<T>,message:string,ms=250)=>{
+      let timer:ReturnType<typeof realSetTimeout>|undefined;
+      try{return await Promise.race([promise,new Promise<never>((_,reject)=>{timer=realSetTimeout(()=>reject(Error(message)),ms);})]);}
+      finally{if(timer!==undefined)clearTimeout(timer);}
+    };
+    for(const kind of ['suspend-during-global-read','coalesced-ready-during-global-read','suspend-after-atomic-submit']){
+      calls.length=0;text='[Framerate]\r\nLimit=75\r\n';completedReloads=0;
+      const seen=new Map<string,(data:any)=>void>();
+      let snapshot={known:true,phase:'ready',generation:8,inputReady:true,hardwareWritesAllowed:true,publicationRevision:1,observedNotificationSequence:20,suspendSerial:3,notificationPending:false};
+      const publicPower=createSharedPowerLifecycleSource({read:async()=>snapshot,listen(name,listener){seen.set(name,listener);return()=>seen.delete(name);}});
+      const publish=(next:Partial<typeof snapshot>)=>{snapshot={...snapshot,...next};seen.get('power.lifecycleChanged')?.(snapshot);};
+      let notify!:()=>void,retire!:()=>void,reached!:()=>void,release!:()=>void;
+      const known=new Promise<void>(resolve=>{notify=resolve;}),retired=new Promise<undefined>(resolve=>{retire=()=>resolve(undefined);});
+      const entered=new Promise<void>(resolve=>{reached=resolve;}),hold=new Promise<void>(resolve=>{release=resolve;});
+      let oldCurrent=true,old:Promise<void>|undefined,successor:Promise<void>|undefined;
+      const dispose=publicPower.onSharedPowerLifecycle(power=>{
+        if(isSharedPowerLifecycleAdmitted(power))notify();
+        if(power.known&&(!isSharedPowerLifecycleAdmitted(power)||power.suspendSerial!==3||power.observedNotificationSequence!==20)){oldCurrent=false;retire();}
+      },{observeSuspendSerial:true,observeNotificationSequence:true});
+      const writes=()=>calls.filter(call=>call.cmd==='fs.writeTextFileAtomic').map(call=>String(call.args.content).match(/^Limit=(\d+)$/m)?.[1]);
+      try{
+        await bounded(known,'Initial public Ready missing');
+        if(kind==='suspend-after-atomic-submit')atomicReplyHook=async()=>{reached();await hold;};
+        else rtssOwnerReplyHook=async(cmd,args)=>{if(cmd==='fs.readTextFile'&&args.path===dir+'\\Profiles\\Global'){rtssOwnerReplyHook=null;reached();await hold;}};
+        old=setRtssLimit(30,()=>oldCurrent,retired);
+        await bounded(Promise.race([entered,old!.then(()=>{throw Error('Expected held IPC stage');})]),'Expected held IPC stage');
+        if(kind!=='coalesced-ready-during-global-read')publish({phase:'suspended',hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:21,suspendSerial:4,notificationPending:true});
+        publish({phase:'ready',hardwareWritesAllowed:true,publicationRevision:3,observedNotificationSequence:22,suspendSerial:4,notificationPending:false});
+        assert.equal(oldCurrent,false,'Shared power did not retire the old request');
+        publish({phase:'suspending',hardwareWritesAllowed:false,publicationRevision:1,observedNotificationSequence:20,suspendSerial:3,notificationPending:true});
+        const current=()=>isSharedPowerLifecycleAdmitted(publicPower.getSharedPowerLifecycle())&&publicPower.getSharedPowerLifecycle()?.suspendSerial===4;
+        assert(current(),'Late older notification undid current Ready');
+        successor=setRtssLimit(45,current);
+        if(kind==='suspend-after-atomic-submit'){
+          let settled=false;void successor.then(()=>{settled=true;});
+          await new Promise(resolve=>setImmediate(resolve));
+          assert.equal(settled,false,'Successor bypassed an unknown atomic outcome');assert.deepEqual(writes(),['30']);assert.equal(completedReloads,0);
+          release();await bounded(Promise.all([old,successor]),'Successor did not resume after atomic settlement');
+        }else{
+          await bounded(Promise.all([old,successor]),'Current Ready was blocked behind a revoked configuration read');
+          assert.deepEqual(writes(),['45'],'Current owner must write before the old read returns');
+          release();await new Promise(resolve=>setImmediate(resolve));
+        }
+        assert.deepEqual(writes(),kind==='suspend-after-atomic-submit'?['30','45']:['45']);
+        assert.equal(completedReloads,1,'Only the current owner may reload');assert(text.includes('Limit=45'));
+        results.push({kind,status:'PASS',writes:writes(),reloads:completedReloads});
+      }catch(error:any){results.push({kind,status:'FAIL',writes:writes(),reloads:completedReloads,error:error.message});}
+      finally{release();await Promise.allSettled([old,successor]);rtssOwnerReplyHook=atomicReplyHook=null;dispose();assert.equal(publicPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);}
+    }
+    const output=process.env.YEMAN_RTSS_AWAIT_TEST_OUT;if(!output)throw Error('OWNED_TEST_OUTPUT_REQUIRED');mkdirSync(output,{recursive:true});
+    const result={actualYemanApiIpcAndSharedPower:true,scope:'Memory-only Windows IPC and filesystem; no native RTSS or hardware',cases:results,failed:results.filter(row=>row.status==='FAIL').length,sourceBindings:['src/bridge/yeman.ts','src/bridge/api.ts','src/bridge/ipc.ts','src/bridge/powerLifecycleState.ts','tools/rtss_overlay_selftest.ts'].map(file=>({file,sha256:createHash('sha256').update(readFileSync(file)).digest('hex')}))};
+    writeFileSync(output+'/rtss-results.json',JSON.stringify(result,null,2)+'\n',{flag:'wx'});console.log(JSON.stringify(result.cases));if(result.failed)process.exitCode=1;return;
   }
 
   const {setOverlayLayout, readOverlayLayout, readRtssZoom, setRtssZoom, setPowerControlDir, ensureRtssOverlayInstalled, monitorOn} = await import('@/bridge/yeman');

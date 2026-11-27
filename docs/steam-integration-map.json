@@ -21069,6 +21069,16 @@
         "deployment": "NOT_RUN",
         "installedAcceptance": false
       },
+      "deckySteamMenuCompletion20261127": {
+        "entry": "nativeSteamMenuButton -> deckySidebarSteamMenuCompleted",
+        "routes": ["main", "quick-access"],
+        "sharedConsumers": ["ModeObserver::requestConnectionRefresh", "Decky Runtime connection check and existing admission"],
+        "condition": "One notification per confirmed key delivery in the current public Steam session and input/power scope, with Decky enabled. No UI proof, key replay, or new recovery authority.",
+        "diagnostic": "connection-check / steam-menu-completion",
+        "fixture": "tools/input_shortcut_toggle_selftest.mjs frontend-buttons",
+        "evidence": "Testing/YMCC/Evidence/DW5-SteamMenuCompletion-20261127",
+        "installedAcceptance": false
+      },
       "screenMenuRouting20261109": {
         "scope": "SD screen Steam/QAM only; direct existing menu.button route on valid UP, no screen SD menu bits",
         "preserved": [
@@ -29610,6 +29620,14 @@
     "defaultFixtures": "NOT_RUN",
     "nextNaturalNativePackageRequired": true,
     "wholeGoalComplete": false
+  },
+  "deckyRebuildReadCadence20261127": {
+    "api": "ModeObserver::requestDeckyRebuildRefresh(session, power, rebuiltEpoch)",
+    "consumer": "native/main.cpp Decky Runtime connectionStepReserved, confirmed document rebuild only",
+    "scope": "Revoke the old read as before. Move one queued read through the existing debounce only for the current session, power and cached document, without an in-flight or resume read. No additional poll or recovery authority.",
+    "fixture": "steam_ui_mode_shared_selftest --mode-source-health-overlap --case rebuild",
+    "evidence": "Testing/YMCC/Evidence/DW5-RebuildReadCadence-20261127",
+    "installedAcceptance": false
   },
   "deckySnapshotSendFailure20261114": {
     "status": "SCOPED_SOURCE_READY",

@@ -13,10 +13,22 @@ const flush=async()=>{for(let i=0;i<240;i++)await Promise.resolve();};
 const resourceTotal=s=>Object.values(s).reduce((n,v)=>n+v,0);
 export const currentHealth=(state,runId,generation)=>Boolean(state.snapshot?.ready===true&&state.snapshot.runId===runId&&state.snapshot.generation===generation&&state.snapshot.provenance?.kind==='ymcc-native'&&state.snapshot.provenance.pid>0);
 export async function lifecycleConsumerTests(nativeResult,options={}){
- assert(options&&typeof options==='object'&&!Array.isArray(options)&&Object.keys(options).every(key=>key==='selection'),'CONSUMER_SELECTION_OPTIONS_INVALID');
- const selection=options.selection??'all';assert(['all','read-recovery'].includes(selection),'CONSUMER_SELECTION_UNKNOWN');
- const cases=[],registeredCaseIds=[],omittedCaseIds=[];
- const check=async(id,action)=>{registeredCaseIds.push(id);if(selection==='read-recovery'&&!id.startsWith('consumer.transient-')&&!id.startsWith('consumer.exception-')&&!id.startsWith('negative.relay-source-churn-')){omittedCaseIds.push(id);return;}try{const measurements=await action();cases.push({id,name:id,passed:measurements.acceptance!==false,measurements});}catch(e){cases.push({id,name:id,passed:false,error:e.stack});}};
+ assert(options&&typeof options==='object'&&!Array.isArray(options)&&Object.keys(options).every(key=>key==='selection'||key==='caseIds'),'CONSUMER_SELECTION_OPTIONS_INVALID');
+ const exact=Object.hasOwn(options,'caseIds');
+ assert(!exact||!Object.hasOwn(options,'selection'),'CONSUMER_SELECTION_CONFLICT');
+ const selection=exact?'exact':(options.selection??'all');
+ assert(exact||['all','read-recovery'].includes(selection),'CONSUMER_SELECTION_UNKNOWN');
+ const requested=new Set();
+ if(exact){
+  assert(Array.isArray(options.caseIds)&&options.caseIds.length>0,'CONSUMER_SELECTION_EMPTY_OR_INVALID');
+  for(const id of options.caseIds){
+   assert(typeof id==='string'&&id.length>0,'CONSUMER_CASE_ID_INVALID');
+   assert(!requested.has(id),'CONSUMER_CASE_ID_DUPLICATE: '+id);
+   requested.add(id);
+  }
+ }
+ const registered=new Map();
+ const check=(id,action)=>{assert(!registered.has(id),'DUPLICATE_CONSUMER_ID');registered.set(id,action);};
  async function fixture({delayedAttach=false}={}){
   const runId='a'.repeat(32),timers=new Map(),sockets=[],delivered=[],pendingAttaches=[];let now=0,nextTimer=0,f;
   const boot={endpoint:'ws://127.0.0.1:1822/mirror',token:'memory-only-token',runId};
@@ -44,10 +56,10 @@ export async function lifecycleConsumerTests(nativeResult,options={}){
   const stop=()=>{f.stop();client.dispose();};
   return{f,client,runId,timers,sockets,delivered,pendingAttaches,start,advance,counts,stop};
  }
- await check('consumer.persistent-resource-classification',async()=>{
+ check('consumer.persistent-resource-classification',async()=>{
   const x=await fixture();try{await x.start();const held=x.counts();assert(held.subscriptions>0);x.sockets[0].close();await flush();assert(x.timers.size>0);const recovering=x.counts();x.stop();assert.equal(x.counts().subscriptions,0);assert.equal(x.counts().timers,0);return{heldWhileHealthy:held,heldWhileRecovering:recovering,afterStop:x.counts(),evidence:'actual host observers and actual client recovery timers survive idle; source-built native processes measured separately'};}finally{x.stop();}
  });
- await check('consumer.sleep-rejects-write-and-automatically-publishes-current-ready',async()=>{
+ check('consumer.sleep-rejects-write-and-automatically-publishes-current-ready',async()=>{
   const native=nativeResult.cases.find(c=>c.id==='native.committed-ready-executes-original-rebind-consumer');assert.equal(native?.passed,true);
   const x=await fixture();try{await x.start();const old=structuredClone(x.client.snapshot());const baseWrites=x.f.counts.performanceUpdates??0;x.f.state.power={...x.f.state.power,generation:2,phase:'suspended',hardwareWritesAllowed:false};x.f.powerChanged(true);await flush();const held=x.client.snapshot().snapshot;assert.equal(held.ready,false);
    await assert.rejects(x.client.mutate('performance.setControls',{patch:{tdp:25}}));
@@ -56,6 +68,8 @@ export async function lifecycleConsumerTests(nativeResult,options={}){
    const denial=x.f.replies.slice(beforeReplies).find(r=>r.message.type==='reply');assert.equal(denial?.message.ok,false);assert.equal(x.f.counts.performanceUpdates??0,baseWrites);
    const snapshotRequests=x.sockets.flatMap(s=>s.sent).filter(r=>r.command==='snapshot').length,replyMark=x.delivered.length;
    x.f.state.power={...x.f.state.power,phase:'ready',hardwareWritesAllowed:true};x.f.emit('power.resumed',{generation:2});await flush();
+   assert.equal(currentHealth(x.client.snapshot(),x.runId,2),false,'compatibility hint alone is not committed Ready');
+   x.f.emit('power.lifecycleChanged',{...x.f.state.power,known:true,source:'shared-power-owner-current'});await flush();
    const after=x.client.snapshot(),newSnapshots=x.delivered.slice(replyMark).filter(r=>r.message.type==='snapshot');assert(currentHealth(after,x.runId,2));assert(after.snapshot.revision>old.snapshot.revision);assert(newSnapshots.length>0);assert.equal(x.sockets.flatMap(s=>s.sent).filter(r=>r.command==='snapshot').length,snapshotRequests);assert.equal(x.f.counts.performanceUpdates??0,baseWrites);
    // The same original scenario also composes repeated power intents with a
    // transport outage. These are memory S3/S0 signals, not physical sleep proof.
@@ -83,11 +97,11 @@ export async function lifecycleConsumerTests(nativeResult,options={}){
     const requestMark=x.sockets.flatMap(s=>s.sent).filter(r=>r.command==='snapshot').length;
     const deliveredMark=x.delivered.length;
     x.f.state.power={...x.f.state.power,phase:'ready',hardwareWritesAllowed:true};
-     // The legacy notification is a hint. The native owner publishes the committed fact separately.
-     const committedPower={...x.f.state.power,known:true,source:'shared-power-owner-current'};
+    // The legacy notification is a hint. The native owner publishes the committed fact separately.
+    const committedPower={...x.f.state.power,known:true,source:'shared-power-owner-current'};
     for(let storm=0;storm<16;storm++)x.f.emit('power.resumed',{generation});
-     x.f.emit('power.lifecycleChanged',committedPower);
-     x.f.emit('power.lifecycleChanged',committedPower);
+    x.f.emit('power.lifecycleChanged',committedPower);
+    x.f.emit('power.lifecycleChanged',committedPower);
     await flush();assert(currentHealth(x.client.snapshot(),x.runId,generation));
     for(const callback of late)callback();
     if(retired){retired.emit('open');retired.emit('message',{type:'snapshot',runId:x.runId,snapshot:old.snapshot});retired.close();}
@@ -98,22 +112,50 @@ export async function lifecycleConsumerTests(nativeResult,options={}){
     compound.push({kind,generation,reconnect,lateCallbacks:late.length,healthy:true,automaticReadySnapshots:1,writes:0});
    }
    const final=x.client.snapshot(),expectedGeneration=14;
-   return{desiredEnabled:true,sleepObserved:held.ready===false,readyGranted:true,recovered:true,healthObserved:currentHealth(final,x.runId,expectedGeneration),currentGeneration:final.snapshot.generation===expectedGeneration,observedGeneration:final.snapshot.generation,expectedGeneration,runId:final.snapshot.runId,revisionBefore:old.snapshot.revision,revisionAfter:final.snapshot.revision,initialNativeCommittedGeneration:2,attempts:native.measurements.bindingCallsAfterReady-native.measurements.bindingCallsBefore,maxAttempts:1,attemptBudgetScope:'one rebind per committed generation; native duplicate event also executed',automaticSnapshots:newSnapshots.length,explicitReadRequestsAfterReady:0,writesWhileSleeping:(x.f.counts.performanceUpdates??0)-baseWrites,ownerDenial:denial.message,compoundRecovery:compound,physicalSleepPerformed:false,unconfirmedWritesReplayed:0,healthOrigin:'production host read -> production relay -> production MirrorClient; memory IPC/socket boundaries'};
+   assert(currentHealth(final,x.runId,expectedGeneration));
+   const exitingGeneration=expectedGeneration+1,socket=x.sockets.at(-1);
+   x.f.state.power={...x.f.state.power,generation:exitingGeneration,phase:'resuming',hardwareWritesAllowed:false};
+   x.f.powerChanged(true);await flush();assert.equal(x.client.snapshot().snapshot.ready,false);
+   socket.close();x.f.emit('deckySidebar.mirrorPeer',{connection:socket.connection,runId:x.runId,connected:false});
+   await flush();
+   const late=[...x.timers.values()].map(timer=>timer.action),heldBeforeExit=x.counts();
+   assert.equal(late.length,1,'the recovered instance must actually own a retry before exit');
+   assert(heldBeforeExit.subscriptions>0,'the recovered Host must still own subscriptions before exit');
+   x.stop();
+   const remainingAfterExit=x.counts(),socketMark=x.sockets.length,deliveryMark=x.delivered.length;
+   const replyMarkAfterExit=x.f.replies.length,requestMarkAfterExit=x.sockets.flatMap(s=>s.sent).length;
+   assert.deepEqual(remainingAfterExit,{timers:0,subscriptions:0});
+   x.f.state.power={...x.f.state.power,phase:'ready',hardwareWritesAllowed:true};
+   x.f.emit('power.resumed',{generation:exitingGeneration});
+   x.f.emit('power.lifecycleChanged',{...x.f.state.power,known:true,source:'shared-power-owner-current'});
+   for(const callback of late)callback();
+   socket.emit('open');socket.emit('message',{type:'snapshot',runId:x.runId,snapshot:final.snapshot});
+   await flush();
+   const remainingAfterLate=x.counts(),terminal=x.client.snapshot();
+   const reopenedSockets=x.sockets.length-socketMark,newDeliveries=x.delivered.length-deliveryMark;
+   const newReplies=x.f.replies.length-replyMarkAfterExit,newRequests=x.sockets.flatMap(s=>s.sent).length-requestMarkAfterExit;
+   const writes=(x.f.counts.performanceUpdates??0)-baseWrites;
+   assert.deepEqual(remainingAfterLate,remainingAfterExit);
+   assert.deepEqual([reopenedSockets,newDeliveries,newReplies,newRequests,writes],[0,0,0,0,0]);
+   assert.equal(terminal.connected,false);assert.equal(terminal.snapshot,null);assert(x.sockets.every(s=>s.closed));
+   const exitAfterRecovery={lastHealthyGeneration:expectedGeneration,retiredReadyGeneration:exitingGeneration,heldBeforeExit,remainingAfterExit,remainingAfterLate,
+    lateRetryCallbacksDelivered:late.length,lateCommittedReadyDelivered:1,reopenedSockets,newDeliveries,newReplies,newRequests,writes,terminalConnected:terminal.connected};
+   return{desiredEnabled:true,sleepObserved:held.ready===false,readyGranted:true,recovered:true,healthObserved:currentHealth(final,x.runId,expectedGeneration),currentGeneration:final.snapshot.generation===expectedGeneration,observedGeneration:final.snapshot.generation,expectedGeneration,runId:final.snapshot.runId,revisionBefore:old.snapshot.revision,revisionAfter:final.snapshot.revision,initialNativeCommittedGeneration:2,attempts:native.measurements.bindingCallsAfterReady-native.measurements.bindingCallsBefore,maxAttempts:1,attemptBudgetScope:'one rebind per committed generation; native duplicate event also executed',automaticSnapshots:newSnapshots.length,explicitReadRequestsAfterReady:0,writesWhileSleeping:(x.f.counts.performanceUpdates??0)-baseWrites,ownerDenial:denial.message,compoundRecovery:compound,exitAfterRecovery,physicalSleepPerformed:false,unconfirmedWritesReplayed:0,healthOrigin:'production host read -> production relay -> production MirrorClient; memory IPC/socket boundaries'};
   }finally{x.stop();}
  });
- await check('negative.connected-without-ready-snapshot-is-not-health',async()=>{
+ check('negative.connected-without-ready-snapshot-is-not-health',async()=>{
   const x=await fixture();try{x.client.setVisible(true);x.sockets[0].emit('open');await flush();const s=x.client.snapshot();assert.equal(s.connected,true);assert.equal(s.snapshot?.ready??false,false);assert.equal(currentHealth(s,x.runId,1),false);return{connected:s.connected,healthObserved:false,correctlyRejected:true,readySnapshotReceived:false};}finally{x.stop();}
  });
- await check('negative.recorded-pre-sleep-ready-is-not-current-generation-health',async()=>{
+ check('negative.recorded-pre-sleep-ready-is-not-current-generation-health',async()=>{
   const x=await fixture();try{await x.start();const actualOld=structuredClone(x.client.snapshot());assert(currentHealth(actualOld,x.runId,1));assert.equal(currentHealth(actualOld,x.runId,2),false);x.sockets[0].emit('message',{type:'snapshot',runId:x.runId,snapshot:actualOld.snapshot});await flush();assert.equal(currentHealth(x.client.snapshot(),x.runId,2),false);return{recordedSnapshotReady:actualOld.snapshot.ready,recordedGeneration:actualOld.snapshot.generation,expectedGeneration:2,healthObserved:false,correctlyRejected:true};}finally{x.stop();}
  });
- await check('consumer.exit-disposes-observers-and-delivered-late-recovery-callbacks',async()=>{
+ check('consumer.exit-disposes-observers-and-delivered-late-recovery-callbacks',async()=>{
   const x=await fixture();await x.start();x.sockets[0].close();await flush();const late=[...x.timers.values()].map(t=>t.action);assert(late.length>0);const saved=x.sockets[0],before=x.sockets.length;const held=x.counts();x.stop();for(const callback of late)callback();saved.emit('open');saved.emit('close');x.f.emit('power.resumed',{generation:3});x.f.emit('deckySidebar.mirrorPeer',{connection:'late',runId:x.runId,connected:true});await flush();const remaining=x.counts();assert.equal(remaining.timers,0);assert.equal(remaining.subscriptions,0);assert.equal(x.sockets.length,before);assert.equal(x.f.counts.performanceUpdates??0,0);return{heldBeforeExit:held,remainingOwnedResources:remaining,lateCallbacksDelivered:late.length+4,restartsAfterExit:x.sockets.length-before,bounded:true,ownerRevoked:true};
  });
- await check('consumer.late-attach-resolution-cannot-recreate-stopped-host',async()=>{
+ check('consumer.late-attach-resolution-cannot-recreate-stopped-host',async()=>{
   const x=await fixture({delayedAttach:true});x.f.ready();assert(x.pendingAttaches.length>0);const delivered=x.pendingAttaches.length;x.stop();for(const resolve of x.pendingAttaches)resolve();await flush();assert.equal(x.counts().subscriptions,0);assert.equal(x.f.replies.length,0);return{lateCallbacksDelivered:delivered,restartsAfterExit:0,remainingOwnedResources:x.counts(),bounded:true,ownerRevoked:true};
  });
- await check('consumer.transient-source-churn-recovers-through-original-two-retry-relay',async()=>{
+ check('consumer.transient-source-churn-recovers-through-original-two-retry-relay',async()=>{
   // Reuse the real host-produced healthy snapshot as the relay read boundary;
   // no synthetic ready JSON is used to establish health.
   const x=await fixture();try{await x.start();const produced=x.client.snapshot().snapshot,{runId,revision,...data}=produced;const timers=new Map(),replies=[];let reads=0,id=0,observers=0,now=0;
@@ -123,7 +165,7 @@ export async function lifecycleConsumerTests(nativeResult,options={}){
    }finally{relay.dispose();assert.equal(observers,0);assert.equal(timers.size,0);}
   }finally{x.stop();}
  });
- await check('consumer.transient-read-exception-does-not-self-recover',async()=>{
+ check('consumer.transient-read-exception-does-not-self-recover',async()=>{
   const x=await fixture();try{await x.start();const actual=x.client.snapshot().snapshot,{runId,revision,...data}=actual;
   const timers=new Map(),replies=[];let reads=0,next=0,now=0;const relay=new ReadOnlyMirrorRelay({read:async()=>{reads++;if(reads<=3)throw Error('inert read exception beyond the two fast observations');return structuredClone(data);},observe:()=>()=>{},reply:async(connection,message)=>{replies.push(message);return true;},schedule:(action,delay)=>{const id=++next;timers.set(id,{action,delay});return id;},cancel:id=>timers.delete(id),now:()=>now});
   try{const peer={connection:'32',runId:x.runId,connected:true};relay.connected(peer);await relay.request({...peer,request:{command:'snapshot',runId:peer.runId}});await flush();const delays=[];for(let n=0;n<3&&timers.size;n++){const t=[...timers.values()][0];timers.clear();delays.push(t.delay);now+=t.delay;t.action();await flush();}
@@ -132,7 +174,7 @@ export async function lifecycleConsumerTests(nativeResult,options={}){
   }finally{relay.dispose();}
   }finally{x.stop();}
  });
- await check('negative.relay-source-churn-exhausts-original-two-retry-budget',async()=>{
+ check('negative.relay-source-churn-exhausts-original-two-retry-budget',async()=>{
   const timers=new Map(),replies=[];let reads=0,next=0,now=0;const relay=new ReadOnlyMirrorRelay({read:async()=>{reads++;relay.invalidate();return {generation:1,ready:false,game:null,fan:{supported:false,enabled:false,preset:'',choices:[]}};},observe:()=>()=>{},reply:async(_connection,message)=>{replies.push(message);return true;},schedule:(action,delay)=>{const id=++next;timers.set(id,{action,delay});return id;},cancel:id=>timers.delete(id),now:()=>now});
   try{const peer={connection:'33',runId:'b'.repeat(32),connected:true};relay.connected(peer);await relay.request({...peer,request:{command:'snapshot',runId:peer.runId}});await flush();assert.equal(reads,3);const delays=[];
    const observe=async expected=>{assert.equal(timers.size,1);const [id,t]=[...timers][0];assert.equal(t.delay,expected);timers.delete(id);now+=t.delay;const before=reads;delays.push(t.delay);t.action();await flush();assert.equal(reads-before,3,'one source-churn read batch retains its original three-attempt bound');assert.equal(timers.size,1);};
@@ -154,7 +196,7 @@ export async function lifecycleConsumerTests(nativeResult,options={}){
   const peer={connection:'34',runId:'c'.repeat(32),connected:true};relay.connected(peer);
   return{relay,peer,timers,replies,reads:()=>reads,observers:()=>observers,elapse:ms=>{now+=ms;},request:()=>relay.request({...peer,request:{command:'snapshot',runId:peer.runId}})};
  }
- await check('consumer.exception-exhausts-original-two-retry-budget',async()=>{
+ check('consumer.exception-exhausts-original-two-retry-budget',async()=>{
   const x=exceptionRelay();try{await x.request();await flush();const delays=[];
    const observe=async expected=>{assert.equal(x.timers.size,1);const [id,t]=[...x.timers][0];assert.equal(t.delay,expected);x.timers.delete(id);x.elapse(t.delay);const before=x.reads();delays.push(t.delay);t.action();await flush();assert.equal(x.reads()-before,1);assert.equal(x.timers.size,1);};
    await observe(250);await observe(1000);assert.equal(x.reads(),3);assert.deepEqual(delays,[250,1000]);
@@ -166,7 +208,7 @@ export async function lifecycleConsumerTests(nativeResult,options={}){
    return{readAttempts:x.reads(),recoveryAttempts:2,maxRecoveryAttempts:2,attemptBudgetScope:'original two fast observations only; fault-only observation has a capped rate and separate owner lifetime',fastWindowExhausted:true,readObservations:delays.length,slowObservations:delays.length-2,delays,nextObservationDelayMs:30000,stormRequests:20,additionalReadsFromStorm:x.reads()-beforeStorm,heldReadObserverTimers,remainingTimers:x.timers.size,remainingSubscriptions:x.observers(),limitReached:true,unconfirmedWritesReplayed:0};
   }finally{x.relay.dispose();assert.equal(x.observers(),0);assert.equal(x.timers.size,0);}
  });
- for(const stop of ['paused-demand','detached-peer','disposed'])await check('consumer.exception-late-retry-cannot-revive-'+stop,async()=>{
+ for(const stop of ['paused-demand','detached-peer','disposed'])check('consumer.exception-late-retry-cannot-revive-'+stop,async()=>{
   const x=exceptionRelay();try{await x.request();await flush();assert.equal(x.timers.size,1);const callback=[...x.timers.values()][0].action;
    if(stop==='paused-demand')await x.relay.request({...x.peer,request:{command:'snapshot',runId:x.peer.runId,subscribe:false}});
    else if(stop==='detached-peer')x.relay.connected({...x.peer,connected:false});else x.relay.dispose();
@@ -174,6 +216,14 @@ export async function lifecycleConsumerTests(nativeResult,options={}){
    return{stop,lateCallbacksDelivered:1,additionalReads:0,additionalDeliveries:0,remainingTimers:0,remainingSubscriptions:0,unconfirmedWritesReplayed:0};
   }finally{x.relay.dispose();}
  });
- assert(cases.length>0,'CONSUMER_SELECTION_EMPTY');assert.equal(new Set(registeredCaseIds).size,registeredCaseIds.length,'DUPLICATE_CONSUMER_ID');
+ // Resolve the entire request before running any case, in original registration order.
+ for(const id of requested)assert(registered.has(id),'CONSUMER_CASE_ID_UNKNOWN: '+id);
+ const registeredCaseIds=[...registered.keys()],cases=[],omittedCaseIds=[];
+ const isReadRecovery=id=>id.startsWith('consumer.transient-')||id.startsWith('consumer.exception-')||id.startsWith('negative.relay-source-churn-');
+ for(const [id,action] of registered){
+  if((exact&&!requested.has(id))||(selection==='read-recovery'&&!isReadRecovery(id))){omittedCaseIds.push(id);continue;}
+  try{const measurements=await action();cases.push({id,name:id,passed:measurements.acceptance!==false,measurements});}catch(e){cases.push({id,name:id,passed:false,error:e.stack});}
+ }
+ assert(cases.length>0,'CONSUMER_SELECTION_EMPTY');
  return{schemaVersion:1,passed:cases.every(c=>c.passed),selection:{mode:selection,registeredCaseIds,actualCaseIds:cases.map(row=>row.id),omittedCaseIds},fullConsumerGroupExecuted:omittedCaseIds.length===0,nativeEvidenceProvided:nativeResult!=null,productionHostExecuted:true,productionClientExecuted:true,productionRelayExecuted:true,physicalSleepPerformed:false,hardwareWrites:0,cases};
 }

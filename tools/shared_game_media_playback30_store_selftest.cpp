@@ -183,6 +183,28 @@ int wmain(int argc,wchar_t** argv) {
                     expect(store.playback30Selection(store.resolve(item)).empty()&&status(originalWebmUrl).starts_with("HTTP/1.1 200"),
                            "missing MP4 derivative leaves playable WebM original");
                     fs::rename(withheld,variantPath);
+
+                    Json retryItem={{"appId",109},{"slot","dynamic"}};
+                    retryItem["bindingRevision"]=store.registerEntry(retryItem)["bindingRevision"];
+                    const auto retrySeed=store.publish(retryItem,input,true);
+                    const auto retryClaim=Store::playback30Claim(retrySeed);
+                    const auto retryUrl=server.expose(store,retrySeed);
+                    const auto retryToken=randomId();const auto retryStage=store.playback30Staging(retryToken);
+                    bool interruptedReuse=false;
+                    const auto retryStarted=GetTickCount64();
+                    const auto recovered=playback30::prepare(store,retryClaim,retryToken,[&]{
+                        if(GetTickCount64()-retryStarted>20000)throw std::runtime_error("fixture WebM recovery deadline");
+                        if(!interruptedReuse&&fs::exists(retryStage)){
+                            interruptedReuse=true;
+                            throw std::runtime_error("fixture transient WebM writer failure");
+                        }
+                    });
+                    const auto retryResult=store.resolve(retryItem);
+                    expect(interruptedReuse&&recovered==playback30::Outcome::ready&&!fs::exists(retryStage)&&
+                           retryResult["asset"]["id"]==retrySeed["asset"]["id"]&&
+                           store.playback30Selection(retryResult)["cadence"]["samples"]==480&&
+                           status(retryUrl).starts_with("HTTP/1.1 200"),"failed VP9 reuse can recover without replacing the original");
+                    std::cout<<"PASS VP9 reuse interruption and fresh-decoder recovery\n";
                 }else{
                     expect(derived.empty()&&status(originalWebmUrl).starts_with("HTTP/1.1 200"),"low or unsupported WebM kept playable");
                     if(lowWebm)expect(row["asset"]["cadence"]["samples"]==39&&row["asset"]["cadence"]["exceeds30"]==false&&

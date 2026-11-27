@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {gpdPreHidePrefix,gpdPreHideParameterPath,readGpdPreHideSelection} from '../../../fixtures/input_coordinator_lifecycle/gpd_pre_hide_selection.mjs';
+import {selector as win5QuarantineSelector,win5QuarantineScope} from '../../../fixtures/input_coordinator_lifecycle/win5_quarantine_projection.mjs';
 import {startOwnedRawProducer,rawProgramLauncherDeclaration,verifyRawProducerBudget} from '../decky-persistent-lifecycle/raw-owned-producer.mjs';
 
 const SELF=fileURLToPath(import.meta.url),REPO=path.resolve(path.dirname(SELF),'../../../..');
@@ -52,15 +53,22 @@ function gpdPreHideAdapter({caseName,deadlineEpochMs,planning,toolPlan,managedDl
 
 function managedLifecycleAdapter({caseName,deadlineEpochMs,planning,managedDll,dotnet}){
   const original='tools/input_coordinator_lifecycle_selftest.mjs';
-  const gpd=caseName==='gpd-expired-first-on-full-cycle';
+  const fixture='tools/fixtures/input_coordinator_lifecycle/';
+  const win5Quarantine=caseName===win5QuarantineSelector;
+  const win5Source=fixture+'win5_elite_quarantine_cases.inc';
+  const nativeWriterReturn=caseName==='gpd-expired-first-on-full-cycle';
+  const settledFirstOn=caseName==='gpd-settled-first-on-full-cycle';
+  const gpd=nativeWriterReturn||settledFirstOn;
   const lateWake=caseName==='wake-kept-source:GPD:expired-then-current';
-  const suite=gpd||lateWake?'lifecycle-directed':'target-return';
+  const psExitPair=caseName==='ps-exit-held-ownership-receipt:pair';
+  const psExitReceipt=caseName==='ps-exit-held-ownership-receipt'||psExitPair;
+  const suite=gpd||lateWake||psExitReceipt||win5Quarantine?'lifecycle-directed':'target-return';
   const pipeSource='tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc';
   const args=['--out','{outDir}/p','--suite',suite,'--case',caseName];
-  if(gpd)args.push('--native-writer-return','actual');
+  if(nativeWriterReturn)args.push('--native-writer-return','actual');
   const bound=managedDll!==undefined||dotnet!==undefined;
   const safePath=p=>typeof p==='string'&&path.isAbsolute(p)&&!/[\0\r\n]/.test(p)&&!p.includes('{outDir}');
-  if(!planning||bound)need(safePath(managedDll)&&path.extname(managedDll).toLowerCase()==='.dll'&&safePath(dotnet)&&path.basename(dotnet).toLowerCase()==='dotnet.exe',gpd||lateWake?'GPD_EXPLICIT_MANAGED_DLL_AND_DOTNET_REQUIRED':'PREPARE_REJECTION_EXPLICIT_MANAGED_DLL_AND_DOTNET_REQUIRED');
+  if(!planning||bound)need(safePath(managedDll)&&path.extname(managedDll).toLowerCase()==='.dll'&&safePath(dotnet)&&path.basename(dotnet).toLowerCase()==='dotnet.exe',gpd||lateWake||win5Quarantine?'GPD_EXPLICIT_MANAGED_DLL_AND_DOTNET_REQUIRED':'PREPARE_REJECTION_EXPLICIT_MANAGED_DLL_AND_DOTNET_REQUIRED');
   const artifactInputs=[];
   if(!planning){
     need(Number.isSafeInteger(deadlineEpochMs)&&deadlineEpochMs>Date.now(),'INHERITED_FUTURE_DEADLINE_REQUIRED');
@@ -68,37 +76,71 @@ function managedLifecycleAdapter({caseName,deadlineEpochMs,planning,managedDll,d
     artifactInputs.push(dll,plain(path.join(dir,'fixture-manifest.json')),plain(stem+'.deps.json'),plain(stem+'.runtimeconfig.json'),exe);
     args.push('--managed-dll',dll,'--dotnet',exe);
   }
-  let expectedCases=['PREPARE-REJECT/ROG/actual-cold-create-exception'];
+  if(win5Quarantine){
+    const selection=win5QuarantineScope(caseName,fs.readFileSync(path.join(REPO,win5Source),'utf8'));
+    return {id:ID,domain:'controller',title:'Win5 Elite quarantine, confirmed return and explicit ON',kind:'node',
+      path:fixture+'win5_quarantine_loader.mjs',args,timeoutMs:420000,inheritExecutionDeadline:true,profiles:['desktop','full'],
+      scope:'behavioral-mock',selectedCoordinatorCase:caseName,selectionDetails:{...selection,requiresSdkFreeManagedFixture:true},
+      evidenceInputs:[MODULE+'/supplemental.mjs',original,win5Source,pipeSource,fixture+'fixture.cpp',
+        fixture+'persona_lifecycle_cases.inc',fixture+'win5_quarantine_projection.mjs',fixture+'compiler_inputs.mjs',
+        fixture+'gpd_settled_first_on_inputs.mjs',fixture+'settings_mutex_isolation.mjs',fixture+'denied_touchpad_input.mjs',
+        'tools/gpd-idle-wake.mjs','native/main.cpp','native/virtual_controller_ui_output_runtime.h',
+        'tools/fixtures/legion_motion_consumer/extract_main.mjs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'],
+      artifactInputs,resultFiles:['p/RESULT.json','p/win5-selection-observed.json','p/full-pipe-core/fixture-result.json'],cacheAcceptance:false,
+      boundary:'One SDK-free managed pipe case. Original queue, admission, verification, return and exit. No default suite, hardware, Terminal29 or release acceptance.'};
+  }
+  let expectedCases=psExitReceipt?['ROG/ps-wake/exit-held-ownership-receipt',...(psExitPair?['ROG/ps-wake/exit-held-ownership-receipt/skip-post-probe-admission']:[])]:['PREPARE-REJECT/ROG/actual-cold-create-exception'];
   if(gpd){
     const source=fs.readFileSync(path.join(REPO,pipeSource),'utf8');
     const table=/\bgpdExpiredFirstOnFullCycleTerminals\[\]\s*=\s*\{\s*"(off|exit)"\s*,\s*"(off|exit)"\s*\}\s*;/.exec(source);
-    need(table&&table[1]!==table[2],'GPD_ORIGINAL_OFF_AND_EXIT_TABLE_REQUIRED');
-    expectedCases=table.slice(1).map(terminal=>'GPD/first-on-expired-full-cycle/'+terminal);
+    need(table&&table[1]==='off'&&table[2]==='exit','GPD_ORIGINAL_OFF_AND_EXIT_TABLE_REQUIRED');
+    const cycle=settledFirstOn?'settled':'expired';
+    expectedCases=table.slice(1).map(terminal=>'GPD/first-on-'+cycle+'-full-cycle/'+terminal);
   }else if(lateWake){
     const source=fs.readFileSync(path.join(REPO,pipeSource),'utf8');
     const table=/\bwakeKeptSourceFamilyControls\[\]\s*=\s*\{([\s\S]*?)\r?\n\};/.exec(source);
     need(table&&[...table[1].matchAll(/\{\s*"GPD"\s*,\s*"expired-then-current"\s*,\s*2\s*,\s*true\s*\}/g)].length===1,'GPD_LATE_WAKE_DIRECTED_PARAMETER_REQUIRED');
     expectedCases=['GPD/wake-kept-source/expired-then-current'];
   }
-  return {id:ID,domain:'controller',title:gpd?'GPD native writer return through OFF and exit':lateWake?'GPD expired ON and late same-Host wake':'Cold PREPARE rejection and next ON recovery',kind:'node',path:original,args,timeoutMs:420000,
+  return {id:ID,domain:'controller',title:psExitReceipt?'ROG PS held ownership reply during exit':settledFirstOn?'GPD settled first ON through OFF and app exit':nativeWriterReturn?'GPD native writer return through OFF and exit':lateWake?'GPD expired ON and late same-Host wake':'Cold PREPARE rejection and next ON recovery',kind:'node',path:original,args,timeoutMs:psExitPair?480000:420000,
     profiles:['desktop','full'],scope:'behavioral-mock',selectedCoordinatorCase:caseName,
-    selectionDetails:{suite,expectedCases,requiresSdkFreeManagedFixture:true,...(gpd?{nativeWriterReturn:true}:{} )},
+    selectionDetails:{suite,expectedCases,requiresSdkFreeManagedFixture:true,...(nativeWriterReturn?{nativeWriterReturn:true}:settledFirstOn?{settledFirstOn:true,nativeWriterReturn:false}:{})},
     evidenceInputs:[MODULE+'/supplemental.mjs','tools/fixtures/input_coordinator_lifecycle/fixture.cpp',
-      ...(gpd?[pipeSource,'tools/fixtures/input_coordinator_lifecycle/gpd_native_writer_return.inc','tools/fixtures/input_coordinator_lifecycle/gpd_stop_receipt.mjs']:
-        lateWake?[pipeSource,'native/virtual_switch_verification_runtime.h','native/virtual_wake_execution_runtime.h']:['tools/fixtures/input_coordinator_lifecycle/prepare_rejection_cases.inc']),
-      'tools/fixtures/input_coordinator_lifecycle/compiler_inputs.mjs',
-      'tools/input_coordinator_current_compile_only.mjs','tools/input_coordinator_terminal26_source_profile.mjs',
+      ...(gpd?[pipeSource,'tools/fixtures/input_coordinator_lifecycle/gpd_stop_receipt.mjs',
+        'tools/fixtures/input_coordinator_lifecycle/gpd_settled_first_on_inputs.mjs','native/virtual_controller_ui_output_runtime.h',
+        ...(nativeWriterReturn?['tools/fixtures/input_coordinator_lifecycle/gpd_native_writer_return.inc']:
+          ['tools/gpd-idle-wake.mjs','native/virtual_controller_stop_runtime.h'])]:
+        psExitReceipt?[pipeSource,'native/main.cpp','tools/fixtures/input_coordinator_lifecycle/ps_exit_receipt_projection.mjs',
+          'tools/fixtures/input_coordinator_lifecycle/gpd_settled_first_on_inputs.mjs','tools/fixtures/input_lifecycle_integration/ManagedEntry.cs']:lateWake?[pipeSource,'native/virtual_switch_verification_runtime.h','native/virtual_wake_execution_runtime.h',
+          'tools/fixtures/input_coordinator_lifecycle/gpd_settled_first_on_inputs.mjs','native/virtual_controller_ui_output_runtime.h']:['tools/fixtures/input_coordinator_lifecycle/prepare_rejection_cases.inc']),
+      'tools/fixtures/input_coordinator_lifecycle/compiler_inputs.mjs','tools/fixtures/input_coordinator_lifecycle/denied_touchpad_input.mjs',
       'tools/fixtures/legion_motion_consumer/extract_main.mjs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'],
-    artifactInputs,resultFiles:lateWake?['p/RESULT.json','p/source-wake-selection-observed.json','p/full-pipe-core/fixture-result.json']:['p/RESULT.json'],cacheAcceptance:false,
-    boundary:(gpd?'Two original SDK-free managed full-pipe terminals with actual native writer retirement and resource return.':lateWake?
+    artifactInputs,resultFiles:lateWake?['p/RESULT.json','p/source-wake-selection-observed.json','p/full-pipe-core/fixture-result.json']:
+      psExitReceipt?['p/RESULT.json','p/ps-exit-receipt-selection-observed.json','p/full-pipe-core/fixture-result.json']:settledFirstOn?['p/RESULT.json','p/full-pipe-core/fixture-result.json']:['p/RESULT.json'],cacheAcceptance:false,
+    boundary:(psExitPair?'One build, isolated positive and semantic negative. Parent requires exactly the raw negative admission assertion; launch failures do not qualify. Controller cleanup is projected.':psExitReceipt?'One SDK-free full-pipe case: a real Host reply crosses the original pipe after the controller exit fence; controller cleanup is projected and called synchronously.':settledFirstOn?'Two original SDK-free managed full-pipe terminals from a replayed settled native handoff; same ticket, actual serialized queue, OFF and app-exit local release.':nativeWriterReturn?'Two original SDK-free managed full-pipe terminals with actual native writer retirement and resource return.':lateWake?
       'One SDK-free managed full-pipe case: original ON expiry followed by current-power same-Host frame and wake, with original terminal preserved.':'One original native/SDK-free managed target-return scenario.')+
       ' Original compile and mode limits under the core owned Job. No default suite, hardware or release acceptance.'};
 }
 
 // Planning does not qualify external artifacts or load the full factory.
 export function getSupplementalAdapter({caseName,deadlineEpochMs,planning=false,toolPlan,managedDll,dotnet}={}){
+  if(caseName==='actual-classified-failed-start-off-on-recovery'){
+    need(typeof planning==='boolean','SUPPLEMENTAL_PLANNING_BOOLEAN_REQUIRED');
+    need(toolPlan===undefined&&managedDll===undefined&&dotnet===undefined,'FAILED_START_REQUIRES_NATIVE_ONLY');
+    if(!planning)need(Number.isSafeInteger(deadlineEpochMs)&&deadlineEpochMs>Date.now(),'INHERITED_FUTURE_DEADLINE_REQUIRED');
+    const fixture='tools/fixtures/input_coordinator_lifecycle/';
+    return {id:ID,domain:'controller',title:'Original failed HELLO and single recovery',kind:'node',
+      path:'tools/input_coordinator_lifecycle_selftest.mjs',args:['--out','{outDir}/p','--suite','switch-recovery','--case',caseName,'--native-optimization','Od'],
+      timeoutMs:375000,profiles:['desktop','full'],scope:'behavioral-mock',selectedCoordinatorCase:caseName,
+      selectionDetails:{suite:'switch-recovery',expectedCases:[caseName],nativeOnly:true,requiresSdkFreeManagedFixture:false,nativeOptimization:'Od'},
+      evidenceInputs:[MODULE+'/supplemental.mjs',fixture+'fixture.cpp',fixture+'failed_start_selection.mjs',fixture+'compiler_inputs.mjs',fixture+'settings_mutex_isolation.mjs',
+        fixture+'denied_touchpad_input.mjs',fixture+'gpd_settled_first_on_inputs.mjs','native/virtual_controller_ui_output_runtime.h',
+        'tools/virtual_controller_runtime_source.mjs','tools/fixtures/legion_motion_consumer/extract_main.mjs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'],
+      artifactInputs:[],resultFiles:['p/RESULT.json','p/switch-recovery/fixture-result.json'],cacheAcceptance:false,
+      boundary:'One original simulated HELLO failure with a single bounded fallback and healthy final. Functional /Od fixture only. Original compile and mode caps; no default switch suite, optimized equivalence, managed Host, hardware, or release acceptance.'};
+  }
   if(caseName?.startsWith(gpdPreHidePrefix))return gpdPreHideAdapter({caseName,deadlineEpochMs,planning,toolPlan,managedDll,dotnet});
-  if(caseName==='prepare-rejection-cold'||caseName==='gpd-expired-first-on-full-cycle'||caseName==='wake-kept-source:GPD:expired-then-current')return managedLifecycleAdapter({caseName,deadlineEpochMs,planning,managedDll,dotnet});
+  if(caseName===win5QuarantineSelector||caseName==='prepare-rejection-cold'||caseName==='gpd-expired-first-on-full-cycle'||caseName==='gpd-settled-first-on-full-cycle'||caseName==='wake-kept-source:GPD:expired-then-current'||caseName==='ps-exit-held-ownership-receipt'||caseName==='ps-exit-held-ownership-receipt:pair')return managedLifecycleAdapter({caseName,deadlineEpochMs,planning,managedDll,dotnet});
   if(caseName==='onex-diagnostic-tls-startup'){
     need(typeof planning==='boolean','SUPPLEMENTAL_PLANNING_BOOLEAN_REQUIRED');
     need(typeof toolPlan==='string'&&path.isAbsolute(toolPlan)&&!/[\0\r\n]/.test(toolPlan),'ONEX_TLS_ABSOLUTE_TOOL_PLAN_REQUIRED');

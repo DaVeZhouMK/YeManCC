@@ -5,7 +5,9 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
+#include <share.h>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -243,10 +245,12 @@ class JournalHistoryKeySax final : public nlohmann::json_sax<Json> {
         return true;
     }
 public:
+    bool keep_sax_string(bool key) const noexcept {return retain_||(key&&rootObject_&&depth_==1);}
     bool read(std::string_view line,std::string& signature) {
         containers_.clear();objectSlot_=nullptr;depth_=0;
         rootObject_=retain_=found_=false;value_=nullptr;
-        if(!Json::sax_parse(line.begin(),line.end(),this)||!found_)return false;
+        const auto* first=line.data();
+        if(line.empty()||!Json::sax_parse_without_token_text(first,first+line.size(),this)||!found_)return false;
         signature=value_.dump();return true;
     }
     bool null() override {return scalar(nullptr);}
@@ -340,12 +344,15 @@ public:
             if(ec){failureEvidence_.filesystem(JournalFailureEvidence::Stage::time,ec);++failures_;retryAt_=GetTickCount64()+5000;return RecordResult::retry;}
             if(!cacheKnown_||cachePath_!=path||cacheBytes_!=bytes_||cacheModified_!=modified){
                 cacheKnown_=false;keys_.clear();rows_=0;invalid_=0;
-                if(exists){++readScans_;std::ifstream in(path,std::ios::binary);if(!in){failureEvidence_.observe(JournalFailureEvidence::Stage::readOpen);++failures_;retryAt_=GetTickCount64()+5000;return RecordResult::retry;}
+                if(exists){++readScans_;
+                    // Keep MSVC ifstream's binary mode and sharing, but bypass its 4095-byte fread loop.
+                    const std::unique_ptr<std::FILE,decltype(&std::fclose)> in(_wfsopen(path.c_str(),L"rb",_SH_DENYNO),std::fclose);
+                    if(!in){failureEvidence_.observe(JournalFailureEvidence::Stage::readOpen);++failures_;retryAt_=GetTickCount64()+5000;return RecordResult::retry;}
                     if(bytes_>static_cast<unsigned long long>((std::numeric_limits<std::streamsize>::max)()) ||
                         bytes_>std::string{}.max_size()){failureEvidence_.observe(JournalFailureEvidence::Stage::read);++failures_;retryAt_=GetTickCount64()+5000;return RecordResult::retry;}
                     std::string buffer(static_cast<size_t>(bytes_),'\0');
-                    in.read(buffer.data(),static_cast<std::streamsize>(buffer.size()));
-                    if(!in||in.peek()!=std::char_traits<char>::eof()||in.bad()){
+                    if(std::fread(buffer.data(),1,buffer.size(),in.get())!=buffer.size() ||
+                        std::fgetc(in.get())!=EOF || std::ferror(in.get())){
                         failureEvidence_.observe(JournalFailureEvidence::Stage::read);++failures_;retryAt_=GetTickCount64()+5000;return RecordResult::retry;}
                     std::string_view remaining(buffer);
                     JournalHistoryKeySax historyKey;
@@ -371,6 +378,7 @@ public:
             if(virtualStep){
                 row[journalScope::markerField]=journalScope::version;
                 journalScope::compactFrameSample(row,category);
+                if(std::string_view(category)=="virtual-step-witness")journalScope::compactStepProducer(row);
             }
             else {
                 row["timestampScope"]=journalScope::timestampScope;
@@ -380,10 +388,7 @@ public:
             }
             row["priorInvalidRows"]=invalid_;
             const auto& writer=ymcc::sleepfactlog::writerIdentity(); // existing cached self identity
-            row["writerPid"]=writer.pid;
-            row["writerProcessCreation100ns"]=writer.creation100ns?Json(std::to_string(writer.creation100ns)):Json(nullptr);
-            row["writerInstanceId"]=writer.creation100ns?Json("native:"+std::to_string(writer.pid)+":"+std::to_string(writer.creation100ns)):Json(nullptr);
-            row["writerIdentityStatus"]=writer.creation100ns?"pid-and-process-creation-known":"pid-only;process-creation-unavailable";
+            journalScope::writeWriterIdentity(row,virtualStep,writer.pid,writer.creation100ns);
             row["writerSequence"]=journalWriterSequence.fetch_add(1,std::memory_order_relaxed)+1;
             const auto serialized=row.dump();
             const bool countLimit=rows_>=maxRecords_,recordLimit=serialized.size()+1>maxRowBytes_,

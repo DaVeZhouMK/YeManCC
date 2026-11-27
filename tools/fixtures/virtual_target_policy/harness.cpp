@@ -10,6 +10,8 @@
 #include "virtual_target_policy.h"
 #include "input_shortcut_toggle.h"
 using json=nlohmann::json;
+static bool oldDriver=false;
+namespace ymcc::hidHideInstalledVersion { static bool tooOld() noexcept { return oldDriver; } }
 #include "model.inc"
 static std::atomic<bool> g_externalPriorityVirtualSuspended{false},g_exitRequested{false},g_shortcutRecordingActive{false};
 static std::string configured;
@@ -80,5 +82,26 @@ int main(){
   reset(id,"steamdeck");nativeInputShortcutToggle("input.virtualGamepadToggle","steamdeck",nullptr);
   check(lastReceipt.value("ok",false)&&!lastReceipt.value("enabled",true),"forbidden old target can still be turned off");
  }
+ using namespace ymcc::input::virtualTargetPolicy;
+ check(!hidHideDriverTooOld({}),"unknown version is not inferred old");
+ check(hidHideDriverTooOld({1,1,50,0}),"field driver is below the minimum");
+ check(hidHideDriverTooOld({1,4,180,65535}),"compare numeric version parts");
+ check(!hidHideDriverTooOld({1,4,181,0}),"supported minimum is not blocked");
+ check(!hidHideDriverTooOld({1,5,0,0}),"newer driver is not blocked");
+ oldDriver=true;
+ for (const std::string persona:{"steamdeck","dualsense-edge","elite"}) {
+   reset(MachineIdentity{},persona);
+   check(!inputHostStart() && boundaryCalls==0,"old HidHide refuses start before device work");
+   check(lastLog.value("reason",std::string{})==kHidHideDriverTooOld,"old HidHide has dedicated rejection reason");
+   const auto projection=projectTarget({{"persona",persona},{"buttonMappingEnabled",true},{"gyroEnabled",true}});
+   check(!projection.enabled && !projection.gyro,"saved virtual persona does not activate on old HidHide");
+   reset(MachineIdentity{},"disabled");
+   nativeInputShortcutToggle("input.virtualGamepadToggle",persona,nullptr);
+   check(!lastReceipt.value("ok",true) && refreshCalls==0 && closeCalls==0,"old HidHide blocks shortcut before side effects");
+   reset(MachineIdentity{},persona);
+   nativeInputShortcutToggle("input.virtualGamepadToggle",persona,nullptr);
+   check(lastReceipt.value("ok",false)&&!lastReceipt.value("enabled",true),"old HidHide does not block shortcut OFF");
+ }
+ check(!inputHostMachineTargetRejectionReason("disabled"),"old HidHide never blocks physical mode");
  std::cout<<"SUMMARY checks="<<checks<<" failures="<<failures<<'\n';return failures?1:0;
 }

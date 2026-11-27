@@ -246,6 +246,14 @@ int wmain(int argc,wchar_t** argv){
     Json manifest={{"schemaVersion",1},{"owner","YMCC"},{"origin","official-release"},{"loaderVersion",ymcc::deckyidentity::version},{"loaderSha256",ymcc::deckyidentity::sha256},{"files",Json::array()}};
     for(const auto* name:ymcc::deckysetup::managedFiles)manifest["files"].push_back({{"path",ymcc::deckysetup::pathText(fs::path(name))},{"bytes",fs::file_size(home/name)},{"sha256",worker::digest((home/name).wstring(),[]{return true;})}});put(metadata,manifest.dump());
     const auto normal=[&]{return worker::prepare(steam,home,metadata,[]{return true;},true);};
+    Json cachePreparationObservations=Json::array();
+    const auto observeCachePreparation=[&](const char* stage){
+        const auto handlesBefore=handles();
+        auto result=normal();
+        const auto handlesAfter=handles();
+        cachePreparationObservations.push_back({{"stage",stage},{"result",result},{"handlesBefore",handlesBefore},{"handlesAfter",handlesAfter}});
+        return result;
+    };
     check("read-only launch preparation validates all live bytes without creating or hashing the repair cache",[&]{
         const auto cache=home/L".ymcc-resource-cache";need(!fs::exists(cache),"read-only fixture cache must start absent");
         const auto r=worker::prepare(steam,home,metadata,[]{return true;},false);
@@ -290,7 +298,7 @@ int wmain(int argc,wchar_t** argv){
             "read-only launch fell back from an invalid installed receipt or reported it as valid");
     });
     check("actual private early-entry child validates current official bytes and primes cache",[&]{
-        const auto r=normal();need(r.value("ready",false)&&r.value("resourceCacheAvailable",false)&&r.value("resourceWorkerDestroyed",false),"real resource worker did not finish with zero resources");
+        const auto r=observeCachePreparation("initial-seed");need(r.value("ready",false)&&r.value("resourceCacheAvailable",false)&&r.value("resourceWorkerDestroyed",false),"real resource worker did not finish with zero resources");
         const auto written=ymcc::deckydiag::record("prepare",r);
         need(written.value("resourceWorkerInitialInspectStep",std::string{})=="steam-debug-marker"&&written.contains("resourceWorkerInitialInspectElapsedMs"),"real initial inspection did not reach final observed step");
         need(written.value("resourceWorkerCacheStep",std::string{})=="seed"&&written.contains("resourceWorkerCacheStepElapsedMs"),"first seed did not report cache substep");
@@ -339,8 +347,8 @@ int wmain(int argc,wchar_t** argv){
             "optional cache verification note changed preparation or invented evidence");
     });
     check("actual same-image child repairs missing Loader and confirms final identity",[&]{
-        if(!fs::exists(home/L".ymcc-resource-cache")){const auto seeded=normal();need(seeded.value("ready",false)&&seeded.value("resourceCacheAvailable",false)&&seeded.value("resourceWorkerDestroyed",false),"repair-fixture-cache-prime");}
-        fs::remove(home/ymcc::deckysetup::managedFiles[0]);const auto r=normal();need(r.value("ready",false)&&r.value("resourcesRepaired",0u)==1&&r.value("resourceWorkerDestroyed",false),"real worker did not repair official bytes");
+        if(!fs::exists(home/L".ymcc-resource-cache")){const auto seeded=observeCachePreparation("repair-prerequisite-seed");need(seeded.value("ready",false)&&seeded.value("resourceCacheAvailable",false)&&seeded.value("resourceWorkerDestroyed",false),"repair-fixture-cache-prime");}
+        fs::remove(home/ymcc::deckysetup::managedFiles[0]);const auto r=observeCachePreparation("loader-repair");need(r.value("ready",false)&&r.value("resourcesRepaired",0u)==1&&r.value("resourceWorkerDestroyed",false),"real worker did not repair official bytes");
         need(r.value("resourceWorkerCacheStep",std::string{})=="repair"&&r.value("resourceWorkerChildStage",std::string{})=="reinspect","cache restore substep was lost or confused with reinspection");
         for(const auto* mode:{L"progress-optional-memory-cache",L"progress-optional-memory-after-cache",L"progress-optional-memory-reinspect"}){
             const auto before=handles();const auto previous=env(L"YMCC_RESOURCE_WORKER_FIXTURE");
@@ -558,5 +566,5 @@ int wmain(int argc,wchar_t** argv){
         need(prepared==2&&recovered&&runtime.snapshot().pid==0,"Ready did not recover resources or started a Loader");
         need(!runtime.requestPreparationRefresh(77),"duplicate Ready restarted preparation");runtime.shutdown();need(handles()==count,"committed resource recovery leaked resources");
     });
-    const auto passed=std::count_if(cases.begin(),cases.end(),[](const auto& r){return r.at("pass")==true;});const Json result={{"pass",passed==static_cast<int>(cases.size())},{"count",cases.size()},{"passed",passed},{"cases",cases},{"realSteamActions",0},{"officialLoaderExecuted",false},{"childIsOwnTestImage",true},{"exitedResourceWait",exitedResourceWait},{"optionalProgressLoss",optionalProgressLoss},{"optionalRepairProgressLoss",optionalRepairProgressLoss},{"digestWork",digestWork},{"launchPreflightRevocations",launchPreflightRevocations},{"originalStopDeadlineMs",3200}};put(argv[2],result.dump(2));std::cout<<result.dump()<<std::endl;return result.at("pass")==true?0:2;
+    const auto passed=std::count_if(cases.begin(),cases.end(),[](const auto& r){return r.at("pass")==true;});const Json result={{"pass",passed==static_cast<int>(cases.size())},{"count",cases.size()},{"passed",passed},{"cases",cases},{"realSteamActions",0},{"officialLoaderExecuted",false},{"childIsOwnTestImage",true},{"exitedResourceWait",exitedResourceWait},{"optionalProgressLoss",optionalProgressLoss},{"optionalRepairProgressLoss",optionalRepairProgressLoss},{"digestWork",digestWork},{"launchPreflightRevocations",launchPreflightRevocations},{"originalStopDeadlineMs",3200},{"cachePreparationObservations",cachePreparationObservations}};put(argv[2],result.dump(2));std::cout<<result.dump()<<std::endl;return result.at("pass")==true?0:2;
  }catch(const std::exception& error){SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",nullptr);std::cerr<<error.what()<<std::endl;return 3;}}

@@ -3,6 +3,9 @@ export const getPolicyGame=()=>window.__fixture?.game||null;
 export const gamePolicyKey=game=>(game?.path||game?.name||'').split(/[\\/]/).pop().toLowerCase();
 export const detectPolicyGame=async()=>getPolicyGame();
 export const isPolicyGameInitialized=()=>true;
+// This UI fixture always has a current in-memory selection, including null.
+export const isPolicyGameCurrent=isPolicyGameInitialized;
+export const subscribePolicyGameReadiness=cb=>{cb(isPolicyGameCurrent());return()=>{};};
 export const subscribePolicyGameStatus=cb=>{listeners.add(cb);queueMicrotask(()=>cb(getPolicyGame()));return()=>listeners.delete(cb)};
 window.__setPolicyGame=game=>{window.__fixture.game=game;for(const cb of [...listeners])cb(game)};
 // The current product adds a strict refresh export. This UI-only fixture

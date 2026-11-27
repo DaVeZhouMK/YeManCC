@@ -170,15 +170,15 @@ const outputCoordinator = createMonitorOutputCoordinator({
     if(current)await requireMonitorCurrent(current);return result;
   },
 });
-export const monitorOutputCoordinator={async apply(prefs:MonitorOutputPreferences,options:BootPreferenceWrite={},recoveryCurrent?:()=>boolean|Promise<boolean>){
+async function applyMonitorOutput(prefs:MonitorOutputPreferences,options:BootPreferenceWrite,requestCurrent?:()=>boolean|Promise<boolean>,recovering=false){
   let submitted=captureBootPreferenceWrite(options);
   const originalBoot=submitted.bootContext;
   const startupReceiptOwner=originalBoot?bootStartupReceiptOwner(originalBoot):cachedBootStartupReceiptOwner();
   const value=normalizeMonitorOutput(prefs);
-  const bootHudRecovery=!!(originalBoot&&recoveryCurrent&&value.enabled&&value.output==='ymcc');
+  const bootHudRecovery=!!(originalBoot&&recovering&&requestCurrent&&value.enabled&&value.output==='ymcc');
   const savedMonitorMatches=(settings:UnifiedSettings)=>equalSettingsDocuments(normalizeMonitorOutput(settings.rtss.monitorOutput),value);
-  if(originalBoot&&recoveryCurrent&&bootHudRecovery){
-    if(!await recoveryCurrent())throw Error('MONITOR_OUTPUT_REQUEST_EXPIRED');
+  if(originalBoot&&requestCurrent&&bootHudRecovery){
+    if(!await requestCurrent())throw Error('MONITOR_OUTPUT_REQUEST_EXPIRED');
     const settings=await loadSettings();
     if(!savedMonitorMatches(settings))throw Error('MONITOR_OUTPUT_REQUEST_EXPIRED');
     try{assertBootPreferenceOwner(settings,submitted);}
@@ -199,25 +199,30 @@ export const monitorOutputCoordinator={async apply(prefs:MonitorOutputPreference
       submitted=captureBootPreferenceWrite({origin:'boot-mode',bootContext:{input:settings.input,extensions:projectBootPreferenceExtensions(settings.extensions)}});
     }
   }
-  const current:MonitorOutputCurrent|undefined=submitted.bootContext||recoveryCurrent?async()=>{
-    if(recoveryCurrent&&!await recoveryCurrent())return false;
+  const current:MonitorOutputCurrent|undefined=submitted.bootContext||requestCurrent?async()=>{
+    if(requestCurrent&&!await requestCurrent())return false;
     if(submitted.bootContext){
       const settings=await loadSettings();
       assertBootPreferenceOwner(settings,submitted);
       if(bootHudRecovery&&!savedMonitorMatches(settings))return false;
     }
-    return !recoveryCurrent||await recoveryCurrent();
+    return !requestCurrent||await requestCurrent();
   }:undefined;
   if(current&&submitted.bootContext)Object.defineProperty(current,'bootContext',{value:submitted.bootContext,enumerable:false});
   if(current)await requireMonitorCurrent(current);
-  const intent:MonitorOutputIntent={id:++nextIntentId,preferences:structuredClone(value),write:captureBootPreferenceWrite(submitted),...(recoveryCurrent?{recovery:true}:{}),...(startupReceiptOwner?{startupReceiptOwner}:{})};++outputApplyCount;publishApplying(intent);
+  const intent:MonitorOutputIntent={id:++nextIntentId,preferences:structuredClone(value),write:captureBootPreferenceWrite(submitted),...(recovering?{recovery:true}:{}),...(startupReceiptOwner?{startupReceiptOwner}:{})};++outputApplyCount;publishApplying(intent);
   try{
     const result=await outputCoordinator.apply(value,current);
     if(current)await requireMonitorCurrent(current);
     for(const listener of applyListeners){try{listener(value,result,copyMonitorIntent(intent));}catch{}}
     return result;
   }finally{--outputApplyCount;publishApplying();}
-}};
+}
+export const monitorOutputCoordinator={
+  apply:(prefs:MonitorOutputPreferences,options:BootPreferenceWrite={},recoveryCurrent?:()=>boolean|Promise<boolean>)=>
+    applyMonitorOutput(prefs,options,recoveryCurrent,!!recoveryCurrent),
+  applyExplicit:(prefs:MonitorOutputPreferences,current:()=>boolean)=>applyMonitorOutput(prefs,{},current),
+};
 
 /** Atomic enabled-only shortcut edit; retain the current output, appearance and unknown fields. */
 export async function updateMonitorOutputEnabled(operation: 'toggle' | 'show' | 'hide'): Promise<MonitorOutputPreferences> {

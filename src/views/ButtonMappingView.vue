@@ -13,7 +13,7 @@ import {tryAcquireQuickAction} from '@/bridge/quickActionLock';
 import {focusGamepadElement} from '@/gamepad/focus';
 import IntegratedPage from '@/components/IntegratedPage.vue';
 import UsbipUpgradeStatus from '@/components/UsbipUpgradeStatus.vue';
-import { useVirtualTargetPolicy, currentVirtualTargetPolicy } from '@/bridge/virtualTargetPolicyState';
+import { useVirtualTargetPolicy } from '@/bridge/virtualTargetPolicyState';
 import { virtualTargetOptions, virtualTargetSelectionError, requireVirtualTargetAllowed, STEAM_DECK_SELF_OUTPUT_MESSAGE } from '@/bridge/virtualTargetPolicy';
 import { computed, nextTick, onActivated, onDeactivated, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import InlineIcon from '@/components/InlineIcon.vue';
@@ -25,7 +25,7 @@ import ControllerCalibrationCard from '@/components/ControllerCalibrationCard.vu
 import ControllerShortcutEditorView from '@/views/ControllerShortcutEditorView.vue';
 import { compareAndSwapInputSettings, onInputSettingsChanged, VirtualStartProtectionActive, type InputSettingsSnapshot } from '@/bridge/settingsRepository';
 import { invoke, on, setGyroTelemetryInterest } from '@/bridge/ipc';
-import { gamepadEnvironmentNotice } from '@/bridge/gamepadEnvironmentNotice';
+import { gamepadEnvironmentNotice, LEGACY_HIDHIDE_TARGET_MESSAGE } from '@/bridge/gamepadEnvironmentNotice';
 import type { HidHideSetupSnapshot } from '@/bridge/hidHideSetupPrompt';
 import { normalizeOemKeysSnapshot } from '@/bridge/controllerShortcutRules';
 import { normalizeOemInputUsage, oneXOemObservationKeys, type OemInputUsage } from '@/bridge/controllerFeatureStatus';
@@ -60,6 +60,11 @@ onBeforeUnmount(() => window.removeEventListener('ipc:gamepad-back', backToContr
 const virtualTargetPolicy = useVirtualTargetPolicy();
 const setupSnapshot = ref<HidHideSetupSnapshot>({ driverSetup: 0, hidHideSetupNotice: 0, driverSetupRedistDir: '' });
 const environmentNotice = computed(() => gamepadEnvironmentNotice(setupSnapshot.value));
+function controllerTargetSelectionError(persona: unknown, enabled = true): string {
+  return enabled && persona !== 'disabled' && setupSnapshot.value.hidHideUnsupportedVersion
+    ? LEGACY_HIDHIDE_TARGET_MESSAGE
+    : virtualTargetSelectionError(persona, virtualTargetPolicy.value, enabled);
+}
 const faultHoldActive = ref(false);
 const virtualOutputRuntime = ref<VirtualOutputRuntimeState | null>(null);
 const physicalGyroSupported = ref<boolean | null>(null);
@@ -282,7 +287,7 @@ const PERSONA_CAPABILITIES: Record<string, { gyro: boolean; backButtons: number 
   elite: { gyro: false, backButtons: 0 },
 };
 const virtualOutputStatus = computed(() => {
-  const blocked = virtualTargetSelectionError(displayPersona.value, virtualTargetPolicy.value);
+  const blocked = controllerTargetSelectionError(displayPersona.value, displayTargetEnabled.value);
   return blocked ? { text: '虚拟手柄-本机不可用', detail: blocked, tone: 'warning' as const }
     : virtualOutputPresentation(virtualOutputRuntime.value, displayTargetEnabled.value, displayPersona.value, targetBusy.value, externalPriorityRuntime.value);
 });
@@ -384,7 +389,7 @@ async function saveTarget(nextEnabled: boolean, nextPersona: ControllerPersona):
   refreshTargetWait();
   if (gameLocked.value || !snapshot.value || externalPriorityBusy.value || frontendIsolationBusy.value || profileRemovalBusy.value) return;
   if (targetBusy.value || startProtectionLocked.value) return;
-  if (virtualTargetSelectionError(nextPersona, currentVirtualTargetPolicy(), nextEnabled)) return;
+  if (controllerTargetSelectionError(nextPersona, nextEnabled)) return;
   const editorAtRequest = inputEditor.value!;
   const epoch = ++targetSaveEpoch;
   targetProtectionNotice.value = '';
@@ -416,7 +421,7 @@ async function saveTarget(nextEnabled: boolean, nextPersona: ControllerPersona):
       editor.target.generation !== editorAtRequest.target.generation) return;
     const result = await saveGameInputEditor(editor, patch, () => targetRequestCurrent(epoch) &&
       !startProtectionLocked.value &&
-      !virtualTargetSelectionError(nextPersona, currentVirtualTargetPolicy(), nextEnabled));
+      !controllerTargetSelectionError(nextPersona, nextEnabled));
     if (!targetRequestCurrent(epoch)) return;
     if (result.ok === false) {
       if (result.reason === 'virtual-start-protection-active') {
@@ -454,7 +459,7 @@ function onPersona(value: string | number): void {
   if (gameLocked.value || externalPriorityBusy.value || frontendIsolationBusy.value || profileRemovalBusy.value) return;
   const next = isControllerPersona(value) ? value : 'disabled';   // 批112
   if (targetBusy.value || startProtectionLocked.value) return;
-  if (virtualTargetSelectionError(next, currentVirtualTargetPolicy())) return;
+  if (controllerTargetSelectionError(next)) return;
   // 2026-09-30 用户裁决：切到 SteamDeck 虚拟手柄时鼠标交给 Steam，JoyXoff 若在跑
   // 强行关掉（存在才关）；顶部专属菜单里切同一人格时走同一处理。
   if (next === 'steamdeck') void closeJoyxoffIfRunning().catch(() => undefined);
@@ -496,10 +501,12 @@ onMounted(() => {
     const driverSetup = state.driverSetup ?? 0;
     const hidHideSetupNotice = state.hidHideSetupNotice ?? 0;
     const driverSetupRedistDir = state.driverSetupRedistDir ?? '';
+    const hidHideUnsupportedVersion = typeof state.hidHideUnsupportedVersion === 'string' ? state.hidHideUnsupportedVersion : '';
+    const hidHideMaintenanceExit = state.hidHideMaintenanceExit ?? -1;
     const previousSetup = setupSnapshot.value;
     // Runtime feedback can change frequently; only display fields invalidate the notice.
-    if (previousSetup.driverSetup !== driverSetup || previousSetup.hidHideSetupNotice !== hidHideSetupNotice || previousSetup.driverSetupRedistDir !== driverSetupRedistDir) {
-      setupSnapshot.value = { driverSetup, hidHideSetupNotice, driverSetupRedistDir };
+    if (previousSetup.driverSetup !== driverSetup || previousSetup.hidHideSetupNotice !== hidHideSetupNotice || previousSetup.driverSetupRedistDir !== driverSetupRedistDir || previousSetup.hidHideUnsupportedVersion !== hidHideUnsupportedVersion || previousSetup.hidHideMaintenanceExit !== hidHideMaintenanceExit) {
+      setupSnapshot.value = { driverSetup, hidHideSetupNotice, driverSetupRedistDir, hidHideUnsupportedVersion, hidHideMaintenanceExit };
     }
     acceptStartProtection(state.virtualOutput?.startProtection);
     virtualOutputRuntime.value = acceptVirtualOutputRuntime(virtualOutputRuntime.value, state.virtualOutput ?? null, startProtectionView.read(performance.now()).requestId);
@@ -562,13 +569,13 @@ function closeShortcutEditor(): void {
              Only actual backend/output failures below describe a failed virtual controller. -->
 
         <div v-if="environmentNotice" :class="environmentNotice.tone === 'warning' ? 'fault-line' : 'environment-note'" role="status">
-          <strong>{{ environmentNotice.title }}</strong><span>{{ environmentNotice.description }}</span>
+          <strong>{{ environmentNotice.title }}</strong><span class="environment-instructions">{{ environmentNotice.description }}</span>
         </div>
-        <div v-if="targetEnabled && faultHoldActive" class="fault-line">
+        <div v-if="!setupSnapshot.hidHideUnsupportedVersion && targetEnabled && faultHoldActive" class="fault-line">
           <strong>虚拟输出已停写</strong>
           <span>后端创建或输入输出失败，已停止虚拟输出。请导出日志查看原因，重新选择虚拟手柄可重试。</span>
         </div>
-        <div v-else-if="targetEnabled && recoveryFallbackState > 0" class="fault-line">
+        <div v-else-if="!setupSnapshot.hidHideUnsupportedVersion && targetEnabled && recoveryFallbackState > 0" class="fault-line">
           <strong>虚拟未恢复</strong>
           <span>{{ recoveryFallbackState === 2 ? '已请求物理兜底（读回：物理可用）。' : '已请求物理兜底（读回结果见日志）。' }}请重新开关虚拟手柄或切换人格重试。</span>
         </div>
@@ -581,8 +588,8 @@ function closeShortcutEditor(): void {
             class="persona-btn"
             :class="{ active: o.value === displayPersona }"
             :data-gp-initial-focus="o.value === 'disabled' ? 'true' : undefined"
-            :disabled="gameLocked || (targetBusy || startProtectionLocked) || externalPriorityBusy || frontendIsolationBusy || profileRemovalBusy || !snapshot || !!virtualTargetSelectionError(o.value, virtualTargetPolicy)"
-            :title="virtualTargetSelectionError(o.value, virtualTargetPolicy)"
+            :disabled="gameLocked || (targetBusy || startProtectionLocked) || externalPriorityBusy || frontendIsolationBusy || profileRemovalBusy || !snapshot || !!controllerTargetSelectionError(o.value)"
+            :title="controllerTargetSelectionError(o.value)"
             @click="onPersona(o.value)"
           >{{ o.label }}</button>
         </div>
@@ -626,6 +633,7 @@ function closeShortcutEditor(): void {
 .persona-actions .persona-btn:disabled{opacity:.42;cursor:default}.fault-line{display:grid;gap:3px;margin:-2px 0 9px;padding:8px 9px;border-radius:var(--radius-ctrl)}.fault-line{border:1px solid rgba(244,163,61,.45);background:color-mix(in srgb,#f4a33d 10%,transparent)}.fault-line strong{color:#ffc46b;font-size:11px}.fault-line span{color:var(--text-dim);font-size:10px;line-height:1.45}.bubble-label{display:block;margin:0 0 8px;color:var(--text-dim);font-size:11px;font-weight:700}/* 能力反馈行（2026-09-30）：替换原来的「背键映射常开」说明文字。 */
 .environment-note{display:grid;gap:3px;margin:-2px 0 9px;padding:8px 9px;border:1px solid rgba(255,255,255,.08);border-radius:var(--radius-ctrl);background:var(--bg-input)}.environment-note strong{color:var(--text);font-size:11px}.environment-note span{color:var(--text-dim);font-size:10px;line-height:1.45}
 .controller-mouse-active{display:inline-flex;align-items:center;gap:5px;color:var(--accent);font-size:10px;white-space:nowrap;}
+.environment-instructions{overflow-wrap:anywhere}
 </style>
 
 <style>

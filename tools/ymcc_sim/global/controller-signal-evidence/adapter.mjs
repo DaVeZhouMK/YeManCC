@@ -2,6 +2,8 @@ import {managedArtifactRows} from './managed-terminal-receipts.mjs';
 import {primaryArtifactRows} from './primary-thread-receipts.mjs';
 import {exitFenceArtifactRows} from './exit-fence-receipts.mjs';
 import {compositionArtifactRows} from './owned-cleanup-composition-receipts.mjs';
+import {dsuGitToolInputs} from './owner-receipts.mjs';
+import {readNativeExitTools} from '../controller-host-exit/tool-profile.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -154,6 +156,9 @@ export const sourceInputs = Object.freeze([
   "native/dsu_server.h",
   "tools/fixtures/dsu_lifecycle/native.cpp",
   "tools/fixtures/dsu_lifecycle/run.mjs",
+  "native/sleep_power_state.h",
+  "tools/ymcc_sim/global/controller-host-exit/tool-profile.mjs",
+  "tools/ymcc_sim/global/controller-host-exit/tool-profile.json",
   "capabilities/upstream/f2e58468/OneXPlayer3.cs",
   "tools/hc_onex_x2_windows_selftest.mjs",
   "native/onex_x2_windows.h",
@@ -592,31 +597,27 @@ export const lifecycleContract = Object.freeze({schemaVersion: 1, features: [{
 }]});
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 export function toolInputs(repo = REPO) {
-  const extra = JSON.parse(fs.readFileSync(path.join(repo, MODULE, 'tool-inputs.json'), 'utf8'));
-  const authority = fs.readFileSync(path.join(repo, extra.nativeAuthority));
-  if (sha(authority) !== extra.nativeAuthoritySha256) throw Error('CONTROLLER_DIAGNOSTIC_NATIVE_TOOL_DECLARATION_CHANGED');
-  const reviewed = JSON.parse(authority);
-  const rows = [...reviewed.files, ...extra.files];
-  const seen = new Map();
-  for (const row of rows) {
-    if (!path.isAbsolute(row.path) || !/^[a-f0-9]{64}$/.test(row.sha256)) throw Error('CONTROLLER_DIAGNOSTIC_TOOL_ROW_INVALID');
-    const key = path.normalize(row.path).toLowerCase();
-    if (seen.has(key) && seen.get(key).sha256 !== row.sha256) throw Error('CONTROLLER_DIAGNOSTIC_TOOL_IDENTITY_CONFLICT');
+  const reviewed = readNativeExitTools(repo);
+  const profile = fs.readFileSync(path.join(repo, MODULE, '../controller-host-exit/tool-profile.json'));
+  const supplement = fs.readFileSync(path.join(repo, MODULE, 'tool-inputs.json'));
+  if (sha(profile) !== reviewed.profileSha256 || sha(supplement) !== JSON.parse(profile).supplementSha256)
+    throw Error('CONTROLLER_DIAGNOSTIC_TOOL_DECLARATION_CHANGED');
+  const extra = JSON.parse(supplement);
+  const normalized = file => path.normalize(file).toLowerCase();
+  const seen = new Map(reviewed.files.map(row => [normalized(row.path), row]));
+  const git = dsuGitToolInputs(repo);
+  // The parent also runs HID and site-enabled Python consumers. Their extra
+  // files stay pinned; the reviewed profile owns any overlapping files.
+  for (const row of [...extra.files.filter(row => normalized(row.path) !== normalized(extra.primary.git)), ...git]) {
+    const key = normalized(row.path);
+    if (seen.has(key)) continue;
+    if (!path.isAbsolute(row.path) || !/^[a-f0-9]{64}$/.test(row.sha256) ||
+        normalized(fs.realpathSync.native(row.path)) !== key || sha(fs.readFileSync(row.path)) !== row.sha256)
+      throw Error('CONTROLLER_DIAGNOSTIC_EXTRA_TOOL_IDENTITY:' + row.path);
     seen.set(key, row);
   }
-  const sdkVersion = reviewed.native.include.map(value => /[\\/]Include[\\/](\d+\.\d+\.\d+\.\d+)[\\/]/i.exec(value)?.[1]).find(Boolean);
-  if (!sdkVersion) throw Error('CONTROLLER_DIAGNOSTIC_SDK_VERSION_UNDECLARED');
-  const vcvars = extra.files.find(row => /[\\/]vcvars64\.bat$/i.test(row.path))?.path;
-  if (!vcvars) throw Error('CONTROLLER_DIAGNOSTIC_VCVARS_UNDECLARED');
-  const primary = {...extra.primary, python: extra.python, compiler: reviewed.native.compiler,
-    linker: reviewed.native.linker, dumpbin: reviewed.native.dumpbin,
-    commandProcessor: reviewed.native.commandProcessor, vcvars};
-  for (const role of ['node', 'git', 'python', 'compiler', 'linker', 'dumpbin', 'commandProcessor', 'vcvars']) {
-    const file = primary[role], declared = typeof file === 'string' && seen.get(path.normalize(file).toLowerCase());
-    if (!declared || sha(fs.readFileSync(file)) !== declared.sha256)
-      throw Error('CONTROLLER_PRIMARY_TOOL_IDENTITY:' + role);
-  }
-  return {python: extra.python, primary, native: reviewed.native, sdkVersion, vcvars, files: [...seen.values()]};
+  const {python, native, sdkVersion, vcvars} = reviewed;
+  return {python, primary:{...reviewed.primary, git:git[0].path}, native, sdkVersion, vcvars, files:[...seen.values()]};
 }
 export function historicalInputs(repo = REPO) {
   const rows = JSON.parse(fs.readFileSync(path.join(repo, MODULE, "historical-inputs.json"), "utf8")).files;
@@ -654,6 +655,7 @@ export function nativeExitClosureArtifactRows(repo=REPO){
 export function signalArtifactRows(repo=REPO){
   return deduplicateArtifactRows([
     ...toolInputs(repo).files.map(row=>({...row,origin:'reviewed-tool'})),
+    ...dsuGitToolInputs(repo).map(row=>({...row,origin:'dsu-reviewed-tool'})),
     ...Object.entries(historicalInputs(repo)).map(([name,row])=>({...row,origin:'historical:'+name})),
     {...sensorEnsureIdentity(repo),origin:'approved-current-manifest'},
     ...compositionArtifactRows(repo),

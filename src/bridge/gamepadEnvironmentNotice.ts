@@ -6,9 +6,48 @@ export interface GamepadEnvironmentNotice {
   readonly tone: 'neutral' | 'warning';
 }
 
-// Presentation only. Preparation status never changes target admission or runtime feedback.
+export const LEGACY_HIDHIDE_TARGET_MESSAGE = 'HidHide 版本过旧，已阻止启用虚拟手柄。请更新 HidHide 并重启 Windows。';
+
+// Presentation only. Only the backend's explicit version decision blocks virtual starts.
 export function gamepadEnvironmentNotice(snapshot: Readonly<HidHideSetupSnapshot>): GamepadEnvironmentNotice | null {
   const status = snapshot.driverSetup ?? 0;
+  const old = snapshot.hidHideUnsupportedVersion;
+  const notice = snapshot.hidHideSetupNotice;
+  if (notice !== undefined && notice >= 10 && notice <= 18) {
+    const code = snapshot.hidHideMaintenanceExit;
+    const error = typeof code === 'number' && code > 0 ? `（错误码 ${code}）` : '';
+    const directory = snapshot.driverSetupRedistDir || DEFAULT_GAMEPAD_REDIST_DIRECTORY;
+    const installer = directory.replace(/[\\/]+$/, '') + '\\' + HIDHIDE_INSTALLER_NAME;
+    const manual = '请退出 YMCC 和其他手柄工具。在 Windows「设置 → 应用 → 已安装的应用」中卸载 HidHide，重启后运行 ' + installer + '，安装完成后再重启。若 HidHide 已不在列表或卸载报错，请导出日志，不要手动删除驱动或手柄归还记录。';
+    const messages: Record<number, [string, string]> = {
+      10: [`HidHide 自动卸载失败${error}`, '本次未安装新版，也不会反复卸载。' + manual],
+      11: [`HidHide 卸载后仍有残留${error}`, '旧组件未确认清除，已停止补装。' + manual],
+      12: ['HidHide 旧组件残留，未能自动卸载', '找不到唯一可验证的官方卸载入口，未覆盖安装。' + manual],
+      13: [`HidHide 新版安装未确认${error}`, '请退出 YMCC，运行 ' + installer + ' 修复，然后重启 Windows。若仍失败，请导出日志。'],
+      14: ['HidHide 卸载后需要重启', '请重启 Windows，再打开 YMCC。程序核验旧组件清除后会自动安装新版。'],
+      15: ['HidHide 新版安装后需要重启', '请重启 Windows，再打开 YMCC。新版核验通过前不会启用虚拟手柄。'],
+      16: ['HidHide 自动升级未确认', '本次没有重复操作。请先重启 Windows 并重新打开 YMCC；若仍显示此提示，请导出日志。'],
+      17: ['HidHide 自动升级等待其他手柄工具退出', '请退出其他手柄工具或正在运行的 HidHide 配置客户端，再重新打开 YMCC。'],
+      18: ['HidHide 自动升级需要管理员权限', '请以管理员身份重新运行 YMCC，再检查升级状态。'],
+    };
+    const [title, description] = messages[notice];
+    return { title, description, tone: 'warning' };
+  }
+  if (old && (status === 1 || status === 5)) {
+    return { title: `正在检查旧版 HidHide ${old}`, description: '本次准备结束前，虚拟手柄不会启用。', tone: 'neutral' };
+  }
+  if (old && (notice === 5 || notice === 6)) {
+    const problem = notice === 5 ? '缺少新版 HidHide 安装器' : '新版 HidHide 安装器校验失败';
+    return { title: problem, description: '自动升级未执行，虚拟手柄仍暂停。请用完整安装包恢复随包安装器，再重新打开 YMCC。', tone: 'warning' };
+  }
+  if (old || (status === 3 && (notice === 4 || notice === 9))) {
+    const directory = snapshot.driverSetupRedistDir || DEFAULT_GAMEPAD_REDIST_DIRECTORY;
+    const installer = directory.replace(/[\\/]+$/, '') + '\\' + HIDHIDE_INSTALLER_NAME;
+    const title = old ? `HidHide 驱动 ${old} 过旧，虚拟手柄未启用`
+      : notice === 9 ? 'HidHide 驱动版本过旧' : 'HidHide 安装不完整，未自动补装';
+    return { title, tone: 'warning', description:
+      '请保留本机手柄，退出 YMCC 和其他手柄工具。运行 ' + installer + ' 更新或修复 HidHide；若安装器要求先卸载，请在 Windows「设置 → 应用 → 已安装的应用」中卸载 HidHide，重启后再安装。安装完成后重启 Windows，再回此页重试。若卸载报错，请保留错误码或截图，不要手动删除驱动文件。' };
+  }
   if (status === 0 || status === 2) return null;
   if (status === 1) {
     return { title: '正在准备手柄环境', description: '后台正在检查并按需准备手柄驱动环境，可以继续尝试启用虚拟手柄。若本次创建失败，请等准备结束后重试。', tone: 'neutral' };

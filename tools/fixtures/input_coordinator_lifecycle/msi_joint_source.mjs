@@ -161,6 +161,20 @@ export function loadMsiJointOsSource(){
  const support=new Map([...patch.includes,bridge.include].map(row=>[row.integrateAs,readMsiJointPin(row)]));
  return {handoff,patch,bridge,support,references:[...refs,...patch.inputs],authority:osHandoffPin};
 }
+const asyncCycleCommands={physicalReleaseWindowDutyBeginRefresh:'HIDHIDE_CYCLE_BEGIN',
+ physicalReleaseWindowDutyPoll:'HIDHIDE_CYCLE_POLL'};
+function pairMsiJointAsyncPort(main,hunk,undo,edits){
+ const command=asyncCycleCommands[hunk.symbol];assert(command);
+ const pipe=`inputHostRequestLocked("${command}",`;
+ const guarded=`fixtureMsiJointEnabled ? fixtureMsiJointUnsupportedAsyncCycle("${command}") : ${pipe}`;
+ const role=(undo?'preserve-original-async-request:':'controlled-async-port:')+hunk.symbol;
+ // Keep the archived full-source proof, but apply only its exact transport substitution
+ // to the current function. BEGIN/POLL ownership and settlement remain production code.
+ assert.equal(replace(hunk.before,pipe,guarded,role,[]),hunk.after);
+ const current=extract(main,hunk.symbol).code;
+ const updated=replace(current,undo?guarded:pipe,undo?pipe:guarded,role,[]);
+ return replace(main,current,updated,role,edits);
+}
 export function pairMsiJointOsGenerated({main,fixture}){
  const original={main,fixture},loaded=loadMsiJointOsSource(),edits={main:[],fixture:[]};
  const apply=(file,hunk)=>{
@@ -169,7 +183,9 @@ export function pairMsiJointOsGenerated({main,fixture}){
  };
  for(const hunk of loaded.patch.hunks){
   const file=hunk.target==='before/generated/main.inert.cpp'?'main':hunk.target==='before/generated/fixture.cpp'?'fixture':null;
-  assert(file,'MSI_JOINT_UNKNOWN_OS_ROLE');apply(file,hunk);
+  assert(file,'MSI_JOINT_UNKNOWN_OS_ROLE');
+  if(file==='main'&&Object.hasOwn(asyncCycleCommands,hunk.symbol))main=pairMsiJointAsyncPort(main,hunk,false,edits.main);
+  else apply(file,hunk);
  }
  for(const hunk of loaded.bridge.hunks)apply('fixture',hunk);
  for(const file of ['main','fixture'])assert.equal(reverseMsiJointText(file==='main'?main:fixture,edits[file]),original[file]);
@@ -245,13 +261,16 @@ export function pairMsiJointStateLifetime(fixture,companion){
 }
 export function pairMsiJointAsyncSignal(main,companion){
  const original={main,companion},edits={main:[],companion:[]},os=loadMsiJointOsSource();
- for(const name of ['physicalReleaseWindowDutyBeginRefresh','physicalReleaseWindowDutyPoll']){
+ for(const name of Object.keys(asyncCycleCommands)){
   const hunk=os.patch.hunks.find(row=>row.symbol===name);assert(hunk);
-  main=replace(main,hunk.after,hunk.before,'preserve-original-async-request:'+name,edits.main);
+  main=pairMsiJointAsyncPort(main,hunk,true,edits.main);
  }
+ const poll=extract(main,'physicalReleaseWindowDutyPoll').code;
+ const power=poll.includes('PhysicalReleaseWindowRefreshBinding binding;')?'binding.powerGeneration':'currentPowerGeneration()';
  const before='        json receipt;\r\n        pipeOk = inputHostRequestLocked("HIDHIDE_CYCLE_POLL",';
- const after='        json receipt;\r\n        if(fixtureMsiJointEnabled)msiJointVisibility::supplyCycleSignal(g_inputHostRunId,g_inputHostEpoch,currentPowerGeneration(),"done");\r\n        pipeOk = inputHostRequestLocked("HIDHIDE_CYCLE_POLL",';
- main=replace(main,before,after,'explicit-controlled-cycle-completion-at-original-poll',edits.main);
+ const after=`        json receipt;\r\n        if(fixtureMsiJointEnabled)msiJointVisibility::supplyCycleSignal(g_inputHostRunId,g_inputHostEpoch,${power},"done");\r\n        pipeOk = inputHostRequestLocked("HIDHIDE_CYCLE_POLL",`;
+ main=replace(main,poll,replace(poll,before,after,'explicit-controlled-cycle-completion-at-original-poll',[]),
+  'explicit-controlled-cycle-completion-at-original-poll',edits.main);
  const refusal='    throw std::logic_error("MSI-nonseam-joint-NOT_READY:original-visibility-CLI-and-PnP-cycle-leaves-missing");';
  companion=replace(companion,refusal,
   '    if(!msiJointVisibility::state.configured || !fixtureMsiJointState::active ||\n'+

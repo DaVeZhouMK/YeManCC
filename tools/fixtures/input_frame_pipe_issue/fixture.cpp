@@ -20,6 +20,8 @@
 #include "HcControllerMotionCapabilityCatalog.h"
 #include "input_host_pipe_transport.h"
 #include "input_host_shared_power.h"
+#include "input_host_compact_frame_reply.h"
+#include "sleep_power_remote_contract.h"
 #include "msi_virtual_report_diagnostic.h"
 #include "virtual_recovery_intent.h"
 #include "virtual_start_protection.h"
@@ -62,6 +64,39 @@ static std::atomic<bool> g_inputReady{true},g_inputHostPowerAdmissionRevoked{fal
 static bool writerAllowed=true,exitFence=false,isMsi=false;
 static HANDLE g_inputHostProcess=nullptr,g_inputHostServerPipe=nullptr;
 static std::string g_inputHostRunId="fixture-same-run";
+static std::string g_inputHostStartupNonce="fixture-same-nonce";
+static std::string g_inputHostFrameReplyBinding;
+static bool g_inputHostCompactFrameRequest=false;
+namespace ymcc::sleeppower::remote {struct NativeRemoteTransport{};struct NativeProvider{};}
+enum class FixtureOffer { Available, NoTransport, Rejected };
+static FixtureOffer fixtureOffer=FixtureOffer::Available;
+static unsigned fixtureOfferCalls=0,fixtureForgottenTargets=0;
+static ymcc::sleeppower::remote::NativeProvider& sharedNativeRemotePowerProvider(){
+ static ymcc::sleeppower::remote::NativeProvider provider;return provider;
+}
+static ymcc::sleeppower::remote::NativeRemoteTransport* sharedNativeRemotePowerTransport(){
+ static ymcc::sleeppower::remote::NativeRemoteTransport port;
+ return fixtureOffer==FixtureOffer::NoTransport?nullptr:&port;
+}
+// Provider/importer and authenticated wire bytes are outside this fragment fixture.
+namespace ymcc::inputHost::sharedPower {
+struct RemoteOffers {
+ struct Ticket{};
+ bool prepare(ymcc::sleeppower::remote::NativeProvider&,ymcc::sleeppower::remote::NativeRemoteTransport&,
+     const std::shared_ptr<ymcc::inputHost::sharedPower::Scope>& source,HANDLE consumer,
+     const std::string& run,std::uint64_t epoch,const std::string& nonce,
+     ymcc::sleeppower::remote::Purpose purpose,const std::string*& header,Ticket&) const noexcept {
+  ++fixtureOfferCalls;header=nullptr;
+  return fixtureOffer==FixtureOffer::Available&&source&&source->current()&&consumer&&consumer==g_inputHostProcess&&
+   !run.empty()&&run==g_inputHostRunId&&epoch&&epoch==g_inputHostEpoch&&!nonce.empty()&&nonce==g_inputHostStartupNonce&&
+   ymcc::sleeppower::remote::inputPurpose(purpose);
+ }
+};
+}
+static ymcc::inputHost::sharedPower::RemoteOffers g_inputHostRemotePowerOffers;
+static void inputHostSwitchVerificationForgetAcceptedLocked() noexcept {++fixtureForgottenTargets;}
+static struct {void revoke() noexcept {}} g_inputHostGameMotorInbox;
+static std::atomic<std::uint64_t> g_inputHostGameMotorBindingGeneration{0};
 static bool g_inputHostPrepared=true,g_inputHostNeutralized=true,g_inputHostTransportFault=false,g_inputHostPipeConnected=false;
 static std::atomic<bool> g_msiDinputRouteDinputArmed{false},g_msiDinputRouteConfirmed{true},g_msiDinputSourceValid{true};
 static struct{std::atomic<bool> enabled{true},mainInterfaceMatched{true};std::atomic<unsigned> productId{0x1902};}g_msiDinput;
@@ -112,16 +147,19 @@ static HANDLE inputHostCreateServerPipeLocked(){auto h=fake::allocate(false,++fa
 static bool inputHostFrameSubmissionMayIssue(void*) noexcept;
 static void inputHostFrameSubmissionTransportRejected() noexcept;
 @@PIPE_CLOSE@@
+@@RECREATE_WRITE@@
 @@PIPE_WRAPPERS@@
 static bool fixtureSchedulingSelection=false;
 static unsigned long long commandSequence=0;static unsigned faultBranches=0,newHosts=0,publicationNotes=0;static std::string lastRejectDetail;
 static std::atomic<unsigned long long> g_inputHostHealthySinceTick{0};enum class InputHostPublicationStage{SourceAbsent};static void inputHostNotePublicationStage(InputHostPublicationStage){++publicationNotes;}
 static DWORD g_inputHostSwitchRecoveryTransportError=ERROR_SUCCESS;
 static auto& g_inputHostSequence=commandSequence;
-static bool preparedRequest(const char* command,json* responseOut,const json& payload=json::object(),InputFrameSubmission* localFrameSubmission=nullptr){
+static bool preparedRequest(const char* command,json* responseOut,const json& payload=json::object(),InputFrameSubmission* localFrameSubmission=nullptr,
+                            InputHostRecreateWrite* recreateWrite=nullptr){
  (void)localFrameSubmission;
 @@REQUEST_POWER_ADMISSION@@
 @@PRE_ENVELOPE@@
+@@FORGET_TARGET_INPUT@@
  std::string requestText="synthetic-envelope";DWORD timeoutMs=fixtureSchedulingSelection?1000:1;const std::uint64_t sequenceValue=commandSequence+1;
 const struct {bool protectedCycle=false;std::uint64_t requestId=0;} rejectedReceiptOwner;
 @@TRANSPORT@@
@@ -187,6 +225,8 @@ static Result submit(const InputCaptureGamepadSnapshot* original,bool physicalSo
 }
 static InputCaptureGamepadSnapshot makeSample(const std::string& source="xinput",DWORD mask=1){InputCaptureGamepadSnapshot s;s.live=true;s.inputSource=source;s.connectedMask=mask;s.readAttemptSequence=9;s.readStartedTick=tick-2;s.readCompletedTick=tick-1;s.readPowerGeneration=power;s.readTopologyGeneration=g_xinputTopologyEpoch;s.readIdentityGeneration=static_cast<unsigned>(g_xinputSlotIdentityEpoch.load());s.readContextStable=true;readSharedSystemPower(&s.sharedPower,sizeof(s.sharedPower));s.readMsiSourceRevision=g_msiMainSourceRevision;s.readMsiModeGeneration=g_msiFeedbackModeGeneration;return s;}
 static void reset(){
+ fixtureOffer=FixtureOffer::Available;fixtureOfferCalls=fixtureForgottenTargets=0;
+ g_inputHostFrameReplyBinding.clear();g_inputHostCompactFrameRequest=false;g_inputHostGameMotorBindingGeneration=0;
  g_inputHostRecoveryIntent.~VirtualRecoveryIntent();new(&g_inputHostRecoveryIntent)ymcc::inputHost::VirtualRecoveryIntent;
  g_inputHostRecoveryIntent.configure(json::object(),"pipe-fixture",true,true,"steamdeck");
  g_virtualStartProtection.~VirtualStartProtection();new(&g_virtualStartProtection)ymcc::VirtualStartProtection;
@@ -196,7 +236,7 @@ static void reset(){
  fixturePublication=fixtureNotification=fixtureSuspendSerial=1;fixtureNotificationPending=false;fixtureKeepTarget=true;
  t_inputHostOneXStartWrite=false;t_inputHostDeferredPhysicalHideWrite=nullptr;t_inputHostDeferredPhysicalHideRefreshIssueActive=false;
  auto& rt=ymcc::inputHost::pipeTransport::processRuntime();if(g_inputHostServerPipe){fake::completeConnect=true;rt.close(g_inputHostServerPipe);rt.maintenance();g_inputHostServerPipe=nullptr;}fake::clear();g_inputHostProcess=reinterpret_cast<HANDLE>(std::uintptr_t(0x555));power=g_inputHostEpoch=1;g_inputHostSwitchRecoveryStartDeadline=0;g_inputHostPrepareMayHaveReachedHost=false;g_inputHostVirtualIntentRevision=0;g_inputHostVirtualIntentWriters=0;g_msiMainSourceRevision=7;g_msiFeedbackModeGeneration=1;t_legionMotionSubmission=nullptr;t_windowsMotionSubmission=nullptr;g_machineIdentity.deviceClass="HandheldCompanion.Devices.LegionGoTablet";g_hidResolveCacheGeneration=g_legionMotionCaptureEpoch=g_legionMotionEpochStartedAt=1;g_legionRawInputSubscribed=true;g_inputCaptureStop=false;g_powerLifecycle=PowerLifecycle::Ready;selectedMotionSensor=0;g_xinputTopologyEpoch=1;g_xinputSlotIdentityEpoch=1;g_inputReady=true;writerAllowed=true;exitFence=isMsi=false;g_inputHostPowerAdmissionRevoked=g_inputHostFaultHoldsStart=false;g_inputHostPrepared=g_inputHostNeutralized=true;g_inputHostTransportFault=g_inputHostPipeConnected=false;g_msiDinputRouteDinputArmed=false;g_msiDinputRouteConfirmed=g_msiDinputSourceValid=true;g_msiDinput.enabled=g_msiDinput.mainInterfaceMatched=true;g_msiDinput.productId=0x1902;tick=1000;commandSequence=0;faultBranches=newHosts=publicationNotes=0;logs=json::array();g_inputHostReadProgress={};}
-struct Checks{json cases=json::array(),failures=json::array();unsigned assertions=0;std::string name;bool collectOnly=false;std::vector<std::string> selected,planned;void check(bool b,const char* why){++assertions;if(!b)failures.push_back({{"case",name},{"assertion",why}});}template<class F>void run(const char* n,F f){if(collectOnly){planned.emplace_back(n);return;}if(!selected.empty()&&std::find(selected.begin(),selected.end(),n)==selected.end())return;reset();name=n;const auto before=failures.size();try{f();}catch(const std::exception&e){check(false,e.what());}cases.push_back({{"name",n},{"passed",failures.size()==before},{"writes",fake::writes},{"connects",fake::connects},{"sequence",commandSequence},{"faultBranches",faultBranches},{"newHosts",newHosts},{"logs",logs}});}};
+struct Checks{json cases=json::array(),failures=json::array();unsigned assertions=0;std::string name;bool collectOnly=false;std::vector<std::string> selected,planned;void check(bool b,const char* why){++assertions;if(!b)failures.push_back({{"case",name},{"assertion",why}});}template<class F>void run(const char* n,F f){if(collectOnly){planned.emplace_back(n);return;}if(!selected.empty()&&std::find(selected.begin(),selected.end(),n)==selected.end())return;fake::activeCase=name.c_str();reset();name=n;fake::activeCase=name.c_str();const auto before=failures.size();try{f();}catch(const std::exception&e){check(false,e.what());}cases.push_back({{"name",n},{"passed",failures.size()==before},{"writes",fake::writes},{"connects",fake::connects},{"sequence",commandSequence},{"faultBranches",faultBranches},{"newHosts",newHosts},{"logs",logs}});}};
 
 // Parameterized additions to this original fixture/ID. All Win32 leaves remain
 // deterministic; these are transport facts, not a synthetic remote command ACK.
@@ -210,7 +250,20 @@ static void runPipeCancellationCases(Checks& c){
  const auto observe=[](const ymcc::inputHost::pipeTransport::Result& r){const auto s=processRuntime().snapshot();logs.push_back({{"domain","pipe-transport"},{"row",{{"ok",r.ok},{"admitted",r.admitted},{"contextRejected",r.contextRejected},{"scopeRevoked",r.scopeRevoked},{"error",r.error},{"firstWait",r.firstWait},{"terminal",r.terminal},{"retired",r.retired},{"byteCountKnown",r.byteCountKnown},{"transferred",r.transferred},{"cancelAttempted",r.cancelAttempted},{"cancelError",r.cancelError},{"operation",r.operation},{"pending",s.pending},{"closeDebt",s.failedCloseDebt}}}});return r;};
  const auto close=[&c](HANDLE pipe){auto& rt=processRuntime();rt.close(pipe);g_inputHostServerPipe=nullptr;rt.maintenance();c.check(rt.stopped(),"all owned transport handles returned");};
  const auto validWaits=[&c](){c.check(!fake::waitMismatch&&fake::waitSteps.empty(),"exact scheduled wait kinds/budgets consumed once");c.check(fake::duplicateClosesWhilePending==0,"no IO handle closed while pending");for(const auto& w:fake::waits)logs.push_back({{"domain","pipe-wait"},{"row",{{"handles",w.count},{"budgetMs",w.milliseconds},{"begin",w.begin},{"end",w.end},{"result",w.result}}}});};
- const auto run=[&](const std::string& name,const std::function<void()>& body){c.run(("pipe-cancellation/"+name).c_str(),[&]{body();validWaits();});};
+ const auto run=[&](const std::string& name,const std::function<void()>& body){c.run(("pipe-cancellation/"+name).c_str(),[&]{
+  body();validWaits();
+  auto& rt=processRuntime();
+  const auto residual=rt.snapshot();
+  if(!residual.stopped){
+   // Record the unresolved original teardown before isolating the next case.
+   c.check(false,"original case left runtime resources before fixture cleanup");
+   logs.push_back({{"domain","fixture-failed-case-cleanup"},{"row",{{"pending",residual.pending},{"closeDebt",residual.failedCloseDebt}}}});
+   fake::completePending(ERROR_OPERATION_ABORTED);
+   if(g_inputHostServerPipe){rt.close(g_inputHostServerPipe);g_inputHostServerPipe=nullptr;}
+   rt.maintenance();
+   fake::require(rt.stopped(),"failed case fixture cleanup did not return resources");
+  }
+ });};
  for(const auto kind:{Kind::Connect,Kind::Read,Kind::Write}){
   const std::string suffix=kind==Kind::Connect?"connect":kind==Kind::Read?"read":"write";
   run("pre-signaled-"+suffix,[&]{
@@ -253,13 +306,23 @@ static void runPipeCancellationCases(Checks& c){
    const HANDLE pipe=open();auto owner=std::make_shared<BorrowedCancellationOwner>();const HANDLE borrowed=owner->event;std::weak_ptr<void> weak=owner;
    Cancellation cancel{borrowed,owner};owner.reset();fake::pendingConnect=kind==Kind::Connect;fake::pendingReads=kind==Kind::Read;fake::pendingWrites=kind==Kind::Write;
    fake::queueWait(2,100,30,[=]{if(order!=0)SetEvent(borrowed);if(order!=1)fake::completePending();});
-   if(order==1)fake::queueWait(1,70,20,[]{fake::completePending();});
+   if(order==1)fake::queueWait(1,7,2,[]{fake::completePending();});
    char data[2]{};const auto r=observe(processRuntime().run(pipe,kind,data,kind==Kind::Connect?0:2,100,7,nullptr,nullptr,std::move(cancel)));
-   c.check(r.admitted&&r.ok&&r.terminal&&!r.retired&&!r.contextRejected&&r.scopeRevoked==(order!=0),"IO and public-revocation facts remain independent");
-   c.check(fake::cancels==0&&r.firstWait==(order==1?WAIT_OBJECT_0+1:WAIT_OBJECT_0),"simultaneous IO wins index zero; cancellation does not call CancelIoEx early");
-   c.check(fake::blockingBudgets()==(order==1?std::vector<DWORD>{100,70}:std::vector<DWORD>{100}),"cancellation drains only original remaining budget");
-   if(kind!=Kind::Connect)c.check(r.byteCountKnown&&r.transferred==2,"successful drain still reports actual transferred bytes");
-   if(kind==Kind::Read)c.check(data[0]=='{'&&data[1]=='}',"drained read preserves actual response bytes for wire accounting");
+   if(order==1){
+    c.check(r.admitted&&!r.ok&&r.terminal&&!r.retired&&!r.contextRejected&&r.scopeRevoked&&r.error==ERROR_OPERATION_ABORTED,
+     "ordinary issued IO stays cancelled even if terminal success arrives in the original cleanup grace");
+    c.check(fake::cancels==1&&r.firstWait==WAIT_OBJECT_0+1,"scope-first ordinary IO cancels exactly once");
+    c.check(fake::blockingBudgets()==std::vector<DWORD>{100,7}&&GetTickCount64()==1032,
+     "ordinary cancellation never spends ACK drain balance or renews the original grace");
+    if(kind!=Kind::Connect)c.check(!r.byteCountKnown&&r.transferred==0,"cancelled ordinary IO cannot expose late byte count");
+    if(kind==Kind::Read)c.check(data[0]==0&&data[1]==0,"late bytes from an ordinary cancelled read are not an ACK");
+   }else{
+    c.check(r.admitted&&r.ok&&r.terminal&&!r.retired&&!r.contextRejected&&r.scopeRevoked==(order!=0),"IO and public-revocation facts remain independent");
+    c.check(fake::cancels==0&&r.firstWait==WAIT_OBJECT_0,"simultaneous IO wins index zero; cancellation does not call CancelIoEx early");
+    c.check(fake::blockingBudgets()==std::vector<DWORD>{100},"completed IO consumes only its original wait");
+    if(kind!=Kind::Connect)c.check(r.byteCountKnown&&r.transferred==2,"successful IO still reports actual transferred bytes");
+    if(kind==Kind::Read)c.check(data[0]=='{'&&data[1]=='}',"completed read preserves actual response bytes for wire accounting");
+   }
    c.check(weak.expired()&&borrowed->closed&&processRuntime().snapshot().cachedOperations==1,"terminal same-lease cache does not pin public scope");close(pipe);
   });
  }
@@ -270,10 +333,11 @@ static void runPipeCancellationCases(Checks& c){
  });
  run("preparation-time-consumes-budget",[&]{
   const HANDLE pipe=open();char data[2]{};c.check(processRuntime().run(pipe,Kind::Write,data,2,100).ok,"warm cache for actual ResetEvent boundary");
-  auto owner=std::make_shared<BorrowedCancellationOwner>();const HANDLE borrowed=owner->event;fake::pendingWrites=true;fake::resetHook=[]{tick+=20;};
+  auto owner=std::make_shared<BorrowedCancellationOwner>();const HANDLE borrowed=owner->event;fake::pendingReads=true;fake::resetHook=[]{tick+=20;};
   fake::queueWait(2,80,30,[=]{SetEvent(borrowed);});fake::queueWait(1,50,20,[]{fake::completePending();});
-  const auto r=observe(processRuntime().run(pipe,Kind::Write,data,2,100,7,nullptr,nullptr,{borrowed,owner}));
-  c.check(r.ok&&r.scopeRevoked&&fake::blockingBudgets()==std::vector<DWORD>{80,50}&&GetTickCount64()==1070,"preparation plus cancellation never renew caller-supplied balance");close(pipe);
+  const auto r=observe(processRuntime().run(pipe,Kind::Read,data,2,100,7,nullptr,nullptr,{borrowed,owner,true}));
+  c.check(r.ok&&r.scopeRevoked&&fake::blockingBudgets()==std::vector<DWORD>{80,50}&&GetTickCount64()==1070,"preparation plus cancellation never renew caller-supplied balance");
+  c.check(fake::writes==1&&fake::reads==1&&fake::cancels==0,"bounded same-request drain reads one ACK without replay");close(pipe);
  });
  for(unsigned timing=0;timing<3;++timing)run("same-request-ack-drain-"+std::to_string(timing),[&]{
   const HANDLE pipe=open();auto owner=std::make_shared<BorrowedCancellationOwner>();const HANDLE borrowed=owner->event;std::weak_ptr<void> weak=owner;char data[2]{};
@@ -303,12 +367,15 @@ static void runPipeCancellationCases(Checks& c){
  });
  for(unsigned outcome=0;outcome<3;++outcome)run("deadline-terminal-"+std::to_string(outcome),[&]{
   const HANDLE pipe=open();auto owner=std::make_shared<BorrowedCancellationOwner>();const HANDLE borrowed=owner->event;std::weak_ptr<void> weak=owner;
-  Cancellation cancel{borrowed,owner};owner.reset();fake::pendingWrites=true;
+  char data[2]{};
+  c.check(processRuntime().run(pipe,Kind::Write,data,2,100).ok,"same request was issued before the cancellation-drain deadline");
+  Cancellation drain{borrowed,owner,true};owner.reset();fake::pendingReads=true;
   const DWORD elapsed=outcome==2?100:30;fake::queueWait(2,100,elapsed,[=]{SetEvent(borrowed);});
   if(outcome!=2)fake::queueWait(1,70,70);
   fake::queueWait(1,7,outcome==0?2:7,[=]{if(outcome==0)fake::completePending();});
-  char data[2]{};const auto r=observe(processRuntime().run(pipe,Kind::Write,data,2,100,7,nullptr,nullptr,std::move(cancel)));
+  const auto r=observe(processRuntime().run(pipe,Kind::Read,data,2,100,7,nullptr,nullptr,std::move(drain)));
   c.check(!r.ok&&r.error==WAIT_TIMEOUT&&r.scopeRevoked&&r.cancelAttempted&&fake::cancels==1,"original timeout remains timeout even if cleanup sees late success");
+  c.check(fake::writes==1&&fake::reads==1&&!r.byteCountKnown&&data[0]==0&&data[1]==0,"late ACK cannot replay command or turn original timeout into business success");
   c.check(fake::blockingBudgets()==(outcome==2?std::vector<DWORD>{100,7}:std::vector<DWORD>{100,70,7}),"no fresh timeout after cancellation or expired deadline");
   c.check(GetTickCount64()<=1107,"same original IO budget plus original grace only");
   if(outcome==0)c.check(r.terminal&&!r.retired&&weak.expired()&&borrowed->closed,"late success in grace returns owner but does not rewrite original outcome");

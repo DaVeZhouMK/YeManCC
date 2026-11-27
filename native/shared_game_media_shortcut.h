@@ -2,6 +2,7 @@
 // Display identity only: parse the active account's file, never write Steam data.
 #include "shared_game_media.h"
 #include "steam_account_facts.h"
+#include "custom-steam-library/custom_steam_library_launch_binding.h"
 #include <map>
 namespace ymcc::media {
 // Consume the one Steam publisher and its same-process UI facts. This is only
@@ -35,35 +36,42 @@ inline Json readShortcutItems(const fs::path& file){
     std::string bytes((std::istreambuf_iterator<char>(stream)),{});if(bytes.size()!=size||fs::last_write_time(file)!=before)throw std::runtime_error("media-shortcuts-changed");
     auto root=ShortcutVdf(std::move(bytes)).parse();if(!root.contains("shortcuts")||!root["shortcuts"].is_object())throw std::runtime_error("media-shortcuts-invalid");return root["shortcuts"];
 }
-inline Json describeShortcut(const Json& item){
+inline Json describeShortcut(const Json& item,const fs::path& file={},const fs::path& dataRoot={},const std::string& account={}){
     if(!item.is_object()||!item.contains("appid")||!item["appid"].is_number_unsigned())throw std::runtime_error("media-shortcut-id");
     const auto id=shortcutAppId(std::to_string(item["appid"].get<uint64_t>()));auto exe=stringField(item,"exe");
     if(exe.size()>1&&exe.front()=='"'&&exe.back()=='"')exe=exe.substr(1,exe.size()-2);
     const auto path=fs::path(wide(exe));if(!path.is_absolute()||normalized(utf8(path.extension().wstring()))!=".exe")throw std::runtime_error("media-shortcut-executable-unconfirmed");
+    namespace launch=custom_steam_library::launch_file;
+    const auto host=path.filename().native();
+    if(launch::equal(host,L"wscript.exe")||launch::equal(host,L"cscript.exe")){
+        const auto primary=launch::readPrimaryBinding(dataRoot,file,account,id,path.native(),wide(stringField(item,"startdir")),wide(stringField(item,"launchoptions")),wide);
+        if(primary.empty())throw std::runtime_error("media-shortcut-script-binding-unconfirmed");
+        exe=utf8(primary.native());
+    }
     return {{"executable",exe},{"name",stringField(item,"appname")},{"shortcutAppId",std::to_string(id)},{"lastPlayed",(std::min)(uint64_t(now()/1000),item.value("lastplaytime",uint64_t{0}))*1000}};
 }
-inline Json shortcutIdentity(const fs::path& file,const std::string& gameId){
+inline Json shortcutIdentity(const fs::path& file,const std::string& gameId,const fs::path& dataRoot={},const std::string& account={}){
     const auto wanted=shortcutAppId(gameId);const auto items=readShortcutItems(file);Json found=Json::object();
     for(const auto& item:items){if(!item.is_object()||!item.contains("appid")||!item["appid"].is_number_unsigned()||item["appid"].get<uint64_t>()!=wanted)continue;
-        if(!found.empty())throw std::runtime_error("media-shortcut-ambiguous");found=describeShortcut(item);
+        if(!found.empty())throw std::runtime_error("media-shortcut-ambiguous");found=describeShortcut(item,file,dataRoot,account);
     }return found;
 }
-inline Json shortcutInventory(const fs::path& file){
+inline Json shortcutInventory(const fs::path& file,const fs::path& dataRoot={},const std::string& account={}){
     const auto items=readShortcutItems(file);std::map<uint32_t,Json> found;std::set<uint32_t> seen,ambiguous;
     for(const auto& item:items){
         if(!item.is_object()||!item.contains("appid")||!item["appid"].is_number_unsigned())continue;
         try{const auto id=shortcutAppId(std::to_string(item["appid"].get<uint64_t>()));if(!seen.insert(id).second){ambiguous.insert(id);found.erase(id);continue;}
-            if(!ambiguous.count(id))found[id]=describeShortcut(item);
+            if(!ambiguous.count(id))found[id]=describeShortcut(item,file,dataRoot,account);
         }catch(const std::exception&){} // A URL/tool shortcut does not hide other valid EXEs.
     }
     Json result=Json::array();for(const auto& [id,item]:found)if(!ambiguous.count(id))result.push_back(item);return result;
 }
-inline Json shortcutInventoryForAccount(const fs::path& file,uint32_t account,const std::function<uint32_t()>& activeAccount){
-    if(!account||activeAccount()!=account)return Json::array();auto rows=shortcutInventory(file);if(activeAccount()!=account)return Json::array();for(auto& row:rows)row["steamAccount"]=std::to_string(account);return rows;
+inline Json shortcutInventoryForAccount(const fs::path& file,uint32_t account,const std::function<uint32_t()>& activeAccount,const fs::path& dataRoot={}){
+    if(!account||activeAccount()!=account)return Json::array();auto rows=shortcutInventory(file,dataRoot,std::to_string(account));if(activeAccount()!=account)return Json::array();for(auto& row:rows)row["steamAccount"]=std::to_string(account);return rows;
 }
 // Runtime diagnostics preserve the original admission rule: a failed read never
 // becomes a guessed empty inventory or a successful identity. No Steam writes.
-inline Json observeShortcutInventory(const fs::path& file,uint32_t account,const std::function<uint32_t()>& activeAccount) {
+inline Json observeShortcutInventory(const fs::path& file,uint32_t account,const std::function<uint32_t()>& activeAccount,const fs::path& dataRoot={}) {
     Json result={{"available",false},{"reason","waiting-steam-account"},{"rows",Json::array()},
         {"evidence",{{"file",utf8(file.wstring())},{"account",std::to_string(account)},{"sourceReadOnly",true}}}};
     auto& evidence=result["evidence"];
@@ -82,7 +90,7 @@ inline Json observeShortcutInventory(const fs::path& file,uint32_t account,const
     evidence["fileBytes"]=bytes;
     if(bytes>16*1024*1024){result["reason"]="shortcut-file-too-large";changed();return result;}
     try {
-        auto rows=shortcutInventoryForAccount(file,account,activeAccount);
+        auto rows=shortcutInventoryForAccount(file,account,activeAccount,dataRoot);
         if(changed())return result;
         result["rows"]=std::move(rows);result["available"]=true;result["reason"]="ready";
     }catch(const std::exception& exception){

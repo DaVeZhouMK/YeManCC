@@ -1,5 +1,6 @@
 import { reactive } from 'vue';
-import { emitMockIpcEvent } from './mock-shell';
+import { emitMockIpcEvent, holdMockIpcReply } from './mock-shell';
+import type { SharedPowerLifecycleSnapshot } from '../src/bridge/powerLifecycleState';
 import { startForegroundPowerSourceRefresh } from '../src/bridge/powerSource';
 import { mkdtempSync, rmSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -331,6 +332,8 @@ async function runGameCustomPersistenceStorm(
 async function main(): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'yeman-schedule-tdp-'));
   let powerLifecycleStates: Array<'ready' | 'resuming'> = [];
+  let scopedPower: SharedPowerLifecycleSnapshot | null = null;
+  let activationHook: (() => void) | null = null;
   let blockedProfileAttempts = 0;
   let blockNextProfileWrite = false;
   let failNextRequiredProfileWrite = false;
@@ -391,8 +394,9 @@ async function main(): Promise<void> {
       return {content:size>args.maxBytes?'':content,offset:0,size};
     }
     if (cmd === 'power.activeScheme') return YEMAN;
-    if (cmd === 'power.setActiveScheme') return {ok:true,code:0};
+    if (cmd === 'power.setActiveScheme') { activationHook?.(); return {ok:true,code:0}; }
     if (cmd === 'power.lifecycle') {
+      if (scopedPower) return { ...scopedPower };
       const phase = powerLifecycleStates.shift() ?? 'ready';
       return { phase, generation: 1, hardwareWritesAllowed: phase === 'ready', inputReady: phase === 'ready', hibernateAvailable: true };
     }
@@ -513,6 +517,53 @@ async function main(): Promise<void> {
     const recoveredApply = await schedule.applyPerformanceSchedule('dc', 'balanced', config);
     assert(recoveredApply, '短暂电源写入闸门应在 native Ready 后自动重试一次');
     assert(blockedProfileAttempts === 0, `连续性能路径不应回写旧固定 CPU 挡位，实际=${blockedProfileAttempts}`);
+
+    const shared = await import('../src/bridge/powerLifecycleState');
+    const detection = await import('../src/bridge/gamedetect');
+    const readyPower = { generation: 1, suspendSerial: 10, observedNotificationSequence: 10, publicationRevision: 10,
+      phase: 'ready', known: true, hardwareWritesAllowed: true } as const;
+    scopedPower = readyPower;
+    const stopPower = shared.onSharedPowerLifecycle(() => {});
+    let heldPower: ReturnType<typeof holdMockIpcReply> | undefined;
+    try {
+      const transition = 'hardware writes are blocked during power transition';
+      const enterScope = (state: SharedPowerLifecycleSnapshot) => { scopedPower = state; emitMockIpcEvent('power.lifecycleChanged', state); };
+      enterScope(readyPower);
+      await detection.refreshGameStatusStrict();
+      let activations = 0;
+      activationHook = () => { if (++activations === 1) throw Error(transition); };
+      assert(await schedule.applyPerformanceSchedule('dc', 'balanced', config) && activations === 2,
+        'same-scope Native ready can retry the original operation once');
+
+      const newer = { ...readyPower, suspendSerial: 11, observedNotificationSequence: 11, publicationRevision: 11 };
+      activations = 0;
+      activationHook = () => { if (++activations === 1) { scopedPower = newer; throw Error(transition); } };
+      const stale = await schedule.applyPerformanceSchedule('dc', 'balanced', config).then(() => null, error => String(error));
+      assert(activations === 1 && stale?.includes(transition), 'a directly read newer Ready must not retry the old schedule operation');
+      assert(shared.getSharedPowerLifecycle()?.suspendSerial === 11, 'the direct read must publish the missed public boundary');
+      await detection.refreshGameStatusStrict();
+
+      activations = 0;
+      activationHook = () => { if (++activations === 1) { heldPower = holdMockIpcReply('power.lifecycle'); throw Error(transition); } };
+      let retired = false;
+      const held = schedule.applyPerformanceSchedule('dc', 'balanced', config).then(() => null, error => { retired = true; return String(error); });
+      for (let i = 0; !heldPower?.captured() && i < 100; i++) await new Promise<void>(resolve => setImmediate(resolve));
+      assert(heldPower?.captured(), 'original schedule must enter the held write-gate read');
+      const next = { ...newer, suspendSerial: 12, observedNotificationSequence: 12, publicationRevision: 12 };
+      enterScope(next);
+      for (let i = 0; !retired && i < 100; i++) await new Promise<void>(resolve => setImmediate(resolve));
+      assert(retired, 'a newer public boundary must release the old retry before its Native reply');
+      assert((await held)?.includes(transition), 'the retired operation preserves the actual write denial');
+      await detection.refreshGameStatusStrict();
+      assert(await schedule.applyPerformanceSchedule('dc', 'balanced', config), 'a new schedule operation must take the released queue');
+      heldPower.release(newer);
+      await Promise.resolve();
+      assert(activations === 2 && shared.getSharedPowerLifecycle()?.suspendSerial === 12 && !schedule.isPerformanceScheduleBusy(),
+        'late read and retired owner must not write or retain the schedule queue');
+      console.log('Performance schedule scoped write retry: PASS (same-scope, missed newer Ready, in-flight retirement)');
+    } finally {
+      heldPower?.release(readyPower); activationHook = null; scopedPower = null; stopPower();
+    }
 
     failNextRequiredProfileWrite = true;
     const noLegacyProfileFailure = await schedule.applyPerformanceSchedule('dc', 'balanced', config);

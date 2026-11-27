@@ -1,9 +1,9 @@
 {
     "binary":  "MemoryScanHost.exe",
-    "luaSha256":  "201942504bf4079b24c3e0dbec02536cc738be57add774364122e86b8fdbb268",
-    "sourceSha256":  "4f0c495aad1a250d94bbdca0c6628bac52469c12e2f7a11ed990bbef45659829",
+    "luaSha256":  "5296d01290641ce8536e98920fd50bdef931af0eeeed60d524f9ab7ff3aac807",
+    "sourceSha256":  "34377b6aaabc840c86f3c06e3d9a1e93f824d1c7e8f0a0432f0e752475b5be3e",
     "runtime":  "Windows .NET Framework 4.8 x64",
-    "binarySha256":  "14db4f5b0f5147385bda978b976a5a5ea6246c27409ff118cc4e11b89238d1d2",
+    "binarySha256":  "66c1c9cf1815822d32dac5a715f449495ee1801bd15cf88760e0f49a5f63e7ff",
     "source":  "MemoryScanHost.cs",
     "engine":  "cheat-engine",
     "schema":  2

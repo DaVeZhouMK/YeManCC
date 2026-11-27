@@ -23,17 +23,30 @@ function profileTargetHelpers(){
 const models = evaluate('src/bridge/performanceControls.ts');
 const frameModel = evaluate('src/bridge/frameRateModel.ts');
 let afterSettingsCommit=null;
+let beforeTdpSnapshot=null,afterTdpDispatch=null;
 let tdpWriteMode='ack';let residentOwner=null;const ownerReads={settings:0,files:0,source:0};let sectionJson='',sectionRevision=0;
 let side='ac', game=null, generation=1, flipOnTdp=false, failSave=false, acceptedLimit=150, clockMs=Date.now(), deviceTemplate='portable';
 class TestDate extends Date { static now(){return clockMs} }
-let settings={rtss:{frameRates:frameModel.frameRatePair({}),future:'KEEP'},performanceSchedule:{configured:false,enabled:false},other:{keep:42}};
+let settings={input:{},rtss:{frameRates:frameModel.frameRatePair({}),future:'KEEP'},performanceSchedule:{configured:false,enabled:false},other:{keep:42}};
 const source={value:'ac'}, files=new Map(), writes=[], listeners=new Set();
 const sourcePath='C:\\SOFT\\YeMan\\PowerControl\\game-custom.json';
 files.set(sourcePath,JSON.stringify({version:1,entries:{},rtss:{}}));
 const frames={...frameModel,loadGlobalFrameRates:async()=>settings.rtss.templateDefaults===true?frameModel.frameRatePair(null,deviceTemplate==='desktop'?200:120,60):frameModel.frameRatePair(settings.rtss.frameRates),ensureGlobalFrameRates:async()=>settings.rtss.templateDefaults===true?frameModel.frameRatePair(null,deviceTemplate==='desktop'?200:120,60):frameModel.frameRatePair(settings.rtss.frameRates),
   applyIndependentFrameRates:async()=>{writes.push({kind:'fps'});return true},publishFrameRatesChanged(){}};
 const target={getPolicyGame:()=>game,detectPolicyGame:async()=>game,gamePolicyKey:g=>(g.path||g.name).split(/[\\/]/).pop().toLowerCase(),isPolicyTargetCurrent:t=>!!game&&game.pid===t.pid&&game.processCreated===t.processCreated};
+let gameStatusCurrent=true;
+let wakePowerFact={phase:'ready',known:true,generation:4,hardwareWritesAllowed:true,suspendSerial:0,observedNotificationSequence:20,publicationRevision:20};
+const wakePowerHandlers=new Map();
+const wakePower=evaluate('src/bridge/powerLifecycleState.ts',{'./ipc':{
+ invoke:async()=>clone(wakePowerFact),on(name,listener){wakePowerHandlers.set(name,listener);return()=>wakePowerHandlers.delete(name);},
+}},{window:{},queueMicrotask,AbortController});
+function publishWakePower(patch){
+ wakePowerFact={...wakePowerFact,publicationRevision:wakePowerFact.publicationRevision+1,...patch};
+ wakePowerHandlers.get('power.lifecycleChanged')?.(clone(wakePowerFact));
+}
+const gameCore={detectGameCorePolicy:async()=>{if(beforeTdpSnapshot)await beforeTdpSnapshot();return {detected:true,heterogeneous:true,smtAvailable:true}},applyGameCorePolicy:async(t,m,h,powerScope)=>{writes.push({kind:'smt',pid:t.pid,h,powerScope:clone(powerScope)});return {ok:true,applied:true}}};
 const repository={loadSettings:async()=>{ownerReads.settings++;return clone(settings)},SETTINGS_FILE:'C:\\SOFT\\YeMan\\PowerControl\\yeman-settings.json',getSettingsGeneration:()=>generation,assertSettingsGeneration:g=>{if(g!==generation)throw Error('generation')},
+  validateSettingsRead:async()=>{},
   getSettingsSectionRevision:key=>{const json=JSON.stringify(settings[key]||{});if(json!==sectionJson){sectionJson=json;++sectionRevision}return sectionRevision},
   readSettingsSection:async key=>{ownerReads.settings++;return clone(settings[key]||{})},mergeSettings:(a,b)=>({...a,...b}),
   saveSettingsSection:async(key,value)=>{if(failSave)throw Error('disk full');settings[key]=clone(value)},replaceSettingsSection:async(key,value)=>{settings[key]=clone(value)},
@@ -42,20 +55,129 @@ const yeman={detectPerformanceTemplate:async()=>deviceTemplate,detectPowerMode:a
   getTdpHardwareMinimum:()=>2,getTdpHardwareMaximum:()=>150,getTdpExecutionCapability:async()=>({selected:'fixture'}),
   detectCoreArchitecture:async()=>({heterogeneous:true}),PW:{YEMAN:'test-yeman'},getActiveScheme:async()=> 'test-yeman',setActiveScheme:async()=>{},
   setCoreModeAc:async mode=>writes.push({kind:'core',side:'ac',mode}),setCoreModeDc:async mode=>writes.push({kind:'core',side:'dc',mode}),
-  setTdp:async(s,w,opts={})=>{if(tdpWriteMode==='throw')throw Error('TDP transport unavailable');if(tdpWriteMode!=='none')opts.onAccepted?.(Math.min(acceptedLimit,w));writes.push({kind:'tdp',side:s,w});if(flipOnTdp){side='dc';source.value='dc';flipOnTdp=false}return tdpWriteMode!=='false'},
+  setCoreModeForPowerScope:async(side,mode)=>writes.push({kind:'core',side,mode}),setActiveSchemeForPowerScope:async()=>{},
+  setTdp:async(s,w,opts={})=>{if(tdpWriteMode==='throw')throw Error('TDP transport unavailable');writes.push({kind:'tdp',side:s,w});if(afterTdpDispatch)await afterTdpDispatch();if(tdpWriteMode!=='none')opts.onAccepted?.(Math.min(acceptedLimit,w));if(flipOnTdp){side='dc';source.value='dc';flipOnTdp=false}return tdpWriteMode!=='false'},
   applyManualPowerParams:async p=>{writes.push({kind:'cpu',...clone(p)});return true},applyCpuProfilePowerParams:async()=>{},rebuildYemanScheme:async()=>{},setRtssLimit:async()=>{},readRtssLimit:async()=>120};
 let realFloatBackend=null;
 function freshSchedule(){return evaluate(serviceSource,{
  './controllerPersona':evaluate('src/bridge/controllerPersona.ts'),
  './bootModeGlobalPreferences':evaluate('src/bridge/bootModeGlobalPreferences.ts',{'./inputConfigHash':evaluate('src/bridge/inputConfigHash.ts'),'./settingsBaseline':evaluate('src/bridge/settingsBaseline.ts',{'../../PowerControl/settings-baseline.json':JSON.parse(fs.readFileSync('PowerControl/settings-baseline.json','utf8'))})}),
-  './performanceControls':models,'./powerSource':{powerSourceMode:source},'./gameCorePolicy':{detectGameCorePolicy:async()=>({detected:true,heterogeneous:true,smtAvailable:true}),applyGameCorePolicy:async(t,m,h)=>{writes.push({kind:'smt',pid:t.pid,h});return {ok:true,applied:true}}},
-  './gamePolicyTarget':target,'./api':{powerLifecycle:{get:async()=>({phase:'ready',hardwareWritesAllowed:true})},fs:{exists:async p=>files.has(p),readTextFile:async p=>{ownerReads.files++;return files.get(p)},writeTextFileAtomic:async(p,v)=>{files.set(p,v)},writeTextFile:async(p,v)=>{files.set(p,v)}}},
-  './settingsSnapshot':evaluate('src/bridge/settingsSnapshot.ts',{'vue':require('vue')}),'./frameRateLimits':frames,'./settingsRepository':repository,'./gamedetect':{isGameStatusCurrent:()=>true,detectGame:async()=>game,validateGameTarget:async()=>true,isCurrentGameTarget:t=>!!game&&game.pid===t.pid&&game.processCreated===t.processCreated},'./yeman':yeman,'./cpuProfiles':{loadCpuProfiles:async()=>({profiles:{}})},
+  './performanceControls':models,'./powerSource':{powerSourceMode:source},'./powerLifecycleState':wakePower,'./gameCorePolicy':gameCore,
+  './gamePolicyTarget':target,'./api':{powerLifecycle:{get:async()=>clone(wakePowerFact)},fs:{exists:async p=>files.has(p),readTextFile:async p=>{ownerReads.files++;return files.get(p)},writeTextFileAtomic:async(p,v)=>{files.set(p,v)},writeTextFile:async(p,v)=>{files.set(p,v)}}},
+  './settingsSnapshot':evaluate('src/bridge/settingsSnapshot.ts',{'vue':require('vue')}),'./frameRateLimits':frames,'./settingsRepository':repository,'./gamedetect':{isGameStatusCurrent:()=>gameStatusCurrent,detectGame:async()=>game,validateGameTarget:async()=>true,isCurrentGameTarget:t=>!!game&&game.pid===t.pid&&game.processCreated===t.processCreated},'./yeman':yeman,'./cpuProfiles':{loadCpuProfiles:async()=>({profiles:{}})},
   './autofloat':realFloatBackend??{pauseContinuousFloatForTdpEdit:async()=>{const owner=residentOwner;if(!owner)return null;return {current:()=>residentOwner===owner,accept:(requested,accepted)=>{owner.lastReceipt={requested,accepted}},release(){}}},disableFloat:async()=>{writes.push({kind:'stop'})},enableContinuousFloat:async(bank,s,t,current,applyCore,receipt)=>{residentOwner={current,applyCore};writes.push({kind:'float',side:s,tdp:bank.tdp,target:t,receipt})},setFloatRtssLinked(){},getFloatInfo:()=>({enabled:false}),updateContinuousFloatCoreRules(){},holdContinuousFloatAfterCoreChange(){},cancelPendingRtssSync(){},notifyTdpMaxChanged:async()=>{},applyFloatSettings:async()=>{},enableFloat:async()=>{},setFloatTarget:async()=>{}},
-},{Date:TestDate});}
+},{Date:TestDate,AbortController});}
 const schedule=freshSchedule();
+function gamepadTdpApp(schedule, handleIpc) {
+ const ts=require('typescript'),script=fs.readFileSync('src/App.vue','utf8').match(/<script setup[^>]*>([\s\S]*?)<\/script>/)[1];
+ const tree=ts.createSourceFile('app.ts',script,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
+ const functions=tree.statements.filter(n=>ts.isFunctionDeclaration(n)&&['applyGamepadTdp','onGamepadTdpDelta'].includes(n.name?.text)).map(n=>n.getText(tree)).join('\n');
+ const serial=evaluate('src/gamepad/serial.ts'),module={exports:{}},feedback=[],events=[],refresh={value:0};
+ const invoke=async(name,args,options)=>{feedback.push({name,args});return handleIpc ? handleIpc(name,args,options) : name==='power.lifecycle' ? clone(wakePowerFact) : {ok:true}};
+ vm.runInNewContext(transformSync(functions+'\nmodule.exports={onGamepadTdpDelta,applyGamepadTdp}',{loader:'ts',format:'cjs'}).code,{
+  module,exports:module.exports,...wakePower,AbortController,SkipApplyError:schedule.SkipApplyError,invoke,
+  adjustContinuousPerformanceTdp:schedule.adjustContinuousPerformanceTdp,enqueueGamepadTaskDetached:serial.enqueueGamepadTaskDetached,globalRefreshKey:refresh,
+  window:{dispatchEvent:e=>events.push(e)},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail}},console:{error(...args){if(process.env.YMCC_TDP_TEST_TRACE)console.error(...args)}},
+ });
+ const scope=()=>[wakePowerFact.generation,wakePowerFact.suspendSerial,wakePowerFact.observedNotificationSequence];
+ return {feedback,events,refresh,apply:(delta,id)=>module.exports.applyGamepadTdp(delta,id??'direct',scope()),
+  press:(delta,feedbackId,powerScope=scope())=>module.exports.onGamepadTdpDelta({detail:{delta,feedbackId,powerScope}}),
+  idle:()=>serial.enqueueGamepadTask(async()=>{}),pending:serial.gamepadSerialPending};
+}
+if(process.argv.includes('--gamepad-tdp-power-scope-only')) {
+ const out=process.argv[2];assert(out&&!out.startsWith('--'),'Expected an evidence directory');
+ const results=[];
+ const defer=()=>{let release;const pending=new Promise(resolve=>{release=resolve});return {pending,release}};
+ const within=async promise=>{let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('serial task did not settle')),600)})])}finally{clearTimeout(timer)}};
+ for(const scenario of ['claim-reply','held-snapshot','held-validation-snapshot','native-ingress-before-save','save-settled','silent-native-after-save','held-write','completion-refused','metadata','cache-behind','unbound-event','steps-and-bounds','burst-banks']) {
+  const schedule=freshSchedule();game=null;side='ac';source.value='ac';residentOwner=null;
+  settings.performanceSchedule={controls:models.normalizeContinuousControls({ac:{mode:'manual',tdp:20}}),configured:true,enabled:true};
+  writes.length=0;
+  publishWakePower({phase:'ready',hardwareWritesAllowed:true,notificationPending:false,generation:wakePowerFact.generation+1,suspendSerial:wakePowerFact.suspendSerial+1,observedNotificationSequence:wakePowerFact.observedNotificationSequence+1});
+  const off=wakePower.onSharedPowerLifecycle(()=>{},{observeSuspendSerial:true,observeNotificationSequence:true});
+  await new Promise(setImmediate);
+  const arrived=defer(),reply=defer(),advance=()=>publishWakePower({phase:'suspending',hardwareWritesAllowed:false,suspendSerial:wakePowerFact.suspendSerial+1,observedNotificationSequence:wakePowerFact.observedNotificationSequence+1});
+  const ready=()=>publishWakePower({phase:'ready',hardwareWritesAllowed:true,generation:wakePowerFact.generation+1});
+  const app=gamepadTdpApp(schedule,async(name,{id})=>{
+   if(name==='input.shortcutAction.claim'&&id==='old'&&scenario==='claim-reply'){arrived.release();await reply.pending;}
+   if(name==='input.shortcutAction.complete'&&scenario==='completion-refused')return {ok:false};
+   return name==='power.lifecycle'?clone(wakePowerFact):{ok:true};
+  });
+  try {
+   const before=JSON.stringify(settings), watts=()=>settings.performanceSchedule.controls.ac.tdp;
+   const assertOldQuiet=()=>{assert.equal(app.events.length,0,'old UI success');assert.equal(app.feedback.filter(f=>f.name==='input.shortcutAction.complete').length,0,'old result publication');};
+   if(['claim-reply','held-snapshot','held-validation-snapshot'].includes(scenario)){
+    let reads=0;
+    if(scenario!=='claim-reply')beforeTdpSnapshot=async()=>{if(++reads!==(scenario==='held-snapshot'?1:2))return;arrived.release();await reply.pending};
+    app.press(2,'old');await within(arrived.pending);advance();ready();app.press(1,'new');await within(app.idle());
+    assert.equal(watts(),21,'only the new press saves');assert.equal(writes.filter(w=>w.kind==='tdp').length,1);
+    assert.equal(app.events.length,1);assert.equal(app.feedback.some(f=>f.args.id==='old'&&f.name==='input.shortcutAction.complete'),false);
+    reply.release();await new Promise(setImmediate);assert.equal(watts(),21);
+   } else if(scenario==='native-ingress-before-save'){
+    beforeTdpSnapshot=async()=>{beforeTdpSnapshot=null;wakePowerFact={...wakePowerFact,notificationPending:true,observedNotificationSequence:wakePowerFact.observedNotificationSequence+1};};
+    app.press(2,'old');await within(app.idle());assert.equal(JSON.stringify(settings),before);assert.equal(writes.length,0);assertOldQuiet();
+   } else if (scenario==='save-settled'||scenario==='silent-native-after-save'){
+    afterSettingsCommit=()=>{if(scenario==='save-settled')advance();else wakePowerFact={...wakePowerFact,notificationPending:true,observedNotificationSequence:wakePowerFact.observedNotificationSequence+1}};
+    app.press(2,'old');await within(app.idle());assert.equal(watts(),22);assert.equal(writes.length,0,'completed save did not authorize a hardware write');assertOldQuiet();
+   } else if(scenario==='held-write'){
+    afterTdpDispatch=async()=>{arrived.release();await reply.pending};app.press(2,'old');await within(arrived.pending);advance();ready();
+    let finished=false;const end=app.idle().then(()=>{finished=true});await new Promise(setImmediate);assert.equal(finished,false,'dispatched write still owns its receipt');
+    reply.release();await within(end);assert.equal(watts(),22);assert.equal(writes.filter(w=>w.kind==='tdp').length,1);assert.equal(writes.filter(w=>w.kind==='cpu').length,0);assertOldQuiet();
+   } else if(scenario==='cache-behind'){
+    wakePowerFact={...wakePowerFact,generation:wakePowerFact.generation+1,suspendSerial:wakePowerFact.suspendSerial+1,observedNotificationSequence:wakePowerFact.observedNotificationSequence+1,publicationRevision:wakePowerFact.publicationRevision+1};
+    app.press(1,'current');await within(app.idle());assert.equal(watts(),21);assert.equal(app.events.length,1);
+   } else if(scenario==='completion-refused'){
+    app.press(2,'old');await within(app.idle());assert.equal(watts(),22);assert.equal(writes.filter(w=>w.kind==='tdp').length,1);
+    assert.equal(app.feedback.filter(f=>f.name==='input.shortcutAction.complete').length,1);assert.equal(app.events.length,0);assert.equal(app.refresh.value,0);
+   } else if(scenario==='unbound-event'){
+    app.press(2,'unbound',null);await within(app.idle());assert.equal(JSON.stringify(settings),before);assert.equal(writes.length,0);assert.equal(app.feedback.length,0);
+   } else if(scenario==='burst-banks'){
+    await verifyGamepadTdpRepeat(schedule);
+   } else if(scenario==='steps-and-bounds'){
+    await verifyGamepadTdpSteps(schedule);
+   } else {
+    beforeTdpSnapshot=async()=>{beforeTdpSnapshot=null;publishWakePower({})};app.press(1,'current');await within(app.idle());assert.equal(watts(),21);assert.equal(app.events.length,1);
+   }
+   results.push({scenario,pass:true});
+  } catch(error) {results.push({scenario,pass:false,error:String(error.stack??error)});}
+  finally {beforeTdpSnapshot=afterSettingsCommit=afterTdpDispatch=null;reply.release();await within(app.idle());off();}
+ }
+ const pass=results.every(r=>r.pass);fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({pass,results},null,2));
+ for(const r of results)console.log(`${r.pass?'PASS':'FAIL'} ${r.scenario}${r.pass?'':' '+r.error.split('\n')[0]}`);
+ process.exit(pass?0:1);
+}
+const fpsCommitCase='FPS保存回执跨电源范围时保留设置，但旧操作不另派硬件应用';
+async function verifyFpsCommitScope(schedule){
+ game=null;side='ac';source.value='ac';
+ const snapshot=await schedule.getContinuousPerformanceSnapshot('global');
+ const before=writes.filter(w=>w.kind==='fps').length;
+ let allowed=true;
+ afterSettingsCommit=()=>{allowed=false};
+ try{
+  const saved=await schedule.updateContinuousPerformanceControls(snapshot.identity,{frameRate:{fps:45,ceiling:60,lastFps:45}},()=>allowed);
+  assert.equal(saved.frameRates.ac.fps,45);
+  assert.equal(settings.rtss.frameRates.ac.fps,45);
+  assert.equal(writes.filter(w=>w.kind==='fps').length,before);
+  assert.equal(saved.frameRateApplied,false);
+ }finally{afterSettingsCommit=null}
+ const fresh=await schedule.getContinuousPerformanceSnapshot('global');
+ const applied=await schedule.updateContinuousPerformanceControls(fresh.identity,{frameRate:{fps:60,ceiling:60,lastFps:60}},()=>true);
+ assert.equal(applied.frameRateApplied,true);
+ assert.equal(writes.filter(w=>w.kind==='fps').length,before+1);
+}
+if(process.argv.includes('--fps-commit-scope-only')) {
+ const out=process.argv[2];assert(out&&!out.startsWith('--')&&process.argv.length===4,'Expected one evidence directory and --fps-commit-scope-only');
+ await verifyFpsCommitScope(freshSchedule());
+ const result={pass:true,count:1,cases:[fpsCommitCase]};
+ fs.writeFileSync(path.join(out,'state-tests.json'),JSON.stringify(result,null,2),{flag:'wx'});
+ console.log(JSON.stringify(result));
+ process.exit(0);
+}
 if(process.argv.includes('--wake-admission-only')) {
  const out=process.argv[2];assert(out&&!out.startsWith('--'),'Explicit wake admission evidence directory required');
+ const off=wakePower.onSharedPowerLifecycle(()=>{});
+ const flush=()=>new Promise(resolve=>setImmediate(resolve));
+ await flush();assert(wakePower.isSharedPowerLifecycleAdmitted(wakePower.getSharedPowerLifecycle()));
  settings.input={};
  settings.performanceSchedule={configured:true,enabled:true,controls:{ac:models.defaultContinuousBank('ac'),dc:models.defaultContinuousBank('dc')}};
  const defer=()=>{let resolve;const promise=new Promise(done=>{resolve=done});return{promise,resolve};};
@@ -73,14 +195,92 @@ if(process.argv.includes('--wake-admission-only')) {
  writes.length=0;
  const tdpEntered=defer(),tdpRelease=defer(),setTdp=yeman.setTdp;
  yeman.setTdp=async(...args)=>{const result=await setTdp(...args);tdpEntered.resolve();await tdpRelease.promise;return result;};
- const partial=schedule.restorePerformanceScheduleAfterWake('ac',false,()=>admitted);
- await tdpEntered.promise;admitted=false;tdpRelease.resolve();
- assert.equal(await partial,'unconfirmed');
+ let partialResult;
+ const partial=schedule.restorePerformanceScheduleAfterWake('ac',false,()=>admitted).then(result=>{partialResult=result;});
+ try {
+  await tdpEntered.promise;
+  publishWakePower({observedNotificationSequence:wakePowerFact.observedNotificationSequence+1});
+  await flush();
+  assert.equal(partialResult,undefined,'revocation cannot release an issued TDP write before its receipt');
+  assert.equal(schedule.isPerformanceScheduleBusy(),true);
+  assert.equal(writes.filter(row=>row.kind==='tdp').length,1);
+  assert.equal(writes.filter(row=>row.kind==='cpu').length,0);
+ } finally { tdpRelease.resolve();await partial;yeman.setTdp=setTdp; }
+ assert.equal(partialResult,'unconfirmed');
  assert.equal(writes.filter(row=>row.kind==='tdp').length,1);
  assert.equal(writes.filter(row=>row.kind==='cpu').length,0);
  assert.equal(schedule.isPerformanceScheduleBusy(),false);
+ writes.length=0;
+ admitted=true;
+ game={pid:79,processCreated:'134400010000000079',name:'wakegame',path:'C:\\Games\\wakegame.exe',source:'whitelist'};
+ gameStatusCurrent=false;
+ const waiting=await schedule.restorePerformanceScheduleAfterWake('ac',false,()=>admitted);
+ assert.deepEqual(writes,[],'unconfirmed game identity admits zero performance actions');
+ assert.equal(waiting,'retry-on-game-ready');
+ assert.equal(schedule.isPerformanceScheduleBusy(),false);
+ gameStatusCurrent=true;
+ assert.equal(await schedule.restorePerformanceScheduleAfterWake('ac',false,()=>admitted),'settled');
+ assert.equal(writes.filter(row=>row.kind==='tdp').length,1);
+ writes.length=0;
+ const coreEntered=defer(),coreRelease=defer(),readCore=gameCore.detectGameCorePolicy;
+ let reads=0,firstResult,nextResult,oldSignal;
+ gameCore.detectGameCorePolicy=async signal=>{if(++reads===1){oldSignal=signal;coreEntered.resolve();await coreRelease.promise;}return readCore();};
+ const old=schedule.restorePerformanceScheduleAfterWake('ac',false,()=>admitted).then(value=>{firstResult=value;});
+ let next;
+ try{
+  await coreEntered.promise;publishWakePower({});await flush();
+  assert.equal(firstResult,undefined,'publication-only Ready must leave the original read current');
+  publishWakePower({observedNotificationSequence:wakePowerFact.observedNotificationSequence+1});await flush();
+  assert.equal(firstResult,'retry-on-ready','retired core read must return the original queue slot before its reply');
+  assert.equal(oldSignal?.aborted,true);
+  assert.deepEqual(writes,[]);
+  next=schedule.restorePerformanceScheduleAfterWake('ac',false,()=>admitted).then(value=>{nextResult=value;});
+  await flush();assert.equal(nextResult,'settled');assert.equal(reads,2);assert.equal(writes.filter(row=>row.kind==='tdp').length,1);
+  coreRelease.resolve();await old;await next;assert.equal(writes.filter(row=>row.kind==='tdp').length,1);
+ }finally{coreRelease.resolve();await old;await next;gameCore.detectGameCorePolicy=readCore;}
+ game=null;
+ settings.performanceSchedule={configured:true,enabled:true,controls:{ac:models.defaultContinuousBank('ac'),dc:models.defaultContinuousBank('dc')}};
+ assert.equal(await schedule.restorePerformanceScheduleAfterWake('ac',false,()=>admitted),'settled');
+ const setCoreAc=yeman.setCoreModeAc,setScopedCore=yeman.setCoreModeForPowerScope;
+ const activate=yeman.setActiveScheme,activateScoped=yeman.setActiveSchemeForPowerScope;
+ const coreWrites=[],activations=[];
+ let flip=true;
+ const recordCore=async(side,mode,scope)=>{
+  coreWrites.push({side,mode,scope:scope&&Array.from(scope)});
+  if(flip){
+   flip=false;
+   publishWakePower({generation:5,suspendSerial:1,observedNotificationSequence:wakePowerFact.observedNotificationSequence+1});
+   await flush();
+  }
+ };
+ yeman.setCoreModeAc=mode=>recordCore('ac',mode);
+ yeman.setCoreModeForPowerScope=recordCore;
+ yeman.setActiveScheme=async()=>{activations.push(null);};
+ yeman.setActiveSchemeForPowerScope=async(_guid,scope)=>{activations.push(Array.from(scope));};
+ try {
+  const before=Array.from(wakePower.sharedPowerWriteScope(wakePower.getSharedPowerLifecycle()));
+  const editCore=async mode=>{
+   const snapshot=await schedule.getContinuousPerformanceSnapshot('global');
+   await schedule.updateContinuousPerformanceControls(snapshot.identity,{auto:{coreLow:mode,coreHigh:mode}});
+  };
+  await editCore('littleOnly');
+  assert.equal(coreWrites.length,1,'the old rule must reach the first write');
+  assert.deepEqual(activations,[],'an older Ready must not activate the scheme after the core write returns');
+  assert.deepEqual(coreWrites[0].scope,before);
+  await editCore('bigOnly');
+  assert.equal(coreWrites.length,1,'an old owner must not take the new suspend serial');
+  assert.equal(await schedule.restorePerformanceScheduleAfterWake('ac',false,()=>admitted),'settled');
+  coreWrites.length=activations.length=0;
+  await editCore('littleOnly');
+  const current=Array.from(wakePower.sharedPowerWriteScope(wakePower.getSharedPowerLifecycle()));
+  assert.deepEqual(coreWrites.map(write=>write.scope),[current]);
+  assert.deepEqual(activations,[current]);
+ } finally {
+  admitted=false;off();yeman.setCoreModeAc=setCoreAc;yeman.setCoreModeForPowerScope=setScopedCore;
+  yeman.setActiveScheme=activate;yeman.setActiveSchemeForPowerScope=activateScoped;
+ }
  fs.mkdirSync(out,{recursive:true});
- const rows=['revoked before actions; current wake can reapply once','revoked after TDP dispatch; later CPU phase stopped and original TDP not replayed'];
+ const rows=['revoked before actions; current wake can reapply once','revoked after TDP dispatch; later CPU phase stopped and original TDP not replayed','unconfirmed non-Steam identity returns a zero-action retry and the confirmed target can resume','same-generation Ready retires a held pre-dispatch core read while publication-only Ready preserves it','resident core update cannot activate on a newer sleep boundary; a rebuilt owner completes once'];
  fs.writeFileSync(path.join(out,'wake-admission.json'),JSON.stringify({pass:true,rows},null,2),{flag:'wx'});
  console.log(JSON.stringify({pass:true,rows}));process.exit(0);
 }
@@ -126,7 +326,17 @@ if (process.argv.includes('--slider-only')) {
 }
 await check('旧revision与PID复用/切游戏/切电源提交均拒绝',async()=>{let s=await schedule.getContinuousPerformanceSnapshot();await schedule.updateContinuousPerformanceControls(s.identity,{tdp:27});await assert.rejects(schedule.updateContinuousPerformanceControls(s.identity,{tdp:26}));s=await schedule.getContinuousPerformanceSnapshot();side='dc';source.value='dc';await assert.rejects(schedule.updateContinuousPerformanceControls(s.identity,{tdp:26}));side='ac';source.value='ac';s=await schedule.getContinuousPerformanceSnapshot();game={pid:9,processCreated:'1009',name:'a.exe',path:'C:/Games/a.exe'};await assert.rejects(schedule.updateContinuousPerformanceControls(s.identity,{tdp:26}))});
 await check('专属从全局复制一次，后续两套TDP和CPU参数独立保存',async()=>{const global=await schedule.loadPerformanceSchedule();const controls=schedule.continuousControlsFromSchedule(global);const profile=global.profiles.ac.performance;await schedule.saveGameCustomConfig({version:1,entries:{'a.exe':{enabled:false,displayName:'A',ac:profile,dc:profile,controls,padPersona:'dualsense-edge',gyroOverride:'racing'}},rtss:{}});let dedicated=await schedule.getContinuousPerformanceSnapshot('dedicated');await schedule.updateContinuousPerformanceControls(dedicated.identity,{tdp:18,auto:{bias:75}});const shared=await schedule.getContinuousPerformanceSnapshot('global');await schedule.updateContinuousPerformanceControls(shared.identity,{tdp:32});dedicated=await schedule.getContinuousPerformanceSnapshot('dedicated');assert.equal(dedicated.bank.tdp,18);assert.equal(dedicated.bank.auto.bias,75);const entry=(await schedule.loadGameCustomConfig()).entries['a.exe'];assert.equal(entry.padPersona,'dualsense-edge');assert.equal(entry.gyroOverride,'racing')});
-await check('仅帧率/SMT不启用未配置性能，不改TDP；公用SMT保存后只作用识别EXE',async()=>{settings.performanceSchedule={configured:false,enabled:false};let s=await schedule.getContinuousPerformanceSnapshot('global');const before=writes.length;await schedule.updateContinuousPerformanceControls(s.identity,{frameRate:{fps:30,ceiling:45,lastFps:30}});assert.equal(settings.performanceSchedule.configured,false);assert.equal(writes.slice(before).filter(w=>w.kind==='tdp'||w.kind==='cpu').length,0);s=await schedule.getContinuousPerformanceSnapshot('global');await schedule.updateContinuousPerformanceControls(s.identity,{hyperThreadMode:'off'});assert.equal(settings.performanceSchedule.configured,false);const entry=(await schedule.loadGameCustomConfig()).entries['a.exe'];assert.equal(entry.enabled,false);assert.equal(entry.smtIndependent,false);assert.equal(settings.performanceSchedule.hyperThreadPolicy,'off');assert.equal(writes.filter(w=>w.kind==='smt').at(-1).pid,9)});
+await check('仅帧率/SMT不启用未配置性能，不改TDP；公用SMT保存后只作用识别EXE',async()=>{
+ const off=wakePower.onSharedPowerLifecycle(()=>{});await new Promise(resolve=>setImmediate(resolve));
+ try{
+  settings.performanceSchedule={configured:false,enabled:false};let s=await schedule.getContinuousPerformanceSnapshot('global');const before=writes.length;
+  await schedule.updateContinuousPerformanceControls(s.identity,{frameRate:{fps:30,ceiling:45,lastFps:30}});assert.equal(settings.performanceSchedule.configured,false);
+  assert.equal(writes.slice(before).filter(w=>w.kind==='tdp'||w.kind==='cpu').length,0);s=await schedule.getContinuousPerformanceSnapshot('global');
+  await schedule.updateContinuousPerformanceControls(s.identity,{hyperThreadMode:'off'});assert.equal(settings.performanceSchedule.configured,false);
+  const entry=(await schedule.loadGameCustomConfig()).entries['a.exe'];assert.equal(entry.enabled,false);assert.equal(entry.smtIndependent,false);
+  assert.equal(settings.performanceSchedule.hyperThreadPolicy,'off');assert.deepEqual(writes.filter(w=>w.kind==='smt').at(-1),{kind:'smt',pid:9,h:'off',powerScope:[4,0,20]});
+ }finally{off();}
+});
 await check('FPS/TDP同一事务保存；保存失败不先写硬件或部分提交',async()=>{let s=await schedule.getContinuousPerformanceSnapshot('global');const next=await schedule.updateContinuousPerformanceControls(s.identity,{tdp:24,frameRate:{fps:45,ceiling:60,lastFps:45}});assert.equal(next.bank.tdp,24);assert.equal(next.frameRates.ac.fps,45);const before=JSON.stringify(settings),count=writes.length;failSave=true;await assert.rejects(schedule.updateContinuousPerformanceControls(next.identity,{tdp:22,frameRate:{fps:60,ceiling:60,lastFps:60}}));failSave=false;assert.equal(JSON.stringify(settings),before);assert.equal(writes.length,count)});
 await check('未改动的DC、RTSS扩展字段和其他模块保留',async()=>{assert.equal(settings.other.keep,42);assert.equal(settings.rtss.future,'KEEP');assert.equal(settings.rtss.frameRates.dc.fps,60);assert.equal(settings.performanceSchedule.controls.dc.tdp,30)});
 await check('硬件写TDP期间切电源，不能继续CPU写入旧侧',async()=>{const s=await schedule.getContinuousPerformanceSnapshot('global'),before=writes.length;flipOnTdp=true;await assert.rejects(schedule.updateContinuousPerformanceControls(s.identity,{tdp:26}));assert.equal(writes.slice(before).filter(w=>w.kind==='cpu').length,0);side='ac';source.value='ac'});
@@ -177,8 +387,12 @@ await check('OEM实际接受较小瓦数时，浮动从已接受基准开始而�
  assert.equal(float.tdp,20);assert.deepEqual(clone(float.receipt),{requested:30,accepted:20});acceptedLimit=150;
 });
 await check('延迟核心刷新只改核心，不重启浮动或重放TDP和CPU',async()=>{
- const before=writes.length;assert.equal(await schedule.refreshPerformanceScheduleCoreMode(),true);
- assert.deepEqual(writes.slice(before).map(w=>w.kind),['core']);
+ const off=wakePower.onSharedPowerLifecycle(()=>{});
+ try{
+  await new Promise(resolve=>setImmediate(resolve));const scope=wakePower.sharedPowerWriteScope(wakePower.getSharedPowerLifecycle());assert(scope);
+  const before=writes.length;assert.equal(await schedule.refreshPerformanceScheduleCoreMode(scope),true);
+  assert.deepEqual(writes.slice(before).map(w=>w.kind),['core']);
+ }finally{off()}
 });
 await check('只按电池识别两套新模板，已保存参数不被台式机模板覆盖',async()=>{
  const saved=clone(settings.performanceSchedule);settings.performanceSchedule={configured:false,enabled:false};deviceTemplate='portable';
@@ -240,29 +454,22 @@ await check('专属字段事务只接收输入/启用字段，过期PID/设置�
  await schedule.patchGameCustomProfile(target,{padPersona:'elite'});await schedule.patchGameCustomProfile(target,{enabled:true},undefined,{expectedEnabled:false});let latest=await schedule.loadGameCustomConfig();assert.equal(latest.entries['a.exe'].padPersona,'elite');assert.deepEqual(clone(latest.entries['a.exe'].controls),controls);
  await schedule.patchGameCustomProfile(target,{enabled:false},undefined,{expectedEnabled:true});const global=await schedule.getContinuousPerformanceSnapshot('global');clockMs+=3100;const result=await schedule.adjustContinuousPerformanceTdp(-1);assert.equal(result.tdp,global.bank.tdp-1);latest=await schedule.loadGameCustomConfig();assert.deepEqual(clone(latest.entries['a.exe'].controls),controls);assert.equal(latest.entries['a.exe'].enabled,false);game=null;
 });
-await check('自定义手柄TDP的真实App入口保留5W/10W步长，自动手动均遵守硬件与滑块边界，非法步长拒绝',async()=>{
- const {createSourceFile,ScriptTarget,ScriptKind,isFunctionDeclaration}=require('typescript');
- const script=fs.readFileSync('src/App.vue','utf8').match(/<script setup[^>]*>([\s\S]*?)<\/script>/)[1],tree=createSourceFile('app.ts',script,ScriptTarget.Latest,true,ScriptKind.TS);
- const fn=tree.statements.find(n=>isFunctionDeclaration(n)&&n.name?.text==='applyGamepadTdp').getText(tree),module={exports:{}},feedback=[],events=[],refresh={value:0};
- vm.runInNewContext(transformSync(fn+'\nmodule.exports={applyGamepadTdp}',{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,adjustContinuousPerformanceTdp:schedule.adjustContinuousPerformanceTdp,globalRefreshKey:refresh,invoke:async(name,args)=>{feedback.push({name,args});return {ok:true}},window:{dispatchEvent:e=>events.push(e)},CustomEvent:class {constructor(type,options){this.type=type;this.detail=options?.detail}},console:{error(){}}});
+async function verifyGamepadTdpSteps(schedule){
+ const {apply,feedback,events,refresh}=gamepadTdpApp(schedule);
  game=null;side='ac';source.value='ac';
  for(const mode of ['auto','manual']){
   const snapshot=await schedule.getContinuousPerformanceSnapshot('global');await schedule.updateContinuousPerformanceControls(snapshot.identity,{mode,tdp:20,tdpCeiling:30});const dcBefore=JSON.stringify(settings.performanceSchedule.controls.dc);
-  clockMs+=3100;await module.exports.applyGamepadTdp(5,'plus-five');assert.equal(settings.performanceSchedule.controls.ac.tdp,25);if(fn.includes('input.shortcutAction.complete'))assert.equal(feedback.at(-1).args.outcome.value.number,25);
-  clockMs+=3100;await module.exports.applyGamepadTdp(-10,'minus-ten');assert.equal(settings.performanceSchedule.controls.ac.tdp,15);
-  clockMs+=3100;await module.exports.applyGamepadTdp(20);assert.equal(settings.performanceSchedule.controls.ac.tdp,30);
-  clockMs+=3100;await module.exports.applyGamepadTdp(-20);assert.equal(settings.performanceSchedule.controls.ac.tdp,10);assert.equal(JSON.stringify(settings.performanceSchedule.controls.dc),dcBefore);
+  clockMs+=3100;await apply(5,'plus-five');assert.equal(settings.performanceSchedule.controls.ac.tdp,25);assert.equal(feedback.at(-1).args.outcome.value.number,25);
+  clockMs+=3100;await apply(-10,'minus-ten');assert.equal(settings.performanceSchedule.controls.ac.tdp,15);
+  clockMs+=3100;await apply(20);assert.equal(settings.performanceSchedule.controls.ac.tdp,30);
+  clockMs+=3100;await apply(-20);assert.equal(settings.performanceSchedule.controls.ac.tdp,10);assert.equal(JSON.stringify(settings.performanceSchedule.controls.dc),dcBefore);
  }
  assert.equal(refresh.value,8);assert.equal(events.length,8);for(const delta of [0,NaN,Infinity,-Infinity,.5,21,-21])await assert.rejects(schedule.adjustContinuousPerformanceTdp(delta));
-});
+}
+await check('自定义手柄TDP的真实App入口保留5W/10W步长，自动手动均遵守硬件与滑块边界，非法步长拒绝',()=>verifyGamepadTdpSteps(schedule));
 
-await check('手柄连续调节移除旧调档冷却，40/150ms连发在自动手动/ACDC/全局专属均保存同一滑块值',async()=>{
- const {createSourceFile,ScriptTarget,ScriptKind,isFunctionDeclaration}=require('typescript');
- const script=fs.readFileSync('src/App.vue','utf8').match(/<script setup[^>]*>([\s\S]*?)<\/script>/)[1],tree=createSourceFile('app.ts',script,ScriptTarget.Latest,true,ScriptKind.TS);
- const functions=tree.statements.filter(n=>isFunctionDeclaration(n)&&['applyGamepadTdp','onGamepadTdpDelta'].includes(n.name?.text)).map(n=>n.getText(tree)).join('\n');
- const serial=evaluate('src/gamepad/serial.ts',{}),module={exports:{}},feedback=[],events=[],refresh={value:0};
- vm.runInNewContext(transformSync(functions+'\nmodule.exports={onGamepadTdpDelta}',{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,adjustContinuousPerformanceTdp:schedule.adjustContinuousPerformanceTdp,enqueueGamepadTaskDetached:serial.enqueueGamepadTaskDetached,globalRefreshKey:refresh,invoke:async(name,args)=>{feedback.push({name,args});return {ok:true}},window:{dispatchEvent:e=>events.push(e)},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail}},console:{error(){}}});
- const idle=()=>serial.enqueueGamepadTask(async()=>{});
+async function verifyGamepadTdpRepeat(schedule){
+ const {press,idle,pending,feedback,events,refresh}=gamepadTdpApp(schedule);
  for(const owner of ['global','dedicated'])for(const powerSide of ['ac','dc'])for(const mode of ['auto','manual']){
   side=powerSide;source.value=powerSide;game=owner==='dedicated'?{pid:29,processCreated:'tdp-repeat-29',name:'repeat.exe',path:'C:/Games/repeat.exe'}:null;
   if(game){const config=await schedule.loadGameCustomConfig();const global=await schedule.loadPerformanceSchedule();config.entries['repeat.exe']={enabled:true,displayName:'repeat',controls:models.normalizeContinuousControls(undefined),ac:clone(global.profiles.ac.eco),dc:clone(global.profiles.dc.eco),padPersona:'elite',gyroOverride:'racing',future:{keep:true}};await schedule.saveGameCustomConfig(config);}
@@ -270,17 +477,18 @@ await check('手柄连续调节移除旧调档冷却，40/150ms连发在自动�
   const other=powerSide==='ac'?'dc':'ac',before=await schedule.getContinuousPerformanceSnapshot('effective'),untouched=JSON.stringify(before.controls[other]),framesBefore=JSON.stringify(before.frameRates),globalBefore=game?JSON.stringify((await schedule.getContinuousPerformanceSnapshot('global')).controls):'';
   const expected=[21,22,23,24,25,24,29,19];const deltas=[1,1,1,1,1,-1,5,-10];
   for(let i=0;i<deltas.length;i++){
-   clockMs+=i<3?150:40;module.exports.onGamepadTdpDelta({detail:{delta:deltas[i],feedbackId:owner+'-'+powerSide+'-'+mode+'-'+i}});await idle();
+   clockMs+=i<3?150:40;press(deltas[i],owner+'-'+powerSide+'-'+mode+'-'+i);await idle();
    snapshot=await schedule.getContinuousPerformanceSnapshot('effective');assert.equal(snapshot.bank.tdp,expected[i],owner+'/'+powerSide+'/'+mode+' repeat '+i);assert.equal(snapshot.bank.mode,mode);assert.equal(JSON.stringify(snapshot.controls[other]),untouched);assert.equal(JSON.stringify(snapshot.frameRates),framesBefore);assert.equal(feedback.at(-1).args.outcome.value.number,expected[i]);
   }
   // Multiple already-admitted repeat events still run through the existing serial lane.
-  for(let i=0;i<4;i++)module.exports.onGamepadTdpDelta({detail:{delta:1,feedbackId:'burst-'+owner+powerSide+mode+i}});await idle();snapshot=await schedule.getContinuousPerformanceSnapshot('effective');assert.equal(snapshot.bank.tdp,23);
+  for(let i=0;i<4;i++)press(1,'burst-'+owner+powerSide+mode+i);await idle();snapshot=await schedule.getContinuousPerformanceSnapshot('effective');assert.equal(snapshot.bank.tdp,23);
   const reopened=game?(await schedule.loadGameCustomConfig()).entries['repeat.exe'].controls[powerSide]:(await schedule.loadPerformanceSchedule()).controls[powerSide];assert.equal(reopened.tdp,23);assert.equal(reopened.mode,mode);
   const persisted=game?JSON.parse(files.get(sourcePath)).entries['repeat.exe'].controls[powerSide]:settings.performanceSchedule.controls[powerSide];assert.equal(persisted.tdp,23);assert.equal(persisted.mode,mode);
   if(game){const entry=(await schedule.loadGameCustomConfig()).entries['repeat.exe'];assert.equal(entry.padPersona,'elite');assert.equal(entry.gyroOverride,'racing');assert.equal(entry.future.keep,true);assert.equal(JSON.stringify((await schedule.getContinuousPerformanceSnapshot('global')).controls),globalBefore);}
  }
- assert.equal(refresh.value,96);assert.equal(events.length,96);assert.equal(serial.gamepadSerialPending(),0);game=null;side='ac';source.value='ac';
-});
+ assert.equal(refresh.value,96);assert.equal(events.length,96);assert.equal(pending(),0);game=null;side='ac';source.value='ac';
+}
+await check('手柄连续调节移除旧调档冷却，40/150ms连发在自动手动/ACDC/全局专属均保存同一滑块值',()=>verifyGamepadTdpRepeat(schedule));
 await check('连续TDP保持上下限和持久化失败保护，不因连发溢出或回退到另一供电侧',async()=>{
  game=null;side='ac';source.value='ac';let snapshot=await schedule.getContinuousPerformanceSnapshot('global');await schedule.updateContinuousPerformanceControls(snapshot.identity,{mode:'manual',tdp:29,tdpCeiling:30});const dcBefore=JSON.stringify((await schedule.getContinuousPerformanceSnapshot('global')).controls.dc);
  clockMs+=40;assert.equal((await schedule.adjustContinuousPerformanceTdp(5)).tdp,30);clockMs+=40;assert.equal((await schedule.adjustContinuousPerformanceTdp(1)).blocked,'boundary');clockMs+=40;assert.equal((await schedule.adjustContinuousPerformanceTdp(-20)).tdp,10);clockMs+=40;assert.equal((await schedule.adjustContinuousPerformanceTdp(-20)).tdp,2);clockMs+=40;assert.equal((await schedule.adjustContinuousPerformanceTdp(-1)).blocked,'boundary');assert.equal(JSON.stringify(settings.performanceSchedule.controls.dc),dcBefore);
@@ -356,6 +564,8 @@ await check('TDP字段提交后快捷操作撤销，旧增量不能绕过新admi
  assert.equal(writes.filter(w=>w.kind==='tdp').length,before);assert.equal(settings.performanceSchedule.controls.ac.tdp,31);
  const current=await schedule.getContinuousPerformanceSnapshot('effective');const recovered=await schedule.updateContinuousPerformanceControls(current.identity,{tdp:32},()=>true);assert.equal(recovered.tdpWriteReceipt.accepted,32);
 });
+
+await check(fpsCommitCase,()=>verifyFpsCommitScope(schedule));
 
 const output=process.argv[2]||path.resolve('../../../Build/Tasks/ContinuousPerformance-20261017');fs.mkdirSync(output,{recursive:true});fs.writeFileSync(path.join(output,'state-tests.json'),JSON.stringify({pass:true,count:cases.length,cases},null,2));
 console.log(JSON.stringify({pass:true,count:cases.length,cases},null,2));

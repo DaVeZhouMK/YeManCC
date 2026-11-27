@@ -1,6 +1,8 @@
-import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';
+import {REPO,readCloseToolProfile,resolveCloseToolProfile} from './adapter.mjs';
 import {verifyReport,verifyExecution,verifyOriginalIdentityAssertion,mutateSource,summarizeActualCoverage} from './contract.mjs';
 const spec=JSON.parse(fs.readFileSync(new URL('./spec.json',import.meta.url),'utf8'));
+const pathIdentity=file=>path.win32.normalize(file).toLowerCase();
 const positive=()=>({ok:true,checks:44,hardwareCalls:0,cpuBenchmark:false,scope:spec.originalScope,results:spec.expectedRows.map(({model,name})=>({model,name,ok:true,calls:['memory'],evidence:name.includes('ordinary read timeout')?{successfulReadOnlyCleanup:true,closeCalls:1,shutdownCalls:1}:{settledWithoutDelay:true,closeCalls:1,stateReads:name.startsWith('close-denied ')?0:1,manualWrites:1,maxLive:1}}))});
 function negative(){const row=positive();row.ok=false;for(const failure of spec.fault.expectedFailures)row.results[failure.index]={name:failure.name,model:failure.model,ok:false,error:failure.error,calls:['close','state']};return row;}
 const raw=()=>({exitCode:0,error:null,signal:null,stdout:JSON.stringify(positive()),boundary:{kind:'fan-global-runtime-boundary',exitCode:0,status:'PASS',explicitExitCalled:false,denied:[],boundaries:Object.fromEntries(['realNetwork','realChildProcess','nativeLibraryLoad','writesOutsideEvidence','realHostMain','hardwareAccess','operatingSystemSleep'].map(name=>[name,false]))},observation:{beforeExitObserved:true,exitCode:0,nodeWindowAbsentAtStart:true,nodeChromeAbsentAtStart:true,nodeWindowAbsentAtEnd:true,nodeChromeAbsentAtEnd:true,activeResources:['PipeWrap']}});
@@ -22,4 +24,42 @@ test('aggregate compiler input count requires both verified worker arms',async()
    assert.throws(()=>verifiedCompilerInputCount({...worker,[arm]:rejected},spec),code);
   }
  }
+});
+test('Close substitutes just its exact PowerShell row without changing the shared profile',()=>{
+ const file=new URL('../../../../'+spec.sharedToolProfile,import.meta.url);
+ const bytes=fs.readFileSync(file),base=JSON.parse(bytes),preimage=structuredClone(base);
+ const {previous,replacement}=spec.closePowerShell;
+ const index=base.files.findIndex(row=>pathIdentity(row.path)===pathIdentity(previous.path));
+ assert(index>=0);
+ const expected=structuredClone(base);
+ expected.powershellExecutable=replacement.path;
+ expected.files[index]={...expected.files[index],...replacement};
+ assert.deepEqual(resolveCloseToolProfile(base,spec.closePowerShell),expected);
+ assert.deepEqual(readCloseToolProfile(REPO,spec),expected);
+ assert.deepEqual(base,preimage);
+ assert.deepEqual(fs.readFileSync(file),bytes);
+});
+test('Close refuses drift or ambiguity in the shared PowerShell preimage',()=>{
+ const base=JSON.parse(fs.readFileSync(new URL('../../../../'+spec.sharedToolProfile,import.meta.url)));
+ const {previous,replacement}=spec.closePowerShell;
+ const previousRow=profile=>profile.files.find(row=>pathIdentity(row.path)===pathIdentity(previous.path));
+ for(const perturb of [
+  p=>{p.powershellExecutable=replacement.path;},
+  p=>{previousRow(p).sha256='0'.repeat(64);},
+  p=>{previousRow(p).path=replacement.path;},
+  p=>p.files.push(previous),
+  p=>p.files.push(replacement),
+ ]){
+  const altered=structuredClone(base);perturb(altered);
+  assert.throws(()=>resolveCloseToolProfile(altered,spec.closePowerShell),/FAN_CLOSE_(SHARED_POWERSHELL|POWERSHELL_FILE)_PREIMAGE/);
+ }
+});
+test('source review authorizes only exact and complete frozen inputs',async()=>{
+ const {verifyReviewedSnapshot}=await import('./run.mjs');
+ const paths=['fanHost.ts','guard.mjs'];
+ const pins=paths.map((path,i)=>({path,sha256:String(i).repeat(64)}));
+ assert.doesNotThrow(()=>verifyReviewedSnapshot(pins,paths,[...pins,{path:'runner.mjs',sha256:'a'.repeat(64)}]));
+ for(const changed of [[pins[0]], [pins[0],pins[0]], [pins[0],{...pins[1],path:'other.mjs'}]])
+  assert.throws(()=>verifyReviewedSnapshot(changed,paths,pins),/FAN_CLOSE_REVIEWED_SOURCE_MEMBERSHIP/);
+ assert.throws(()=>verifyReviewedSnapshot(pins,paths,[pins[0],{...pins[1],sha256:'a'.repeat(64)}]),/FAN_CLOSE_REVIEWED_SOURCE_CHANGED:guard.mjs/);
 });

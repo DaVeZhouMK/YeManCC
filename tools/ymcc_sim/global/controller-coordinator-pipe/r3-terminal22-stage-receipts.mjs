@@ -33,3 +33,42 @@ export function captureFinalStages(runtimeRoot,expectedPid){
   return{...parseFinalStages(data.toString('utf8'),expectedPid),file:{path:file,sha256:createHash('sha256').update(data).digest('hex'),bytes:data.length}};
  }catch(error){return{...failure(error.code==='ENOENT'?'STAGE_FILE_MISSING':'STAGE_READ_FAILED:'+error.code),path:file};}
 }
+
+const childStages=['launch','exit-wait','receipt-parse','observer-close'];
+const childBytes=256*1024;
+export function parseChildStages(text,expectedPid){
+ try{
+  if(typeof text!=='string'||Buffer.byteLength(text)>childBytes||!Number.isSafeInteger(expectedPid)||expectedPid<=0)throw Error('CHILD_STAGE_INPUT_INVALID');
+  const tailComplete=text.endsWith('\n'),lines=text.split(/\r?\n/);
+  lines.pop(); // A timeout can interrupt the last write. Preserve only complete rows.
+  if(!lines.length)return failure('CHILD_STAGE_EMPTY');
+  if(lines.length>1024)throw Error('CHILD_STAGE_ROW_LIMIT');
+  const positive=value=>typeof value==='string'&&/^[1-9]\d{0,19}$/.test(value);
+  const groups=new Map();let frequency=null;
+  for(const line of lines){
+   const row=JSON.parse(line);
+   if(row.schemaVersion!==1||row.parentPid!==expectedPid||!Number.isSafeInteger(row.pid)||row.pid<=0||row.pid===expectedPid||
+      !positive(row.birth)||!positive(row.start)||!positive(row.end)||!positive(row.frequency)||
+      !Number.isSafeInteger(row.wait)||row.wait<0||row.wait>0xffffffff||BigInt(row.end)<BigInt(row.start))throw Error('CHILD_STAGE_IDENTITY_OR_CLOCK_INVALID');
+   if(frequency!==null&&frequency!==row.frequency)throw Error('CHILD_STAGE_FREQUENCY_CHANGED');
+   frequency=row.frequency;
+   const key=`${row.pid}:${row.birth}`,group=groups.get(key)??{pid:row.pid,birth:row.birth,stages:[]},previous=group.stages.at(-1);
+   if(row.stage!==childStages[group.stages.length]||row.stage!=='exit-wait'&&row.wait!==0||previous&&BigInt(row.start)<BigInt(previous.end))throw Error('CHILD_STAGE_ORDER_CHANGED');
+   const ms=Number((BigInt(row.end)-BigInt(row.start))*1000000n/BigInt(frequency))/1000;
+   group.stages.push({...row,ms});groups.set(key,group);
+  }
+  return{status:'OBSERVED_CHILD_PHASES',rows:lines.length,tailComplete,children:[...groups.values()],
+   scope:'Exact fixture-owned CreateProcess, final wait, receipt parse, and observation handle close blocks. Child phases can omit managed binding, pipe exchanges and earlier waits; no total or acceptance is inferred.',
+   naturalExitProven:false,resourceReleaseProven:false,acceptanceGranted:false};
+ }catch(error){return failure('CHILD_STAGE_INVALID:'+error.message);}
+}
+export function captureChildStages(runtimeRoot,expectedPid){
+ const file=path.join(runtimeRoot,'native-child-stages.jsonl');
+ try{
+  const stat=fs.lstatSync(file);
+  if(!stat.isFile()||stat.isSymbolicLink()||stat.size>childBytes)return{...failure('CHILD_STAGE_FILE_NOT_BOUNDED_REGULAR'),path:file};
+  const data=fs.readFileSync(file);
+  if(data.length!==stat.size)return{...failure('CHILD_STAGE_FILE_CHANGED_DURING_READ'),path:file};
+  return{...parseChildStages(data.toString('utf8'),expectedPid),file:{path:file,sha256:createHash('sha256').update(data).digest('hex'),bytes:data.length}};
+ }catch(error){return{...failure(error.code==='ENOENT'?'CHILD_STAGE_FILE_MISSING':'CHILD_STAGE_READ_FAILED:'+error.code),path:file};}
+}

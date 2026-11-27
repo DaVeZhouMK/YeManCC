@@ -156,6 +156,26 @@ inline std::optional<bool> sessionInProgressOnExit(const json& evidence) noexcep
     if (continuing == values->end() || !continuing->is_boolean()) return std::nullopt;
     return continuing->get<bool>();
 }
+struct ScreenOffWithoutSleep { std::uint64_t totalUs=0,screenOffUs=0; };
+inline ScreenOffWithoutSleep longScreenOffWithoutSleep(const json& evidence,std::uint64_t minimumUs,
+                                                     bool continuingAcSegment=false) {
+    if(sessionInProgressOnExit(evidence)!=continuingAcSegment)return {};
+    const auto& values=evidence.at("values");
+    if(continuingAcSegment){
+        const auto ac=values.find("PowerStateAc");
+        if(ac==values.end()||*ac!=true)return {};
+    }
+    const auto number=[&](const char* key)->std::optional<std::uint64_t>{
+        const auto field=values.find(key);
+        if(field==values.end()||!field->is_number_unsigned())return std::nullopt;
+        return field->get<std::uint64_t>();
+    };
+    const auto entered=values.find("SleepEntered");
+    const auto sleep=number("SleepDurationInUs"),total=number("DurationInUs"),off=number("ScreenOffDurationInUs");
+    if(entered==values.end()||*entered!=false||sleep!=0||!total||!off||
+       *off<minimumUs||*off>*total||*total-*off>5000000)return {};
+    return {*total,*off};
+}
 inline bool isContinuingTransition(const json& evidence, int reason) noexcept {
     // Keep the explicit human veto and Windows hibernate handoff intact.
     return reason != 1 && reason != 20 && sessionInProgressOnExit(evidence).value_or(false);

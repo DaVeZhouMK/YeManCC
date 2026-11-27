@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 export const sha = value => crypto.createHash('sha256').update(value).digest('hex');
-function endBody(text, start) {
+function endPair(text, start, open, close) {
   let depth = 0, mode = 'code';
   for (let i = start; i < text.length; ++i) {
     const c = text[i], n = text[i + 1];
@@ -16,8 +16,8 @@ function endBody(text, start) {
     if (c === '/' && n === '*') { mode = 'block'; ++i; continue; }
     if (c === '"') { mode = 'string'; continue; }
     if (c === "'") { mode = 'char'; continue; }
-    if (c === '{') ++depth;
-    if (c === '}' && --depth === 0) return i + 1;
+    if (c === open) ++depth;
+    if (c === close && --depth === 0) return i + 1;
   }
   throw Error('Unclosed source body');
 }
@@ -27,9 +27,10 @@ export function extract(text, kind, name, file, bindings) {
   const pattern = new RegExp(prefix, 'mg');
   let match;
   while ((match = pattern.exec(text))) {
-    const brace = text.indexOf('{', match.index), semi = text.indexOf(';', match.index);
+    const bodyStart = kind === 'function' ? endPair(text, pattern.lastIndex - 1, '(', ')') : match.index;
+    const brace = text.indexOf('{', bodyStart), semi = text.indexOf(';', bodyStart);
     if (brace < 0 || (semi >= 0 && semi < brace)) continue;
-    let end = endBody(text, brace);
+    let end = endPair(text, brace, '{', '}');
     if (kind !== 'function') { assert.equal(text[end], ';'); ++end; }
     const code = text.slice(match.index, end);
     bindings.push({ file, kind, symbol: name, startLine: text.slice(0, match.index).split('\n').length,

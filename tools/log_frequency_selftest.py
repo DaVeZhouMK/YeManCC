@@ -236,8 +236,9 @@ int wmain(int argc,wchar_t** argv){
     if(argc!=2&&argc!=3)return 2;const fspath::path root(argv[1]);
     using ymcc::logging::NativeLane;using ymcc::logging::nativeLane;
     reset(root,L"exit-wait-failure");
-    const json wait={{"exitSessionId",37},{"win32",6},{"ownerRetained",true},{"retryWithMessageWait",true}};
-    const json kernel={{"exitSessionId",37},{"win32",6}};
+    const auto sessionPrefix=std::to_string(GetCurrentProcessId())+"-";
+    const json wait={{"exitSessionId",sessionPrefix+"37"},{"win32",6},{"ownerRetained",true},{"retryWithMessageWait",true}};
+    const json kernel={{"exitSessionId",sessionPrefix+"37"},{"win32",6}};
     const json marker={{"pid",GetCurrentProcessId()},{"reason","session-marker-write-failed"}};
     const bool recoveryOnly=argc==3&&std::wstring(argv[2])==L"--recovery-only";
     if(argc==3&&!recoveryOnly){
@@ -261,7 +262,7 @@ int wmain(int argc,wchar_t** argv){
     check("exit-wait-failure-50000-repeats-default-off-no-file-writes",readRows(L"native-lifecycle.log").size()==count&&!fspath::exists(fspath::path(g_testRoot)/L"native-detail.log"));
     changed=wait;changed["win32"]=5;appendNativeLifecycleLog("exit-cleanup-wait-failed",changed);
     check("exit-wait-failure-error-change-retained",readRows(L"native-lifecycle.log").size()==++count);
-    changed["exitSessionId"]=38;appendNativeLifecycleLog("exit-cleanup-wait-failed",changed);
+    changed["exitSessionId"]=sessionPrefix+"38";appendNativeLifecycleLog("exit-cleanup-wait-failed",changed);
     check("exit-wait-failure-session-change-retained",readRows(L"native-lifecycle.log").size()==++count);
     ++g_powerGeneration;appendNativeLifecycleLog("exit-cleanup-wait-failed",changed);
     check("exit-wait-failure-power-change-retained",readRows(L"native-lifecycle.log").size()==++count);
@@ -270,7 +271,11 @@ int wmain(int argc,wchar_t** argv){
     appendNativeLifecycleLog("exit-cleanup-wait-failed",changed);++count;
     check("exit-wait-failure-unknown-rearms-first-supported",readRows(L"native-lifecycle.log").size()==count);
     g_domainLogEnabled[1]=true;appendNativeLifecycleLog("exit-cleanup-wait-failed",changed);flushNativeLifecycleLogs(false);
-    check("exit-wait-failure-repeat-on-is-detail",readRows(L"native-lifecycle.log").size()==count&&readRows(L"native-detail.log").size()==1);
+    const auto detailRows=readRows(L"native-detail.log");
+    const auto residentRows=readRows(L"native-lifecycle.log");
+    check("exit-wait-failure-repeat-on-is-detail",readRows(L"native-lifecycle.log").size()==count&&detailRows.size()==1);
+    check("exit-wait-failure-only-detail-marked",detailRows.size()==1&&detailRows.front().value("exitFailureRepeatSample",false)&&
+        std::none_of(residentRows.begin(),residentRows.end(),[](const json& row){return row.contains("exitFailureRepeatSample");}));
     g_domainLogEnabled[1]=false;
     }
     changed["win32"]=123;g_nativeLifecycleLog.setstate(std::ios::badbit);appendNativeLifecycleLog("exit-cleanup-wait-failed",changed);
@@ -847,7 +852,7 @@ int wmain(int argc,wchar_t** argv){
     }
 /*ORIGINAL_SINK*/
     reset(root,L"cached-mode");
-    json healthy={{"elapsedMs",0u},{"reason",""},{"launchMode","bigpicture"},{"modeKnown",true},{"modeRunning",true},{"modeIdentityConfirmed",true},
+    json healthy={{"elapsedMs",0u},{"modeReadPath","budget-cache"},{"reason",""},{"launchMode","bigpicture"},{"modeKnown",true},{"modeRunning",true},{"modeIdentityConfirmed",true},
         {"deckyBackendKnown",true},{"deckyBackendConnected",true},{"deckyClientKnown",true},{"deckyClientConnected",true},{"deckyHooksKnown",true},{"deckyHooksInstalled",true},
         {"deckyClientCheckingKnown",true},{"deckyClientChecking",false},{"steamPid",37u},{"steamBirth","400"},{"proofStage","registry-account"}};
     for(unsigned i=0;i<128;++i)deckySidebarDiagnostic("steam-mode-read",healthy,true);
@@ -857,8 +862,21 @@ int wmain(int argc,wchar_t** argv){
     check("decky-healthy-new-steam-birth-retained",readRows(L"decky-sidebar.log").size()==count+1);
     count=readRows(L"decky-sidebar.log").size();++g_powerGeneration;deckySidebarDiagnostic("steam-mode-read",healthy,true);
     check("decky-healthy-same-payload-new-power-retained",readRows(L"decky-sidebar.log").size()==count+1);
-    count=readRows(L"decky-sidebar.log").size();healthy["elapsedMs"]=7u;for(unsigned i=0;i<2;++i)deckySidebarDiagnostic("steam-mode-read",healthy,true);
+    auto live=healthy;live["modeReadPath"]="live-path";live["elapsedMs"]=7u;count=readRows(L"decky-sidebar.log").size();
+    for(unsigned i=0;i<2;++i)deckySidebarDiagnostic("steam-mode-read",live,true);
     check("decky-real-read-duration-each-preserved-without-time-threshold",readRows(L"decky-sidebar.log").size()==count+2);
+    count=readRows(L"decky-sidebar.log").size();live["elapsedMs"]=0u;for(unsigned i=0;i<2;++i)deckySidebarDiagnostic("steam-mode-read",live,true);
+    auto zeroRows=readRows(L"decky-sidebar.log");
+    check("decky-two-zero-ms-live-reads-kept-with-source",zeroRows.size()==count+2&&zeroRows[count]["modeReadPath"]=="live-path"&&zeroRows.back()["modeReadPath"]=="live-path");
+    for(const auto& label:std::vector<json>{nullptr,true,"private-path","pre-live","budget-paused","budget-cache "}) {
+        auto probe=healthy;probe["modeReadPath"]=label;count=readRows(L"decky-sidebar.log").size();
+        for(unsigned i=0;i<2;++i)deckySidebarDiagnostic("steam-mode-read",probe,true);
+        const auto rows=readRows(L"decky-sidebar.log");const bool valid=label=="pre-live"||label=="budget-paused";
+        check("decky-non-cache-or-unrecognized-source-not-deduplicated",rows.size()==count+2&&rows.back().contains("modeReadPath")==valid);
+    }
+    auto legacy=healthy;legacy.erase("modeReadPath");count=readRows(L"decky-sidebar.log").size();
+    for(unsigned i=0;i<2;++i)deckySidebarDiagnostic("steam-mode-read",legacy,true);
+    check("decky-legacy-zero-ms-does-not-assert-cache",readRows(L"decky-sidebar.log").size()==count+2&&!readRows(L"decky-sidebar.log").back().contains("modeReadPath"));
     count=readRows(L"decky-sidebar.log").size();healthy["elapsedMs"]=0u;for(unsigned i=0;i<2;++i)deckySidebarDiagnostic("steam-mode-read",healthy,true);
     check("decky-cached-health-reentry-after-real-read-retained-once",readRows(L"decky-sidebar.log").size()==count+1);
     auto failed=healthy;failed["modeKnown"]=false;failed["reason"]="steam-session-unconfirmed";count=readRows(L"decky-sidebar.log").size();
@@ -1430,7 +1448,12 @@ def run_native_sink_failure_case(args):
         code=code[:code.index('int wmain(')]+selected.replace('@@FIELD_DECLARATION@@',declaration,1)
     if args.native_sink_case=='power-leaf-failures':
         selected=(ROOT/'tools/fixtures/log_frequency_power_leaf_failures.inc').read_text(encoding='utf-8-sig').replace('\r\n','\n')
-        resume=extract(source,'static void handlePowerResumeNotification(SgWork work, const char* reason) {')
+        resumeSignatures=('static void handlePowerResumeNotification(SgWork work, const char* reason) {',
+            'static void handlePowerResumeNotification(SgWork work, const char* reason, SgWorkItem* originalS4=nullptr) {')
+        matches=[signature for signature in resumeSignatures if signature in source]
+        if len(matches)!=1 or source.count(matches[0])!=1:
+            raise ValueError('original power resume definition identity changed')
+        resume=extract(source,matches[0])
         broadcast=source[source.index('    case kSleepPowerForwardMessage:'):source.index('    case kSleepPowerForwardMessage:')+24000]
         values={'@@ACTUAL_SGWORK@@':extract(source,'enum class SgWork : uint8_t {')+';',
             '@@ACTUAL_POWER_GETTER@@':extract(source,'static unsigned long long currentPowerGeneration() {'),
@@ -1439,7 +1462,14 @@ def run_native_sink_failure_case(args):
         for token,value in values.items():
             if selected.count(token)!=1:raise ValueError('original power consumer guard fixture token changed')
             selected=selected.replace(token,value,1)
-        code=code[:code.index('int wmain(')]+selected
+        prefix=code[:code.index('int wmain(')]
+        # This case includes log_export_evidence.h after the fixture globals.
+        # Keep the fixture's counter distinct from the product's local checks.
+        for before,after in (('static json checks=', 'static json powerLeafFixtureChecks='),
+                             ('{checks.push_back(', '{powerLeafFixtureChecks.push_back(')):
+            if prefix.count(before)!=1:raise ValueError('original power consumer fixture counter changed')
+            prefix=prefix.replace(before,after,1)
+        code=prefix+selected.replace(':checks)',':powerLeafFixtureChecks)').replace('{"checks",checks}', '{"checks",powerLeafFixtureChecks}')
     if args.native_sink_case=='startup-finite' and getattr(args,'startup_finite_phase',None)=='calibration-restore':
         selected=(ROOT/'tools/fixtures/log_frequency_calibration_restore.inc').read_text(encoding='utf-8-sig').replace('\r\n','\n')
         for token,signature in (('@@ACTUAL_FRAME_CURRENT@@','static bool inputCaptureWindowsCalibrationFrameCurrent(const ymcc::windows_motion::Stamp& sample) {'),
@@ -1584,7 +1614,25 @@ def run_native_sink_failure_case(args):
     if args.native_sink_case=='diagnostic-memos':
         code=code[:code.index('int wmain(')]+(ROOT/'tools/fixtures/log_frequency_diagnostic_memo_recovery.inc').read_text(encoding='utf-8-sig').replace('\r\n','\n')
     if args.native_sink_case=='snapshots':
-        code=code[:code.index('int wmain(')]+(ROOT/'tools/fixtures/log_frequency_snapshot_recovery.inc').read_text(encoding='utf-8-sig').replace('\r\n','\n')
+        extra=(ROOT/'tools/fixtures/log_frequency_snapshot_recovery.inc').read_text(encoding='utf-8-sig').replace('\r\n','\n')
+        timer=extract(source,'static void gamepadLogFallbackConnectionLocked(UINT_PTR timer) noexcept {')
+        edge=extract(source,'static void gamepadLogControllerConnectionEdge(bool connected, bool updatesCachedState, json row) {')
+        wmi=extract(source,'static void msiWmiLogSourceCapability(')
+        wake=(ROOT/'native/virtual_wake_execution_runtime.h').read_text(encoding='utf-8-sig').replace('\r\n','\n')
+        wake_parts=[extract(wake,'struct Work {')+';',extract(wake,'struct QueueReceipt {')+';',
+                    extract(wake,'static void retry('),extract(wake,'template<class Submit>\nstatic bool queue(')]
+        wake_log=extract(source,'static void logInputHostWakeRescanQueued(')
+        reprobe=extract(source,'static void msiDinputLogExhaustedReprobe(')
+        no_journal=extract(source,'static void logHidHideDisconnectWithoutWrite(')
+        rog_noise=extract(source,'static void rogRemapLogDeviceTreeNoise(')
+        visibility_snapshot=extract(source,'static void logHidHideVisibilitySnapshot(')
+        rog_throttle=extract(source,'struct RogRemapThrottle {')+';'
+        rog_dirty=extract(source,'static RogRemapDirty rogRemapResolveDirty(')
+        extra=extra.replace('// ACTUAL_WAKE_TYPES','\n'.join(wake_parts[:2]),1)
+        extra=extra.replace('// ACTUAL_WAKE_QUEUE','\n'.join(wake_parts[2:]),1).replace('// ACTUAL_WAKE_LOG',wake_log,1)
+        extra=extra.replace('// ACTUAL_ROG_DEVICE_TREE','\n'.join([rog_throttle,rog_dirty,rog_noise]),1)
+        extra=extra.replace('// ACTUAL_HIDHIDE_VISIBILITY_LOG',visibility_snapshot,1)
+        code=code[:code.index('int wmain(')]+extra.replace('// ACTUAL_CONTROLLER_CONNECTION_FUNCTIONS',edge+'\n'+timer+'\n'+wmi+'\n'+no_journal,1).replace('// ACTUAL_DINPUT_REPROBE_LOG',reprobe,1)
     if args.native_sink_case=='mirror':code='#define YMCC_NATIVE_FAILURE_MIRROR_ONLY 1\n'+code
     if args.native_sink_case=='flush':code='#define YMCC_NATIVE_FAILURE_FLUSH_ONLY 1\n'+code
     if args.native_sink_case=='recovery':code='#define YMCC_SCREEN_RECOVERY_ONLY 1\n'+code
@@ -1634,7 +1682,7 @@ def run_native_sink_failure_case(args):
     if args.native_sink_case=='record-preparation':sourcePaths.append(ROOT/'tools/fixtures/log_frequency_record_preparation.inc')
     if args.native_sink_case=='ipc-reoffer':sourcePaths.append(ROOT/'tools/fixtures/log_frequency_ipc_reoffer.inc')
     if args.native_sink_case=='diagnostic-memos':sourcePaths.append(ROOT/'tools/fixtures/log_frequency_diagnostic_memo_recovery.inc')
-    if args.native_sink_case=='snapshots':sourcePaths.append(ROOT/'tools/fixtures/log_frequency_snapshot_recovery.inc')
+    if args.native_sink_case=='snapshots':sourcePaths.extend([ROOT/'tools/fixtures/log_frequency_snapshot_recovery.inc',ROOT/'native/msi_key_event_class.h',ROOT/'native/virtual_wake_execution_runtime.h',ROOT/'native/msi_dinput_reprobe_log.h'])
     if args.native_sink_case=='sensor-retirement':sourcePaths.extend([ROOT/'native/model_adaptation_log_native.inc',ROOT/'native/virtual_adaptation_log_native.inc'])
     if args.native_sink_case=='msi-feedback':sourcePaths.extend([msiTemplate]+([] if args.msi_feedback_phase=='classification' else [ROOT/'native/touch_feedback_lease.h',ROOT/'native/touch_haptic_dispatch.h']))
     pins=[pin(p) for p in sourcePaths];tools=[pin(pathlib.Path(recipe[k])) for k in ('compiler','linker')];results=[]
@@ -1764,7 +1812,8 @@ def run_native_sink_failure_case(args):
         unique=lambda values:list({str(p.resolve()).lower():p for p in values}.values())
         graph=dict(source=pin(cpp),includes=[pin(p) for p in unique(includes)],libraries=[pin(p) for p in unique(libs)],executable=pin(exe));save(run/(variant+'.GRAPH.json'),graph)
         if not includes or not libs:raise ValueError('native sink dependency graph missing')
-        ran=subprocess.run([str(exe),str(run/(variant+'-files'))]+(['--'+args.finite_terminal_phase] if args.native_sink_case=='finite-terminals' and args.finite_terminal_phase else []),cwd=run,env=env,capture_output=True,timeout=45 if args.sensor_retirement_phase=='source-gate' else 25)
+        phase=args.snapshot_phase or (args.finite_terminal_phase if args.native_sink_case=='finite-terminals' else None)
+        ran=subprocess.run([str(exe),str(run/(variant+'-files'))]+(['--'+phase] if phase else []),cwd=run,env=env,capture_output=True,timeout=45 if args.sensor_retirement_phase=='source-gate' else 25)
         put(run/(variant+'.stdout.raw'),ran.stdout);put(run/(variant+'.stderr.raw'),ran.stderr);save(run/(variant+'.RUN.json'),dict(exitCode=ran.returncode))
         result=json.loads(ran.stdout);save(run/(variant+'.RESULT.json'),result);failed=[q['name'] for q in result['checks'] if not q['pass']]
         if variant in ('current','current-mirror','current-flush','current-recovery','current-preparation','current-sensor-retirement','current-sensor-source-preparation','current-sensor-error-detail','current-sensor-source-gate','current-msi-feedback','current-snapshots','current-diagnostic-memos','current-ipc-reoffer','current-ipc-reoffer-event-gates','current-record-preparation','current-classifier-text','current-path-preparation','current-preselection-stages','current-boundary-failures','current-finite-terminals','current-shortcut-outcomes','current-msi-return-debt','current-startup-finite','current-foreground-wait','current-ui-output-recovery','current-common-frame-recovery','current-quarantine-source','current-retained-session','current-touch-haptic-lanes','current-touch-haptic-preparation','current-touch-haptic-queue-clear','current-power-leaf-failures'):
@@ -1796,13 +1845,15 @@ def run_native_sink_failure_case(args):
         elif variant=='missing-mirror-scope':
             if ran.returncode!=2 or failed!=['postwrite mirror exception is not misclassified as Native file sink exception']:raise ValueError('missing mirror scope was not rejected')
         elif ran.returncode!=2 or failed!=['actual open failure is counted in event lane']:raise ValueError('missing open evidence was not rejected by original assertion')
+        if args.snapshot_phase and (result.get('selectedCase')!='native-sink-snapshots' or result.get('selectedPhase')!=args.snapshot_phase or len(result['checks'])!=7):raise ValueError('native snapshot selection mismatch')
         if result['handlesBefore']!=result['handlesAfter']:raise ValueError('native sink private handles not returned')
         results.append(dict(variant=variant,nativeExitCode=ran.returncode,result=pin(run/(variant+'.RESULT.json')),graph=pin(run/(variant+'.GRAPH.json'))))
     for item in pins+tools:
         if pin(pathlib.Path(item['path']))!=item:raise ValueError('native sink input changed')
     report=dict(selectedCase='native-sink-failure',pass_=True,runs=results,sourcePins=pins,tools=tools,out=str(run),
-        defaultSuiteExecuted=False,productSdkDeviceSleepExecuted=False,originalFunctions=10 if args.native_sink_case=='sensor-retirement' else 6,originalAdaptationGuardPrefixes=2 if args.native_sink_case=='sensor-retirement' else 0,exportBlockExecuted=True,
+        defaultSuiteExecuted=False,productSdkDeviceSleepExecuted=False,originalFunctions=10 if args.native_sink_case=='sensor-retirement' else 6,originalAdaptationGuardPrefixes=2 if args.native_sink_case=='sensor-retirement' else 0,exportBlockExecuted=not bool(args.snapshot_phase),
         limits='controlled streambuf faults;real ofstream open and successful writes;rotation/domain/deferred queues are ports;no complete runtime delivery proof')
+    if args.snapshot_phase:report['selectedPhase']=args.snapshot_phase
     save(run/'RESULT.json',report);print(json.dumps(report,ensure_ascii=False));return 0
 
 
@@ -1822,6 +1873,7 @@ def main() -> int:
     parser.add_argument("--classifier-phase",choices=["command-result"],help="Only original command-result boolean classification and logger;no Host requests")
     parser.add_argument("--msi-feedback-phase",choices=["classification"],help="Only original MSI feedback classifier and Native lanes;no output lease or device calls")
     parser.add_argument("--ui-output-recovery-phase",choices=["connection-truth"],help="Only original connection truth producer and Native file-recovery boundary")
+    parser.add_argument("--snapshot-phase",choices=["controller-fallback-edges"],help="Only original controller fallback logs and their edge references")
     parser.add_argument("--haptic-preparation-phase",choices=["queue-clear"],help="Only original accepted-summary queue-clear and pending-latch observations")
     parser.add_argument("--foreground-wait-replay",type=pathlib.Path,help="Explicit bounded extracted field replay for foreground-wait only")
     parser.add_argument("--aya-keyboard-case",choices=["legacy-air"],help="Only the selected legacy AIR function-key witness; existing AYA cases stay separate")
@@ -1845,6 +1897,7 @@ def main() -> int:
     if args.classifier_phase and (args.case!="native-sink-failure" or args.native_sink_case!="classifier-text" or any(value for key,value in vars(args).items() if key not in ("case","native_sink_case","classifier_phase","source","output_dir"))):parser.error("--classifier-phase requires exclusive native-sink-failure/classifier-text")
     if args.msi_feedback_phase and (args.case!="native-sink-failure" or args.native_sink_case!="msi-feedback" or any(value for key,value in vars(args).items() if key not in ("case","native_sink_case","msi_feedback_phase","source","output_dir"))):parser.error("--msi-feedback-phase requires exclusive native-sink-failure/msi-feedback")
     if args.ui_output_recovery_phase and (args.case!="native-sink-failure" or args.native_sink_case!="ui-output-recovery" or any(value for key,value in vars(args).items() if key not in ("case","native_sink_case","ui_output_recovery_phase","source","output_dir"))):parser.error("--ui-output-recovery-phase requires exclusive native-sink-failure/ui-output-recovery")
+    if args.snapshot_phase and (args.case!="native-sink-failure" or args.native_sink_case!="snapshots" or any(value for key,value in vars(args).items() if key not in ("case","native_sink_case","snapshot_phase","source","output_dir"))):parser.error("--snapshot-phase requires exclusive native-sink-failure/snapshots")
     if args.adaptation_record_boundary and (args.case!="adaptation-facts" or any(value for key,value in vars(args).items() if key not in ("case","adaptation_record_boundary","output_dir"))):parser.error("--adaptation-record-boundary requires exclusive adaptation-facts")
     if args.decky_log_phase and (args.case!="decky-mode-health" or any((args.native_sink_case,args.finite_terminal_phase,args.deferred_post_phase,args.source,args.native_sink_before,args.review_existing_run))):parser.error("--decky-log-phase requires exclusive decky-mode-health")
     if args.haptic_preparation_phase and (args.case!="native-sink-failure" or args.native_sink_case!="touch-haptic-preparation"):parser.error("--haptic-preparation-phase requires native-sink-failure/touch-haptic-preparation")
@@ -2093,6 +2146,23 @@ static bool oemProducerPublish(OemProducerId,uint64_t,uint64_t,uint64_t observed
     tests = r"""
 static json checks = json::array();
 static void check(const char* name, bool pass) { checks.push_back({{"name", name}, {"pass", pass}}); }
+static json readVirtualStepProducer(const json& row) {
+    namespace scope=ymcc::adaptlog::journalScope;
+    auto producer=row.at("firstSample").at("producer");
+    const auto marker=row.find(scope::producerCopiesMarker);
+    if(marker==row.end())return producer;
+    const auto mask=marker->get<unsigned>();
+    unsigned bit=1;
+    for(const auto* field:scope::producerCopyFields){
+        if(mask&bit){
+            if(producer.contains(field))throw std::logic_error("Conflicting virtual producer field");
+            producer[field]=row.at("uniqueKey").at("identity").at(field);
+        }
+        bit<<=1;
+    }
+    if(!mask||mask>=bit)throw std::logic_error("Invalid virtual producer copy mask");
+    return producer;
+}
 static std::vector<json> readRows(const wchar_t* name) {
     flushNativeLifecycleLogs();
     std::ifstream f(fspath::path(g_testRoot) / name);
@@ -2136,7 +2206,7 @@ int wmain(int argc, wchar_t** argv) {
     const auto& sample=rows[1]["firstSample"];
     check("virtual-frame-sample-preserves-exact-source-and-request",sample["source"]["pad"]["buttons"]==4096&&sample["source"]["pad"]["ltByte"]==128&&sample["replayRequest"]["buttons"]==4096&&sample["commandSequence"]==300&&rows[1]["uniqueKey"]["identity"]["hostInstanceId"]=="Host-before-call");
     check("virtual-transport-auth-not-logged-and-external-proof-false",sample.dump().find("must-not-retain-this")==std::string::npos&&!sample["replayRequest"].contains("startupNonce")&&!sample["nativeReceiptJson"].contains("frameReplyBinding")&&sample["hostSdkDeliveryProven"]==false&&sample["steamConsumptionProven"]==false);
-    check("virtual-stage-original-power-retained",rows[0]["firstSample"]["producer"]["powerGeneration"]==22);
+    check("virtual-stage-original-power-retained",readVirtualStepProducer(rows[0]).at("powerGeneration")==22);
     check("virtual-independent-budget-and-no-per-write-rescan",virtualAdaptationStatus()["maxBytes"]==8ull*1024*1024&&virtualAdaptationJournal().status()["journalReadScans"]<=1);
     ymcc::virtualAdaptation::FrameSelector bounded;unsigned selected=0;
     for(unsigned context=1;context<=64;++context)for(unsigned flags=0;flags<8;++flags){auto value=stamp;value.epoch=context;value.neutral=flags&1;value.accepted=flags&2;value.sourceAdmitted=flags&4;selected+=bounded.select(value);}
@@ -2162,7 +2232,7 @@ int wmain(int argc, wchar_t** argv) {
     rows=readRows(L"native-lifecycle.log");
     check("virtual-missing-generation-stays-missing-and-unknown-stays-unknown",!rows[1].contains("producerPowerGeneration")&&rows[2]["producerPowerGeneration"]=="unknown"&&rows[2]["powerGeneration"]==23);
     auto evidence=readRows(L"virtual-adaptation.log");
-    check("virtual-wake-duplicate-retains-original-budget",evidence[evidence.size()-2]["firstSample"]["producer"]["originalPlayerDeadline"]==4000&&evidence.back()["firstSample"]["producer"]["reason"]=="original-wake-budget-expired");
+    check("virtual-wake-duplicate-retains-original-budget",readVirtualStepProducer(evidence[evidence.size()-2]).at("originalPlayerDeadline")==4000&&readVirtualStepProducer(evidence.back()).at("reason")=="original-wake-budget-expired");
     bool protectionUnchanged=true,unknownRequest=true,badViewExpires=true;
     for(unsigned verifying=0;verifying<2;++verifying){
         ymcc::VirtualStartProtection currentProtection,badProtection;
@@ -2199,7 +2269,9 @@ int wmain(int argc, wchar_t** argv) {
     const auto& episodeKey=episodeRows[priorEpisodeRows]["uniqueKey"]["identity"];
     check("virtual-episode-existing-context-and-writer-scope-retained",episodeKey["requestId"]==7&&episodeKey["hostEpoch"]==91&&episodeKey["runId"]=="run-a"&&episodeKey["hostInstanceId"]=="host-a"&&episodeKey["powerGeneration"]==23&&episodeKey["intentRevision"]==4&&episodeKey["presentationGeneration"]==8&&episodeKey["writerInstanceId"]==episodeA["writerInstanceId"]);
     const auto& metadata=episodeRows.back();const auto& cachedWriter=ymcc::sleepfactlog::writerIdentity();
-    check("adaptation-journal-writer-birth-and-instance-come-from-existing-cache",metadata["writerPid"]==cachedWriter.pid&&metadata["writerProcessCreation100ns"]==std::to_string(cachedWriter.creation100ns)&&metadata["writerInstanceId"]==episodeA["writerInstanceId"]);
+    check("adaptation-journal-writer-birth-and-instance-come-from-existing-cache",metadata["writerPid"]==cachedWriter.pid&&metadata["writerProcessCreation100ns"]==std::to_string(cachedWriter.creation100ns)&&
+        metadata.value("journalWriterCopiesV1",0)==1&&!metadata.contains("writerInstanceId")&&!metadata.contains("writerIdentityStatus")&&
+        episodeA["writerInstanceId"]=="native:"+std::to_string(cachedWriter.pid)+":"+std::to_string(cachedWriter.creation100ns));
     bool sequenceIncreasing=true;for(size_t i=1;i<episodeRows.size();++i)sequenceIncreasing&=episodeRows[i]["writerSequence"].get<unsigned long long>()>episodeRows[i-1]["writerSequence"].get<unsigned long long>();
     check("adaptation-journal-sequence-is-process-scoped-and-outside-hardware-key",sequenceIncreasing&&metadata["journalScopeSchema"]==1&&!metadata.contains("writerSequenceScope")&&!metadata["uniqueKey"].contains("writerSequence")&&!metadata["uniqueKey"].contains("writerProcessCreation100ns"));
 
@@ -2225,7 +2297,7 @@ int wmain(int argc, wchar_t** argv) {
     virtualAdaptationFlush();auto startupRows=readRows(L"virtual-adaptation.log");
     check("virtual-startup-50000-observations-three-check-shapes-only",startupRows.size()==beforeStartup+3);
     const auto& firstStartup=startupRows[beforeStartup];const auto& startupIdentity=firstStartup["uniqueKey"]["identity"];
-    check("virtual-startup-unknown-operation-and-original-fields-retained",firstStartup["firstSample"]["producer"]==startup&&firstStartup["firstSample"]["operationContextKnown"]==false);
+    check("virtual-startup-unknown-operation-and-original-fields-retained",readVirtualStepProducer(firstStartup)==startup&&firstStartup["firstSample"]["operationContextKnown"]==false);
     const auto& startupSlot=startupIdentity["startupReadbackShape"]["slotReadback"][0];
     check("virtual-startup-unattempted-default-and-attempted-failure-distinct",startupSlot["confirmAttempted"]==false&&startupSlot["confirmResult"]==1167&&startupRows[beforeStartup+2]["uniqueKey"]["identity"]["startupReadbackShape"]["slotReadback"][0]["confirmAttempted"]==true&&startupRows[beforeStartup+2]["uniqueKey"]["identity"]["startupReadbackShape"]["slotReadback"][0]["confirmResult"]==1167);
     check("virtual-startup-key-excludes-clock-poll-and-path",!startupIdentity.contains("elapsedMs")&&!startupIdentity.contains("polls")&&!startupSlot.contains("path"));
@@ -2789,10 +2861,11 @@ int wmain(int argc, wchar_t** argv) {
         check("new-request-restores-first-throttle-evidence",readRows(L"native-lifecycle.log").size()==beforeThrottle+3);
 
         json facts={{"generation",static_cast<unsigned long long>(g_powerGeneration.load())},{"pid",27},{"status","current"},
-            {"foregroundRole","original-game"},{"nativePrimary",{{"status","matched"},{"log",{{"copiedBytes",1},{"originalBytes",1}}}}}};
+            {"foregroundRole","original-game"},{"nativePrimary",{{"status","matched"},{"log",{{"available",true},
+                {"truncated",false},{"copiedBytes",1u},{"originalBytes",1u},{"limitBytes",32u},{"sourceRevision",1u}}}}}};
         recordInspection(g_powerGeneration.load(),"observation",facts);
-        facts["nativePrimary"]["log"]["copiedBytes"]=2;facts["nativePrimary"]["log"]["originalBytes"]=2;
-        for(int i=0;i<22;++i)recordInspection(g_powerGeneration.load(),"observation",facts);
+        facts["nativePrimary"]["log"]["copiedBytes"]=2u;facts["nativePrimary"]["log"]["originalBytes"]=2u;
+        for(unsigned i=2;i<=23;++i){facts["nativePrimary"]["log"]["sourceRevision"]=i;recordInspection(g_powerGeneration.load(),"observation",facts);}
         check("sleep-log-growth-not-a-resident-state-change",readRows(L"sleep-facts.log").size()==1);
         recordInspection(g_powerGeneration.load(),"input-preflight",facts);
         recordInspection(g_powerGeneration.load(),"input-postflight",facts);
@@ -3148,7 +3221,7 @@ int wmain(int argc,wchar_t**argv){
         "mirror-gated-before-string-allocation": mirror.index('if (!domainLogEnabled("gyro") && !domainLogEnabled("virtual")) return;') < mirror.index('std::string name'),
         "detail-export-includes-active-and-rotated": 'addRotated(appDir + L"\\\\native-detail.log");' in source,
         "export-flushes-pending-detail-batch": 'flushNativeLifecycleLogs(); // export includes the latest partial detail batch' in source,
-        "bus-transition-helper-used-in-production": 'if (busRateLogState.observe(evidenceRateFlags)) {' in source,
+        "bus-transition-helper-used-in-production": 'busRateLogState.closeWindow(static_cast<unsigned long long>(busWindowMs),readyPower,evidenceRateFlags)' in source and 'else if (window.transition) {' in source,
         "periodic-bus-samples-have-separate-name": 'appendNativeLifecycleLog("input-capture-bus-rate-sample", rateEvidence(true));' in source,
         "family-imu-source-gates-before-building-json": family_log.index("g_sensorDetailLogging.load") < family_log.index("inputCaptureQueueSample"),
         "family-imu-source-has-no-synchronous-write": "inputCaptureAppend(" not in family,

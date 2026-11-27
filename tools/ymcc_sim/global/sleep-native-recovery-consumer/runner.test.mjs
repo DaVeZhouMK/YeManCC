@@ -1,6 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import {getSleepNativeRecoveryConsumerAdapters,moduleSources,REPO,MODULE}from'./adapter.mjs';
 test('adapter retains both original consumers, exact boundary sources and a structured result',()=>{const [row]=getSleepNativeRecoveryConsumerAdapters();for(const f of['tools/sleep_recovery_api_selftest.py','tools/sleep_wake_resume_selftest.py','native/main.cpp','native/wake_game_recovery.h','native/sleep_recovery_api.h'])assert(row.evidenceInputs.includes(f));assert(row.evidenceInputs.includes(MODULE+'/boundary.h'));assert.equal(row.resultFiles.length,1);assert(row.artifactInputs.length>0);});
-test('private source fault targets the original confirmation policy once',()=>{const spec=historicalSpec(),source=fs.readFileSync(REPO+'/'+spec.fault.path,'utf8');assert.equal(source.split(spec.fault.before).length,2);assert.notEqual(spec.fault.before,spec.fault.after);assert.equal(spec.ioReview.originalAssertionsChanged,true);assert.equal(spec.ioReview.originalPolicyAssertionsChanged,false);});
 test('all module sources are explicitly listed and exist',()=>{for(const relative of moduleSources())assert(fs.statSync(REPO+'/'+relative).isFile());});
 
 import os from 'node:os';
@@ -32,12 +31,19 @@ test('short execution root binds the exact case, copies bytes, and cleans only a
 });
 
 import {verifyReviewedOriginalScripts as verifyHistoricalOriginalScripts} from './run.mjs';
-import {verifyS4Review,verifyCurrentReviewedScripts} from './script-review.mjs';
+import {reverseReviewedDelta,verifyS4Review,verifyCurrentReviewedScripts} from './script-review.mjs';
+import {verifySourceContinuity} from './source-continuity.mjs';
 const currentSpec=JSON.parse(fs.readFileSync(REPO+'/'+MODULE+'/spec.json','utf8'));
-const currentReview=verifyS4Review(currentSpec,'native',relative=>fs.readFileSync(REPO+'/'+relative));
-const historicalRead=relative=>currentReview.historical.get(relative)??fs.readFileSync(REPO+'/'+relative);
+let reviewedRead;
+verifySourceContinuity(REPO,'native',currentSpec,(spec,read)=>{
+ reviewedRead=read;
+ return verifyCurrentReviewedScripts(spec,read);
+},reverseReviewedDelta);
+const currentReview=verifyS4Review(currentSpec,'native',reviewedRead);
+const historicalRead=relative=>currentReview.historical.get(relative)??reviewedRead(relative);
 const historicalSpec=()=>({...structuredClone(currentSpec),originalScripts:structuredClone(currentReview.review.priorSpec.originalScripts)});
 const verifyReviewedOriginalScripts=(spec,read=historicalRead)=>verifyHistoricalOriginalScripts(spec,read);
+test('private source fault targets the original confirmation policy once',()=>{const spec=historicalSpec(),source=fs.readFileSync(REPO+'/'+spec.fault.path,'utf8');assert.equal(source.split(spec.fault.before).length,2);assert.notEqual(spec.fault.before,spec.fault.after);assert.equal(spec.ioReview.originalAssertionsChanged,true);assert.equal(spec.ioReview.originalPolicyAssertionsChanged,false);});
 test('reviewed API maintenance recovers all exact historical bytes and actual owner-proof consumer',()=>{
  const spec=historicalSpec(),review=verifyReviewedOriginalScripts(spec);
  assert.equal(review.exactHistoricalRemainderVerified,true);assert.equal(review.priorVersion1Review.onlyAddedMemorySnapshotDeclaration,true);assert.equal(review.exactReverseDeltaVerified,true);assert.equal(review.wakeFixtureMaintainedForCurrentSource,true);assert.equal(review.historicalWakeBytesUnchanged,false);assert.equal(review.realOwnerProofCalculationCovered,false);
@@ -79,4 +85,14 @@ test('version 2 requires the actual current success and deletion gates in the pr
  }
 });
 
-test("current S4 review reconstructs v2 and refuses hash-only resigning",()=>{assert.equal(verifyCurrentReviewedScripts(currentSpec,relative=>fs.readFileSync(REPO+"/"+relative)).priorReview.schemaVersion,2);const changed=structuredClone(currentSpec);changed.originalScripts[1].sha256="0".repeat(64);assert.throws(()=>verifyCurrentReviewedScripts(changed,relative=>fs.readFileSync(REPO+"/"+relative)),/(?:S4_REVIEW_SCRIPT_SET_CHANGED|CANCELED_LEASE_SCRIPT_SET_CHANGED)/);assert.throws(()=>verifyCurrentReviewedScripts(currentSpec,relative=>{const bytes=fs.readFileSync(REPO+"/"+relative);return relative==="tools/sleep_wake_resume_selftest.py"?Buffer.concat([bytes,Buffer.from("\n# unreviewed")]):bytes;}),/(?:S4_REVIEW_CURRENT_BYTES_CHANGED|CANCELED_LEASE_CURRENT_SCRIPT_CHANGED)/);});
+test("current S4 review reconstructs v2 and refuses hash-only resigning",()=>{
+ const read=reviewedRead;
+ const receipt=verifyCurrentReviewedScripts(currentSpec,read);
+ assert.equal(receipt.priorReview.schemaVersion,2);
+ assert.equal(receipt.publicDeliverySourceReview.sha256,currentSpec.publicDeliveryCompatibilityReview.sha256);
+ const changed=structuredClone(currentSpec);changed.originalScripts[1].sha256="0".repeat(64);
+ assert.throws(()=>verifyCurrentReviewedScripts(changed,read),{message:'PUBLIC_DELIVERY_REVIEW_SPEC'});
+ assert.throws(()=>verifyCurrentReviewedScripts(currentSpec,relative=>{
+  const bytes=read(relative);return relative==="tools/sleep_wake_resume_selftest.py"?Buffer.concat([bytes,Buffer.from("\n# unreviewed")]):bytes;
+ }),/(?:S4_REVIEW_CURRENT_BYTES_CHANGED|CANCELED_LEASE_CURRENT_SCRIPT_CHANGED)/);
+});

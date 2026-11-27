@@ -40,7 +40,7 @@ internal sealed class MemoryScanHost {
     FileStream sessionGate,ceGate;bool ownsSessionOutputs,ownsCeRecord,launchUnconfirmed,reconcileOnly;
     string ceRecordPath,cePriorDirectory;byte[] ceRecordImage;Dictionary<string,object> ceIdentity;
     readonly Stopwatch startup=Stopwatch.StartNew();
-    DateTime lastPublish=DateTime.MinValue,lastCeSeen=DateTime.MinValue;bool closing;long heartbeat;
+    DateTime lastPublish=DateTime.MinValue,lastCeSeen=DateTime.MinValue;bool closing;long heartbeat,lastHeartbeatAt=-1;
     [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr OpenProcess(uint access,bool inherit,int id);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
     [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr h,uint ms);
@@ -532,9 +532,14 @@ internal sealed class MemoryScanHost {
         // command. It remains valid after the old game or renderer has ended.
         if(reconcileOnly){if(startup.ElapsedMilliseconds>=12000)throw new InvalidOperationException("旧CE退出核验超时，请稍后重新打开");return;}
         if(File.Exists(Path.Combine(root,"stop")))throw new OperationCanceledException("CE会话已结束");
-        var lease=Read(Path.Combine(root,"lease.json"),4096);ValidateLease(lease);long age;
+        var lease=Read(Path.Combine(root,"lease.json"),4096);ValidateLease(lease);
         AssertIdentity(ownerHandle,ownerBirth,ownerPath);AssertIdentity(gameHandle,created,imagePath);
-        var target=Read(snapshotPath,65536);age=Now()-Num(target,"lastSeen");if((!target.ContainsKey("valid")||!(target["valid"] is bool)||!(bool)target["valid"])||age<0||age>10000||Num(target,"generation")<=0||Num(target,"pid")!=processId||Text(target,"processCreated")!=created||Key(Text(target,"path"))!=Key(imagePath))throw new InvalidOperationException("YMCC锁定游戏已改变，CE搜索已取消");
+    }
+    void ValidateInitialTarget(){
+        // Recognition admits a session once. Afterwards the held game process,
+        // its birth time and image path are authoritative until stop or exit.
+        // A foreground/recognition update must never rebind or cancel this CE.
+        var target=Read(snapshotPath,65536);long age=Now()-Num(target,"lastSeen");if((!target.ContainsKey("valid")||!(target["valid"] is bool)||!(bool)target["valid"])||age<0||age>10000||Num(target,"generation")<=0||Num(target,"pid")!=processId||Text(target,"processCreated")!=created||Key(Text(target,"path"))!=Key(imagePath))throw new InvalidOperationException("YMCC锁定游戏已改变，CE搜索已取消");
     }
     void Open(string session){
         root=Path.GetFullPath(session);if(!Hex(Path.GetFileName(root),32))throw new InvalidOperationException("CE会话目录无效");NoLinks(root);
@@ -556,10 +561,18 @@ internal sealed class MemoryScanHost {
         gameHandle=OpenProcess(IdentityAccess,false,processId);ownerHandle=OpenProcess(IdentityAccess,false,ownerId);
         long b,e,k,u;var image=new StringBuilder(32768);int count=image.Capacity;if(ownerHandle==IntPtr.Zero||!GetProcessTimes(ownerHandle,out b,out e,out k,out u)||!QueryFullProcessImageName(ownerHandle,0,image,ref count))throw new InvalidOperationException("无法核验YMCC进程");ownerBirth=b.ToString(Inv);ownerPath=image.ToString();
         if((Text(config,"ownerPath")!=""&&Key(Text(config,"ownerPath"))!=Key(ownerPath))||(Text(config,"ownerCreated")!=""&&Text(config,"ownerCreated")!=ownerBirth)||(Text(config,"ownerDirectory")!=""&&Key(Text(config,"ownerDirectory"))!=Key(Path.GetDirectoryName(ownerPath))))throw new InvalidOperationException("YMCC会话身份已改变");
-        state["startupPhase"]="game-snapshot";Guard();
+        state["startupPhase"]="game-snapshot";Guard();ValidateInitialTarget();
     }
     void Publish(bool force){if(!ownsSessionOutputs||state==null)return;if(!force&&(DateTime.UtcNow-lastPublish).TotalMilliseconds<300)return;var result=new Dictionary<string,object>(state);result["token"]=token;result["at"]=Now();result["engine"]="cheat-engine";result["pid"]=processId;result["processCreated"]=created;result["path"]=imagePath;result["revision"]=revision;result["offset"]=0;result["pageSize"]=40;result["selected"]="";result["selectedValue"]=null;result["frozen"]=false;result["frozenValue"]=null;result["skippedBlocks"]=0;result["bulkLimit"]=32;Save(Path.Combine(root,"status.json"),result);lastPublish=DateTime.UtcNow;}
-    void Heartbeat(){Atomic(Path.Combine(root,"ce-lease.txt"),token+"\n"+(++heartbeat).ToString(Inv));}
+    void Heartbeat(){
+        try{Atomic(Path.Combine(root,"ce-lease.txt"),token+"\n"+(++heartbeat).ToString(Inv));lastHeartbeatAt=startup.ElapsedMilliseconds;}
+        catch(IOException ex){
+            // Only Windows sharing/lock collisions on this heartbeat may retry.
+            // Never soften command/state/identity errors or manufacture a renewal.
+            int code=ex.HResult&0xffff;if((code!=32&&code!=33)||lastHeartbeatAt<0)throw;
+            if(startup.ElapsedMilliseconds-lastHeartbeatAt>=2000)throw new IOException("CE心跳文件持续被占用，后台连接已停止，请稍后重新开始",ex);
+        }
+    }
     void LaunchCE(string executable){
         state["startupPhase"]="ce-create";
         Guard();

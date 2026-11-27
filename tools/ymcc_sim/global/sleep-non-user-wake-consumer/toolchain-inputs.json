@@ -352,6 +352,11 @@
       "bytes": 24121,
       "sha256": "98a76f9cdc7149fba4407a8d5b4b90e4bcd5bace35fb066da6591aacd77c97c1",
       "role": "windows-sdk-actual-resume-classification-compiler-input"
+    },
+    {
+      "path": "c:\\program files (x86)\\microsoft visual studio\\2022\\buildtools\\vc\\tools\\msvc\\14.44.35207\\include\\latch",
+      "sha256": "bd99302f5ae0032f830e781d97c1c3b8695067717a9026231d6abe49b0b5746e",
+      "role": "actual-resume-classification-msvc-include"
     }
   ],
   "initialMeaning": "All inherited actual compiler/Python observations plus explicit prerequisites, augmented only for AST command-branch composition. Actual evaluated inputs remain recorded and checked on every run.",

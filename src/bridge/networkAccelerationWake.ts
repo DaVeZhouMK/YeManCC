@@ -1,5 +1,5 @@
-// One five-second wake check, with one continuation if Native proves it did
-// not call the launch operation because public power admission closed.
+// One five-second wake check, with one continuation for a confirmed failure
+// before launch in the public power gate or its prerequisite reads.
 export interface NetworkAccelerationWakeClock {
   setTimeout: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
   clearTimeout: (timer: ReturnType<typeof setTimeout>) => void;
@@ -33,7 +33,8 @@ export function createNetworkAccelerationWakeRecovery(
         inFlight = false;
         const reply = value as { generation?: number; suspendSerial?: number; ok?: boolean; reason?: string; submitted?: boolean } | null;
         finished = !(reply?.generation === next && reply.suspendSerial === serial && reply.ok === false && reply.submitted === false &&
-          reply.reason === 'power-deferred-before-launch');
+          (reply.reason === 'power-deferred-before-launch' || reply.reason === 'startup-state-unavailable' ||
+            reply.reason === 'process-state-unavailable'));
         arm();
       }, () => {
         if (!ownsScope()) return;

@@ -114,16 +114,19 @@ inline std::string targetKey(const Json &target) {
       :target.value("identityPending",false)&&pendingShortcut(target)?"file-"+digestKey(normalized(stringField(target,"executable"))):std::string{};
 }
 inline bool unavailableResult(const std::string& reason){return reason=="no-dynamic-video"||reason=="store-unavailable"||reason=="not-game-or-no-video";}
-inline bool complete(const Json &e, int64_t time) {
+inline constexpr std::array<const char*,2> mediaSlots{"static","dynamic"};
+inline bool complete(const Json &e, int64_t time,const std::array<bool,2>* observed=nullptr) {
   if(pendingMediaRefresh(e,"dynamic")||pendingMediaRefresh(e,"static"))return false;
-  for (const auto *slot : {"static", "dynamic"})
-    if (!e.value(std::string(slot) + "Ready", false) &&
+  for (size_t i=0;i<mediaSlots.size();++i){
+    const auto* slot=mediaSlots[i];
+    if (!(observed?(*observed)[i]:e.value(std::string(slot) + "Ready", false)) &&
         !e.value("deletedSlots", Json::object()).value(slot, false) &&
         !e.value("manualSlots", Json::object()).value(slot, false) &&
         e.value(std::string(slot) == "dynamic" ? "videoUnavailableUntil"
                                                : "staticUnavailableUntil",
                 int64_t{0}) <= time)
       return false;
+  }
   return true;
 }
 // A user request is a bounded run, independent from the automatic switch.
@@ -200,10 +203,33 @@ namespace checkpoint {
 // to distinguish a failed IO observation from readable malformed bytes.
 struct ReadUnavailable : std::runtime_error {explicit ReadUnavailable(const char* reason):std::runtime_error(reason){} };
 struct UpgradeRequired : std::runtime_error { UpgradeRequired():std::runtime_error("media-download-checkpoint-upgrade-required"){} };
-inline Json read(const fs::path& path,size_t limit=16*1024*1024,int version=1,const char* field="schemaVersion") {
+// Build the ordinary DOM directly. The old callback kept every value and
+// used the open container count only to enforce the checkpoint depth limit.
+class BoundedCheckpointDom final : public nlohmann::detail::json_sax_dom_parser<Json> {
+  using Base=nlohmann::detail::json_sax_dom_parser<Json>;
+  unsigned depth_=0;
+  void checkDepth() const {
+    if(depth_>64)throw std::runtime_error("media-checkpoint-depth-invalid");
+  }
+public:
+  using Base::Base;
+  bool null(){checkDepth();return Base::null();}
+  bool boolean(bool value){checkDepth();return Base::boolean(value);}
+  bool number_integer(number_integer_t value){checkDepth();return Base::number_integer(value);}
+  bool number_unsigned(number_unsigned_t value){checkDepth();return Base::number_unsigned(value);}
+  bool number_float(number_float_t value,const string_t& raw){checkDepth();return Base::number_float(value,raw);}
+  bool string(string_t& value){checkDepth();return Base::string(value);}
+  bool binary(binary_t& value){checkDepth();return Base::binary(value);}
+  bool key(string_t& value){checkDepth();return Base::key(value);}
+  bool start_object(size_t size){checkDepth();++depth_;return Base::start_object(size);}
+  bool start_array(size_t size){checkDepth();++depth_;return Base::start_array(size);}
+  bool end_object(){--depth_;return Base::end_object();}
+  bool end_array(){--depth_;return Base::end_array();}
+};
+inline std::optional<std::string> readBytes(const fs::path& path,size_t limit) {
   const auto disk=custom_steam_library::ioPath(path);
   std::error_code ec;const auto status=fs::symlink_status(disk,ec);
-  if(status.type()==fs::file_type::not_found||ec==std::errc::no_such_file_or_directory)return Json::object();
+  if(status.type()==fs::file_type::not_found||ec==std::errc::no_such_file_or_directory)return std::nullopt;
   if(ec)throw ReadUnavailable("media-cache-file-unsafe");
   if(!fs::is_regular_file(status)||fs::is_symlink(status))throw std::runtime_error("media-cache-file-unsafe");
   const auto size=fs::file_size(disk,ec);if(ec)throw ReadUnavailable("media-checkpoint-size-invalid");
@@ -211,16 +237,25 @@ inline Json read(const fs::path& path,size_t limit=16*1024*1024,int version=1,co
   std::ifstream in(disk,std::ios::binary);if(!in)throw ReadUnavailable("media-checkpoint-unreadable");
   std::string text(static_cast<size_t>(size),'\0');in.read(text.data(),text.size());
   if(!in||in.peek()!=std::char_traits<char>::eof()||in.bad())throw ReadUnavailable("media-checkpoint-unreadable");
+  return text;
+}
+inline Json parseBytes(const std::string& text,int version,const char* field) {
   // JSON text cannot contain literal NUL bytes. The vendored lexer treats
   // NUL as EOF, which could otherwise hide trailing checkpoint contents.
   if(text.find('\0')!=std::string::npos)throw std::runtime_error("media-checkpoint-content-invalid");
-  auto j=Json::parse(text,[](int depth,Json::parse_event_t,Json&){if(depth>64)throw std::runtime_error("media-checkpoint-depth-invalid");return true;});
+  Json j;
+  BoundedCheckpointDom dom(j);
+  if(!Json::sax_parse(text,&dom))throw std::runtime_error("media-checkpoint-content-invalid");
   if(!j.is_object())throw std::runtime_error("media-checkpoint-root-invalid");
   if(j.contains(field)) {
     const auto& v=j[field];if(!v.is_number_integer()||(v.is_number_integer()&&!v.is_number_unsigned()&&v.get<int64_t>()<0))throw std::runtime_error("media-checkpoint-version-invalid");
     if(v.get<uint64_t>()>static_cast<uint64_t>(version))throw UpgradeRequired();
   }
   return j;
+}
+inline Json read(const fs::path& path,size_t limit=16*1024*1024,int version=1,const char* field="schemaVersion") {
+  const auto text=readBytes(path,limit);
+  return text?parseBytes(*text,version,field):Json::object();
 }
 inline void preserve(const fs::path& path) {
   const auto disk=custom_steam_library::ioPath(path);
@@ -303,8 +338,8 @@ inline void fields(const Json& j,bool row=false) {
     for(const auto* key:{"preferredHeight","selectedHeight"})if(v.contains(key)&&(!v[key].is_number_integer()||v[key].get<int64_t>()<0||v[key].get<uint64_t>()>INT_MAX))throw std::runtime_error("media-queue-video-invalid");
   }
 }
-inline Json queue(const fs::path& path,bool status=false) {
-  auto j=read(path);fields(j);
+inline void validateQueue(const Json& j) {
+  fields(j);
   for(const auto* name:{"jobs","active"})if(j.contains(name)) {
     if(j[name].size()>10000)throw std::runtime_error("media-queue-count-invalid");
     for(auto it=j[name].begin();it!=j[name].end();++it) {
@@ -313,9 +348,51 @@ inline Json queue(const fs::path& path,bool status=false) {
     }
   }
   if(j.contains("current"))fields(j["current"],true);
+}
+struct QueueValidation {
+  // Proof for one save; it never replaces a fresh file observation.
+  std::optional<std::string> bytes;
+};
+inline Json validateQueueBytes(std::string&& text,QueueValidation* proof) {
+  auto j=parseBytes(text,1,"schemaVersion");validateQueue(j);
+  if(proof&&text.size()<=64*1024)proof->bytes=std::move(text);
   return j;
 }
-inline void guardQueue(const fs::path& path){try{queue(path);}catch(const UpgradeRequired&){throw;}catch(...){preserve(path);}}
+inline Json queue(const fs::path& path,QueueValidation* proof=nullptr) {
+  auto text=readBytes(path,16*1024*1024);
+  return text?validateQueueBytes(std::move(*text),proof):Json::object();
+}
+inline Json durableQueue(const fs::path& path) {
+  auto text=readBytes(path,16*1024*1024);
+  if(!text)return Json::object();
+  const auto parse=[](const std::string& bytes){auto j=parseBytes(bytes,1,"schemaVersion");validateQueue(j);return j;};
+  if(text->size()>64*1024)return parse(*text);
+  // A complete fresh read is still required. Only the validated DOM is shared;
+  // manual deadlines, progress and normalization are evaluated by the caller.
+  struct Entry{std::string bytes;std::shared_ptr<const Json> document;};
+  static std::mutex mutex;
+  static Entry cached;
+  bool repeated=false;
+  std::shared_ptr<const Json> hit;
+  {
+    std::lock_guard lock(mutex);
+    repeated=cached.bytes==*text;
+    if(repeated)hit=cached.document;
+  }
+  if(hit)return *hit;
+  auto parsed=parse(*text);
+  // Do not copy the parsed tree for a checkpoint that is still changing.
+  auto document=repeated?std::make_shared<const Json>(parsed):nullptr;
+  Entry next{std::move(*text),std::move(document)};
+  {std::lock_guard lock(mutex);std::swap(cached,next);}
+  return parsed;
+}
+inline void guardQueue(const fs::path& path,QueueValidation* proof=nullptr){
+  try{
+    auto text=readBytes(path,16*1024*1024);
+    if(text&&(!proof||proof->bytes!=text))validateQueueBytes(std::move(*text),proof);
+  }catch(const UpgradeRequired&){throw;}catch(...){preserve(path);}
+}
 } // namespace checkpoint
 
 // Retry eligibility is based on a repaired file environment, never on an
@@ -412,7 +489,7 @@ class Queue {
   Json storedQueue(bool* readable=nullptr) const {
     if(readable)*readable=false;
     const auto path=root_/L"config"/L"game-media-downloads.json";
-    try{auto state=checkpoint::queue(path);if(readable)*readable=true;return state;}
+    try{auto state=checkpoint::durableQueue(path);if(readable)*readable=true;return state;}
     catch(const checkpoint::UpgradeRequired&){throw;}
     catch(const std::exception& e){
       Json safe={{"enabled",false},{"recoveryRequired",true},{"recoveryReason",e.what()},{"phase","deferred"},{"reason","queue-recovery-required"},{"jobs",Json::object()},{"recoveryBlockedKeys",Json::array()}};
@@ -436,8 +513,8 @@ class Queue {
     }
   }
   Json load(bool *invalidatesStatus = nullptr,bool* readable=nullptr) const {return normalizedDocument(storedQueue(readable),invalidatesStatus);}
-  Json readStatus() const {
-    try{return checkpoint::queue(statusPath(),true);}catch(const checkpoint::UpgradeRequired&){throw;}catch(...){return Json::object();}
+  Json readStatus(checkpoint::QueueValidation* proof=nullptr) const {
+    try{return checkpoint::queue(statusPath(),proof);}catch(const checkpoint::UpgradeRequired&){throw;}catch(...){return Json::object();}
   }
   static bool statusMatches(const Json& status,const Json& durable) {
     if(status.empty()||stringField(status,"session")!=stringField(durable,"session")||
@@ -460,18 +537,18 @@ class Queue {
     if(!invalidated&&currentSummaryPolicy(status))return status;
     // Normalization or summary policy changes scheduling, not owned progress. Rebuild
     // counts/deadlines from the current jobs while retaining only live fields.
-    auto current=durable;
+    auto current=summaryFields(durable);
     for(const auto* field:{"active","current","bytes","totalBytes","resumedBytes",
                           "sessionResumedBytes","heartbeatAt","taskStartedAt",
                           "statusRevision","updatedAt","progressNotifiedAt","queueRevision"})
       if(status.contains(field))current[field]=status[field];
-    return summary(std::move(current));
+    return summary(std::move(current),durable.at("jobs"));
   }
   Json liveStatus() const {
     bool invalidated=false;const auto durable=load(&invalidated);
     return liveStatus(durable,invalidated);
   }
-  void writeStatus(const Json& j) const {checkpoint::guardQueue(statusPath());checkpoint::write(statusPath(),j);}
+  void writeStatus(const Json& j,checkpoint::QueueValidation* proof=nullptr) const {checkpoint::guardQueue(statusPath(),proof);checkpoint::write(statusPath(),j);}
 
   fs::path statusPath() const {
     return root_ / L"config" / L"game-media-download-progress.json";
@@ -513,12 +590,21 @@ class Queue {
     j["active"]=Json::object();j["activeCount"]=0;j["current"]=Json::object();
     j["taskStartedAt"]=0;j["workerPid"]=0;j["workerBirth"]="";return true;
   }
-  static Json summary(Json j) {
+  static Json summaryFields(const Json& durable) {
+    Json result=Json::object();
+    for(auto item=durable.begin();item!=durable.end();++item)
+      if(item.key()!="jobs")result[item.key()]=item.value();
+    return result;
+  }
+  static Json summary(const Json& durable) {
+    return summary(summaryFields(durable),durable.at("jobs"));
+  }
+  static Json summary(Json j,const Json& jobs) {
     j["summaryPolicyVersion"]=1;
     size_t done = 0, waiting = 0, failed = 0, unavailable = 0, stopped = 0, excluded = 0;
     std::array<size_t,5> sources{};size_t identifying=0;std::string pendingReason;
     int64_t nextDue = -1;
-    for (auto item=j["jobs"].begin();item!=j["jobs"].end();++item) {
+    for (auto item=jobs.begin();item!=jobs.end();++item) {
       const auto& job=item.value();
       if(inactiveExcludedQueueTool(j,item.key(),job)){++excluded;continue;}
       if(job.value("autoStopped",false))++stopped;
@@ -548,10 +634,10 @@ class Queue {
     }
     if(nextDue>=0) nextDue=(std::max)(nextDue,j.value("cooldownUntil",int64_t{0}));
     size_t manualTotal=0,manualCompleted=0;
-    if(j.contains("manualTargets")&&j["manualTargets"].is_array())for(const auto& value:j["manualTargets"]){const auto job=j["jobs"].value(value.get<std::string>(),Json::object());if(inactiveExcludedQueueTool(j,value.get<std::string>(),job))continue;++manualTotal;const auto state=stringField(job,"state");if(state=="done"||state=="unavailable")++manualCompleted;}
+    if(j.contains("manualTargets")&&j["manualTargets"].is_array())for(const auto& value:j["manualTargets"]){const auto job=jobs.value(value.get<std::string>(),Json::object());if(inactiveExcludedQueueTool(j,value.get<std::string>(),job))continue;++manualTotal;const auto state=stringField(job,"state");if(state=="done"||state=="unavailable")++manualCompleted;}
     Json manualItems=Json::object();
     if(j.contains("manualTargets")&&j["manualTargets"].is_array())for(const auto& key:j["manualTargets"]){
-      if(manualItems.size()>=24)break;const auto job=j["jobs"].value(key.get<std::string>(),Json::object());Json item=Json::object();
+      if(manualItems.size()>=24)break;const auto job=jobs.value(key.get<std::string>(),Json::object());Json item=Json::object();
       for(const auto* field:{"state","lastError","retryAt","requestBindingRevision","autoStopped","stopReason"})if(job.contains(field))item[field]=job[field];
       manualItems[key.get<std::string>()]=std::move(item);
     }
@@ -562,9 +648,8 @@ class Queue {
     j["remaining"] = waiting;
     j["failed"] = failed;j["pendingReason"]=pendingReason;
     j["unavailable"] = unavailable;j["autoStopped"] = stopped;
-    j["total"] = j["jobs"].size()-excluded;
+    j["total"] = jobs.size()-excluded;
     j["sourceCounts"]={{"popular",sources[0]},{"steamNative",sources[1]},{"steamShortcuts",sources[2]},{"ymccConfirmed",sources[3]},{"other",sources[4]},{"identifying",identifying}};
-    j.erase("jobs");
     return j;
   }
   void save(Json &j, bool wakeOwner = true,
@@ -572,7 +657,8 @@ class Queue {
     // The optional status was validated under this same root lock. Resource
     // publication does not yield or invoke callbacks before this save; guards
     // still validate both files immediately before their atomic replacements.
-    auto previous = validatedPrevious ? *validatedPrevious : readStatus();
+    checkpoint::QueueValidation statusProof;
+    auto previous = validatedPrevious ? *validatedPrevious : readStatus(&statusProof);
     if(!validatedPrevious&&!statusMatches(previous,load()))previous=Json::object();
     if (!previous.empty() &&
         previous.value("session", std::string{}) ==
@@ -613,9 +699,9 @@ class Queue {
     j["updatedAt"] = now();
     j["schemaVersion"] = 1;
     const auto path=root_/L"config"/L"game-media-downloads.json";
-    checkpoint::guardQueue(path);checkpoint::guardQueue(statusPath());
+    checkpoint::guardQueue(path);checkpoint::guardQueue(statusPath(),&statusProof);
     checkpoint::write(path,j);
-    auto status=summary(j);status["queueRevision"]=j["statusRevision"];writeStatus(status);
+    auto status=summary(j);status["queueRevision"]=j["statusRevision"];writeStatus(status,&statusProof);
     notify(root_, wakeOwner);
   }
 
@@ -634,6 +720,19 @@ public:
               {"reason", "queue-unreadable"},{"checkpointReadable",false},
               {"workerPid", 0}};
     }
+  }
+  std::string workerManualRequest(const std::string& token,const std::string& key) const {
+    try {
+      Lock lock(root_);
+      bool invalidated=false;
+      const auto durable=load(&invalidated);
+      // Matching progress cannot create a manual window missing from the queue.
+      if(durable.value("manualUntil",int64_t{0})<=0)return {};
+      const auto intent=liveStatus(durable,invalidated);
+      if(stringField(intent,"session")==token&&manualRun(intent)&&manualTarget(intent,key))
+        return stringField(intent,"manualRequestId");
+    }catch(...){ /* An unreadable snapshot cannot authorize manual work. */ }
+    return {};
   }
   bool progress(const std::string &token,const std::string &phase,uint64_t bytes,uint64_t total) {
     return progress(token,"",phase,bytes,total);
@@ -878,7 +977,7 @@ public:
   bool catalogDue(const std::string&) const {return false;}
   void catalogResult(const std::string&,bool,const std::string& = {},size_t = 0) {}
   void enqueueCatalog(const Json&) {}
-  void enqueue(const Json &targets,const std::string& requiredSession={},const Json& demand=Json::object(),const Json& replacementClaim=Json::object()) {
+  void enqueue(const Json &targets,const std::string& requiredSession={},const Json& demand=Json::object(),const Json& replacementClaim=Json::object(),Json* unchangedSnapshot=nullptr) {
     if(!steamDemand::allowed(demand))return;
     if (!targets.is_array() || targets.size() > 10000)
       throw std::runtime_error("media-inventory-invalid");
@@ -887,19 +986,28 @@ public:
     struct PreparedTarget {Json target;uint64_t revision;};
     std::vector<PreparedTarget> pending;
     Store store(root_);
-    const auto entries = std::move(store.snapshot()["entries"]);
-    const auto prepareMedia=[&](Json& target,Json e){
-      for (const auto *slot : {"static", "dynamic"})
+    // Admission uses binding fields, so it does not need the UI lease projection.
+    const auto entries = store.queueAdmissionEntries();
+    const Json empty=Json::object();
+    const auto lookup=[&](const Json& rows,const std::string& key)->const Json&{
+      const auto it=rows.find(key);
+      return it==rows.end()?empty:*it;
+    };
+    const auto prepareMedia=[&](Json& target,const Json& e){
+      // The shared index supplies metadata; file observations stay local to this admission.
+      std::array<bool,2> ready{};
+      for (size_t i=0;i<mediaSlots.size();++i){
+        const auto* slot=mediaSlots[i];
         if (e.value(std::string(slot) + "Ready", false)) {
           std::error_code ec;
-          const auto assets = e.value("assets", Json::object());
-          e[std::string(slot) + "Ready"] =
-              assets.contains(slot) &&
-              fs::is_regular_file(store.assetPath(assets[slot]), ec) && !ec;
+          const auto assets=e.find("assets");
+          ready[i]=assets!=e.end()&&assets->contains(slot)&&
+              fs::is_regular_file(store.assetPath((*assets)[slot]), ec) && !ec;
         }
-      const bool refresh = e.value("refreshRequested", false),upgrade=needsVideoQualityUpgrade(e,now());
+      }
+      const bool refresh = e.value("refreshRequested", false),upgrade=needsVideoQualityUpgrade(e,now(),ready[1]);
       target["videoQualityPolicy"]=videoQualityPolicy;if(upgrade)target["qualityUpgradeRevision"]=e.value("bindingRevision",uint64_t{0});else target.erase("qualityUpgradeRevision");
-      if (e.value("deleted", false) || complete(e, now()) && !refresh && !upgrade)
+      if (e.value("deleted", false) || complete(e, now(),&ready) && !refresh && !upgrade)
         return false;
       if(e.contains("selectedVideo"))target["selectedVideo"]=e["selectedVideo"];
       target.erase("requestBindingRevision");
@@ -920,21 +1028,39 @@ public:
           target["appId"] = identity.value("appId", int64_t{0});target["verified"] = true;target.erase("identityPending");
         }
       }
-      if (targetKey(target).empty() || (!target.value("verified", false)&&!target.value("identityPending",false)))
+      const auto key=targetKey(target);
+      if (key.empty() || (!target.value("verified", false)&&!target.value("identityPending",false)))
         continue;
-      auto e = entries.value(targetKey(target), Json::object());
+      const auto& e=lookup(*entries,key);
       if(!prepareMedia(target,e))continue;
       pending.push_back({std::move(target),e.value("bindingRevision",uint64_t{0})});
     }
     Lock lock(root_);
     if(!steamDemand::allowed(demand))return;
-    auto j = load();
+    bool readable=false;
+    auto stored=storedQueue(&readable);
+    // Only an ordinary admission leaves the status identity untouched and
+    // has no manual deadline to re-evaluate at save time.
+    const bool reuseForStatus=readable&&requiredSession.empty()&&stored.value("manualUntil",int64_t{0})==0;
+    bool invalidated=false;
+    const bool replyFromRead=unchangedSnapshot&&reuseForStatus;
+    auto j=normalizedDocument(std::move(stored),replyFromRead?&invalidated:nullptr);
+    const auto replyIfUnchanged=[&] {
+      if(!replyFromRead)return;
+      try{
+        if(j.contains("wallpaperPauseOnBattery")&&j["wallpaperPauseOnBattery"].is_boolean())
+          powerPolicy::consume(j["wallpaperPauseOnBattery"].get<bool>());
+        auto result=liveStatus(j,invalidated);
+        result["checkpointReadable"]=true;
+        *unchangedSnapshot=std::move(result);
+      }catch(...){ /* Let the normal snapshot path report unreadable state. */ }
+    };
     if(!requiredSession.empty()&&(j.value("session",std::string{})!=requiredSession||!downloadsEnabled(j)||policyBlocked(j)||!j.value("resourcePauseReason",std::string{}).empty()))return;
-    if(pending.empty())return; // load above still validates checkpoint/version debt.
+    if(pending.empty()){replyIfUnchanged();return;}
     // Store and Queue share this recursive mutex. A concurrent editor may have
     // finished or changed a slot while the inventory was checking identities.
     // Validate one fresh media snapshot for the whole batch before mutating it.
-    const auto currentEntries=std::move(store.snapshot()["entries"]);
+    const auto currentEntries=store.queueAdmissionEntries();
     const auto admissionRevision=j.value("statusRevision",uint64_t{0})+1;
     bool changed = false;
     for (auto& prepared : pending) {
@@ -949,7 +1075,7 @@ public:
         if(!identity.value("verified",false)||identity.value("appId",int64_t{0})!=target.value("appId",int64_t{0}))continue;
       }
       auto key = targetKey(target);
-      const auto current=currentEntries.value(key,Json::object());
+      const auto& current=lookup(*currentEntries,key);
       if(current.value("bindingRevision",uint64_t{0})!=prepared.revision){
         if(current.empty())continue; // A retired binding cannot be recreated.
         target.erase("selectedVideo");
@@ -1036,8 +1162,14 @@ public:
     }
     if (changed) {
       if(!steamDemand::allowed(demand))return;
-      save(j);
-    }
+      if(reuseForStatus){
+        auto previous=readStatus();
+        if(j.contains("wallpaperPauseOnBattery")&&j["wallpaperPauseOnBattery"].is_boolean())
+          powerPolicy::consume(j["wallpaperPauseOnBattery"].get<bool>());
+        if(!statusMatches(previous,j))previous=Json::object();
+        save(j,true,&previous);
+      }else save(j);
+    }else replyIfUnchanged();
   }
   // Temporary ownership is a tiny independent record. Tracking two assets
   // must not serialize the complete game inventory four more times.

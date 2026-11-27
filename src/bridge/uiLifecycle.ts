@@ -24,6 +24,7 @@ export interface UiCommittedPowerSnapshot {
   hardwareWritesAllowed: boolean;
 }
 let lastVisible: boolean | null = null;
+let activeVisibilityEvent: Event | null = null;
 let initialized = false;
 function documentVisible(): boolean {
   return typeof document === 'undefined' || document.visibilityState === 'visible';
@@ -43,7 +44,10 @@ function emitIfChanged(source: UiVisibilitySource, force = false): void {
   const state = getUiVisibilityState();
   if (!force && lastVisible === state.visible) return;
   lastVisible = state.visible;
-  window.dispatchEvent(new CustomEvent(UI_VISIBILITY_EVENT, { detail: { ...state, source } }));
+  const event = new CustomEvent(UI_VISIBILITY_EVENT, { detail: { ...state, source } });
+  activeVisibilityEvent = event;
+  try { window.dispatchEvent(event); }
+  finally { if (activeVisibilityEvent === event) activeVisibilityEvent = null; }
 }
 // A hidden/recreated WebView can miss the one-shot resumed event. Reconcile
 // only on existing lifecycle/show/focus edges, using the native read-only state.
@@ -80,7 +84,10 @@ export function setNativeWindowVisible(visible: boolean): void {
 export function onUiVisibilityChange(handler: (state: UiVisibilityState, source: UiVisibilitySource) => void): () => void {
   initialize();
   if (typeof window === 'undefined') return () => {};
-  const listener = ((event: CustomEvent<UiVisibilityState & { source: UiVisibilitySource }>) => handler(event.detail, event.detail.source)) as EventListener;
+  const listener = ((event: CustomEvent<UiVisibilityState & { source: UiVisibilitySource }>) => {
+    // A preceding listener can synchronously publish a newer visibility edge.
+    if (activeVisibilityEvent === event) handler(event.detail, event.detail.source);
+  }) as EventListener;
   window.addEventListener(UI_VISIBILITY_EVENT, listener);
   handler(getUiVisibilityState(), 'initial');
   return () => window.removeEventListener(UI_VISIBILITY_EVENT, listener);

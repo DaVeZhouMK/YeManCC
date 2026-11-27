@@ -16,7 +16,7 @@ internal sealed partial class FanHostEngine
                 backend.IsOpen||backend.OpenAttempted||state.OpenCalled||state.OpenEventsCalled||
                 state.HardwareWritesEnabled||state.HardwareWrites||state.UnknownState||state.HcCloseCleanupPending||
                 replacementHandoffInFlight||!IsOemReleaseSafe(state.HardwareWritesObserved,backend.OemReleaseActionKind)||
-                (state.HardwareWritesObserved&&!backend.SourceAutomaticReturnObserved))return false;
+                (state.HardwareWritesObserved&&!backend.SourceReturnActionCompleted))return false;
             lock(acceptanceGate)
             {
                 var completed=recoveryCycle;

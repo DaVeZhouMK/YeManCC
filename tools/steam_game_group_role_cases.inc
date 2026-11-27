@@ -15,7 +15,7 @@ static void check(const char* name, bool pass) {
 }
 template<class T> concept PublicGroupAcquire = requires(const T& owner,
     const std::shared_ptr<ProcessLease>& selected, const ProcessGroupSeed& seed) {
-    owner.acquireGroup(selected,seed);
+    owner.acquireGroup(selected,seed,DWORD{1});
 };
 template<class T> concept PublicBoundaryOverride = requires(T& owner,
     const SteamLogSourceIdentity& source, const std::shared_ptr<ProcessLease>& selected,
@@ -45,6 +45,23 @@ static bool outcome(const roles::Result& result,roles::State state,roles::Reason
     return result.state==state&&result.reason==reason;
 }
 static void pureCases() {
+    const ProcessWitness game{101,200,L"D:\\Games\\Cyberpunk\\bin\\x64\\Cyberpunk2077.exe"};
+    const ProcessWitness tool{102,300,L"D:\\Games\\Cyberpunk\\bin\\x64\\REDEngineErrorReporter.exe"};
+    using group_detail::scriptPairChildTool;
+    check("script-pair-direct-tool-with-bare-steam-path",scriptPairChildTool("REDEngineErrorReporter.exe",tool,game,101));
+    check("script-pair-direct-tool-with-absolute-steam-path",scriptPairChildTool("d:/games/cyberpunk/bin/x64/redengineerrorreporter.exe",tool,game,101));
+    check("script-pair-sibling-refused",!scriptPairChildTool("REDEngineErrorReporter.exe",tool,game,100));
+    check("script-pair-parent-pid-reuse-refused",!scriptPairChildTool("REDEngineErrorReporter.exe",{102,199,tool.image},game,101));
+    check("script-pair-other-directory-refused",!scriptPairChildTool("REDEngineErrorReporter.exe",{102,300,L"D:\\Other\\REDEngineErrorReporter.exe"},game,101));
+    check("script-pair-relaunched-game-refused",!scriptPairChildTool("Cyberpunk2077.exe",{102,300,game.image},game,101));
+    check("script-pair-different-log-path-refused",!scriptPairChildTool("Different.exe",tool,game,101));
+    const std::wstring toolCommand=L"REDEngineErrorReporter.exe 101";
+    const auto toolSlash=tool.image.find_last_of(L'\\');
+    using group_detail::scriptPairToolCommand;
+    check("script-pair-direct-tool-with-matching-command",scriptPairToolCommand(toolCommand,toolCommand,tool.image,toolSlash));
+    check("script-pair-different-command-arguments-refused",!scriptPairToolCommand(L"REDEngineErrorReporter.exe 100",toolCommand,tool.image,toolSlash));
+    const std::wstring wrongCommand=L"D:\\Other\\REDEngineErrorReporter.exe 101";
+    check("script-pair-matching-command-with-other-image-refused",!scriptPairToolCommand(wrongCommand,wrongCommand,tool.image,toolSlash));
     using S=roles::State;using R=roles::Reason;
     auto graph=chain();graph.count=1;graph.members[0]={30,7,900,300};
     auto result=roles::inspect(graph,30,30);

@@ -114,6 +114,6 @@ struct ResourcePorts {
   };
   std::function<std::optional<double>(uint64_t)> cpu;
   std::function<bool()> foreground;
-  std::function<void(const std::string&,int,const char*,DWORD,uint64_t,bool)> playbackAttempt;
+  std::function<void(const std::string&,int,const char*,DWORD,uint64_t,bool,const char*,unsigned,bool)> playbackAttempt;
 };
 } // namespace ymcc::media::downloads

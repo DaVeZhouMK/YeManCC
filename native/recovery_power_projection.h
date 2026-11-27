@@ -1,4 +1,5 @@
 #pragma once
+#include "recovery_resume_commit.h"
 #include "sleep_power_state.h"
 #include "recovery_power_boundary.h"
 

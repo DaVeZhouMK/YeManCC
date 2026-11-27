@@ -44,7 +44,8 @@ public:
 };
 inline constexpr bool sameContext(const Proof& a,const Proof& b) noexcept {
     return a.episode==b.episode && a.power==b.power && a.mode==b.mode && a.intent==b.intent &&
-        a.host==b.host && a.sourceEvent==b.sourceEvent && a.topology==b.topology && a.identity==b.identity;
+        a.host==b.host && a.sourceEvent==b.sourceEvent && a.topology==b.topology && a.identity==b.identity &&
+        a.powerScope.suspendSerial==b.powerScope.suspendSerial;
 }
 inline constexpr bool exactSinglePhysicalMask(unsigned matchedMask,unsigned connectedMask) noexcept {
     return matchedMask && matchedMask<16 && (matchedMask&(matchedMask-1u))==0 &&

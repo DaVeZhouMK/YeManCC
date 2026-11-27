@@ -22,6 +22,8 @@ static class Program
         if (args.Length == 1 && args[0] == "--self-test") return SelfTests.Run();
         if (args.Length == 1 && args[0] == "--self-test-liveness") return SelfTests.RunLiveness();
         if (args.Length == 1 && args[0] == "--self-test-saved-sample") return SavedSampleTests.Run();
+        if (args.Length > 0 && args[0] == "--peak-sweep") return PeakSweep.Run(args[1..]);
+        if (args.Length == 1 && args[0] == "--self-test-peak-sweep") return PeakSweep.SelfTest();
         if (args.Length < 4 || args[2] != "--target-pid") { Console.Error.WriteLine("PreciseCpu <captureRoot> <freshOutputRoot> --target-pid PID [--warmup-seconds 15] [--sample ID] | --self-test"); return 2; }
         string? output = null; bool outputCreated = false;
         try

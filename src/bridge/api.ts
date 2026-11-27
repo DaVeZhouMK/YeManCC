@@ -6,6 +6,7 @@ import type { VirtualStartProtectionState } from './virtualOutputStatus';
 import type { TdpObservationContext } from './tdpStaticDiagnostics';
 import { captureBootPreferenceWrite, type BootPreferenceWrite, type BootPreferenceContext } from './bootModeGlobalPreferences';
 import type { MouseBootContext } from './gameproc';
+import type { SharedPowerWriteScope } from './powerLifecycleState';
 
 // Optional correlation metadata for the top game menu's one-shot handover.
 // It is diagnostic provenance, not authorization or a human-gesture receipt.
@@ -54,7 +55,7 @@ export const fs = {
     const ok = await invoke<boolean>('fs.writeTextFileAtomic', { path, content, ...(windowsConfig && Object.prototype.hasOwnProperty.call(windowsConfig,'expectedContent') ? { textEncoding: 'windows-config', expectedContent: windowsConfig.expectedContent } : {}),...(submitted.bootContext?{origin:submitted.origin,bootContext:submitted.bootContext}:{}),...(windowsConfig?.fanDeploymentRecord?{fanDeploymentRecord:true}:{}) }, { timeoutMs });
     if (!ok) throw new Error(`原子写入失败: ${path}`);
   },
-  exists: (path: string, timeoutMs?: number) => invoke<boolean>('fs.exists', { path }, { timeoutMs }),
+  exists: (path: string, timeoutMs?: number, signal?: AbortSignal) => invoke<boolean>('fs.exists', { path }, { timeoutMs, signal }),
   // FAN-927 §2.2：部署边界只需要对**少量清单文件**取摘要。复用 native 进程内 SHA-256，
   // 不再为每个依赖文件起一次 certutil 子进程；正常开启不遍历依赖目录。
   sha256File: (path: string) => invoke<string>('fs.sha256File', { path }, { timeoutMs: 15000 }),
@@ -118,7 +119,7 @@ export const keyboard = {
 };
 
 export interface LosslessRuntimeIdentity { exe:string;pid:number;processCreated:string; }
-export interface LosslessRuntimeReceipt {known:boolean;running:boolean;readable:boolean;pid:number;processCreated:string;path:string;button:string;status:string;reason:string;configRevision:number;observedAt?:number;}
+export interface LosslessRuntimeReceipt {known:boolean;running:boolean;readable:boolean;pid:number;processCreated:string;path:string;button:string;status:string;reason:string;configRevision:number;observedAt?:number;powerGeneration?:number;powerNotificationSequence?:number;powerSuspendSerial?:number;}
 export interface LosslessActivation { ok:boolean;enabled:boolean|null;invoked:boolean;pending:boolean;cancelled:boolean;reason:string;stopInvoked?:boolean;restarted?:boolean;refreshAttempted?:boolean;windowRefreshed?:boolean;refreshReason?:string;refreshMethod?:number;refreshMethodName?:string;refreshApiAccepted?:boolean;refreshFrameAccepted?:boolean;refreshRedrawAccepted?:boolean;refreshTopAccepted?:boolean;refreshForegroundAccepted?:boolean;failureResetRequested?:boolean;failureResetAttempted?:boolean;failureResetTerminated?:boolean;failureResetClosed?:boolean;failureResetReason?:string;failureResetError?:number;retryCount?:number;scalingTimedOut?:boolean; }
 // LS launch and UIA share exact process identity. No generic focus/input fallback.
 export const losslessRuntime = {
@@ -168,10 +169,13 @@ export const shell = {
   // Windows 程序切换：native 在受超时监管的独立进程中调用系统 Shell API。
   taskView: () => invoke<boolean>('shell.taskView', { requestedAtUnixMs: Date.now() }, { timeoutMs: 6000 }),
   taskViewWithEvidence: (evidence: WindowActionEvidence) => invoke<boolean>('shell.taskView', evidence, { timeoutMs: 6000 }),
-  hidden: (program: string, args: string[] = [], timeoutMs?: number, creationReceipt = false, options: BootPreferenceWrite = {}) => {
+  hidden: (program: string, args: string[] = [], timeoutMs?: number, creationReceipt = false,
+    options: BootPreferenceWrite & { powerScope?: SharedPowerWriteScope; mutationTicket?: number } = {}) => {
     const submitted = captureBootPreferenceWrite(options);
     return invoke<{ ok: boolean; pid?: number; creationReceipt?: number; processCreated?: boolean; errorCode?: string; win32Error?: number }>(
       'shell.hidden', { program, args, ...(creationReceipt ? { creationReceipt: 1 } : {}),
+        ...(options.powerScope ? { powerScope: options.powerScope } : {}),
+        ...(options.mutationTicket ? { mutationTicket: options.mutationTicket } : {}),
         ...(submitted.bootContext ? {origin:submitted.origin,bootContext:submitted.bootContext} : {}) }, { timeoutMs });
   },
 };
@@ -243,8 +247,10 @@ export interface PowerLifecycleState {
   generation: number;
   hardwareWritesAllowed: boolean;
   inputReady: boolean;
-  /** Native F5 is durable state, so a recreated WebView can resume FanHost. */
+  /** Durable wake admission for automatic recovery, including a recreated WebView. */
   resumeReady: boolean;
+  /** Paired OS fact; useful to an explicit click before automatic admission. */
+  physicalWakeObserved?: boolean;
   hibernateAvailable: boolean;
   /** Coherent public power metadata; absent only on older native providers. */
   known?: boolean;
@@ -271,12 +277,32 @@ export interface FanManualWakeResult {
   resumeDisposition?: 'registered' | 'not-registered' | 'awaiting-power';
 }
 
+export type FanStartupOffDocument = { generation: string; navigationId: string };
+export type FanStartupOffRequest = { offSequence: number; offDocument: FanStartupOffDocument };
+type FanStartupOffReply = {
+  ok: boolean;
+  offSequence?: number;
+  state?: 'applied' | 'retired' | 'waiting_for_new_boundary' | 'superseded';
+};
+
 export const powerLifecycle = {
   // Lifecycle reads must not leave callers waiting forever while native is
   // recovering from a power transition.
-  get: (timeoutMs = 3000) => invoke<PowerLifecycleState>('power.lifecycle', {}, { timeoutMs }),
+  get: (timeoutMs = 3000, signal?: AbortSignal) => invoke<PowerLifecycleState>('power.lifecycle', {}, { timeoutMs, signal }),
   /** Actual OS wake for Fan only; does not commit shared input/game recovery. */
   getForFan: (timeoutMs = 3000) => invoke<PowerLifecycleState>('power.fanLifecycle', {}, { timeoutMs }),
+  fanStartupOffDocument: async (): Promise<FanStartupOffDocument | null> => {
+    type Context = { generation?: string; documentNavigationId?: string };
+    const ready = (window as Window & { __YMCC_STARTUP_READY__?: Context }).__YMCC_STARTUP_READY__;
+    const context = ready ?? await invoke<Context>('window.renderContext', {}, { timeoutMs: 1500 });
+    return typeof context?.generation === 'string' && /^[1-9]\d*$/.test(context.generation) &&
+      typeof context.documentNavigationId === 'string' && /^[1-9]\d*$/.test(context.documentNavigationId)
+      ? { generation: context.generation, navigationId: context.documentNavigationId } : null;
+  },
+  cancelFanStartupWake: (request: FanStartupOffRequest) =>
+    invoke<FanStartupOffReply>('power.fanCancelStartupWake', request, { timeoutMs: 3000 }),
+  readFanStartupOff: (request: FanStartupOffRequest) =>
+    invoke<FanStartupOffReply>('power.fanStartupOffStatus', request, { timeoutMs: 3000 }),
   completeResume: (generation: number, meta: PowerResumeCompleteMeta = { daemonRequired: false, daemonReady: false }) =>
     invoke<{ ok: boolean; reason?: string; generation: number; inputReady?: boolean; daemonRequired?: boolean; daemonReady?: boolean }>(
       'power.resumeComplete',
@@ -416,8 +442,8 @@ export const app = {
   // FAN-927 §5：native 侧的当前 run 责任 / Fan 活动记录只读快照。渲染器重建后本地
   // JS 状态为空，只有 native 仍知道"本次运行是否已确认活动控制意图"以及崩溃前仍有效的记录。
   fanActivity: () => invoke<FanActivitySnapshot>('app.fanActivity', {}, { timeoutMs: 5000 }),
-  exeDir: (timeoutMs?: number) => invoke<string>('app.exeDir', {}, { timeoutMs }),
-  pid: (timeoutMs?: number) => invoke<number>('app.pid', {}, { timeoutMs }),
+  exeDir: (timeoutMs?: number, signal?: AbortSignal) => invoke<string>('app.exeDir', {}, { timeoutMs, signal }),
+  pid: (timeoutMs?: number, signal?: AbortSignal) => invoke<number>('app.pid', {}, { timeoutMs, signal }),
   // Native resolves the sibling PowerControl directory once at process start.
   // Frontend modules must use that exact value for unified settings writes.
   powerControlDir: (timeoutMs?: number) => invoke<string>('app.powerControlDir', {}, { timeoutMs }),
@@ -503,7 +529,7 @@ export const windowApi = {
   minimizeWithEvidence: (evidence: WindowActionEvidence) => invoke<boolean>('window.minimize', evidence, { timeoutMs: 1500 }),
   maximize: () => invoke<boolean>('window.maximize'),
   show: () => invoke<boolean>('window.show'),
-  getState: () => invoke<{ visible: boolean; minimized: boolean; foreground?: boolean }>('window.getState'),
+  getState: (signal?: AbortSignal) => invoke<{ visible: boolean; minimized: boolean; foreground?: boolean; softwareRendering?: boolean }>('window.getState', {}, { signal }),
   /** 主窗口左上角屏幕坐标（GetWindowRect.left/top）。 */
   position: () => invoke<{ x: number; y: number }>('window.position'),
   /** 将主窗口移动到屏幕坐标 (x, y)，不改尺寸与 Z 序。 */
@@ -584,7 +610,7 @@ export interface NativeProcessObservation {
   observedAt?: string;
 }
 export const proc = {
-  identities: (names: string[]) => invoke<NativeProcessObservation>('proc.identities', { names }, { timeoutMs: 5000 }),
+  identities: (names: string[], signal?: AbortSignal) => invoke<NativeProcessObservation>('proc.identities', { names }, { timeoutMs: 5000, signal }),
   running: (names: string[]) => invoke<Record<string, boolean>>('proc.running', { names }),
   findExact: (path: string) => invoke<{ found: boolean; pid: number }>('proc.findExact', { path }, { timeoutMs: 5000 }),
   terminateTree: (pid: number, timeoutMs?: number) => invoke<{ ok: boolean; attempted: number; terminated: number }>('process.terminateTree', { pid }, { timeoutMs }),
@@ -645,9 +671,10 @@ export const registry = {
     subGroup: string,
     valueName: 'ACSettingIndex' | 'DCSettingIndex',
     entries: Array<{ setting: string; value: number }>,
+    powerScope?: SharedPowerWriteScope,
   ) => invoke<{ ok: boolean; written: number; failed: Array<{ setting: string; code: number }> }>(
     'registry.writePowerBatch',
-    { scheme, subGroup, valueName, entries },
+    { scheme, subGroup, valueName, entries, ...(powerScope ? { powerScope } : {}) },
   ),
   exists: (root: string, path: string) => invoke<boolean>('registry.exists', { root, path }),
 };

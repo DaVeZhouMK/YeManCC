@@ -284,7 +284,7 @@ R"YMSTEAM(dId:bridge.frontendBuildId,loaderVersion:emptyVersion};
       const deckyAccountWatchAvailable=accountWatch?.version===1&&!!observedAccount&&accountWatch.read(observedAccount);
       // Reviewed official v3.3.1 fields. Unknown versions remain UNKNOWN;
       // installed hooks are only a structural check, never visual acceptance.
-      let deckyBackendConnected,deckyBackendState,deckyHooksInstalled,deckyClientConnected,deckyClientVerified,deckyClientChecking,deckyClientState;
+      let deckyBackendConnected,deckyBackendState,deckyHooksInstalled,deckyClientConnected,deckyClientVerified,deckyClientChecking,deckyClientState,deckyQamPanelState;
       try {
         if(window===window.top&&window.location.origin==='https://steamloopback.host'&&
            window.DeckyPluginLoader?.deckyState?.publicState?.()?.versionInfo?.current==='v3.3.1'){
@@ -310,10 +310,16 @@ R"YMSTEAM(dId:bridge.frontendBuildId,loaderVersion:emptyVersion};
             else if(frontend.active!==true)deckyClientState='frontend-inactive';
             else{const state=frontend.connectionState;if(['disposed','native-run-missing','binding-run-missing','run-mismatch','socket-missing','socket-connecting','socket-closing','socket-closed','socket-unavailable','transport-unconfirmed','opening-reply-missing','connected','module-dismounted','frontend-absent','frontend-inactive','read-failed'].includes(state))deckyClientState=state;}
           }catch{deckyClientState='read-failed';}
+          // Optional commit evidence. Missing/hidden and old frontends cannot
+          // prove a failed mount, and this value never changes hook health.
+          try{
+            const state=mode==='bigpicture'&&frontend?.active===true?frontend.qamPanelState:undefined;
+            if(s)YMSTEAM"
+R"YMSTEAM(tate==='unobserved'||state==='committed'||state==='native-ready-commit')deckyQamPanelState=state;
+          }catch{}
         }
       }catch{} // Never emit credentials, router URL, source objects or exception text.
-      return { ok: true, ...(typeof deckyBackendConnected==='boolean'?{deckyBackendConnected}:{}), ...(typeof deckyBackendState==='string'?{deckyBackendState}:{}), ...(typeof deckyHooksInstalled==='boolean'?{dec)YMSTEAM"
-R"YMSTEAM(kyHooksInstalled}:{}), ...(typeof deckyClientConnected==='boolean'?{deckyClientConnected}:{}), ...(typeof deckyClientChecking==='boolean'?{deckyClientChecking}:{}), ...(typeof deckyClientVerified==='boolean'?{deckyClientVerified}:{}), ...(typeof deckyClientState==='string'?{deckyClientState}:{}), ...(observedAccount?{observedAccount}:{}), deckyAccountWatchAvailable, mode, rawMode: Number.isInteger(raw) ? raw : null, modeEpoch: watch.active ? watch.id + ':' + watch.entries : '', ...(deckyUpdateResidue?{deckyUpdateResidue}:{}), ...(deckyEmptyFrontend?{deckyEmptyFrontend}:{}), ...(typeof deckyFrontendLoaded === 'boolean'?{deckyFrontendLoaded}:{}), mutated: false, via: 'live' };
+      return { ok: true, ...(typeof deckyBackendConnected==='boolean'?{deckyBackendConnected}:{}), ...(typeof deckyBackendState==='string'?{deckyBackendState}:{}), ...(typeof deckyHooksInstalled==='boolean'?{deckyHooksInstalled}:{}), ...(typeof deckyClientConnected==='boolean'?{deckyClientConnected}:{}), ...(typeof deckyClientChecking==='boolean'?{deckyClientChecking}:{}), ...(typeof deckyClientVerified==='boolean'?{deckyClientVerified}:{}), ...(typeof deckyClientState==='string'?{deckyClientState}:{}), ...(deckyQamPanelState?{deckyQamPanelState}:{}), ...(observedAccount?{observedAccount}:{}), deckyAccountWatchAvailable, mode, rawMode: Number.isInteger(raw) ? raw : null, modeEpoch: watch.active ? watch.id + ':' + watch.entries : '', ...(deckyUpdateResidue?{deckyUpdateResidue}:{}), ...(deckyEmptyFrontend?{deckyEmptyFrontend}:{}), ...(typeof deckyFrontendLoaded === 'boolean'?{deckyFrontendLoaded}:{}), mutated: false, via: 'live' };
     }
     // Steam sleep captures bind the account only through this fixed read.
     // Native code pins the verified Steam PID/birth/root and never uses this to
@@ -418,7 +424,8 @@ R"YMSTEAM(kyHooksInstalled}:{}), ...(typeof deckyClientConnected==='boolean'?{de
           try { window.removeEventListener('pagehide', lease.pagehide); lease.listening = false; } catch { clean = false; }
         }
         if (lease.handle) {
-          try { lease.handle.Unregister(); lease.handle = null; } catch { clean = false; }
+          try { lease.handle.Unregister(); lease.handle = nu)YMSTEAM"
+R"YMSTEAM(ll; } catch { clean = false; }
         }
         if (Array.isArray(callbacks)) {
           try {
@@ -428,8 +435,7 @@ R"YMSTEAM(kyHooksInstalled}:{}), ...(typeof deckyClientConnected==='boolean'?{de
         }
         try {
           const currentAction = manager && Object.getOwnPropertyDescriptor(manager, 'OnButtonActionInternal');
-          if (lease.wrapper && currentAction && 'value' in currentAction && currentAct)YMSTEAM"
-R"YMSTEAM(ion.value === lease.wrapper &&
+          if (lease.wrapper && currentAction && 'value' in currentAction && currentAction.value === lease.wrapper &&
               currentAction.writable === true && currentAction.configurable === true && currentAction.enumerable === actionDescriptor.enumerable) {
             if (actionOwner === manager && actionDescriptor) Object.defineProperty(manager, 'OnButtonActionInternal', actionDescriptor);
             else if (!delete manager.OnButtonActionInternal) clean = false;
@@ -555,7 +561,8 @@ R"YMSTEAM(ion.value === lease.wrapper &&
       }
       const receipt = lease.receipt();
       if ((request.enabled && !receipt.enabled) || (!request.enabled && lease.blockedDown.size > 0 && !receipt.releasing)) {
-        if (!lease.dispose()) fail('gamepad-lease-cleanup-failed');
+        if (!lease.)YMSTEAM"
+R"YMSTEAM(dispose()) fail('gamepad-lease-cleanup-failed');
         fail('gamepad-lease-expired');
       }
       return { ok: true, mutated, stage, ...receipt };
@@ -568,8 +575,7 @@ R"YMSTEAM(ion.value === lease.wrapper &&
       stage = 'apps-api-contract-read';
       return readFixedApiDescriptors(true);
     }
-    // One )YMSTEAM"
-R"YMSTEAM(fixed diagnostic catalog; no caller names/paths/code or PID payload.
+    // One fixed diagnostic catalog; no caller names/paths/code or PID payload.
     // Reflection may execute Proxy traps. ownPropertyNames allocates its complete
     // returned list; only our visits/output below are bounded, not that intrinsic.
     function readFixedApiDescriptors(contractOnly) {
@@ -668,7 +674,8 @@ R"YMSTEAM(fixed diagnostic catalog; no caller names/paths/code or PID payload.
               try { item = Object.getOwnPropertyDescriptor(cursor, name); }
               catch { reflectionUnknown = true; summary.status = 'partial'; summary.reason = 'descriptor-threw'; continue; }
               if (!item) { reflectionUnknown = true; summary.status = 'partial'; summary.reason = 'descriptor-disappeared'; continue; }
-              const row = describe(label, name, item, depth); rowCount++; summary.rows.push(row); rows.push(row);
+              const row = describe(label, name, item, depth); rowCount++; summary.rows.pus)YMSTEAM"
+R"YMSTEAM(h(row); rows.push(row);
             }
             if (index < names.length) { summary.truncated = true; summary.hasMore = true; summary.status = 'partial'; summary.reason = budgetReason(); break; }
             if (depth + 1 < maxDepth) {
@@ -677,8 +684,7 @@ R"YMSTEAM(fixed diagnostic catalog; no caller names/paths/code or PID payload.
             }
           }
         }
-        if (object && !contractOnly) {)YMSTEAM"
-R"YMSTEAM(
+        if (object && !contractOnly) {
           // namesVisited counts every consumed sequence position, including
           // filtered/shadowed names, so row limits never create continuation gaps.
           const continuationUnknown = reflectionUnknown || summary.status === 'uninspectable' ||
@@ -770,14 +776,14 @@ R"YMSTEAM(
         const nav=probe(()=>typeof manager?.GetActiveContext==='function'?manager.GetActiveContext():null);
         const root=probe(()=>nav?.RootWindow),params=probe(()=>active?.params);
         const route=probe(()=>active?.LocationPathName),visibility=probe(()=>document?.visibilityState);
-        // Reading DesktopOverlay would lazily construct the store. Observe only
+        // Reading DesktopOverlay would lazily construct the )YMSTEAM"
+R"YMSTEAM(store. Observe only
         // an existing store; never create it or register Overlay callbacks.
         const desktop=probe(()=>active?.m_DesktopOverlay);
         const gameid=probe(()=>params?.gameid),pid=probe(()=>params?.browserInfo?.m_unPID);
         return {authority:'diagnostic-only-no-admission',source:'valve-navigation-cache-and-browser-dom',
           navigationContextObserved:nav!=null,rootMatchesBrowser:root!=null&&browser!=null?root===browser:null,
-         )YMSTEAM"
-R"YMSTEAM( navigationActive:bool(()=>nav?.BIsActive?.()),browserObserved:browser!=null,browserClosed:bool(()=>browser?.closed),
+          navigationActive:bool(()=>nav?.BIsActive?.()),browserObserved:browser!=null,browserClosed:bool(()=>browser?.closed),
           documentVisibility:visibility==='visible'||visibility==='hidden'?visibility:'unknown',documentFocused:bool(()=>document?.hasFocus?.()),
           routeKind:route==='/apprunning'?'app-running':typeof route==='string'?'other':'unknown',
           windowAppid:canonical(probe(()=>params?.appid)),browserAppid:canonical(probe(()=>params?.browserInfo?.m_unAppID)),
@@ -857,11 +863,11 @@ R"YMSTEAM( navigationActive:bool(()=>nav?.BIsActive?.()),browserObserved:browser
               const queries=controllers.slice(0,2).map(async c=>{
                 try{const info=await SteamClient.Input.GetConfigForAppAndController(found.overview.appid??found.key,c.index);
                   const url=typeof info?.URL==='string'?info.URL:null;let hash=null;if(url!==null){hash=2166136261;for(let n=0;n<url.length;n++)hash=Math.imul(hash^url.charCodeAt(n),16777619)>>>0;}
-                  return {appid:ids[0],index:c.index,status:info?'available':'unavailable',urlIdentity:hash,urlKind:url===null?'unknown':/(?:^|[\\/])empty\.vdf$/i.test(url)?'empty-or-passthrough':'configured',selectionType:num(info?.eSelectionType)};
+)YMSTEAM"
+R"YMSTEAM(                  return {appid:ids[0],index:c.index,status:info?'available':'unavailable',urlIdentity:hash,urlKind:url===null?'unknown':/(?:^|[\\/])empty\.vdf$/i.test(url)?'empty-or-passthrough':'configured',selectionType:num(info?.eSelectionType)};
                 }catch{return {appid:ids[0],index:c.index,status:'unavailable'}}
               });
-              try{configQueries.push(...await bounded(Promise.all(queries)))}catch{configQueries.push({appid:ids[0],status:'t)YMSTEAM"
-R"YMSTEAM(imeout'})}
+              try{configQueries.push(...await bounded(Promise.all(queries)))}catch{configQueries.push({appid:ids[0],status:'timeout'})}
             }
           }
         };
@@ -958,13 +964,13 @@ R"YMSTEAM(imeout'})}
           // create VR windows; neither they nor navigation/native calls belong here.
           if(!ws||dataField(ui,'m_WindowStore')!==ws)return unknown('window-store-unavailable');
           let method=null,owner=ws;
-          for(let i=0;i<5&&owner;i++,owner=Object.getPrototypeOf(owner)){
+     )YMSTEAM"
+R"YMSTEAM(     for(let i=0;i<5&&owner;i++,owner=Object.getPrototypeOf(owner)){
             const d=Object.getOwnPropertyDescriptor(owner,'GetOverlayInstances');
             if(d){if('value' in d&&typeof d.value==='function')method=d.value;break;}
           }
           const expected='GetOverlayInstances(Zt){let Nt=Array.from(this.m_mapOverlayPopupByPID.values()).reverse();return Nt=Nt.filter(Er=>Er.params.browserInfo.m_unAppID==Zt),Nt}';
-          if(!method||Function.prototype.to)YMSTEAM"
-R"YMSTEAM(String.call(method).trim()!==expected)return unknown('getter-source-unverified');
+          if(!method||Function.prototype.toString.call(method).trim()!==expected)return unknown('getter-source-unverified');
           result.sourceMatched=true;
           const cache=dataField(ws,'m_mapOverlayPopupByPID'),sizeGet=Object.getOwnPropertyDescriptor(Map.prototype,'size').get;
           let data=cache,wrapped=false,size;
@@ -1065,7 +1071,8 @@ R"YMSTEAM(String.call(method).trim()!==expected)return unknown('getter-source-un
           const tailCheck=entries=>{
             limit();const target=entries.find(entry=>entry.key===targetKey);
             if(!target){if(Map.prototype.has.call(map,targetKey))reject('cache-changed');return;}
-            if(Map.prototype.get.call(map,targetKey)!==target.row)reject('cache-changed');
+            if(Map.prot)YMSTEAM"
+R"YMSTEAM(otype.get.call(map,targetKey)!==target.row)reject('cache-changed');
             for(let i=0;i<names.length;i++){
               const d=Object.getOwnPropertyDescriptor(target.row,names[i]);
               if(!d||!('value' in d)||!Object.is(d.value,target.raw[i]))reject('cache-changed');
@@ -1073,8 +1080,7 @@ R"YMSTEAM(String.call(method).trim()!==expected)return unknown('getter-source-un
           };
           const take=()=>{
             limit();const entries=[],iterator=Map.prototype.entries.call(map);
-            const next=Object.getOwnPropertyDescriptor(O)YMSTEAM"
-R"YMSTEAM(bject.getPrototypeOf(iterator),'next')?.value;
+            const next=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(iterator),'next')?.value;
             if(typeof next!=='function'||!Function.prototype.toString.call(next).includes('[native code]'))reject('map-brand-unqualified');
             for(let count=0;;count++){
               limit();const item=Reflect.apply(next,iterator,[]);
@@ -1179,13 +1185,13 @@ R"YMSTEAM(bject.getPrototypeOf(iterator),'next')?.value;
         result.observerInstalled=!!watch.active;
         result.observerInstanceId=typeof watch.id==='string'?watch.id:null;
         const diagnosticCount=value=>Number.isSafeInteger(value)&&value>=0?value:null;
-        result.observerCreatedAtUnixMs=diagnosticCount(watch.createdAtUnixMs);
+   )YMSTEAM"
+R"YMSTEAM(     result.observerCreatedAtUnixMs=diagnosticCount(watch.createdAtUnixMs);
         result.diagnosticCountersAvailable=watch.diagnosticCountersVersion===1&&
           [watch.rawCallbacksEntered,watch.accountUnavailableCallbacks,watch.accountMismatchCallbacks,watch.schemaInvalidEvents].every(value=>diagnosticCount(value)!==null);
         if(result.diagnosticCountersAvailable){
           result.rawCallbacksEntered=watch.rawCallbacksEntered;
-          result.accountUnavaila)YMSTEAM"
-R"YMSTEAM(bleCallbacks=watch.accountUnavailableCallbacks;
+          result.accountUnavailableCallbacks=watch.accountUnavailableCallbacks;
           result.accountMismatchCallbacks=watch.accountMismatchCallbacks;
         }
         result.subscriptionUnregisterAvailable=!!watch.unregisterAvailable;
@@ -1264,11 +1270,11 @@ R"YMSTEAM(bleCallbacks=watch.accountUnavailableCallbacks;
         // numeric code nor a settled call proves original-window/input success.
         const nativeNumber=typeof nativeValue==='number'&&Number.isInteger(nativeValue)&&nativeValue>=0&&nativeValue<=0xffffffff;
         const nativeBoolean=typeof nativeValue==='boolean';
-        const nativeReturn=settledNativeReturn={source:'SteamClient.Apps.RaiseWindowForGame',kind:nativeNumber?'uint32':nativeBoolean?'boolean':typeof nativeValue==='undefined'?'undefined':'unsupported',
+       )YMSTEAM"
+R"YMSTEAM( const nativeReturn=settledNativeReturn={source:'SteamClient.Apps.RaiseWindowForGame',kind:nativeNumber?'uint32':nativeBoolean?'boolean':typeof nativeValue==='undefined'?'undefined':'unsupported',
           observed:nativeNumber||nativeBoolean,code:nativeNumber?nativeValue:null,booleanValue:nativeBoolean?nativeValue:null,
           authority:'diagnostic-only-no-admission',nativeMeaningVerified:false,gameInputVerified:false,continueVerified:false};
-        // FocusedAppWi)YMSTEAM"
-R"YMSTEAM(ndowStore is only a UI cache, not active Steam Input or
+        // FocusedAppWindowStore is only a UI cache, not active Steam Input or
         // the original-PID contract. Do not delay native OS-PID postflight on
         // its 3s readback loop; take an auxiliary fresh snapshot immediately.
         // Delayed cache catch-up belongs to bounded read-only wake observation.
@@ -1341,12 +1347,12 @@ R"YMSTEAM(ndowStore is only a UI cache, not active Steam Input or
         const accepted=contactIdentityStable&&after.overviews.every(o=>o.overviewAvailable&&o.localRunning&&o.inRunningList);
         const contactAccepted=contactRequested&&contactTargetValid&&accepted;
         return {ok:accepted,mutated,stage,reason:accepted?'steam-association-current':contactTargetValid?'steam-contact-rescope-not-confirmed':'steam-rescope-not-confirmed',
-          refreshed:missing,runtimeAccepted:accepted,rescopeContract,contactRecovery:{requested:contactRequested,proofAccepted:contactTargetValid,accepted:contactAccepted,readOnly:true},before,after,gameInput:'unknown',healthVerified:false};
+          refreshed:missing,runtimeAccepte)YMSTEAM"
+R"YMSTEAM(d:accepted,rescopeContract,contactRecovery:{requested:contactRequested,proofAccepted:contactTargetValid,accepted:contactAccepted,readOnly:true},before,after,gameInput:'unknown',healthVerified:false};
       }
       let overlayEnabled=null;try{const v=window.settingsStore?.GetClientSetting('enable_overlay')?.[0];overlayEnabled=typeof v==='boolean'?v:null}catch{}
       // Persistent association reads do not spend their independent 2s lane on
-      // controller configuratio)YMSTEAM"
-R"YMSTEAM(n RPCs. Sleep/input inspection retains those RPCs.
+      // controller configuration RPCs. Sleep/input inspection retains those RPCs.
       const inputContext=await inputSnapshot(request.runningLinkRead!==true,{passiveInspect:request.operation==='sleep.inspect'});const controllers=inputContext.controllers;
       // Install the lifecycle observer before the focus callback can yield; its
       // bounded ring is what preserves edges across later sleep/wake reads.
@@ -1409,7 +1415,8 @@ R"YMSTEAM(n RPCs. Sleep/input inspection retains those RPCs.
           if(window.__ymccMenuGameAlias!==entry||entry.disposed){nativeStop('owner-or-menu-ended');return false;}
           return true;
         }catch{nativeStop('observation-unavailable');return false;}
-      };
+     )YMSTEAM"
+R"YMSTEAM( };
       const armNative=()=>{
         if(nativeAttempted||entry.disposed||window.__ymccMenuGameAlias!==entry)return;
         nativeAttempted=true;
@@ -1418,8 +1425,7 @@ R"YMSTEAM(n RPCs. Sleep/input inspection retains those RPCs.
           if(!Number.isFinite(nativeStart)){nativeReason='clock-unavailable';nativeStatus='stopped';return;}
           nativeElapsed=0;nativeStatus='observing';nativeReason='original-call-window';
           armActivation();
-        }catch{nativeStatus='stopped';nativeReas)YMSTEAM"
-R"YMSTEAM(on='clock-unavailable';}
+        }catch{nativeStatus='stopped';nativeReason='clock-unavailable';}
       };
       const nativeCall=(kind,path,self,id,value,result,threw=false)=>{
         if(!nativeLive())return;
@@ -1534,13 +1540,13 @@ R"YMSTEAM(on='clock-unavailable';}
           ++activationCallbacks;
           const validPid=Number.isInteger(pid)&&pid>=0&&pid<=0xffffffff;
           const validApp=Number.isInteger(appid)&&appid>=-0x80000000&&appid<=0xffffffff;
-          const unsigned=validApp?appid>>>0:null;
+          const unsigned=)YMSTEAM"
+R"YMSTEAM(validApp?appid>>>0:null;
           if(!validPid||!validApp||pid!==proof.hostPid||unsigned!==proof.appid&&unsigned!==proof.registeredAppid)++activationIgnored;
           else{
             const type=value=>value===null?'null':['undefined','boolean','number','string'].includes(typeof value)?typeof value:'other';
             if(typeof active!=='boolean'||typeof fourth!=='boolean')++activationInvalid;
-            activationEvents.push(Object.freeze({ordinal:activationEvents.)YMSTEAM"
-R"YMSTEAM(length+1,elapsedMs:activationElapsed,
+            activationEvents.push(Object.freeze({ordinal:activationEvents.length+1,elapsedMs:activationElapsed,
               pid,appidRaw:appid,appid:unsigned,appidRole:unsigned===proof.appid?'logical':'registered',
               active:typeof active==='boolean'?active:null,fourth:typeof fourth==='boolean'?fourth:null,
               activeType:type(active),fourthType:type(fourth)}));
@@ -1648,7 +1654,8 @@ R"YMSTEAM(length+1,elapsedMs:activationElapsed,
           const item=hooks[n];if(item.done)continue;
           try{
             const d=Object.getOwnPropertyDescriptor(item.object,item.key);
-            if(item.before?same(d,item.before):d===undefined){
+            if(item.before?same(d,i)YMSTEAM"
+R"YMSTEAM(tem.before):d===undefined){
               item.notInstalled=!item.wasInstalled;item.returned=true;item.done=true;continue;
             }
             if(!same(d,item.installed)){
@@ -1657,8 +1664,7 @@ R"YMSTEAM(length+1,elapsedMs:activationElapsed,
               item.foreign=true;item.done=true;continue;
             }
             item.wasInstalled=true;
-            if(item.before)YMSTEAM"
-R"YMSTEAM()Object.defineProperty(item.object,item.key,item.before);
+            if(item.before)Object.defineProperty(item.object,item.key,item.before);
             else delete item.object[item.key];
             const after=Object.getOwnPropertyDescriptor(item.object,item.key);
             if(item.before?same(after,item.before):after===undefined){item.done=true;item.restored=true;item.returned=true;}
@@ -1781,13 +1787,13 @@ R"YMSTEAM()Object.defineProperty(item.object,item.key,item.before);
         try{
           if(window.__ymccMenuGameAlias!==entry||!entry.current()||!game.current()||entry.disposed)
             throw new Error('trace-owner');
-          ui=window.SteamUIStore;manager=ui?.NavigationManager;
+          ui=window.SteamUIStore;manager=ui?.NavigationManage)YMSTEAM"
+R"YMSTEAM(r;
           if(!manager||data(ui,'m_GamepadNavigationManager')!==manager)throw new Error('trace-manager');
           getContext=method(w,'GetFocusNavContext');getActive=method(manager,'GetActiveContext');
           if(!exact(getContext,'GetFocusNavContext')||!exact(getActive,'GetActiveContext'))throw new Error('trace-profile');
           context=Reflect.apply(getContext,w,[]);contexts=data(manager,'m_rgAllContexts');
-          sources=data(manager,'m_rgGamepadInputSourc)YMSTEAM"
-R"YMSTEAM(es');
+          sources=data(manager,'m_rgGamepadInputSources');
           if(!context||!Array.isArray(contexts)||contexts.length>32||!Array.isArray(sources)||sources.length>64)
             throw new Error('trace-arrays');
           sourceItems=[];const matches=[];
@@ -1890,13 +1896,13 @@ R"YMSTEAM(es');
     const installMenuGameAlias = (receiver, proof) => {
       const old=window.__ymccMenuGameAlias;
       if(proof.gameid64===proof.registeredGameid64){if(old){mutated=true;old.dispose?.(true);}return null;}
-      const w=receiver.window,game=receiver.game,api=SteamClient.Overlay,store=window.overlayStore,map=store?.m_mapBrowserInfo;
+      const w=receiver.window,game=receiver.game,api=SteamClient.O)YMSTEAM"
+R"YMSTEAM(verlay,store=window.overlayStore,map=store?.m_mapBrowserInfo;
       const cacheCurrent=()=>{
         if(window.overlayStore!==store||store?.m_mapBrowserInfo!==map||typeof map?.values!=='function'||map.size>16)return false;
         const matches=Array.from(map.values()).filter(r=>r?.m_gameID===proof.registeredGameid64);
         if(matches.length!==1)return false;const r=matches[0];
-        return r.m_unPID===proof.hostPid&&r.m_nBrowserID===proof.browserId&&r.m_unAppID===p)YMSTEAM"
-R"YMSTEAM(roof.registeredAppid&&r.m_eBrowserType===0&&r.m_eUIMode===4;
+        return r.m_unPID===proof.hostPid&&r.m_nBrowserID===proof.browserId&&r.m_unAppID===proof.registeredAppid&&r.m_eBrowserType===0&&r.m_eUIMode===4;
       };
       if(!cacheCurrent())fail('steam-menu-game-native-cache-changed');
       if(old?.inputLookupVersion===1 && old.window===w && old.logical===game.logical && old.registered===game.registered && old.current?.())return old;
@@ -1975,6 +1981,7 @@ R"YMSTEAM(roof.registeredAppid&&r.m_eBrowserType===0&&r.m_eUIMode===4;
         // already be retired; a new/duplicate host never inherits this write.
         try{
         if(release&&api.SetOverlayState===entry.wrapper&&entry.lastState!==null&&entry.lastState!==0&&cacheCurrent()&&
+           game.registrationUncontested()&&
            window.settingsStore?.m_CMInterface?.steamid?.GetAccountID?.()===proof.account&&
            window.SteamUIStore?.WindowStore?.GetInstanceForPID?.(proof.hostPid)===w){
           try{original.call(api,entry.registered,0);}catch{}
@@ -2001,15 +2008,15 @@ R"YMSTEAM(roof.registeredAppid&&r.m_eBrowserType===0&&r.m_eUIMode===4;
           // pure original reads; no new subscription or composition request.
           if(id!==entry.logical&&id!==w.MainRunningApp?.gameid)return result;
           const menu=w.MenuStore.GetOpenSideMenu();
-          // A shared Steam screensaver/opaque request may arrive after this
+          // A shared Steam screensaver/opaque request may arrive af)YMSTEAM"
+R"YMSTEAM(ter this
           // window's side menu has closed. End our menu-only ownership here;
           // never mirror that fullscreen state into the game's registration.
           if(menu===0&&entry.activated){entry.submit(0);entry.dispose(false);return result;}
           if(![1,2].includes(menu)||state!==2)return result;
           const cs=w.CompositionStateStore;
           if(typeof cs?.ComputeOverallMinimumRequestedComposition!=='function'||
-             typeof cs.GetOverridingComposition!=='function')return result;)YMSTEAM"
-R"YMSTEAM(
+             typeof cs.GetOverridingComposition!=='function')return result;
           const desired=cs.GetOverridingComposition()??cs.ComputeOverallMinimumRequestedComposition();
           if(state!==desired)return result;
           entry.submit(state);
@@ -2031,7 +2038,7 @@ R"YMSTEAM(
 
     // The native caller pins the elected foreground game, Steam, and this exact
     // overlay host until the request ends. IDs alone never authorize routing.
-    const menuGameReceiver = async (handler, proof, trace) => {
+    const menuGameReceiver = async (handler, proof, trace, restoreMissing = false) => {
       const uint32 = v => Number.isInteger(v) && v > 0 && v <= 0xffffffff;
       const decimal = v => typeof v === 'string' && /^[1-9][0-9]{0,19}$/.test(v) && BigInt(v) <= 0xffffffffffffffffn;
       if (!proof || proof.version !== 1 ||
@@ -2050,6 +2057,11 @@ R"YMSTEAM(
       const ui=window.SteamUIStore,windows=ui?.WindowStore,apps=window.appStore?.m_mapApps;
       const account=window.settingsStore?.m_CMInterface?.steamid;
       const a=apps?.get?.(appid),b=apps?.get?.(appid|0),overview=a||b;
+      // The registered browser ID may be a base app ID. Do not mirror menu
+      // state to it if Steam is also running that app independently.
+      const registrationUncontested=()=>!base||exact||short||(
+        window.SteamUIStore===ui&&Array.isArray(ui?.m_runningAppIDs)&&
+        !ui.m_runningAppIDs.some(id=>Number.isInteger(id)&&(id>>>0)===proof.registeredAppid));
       // Record only the first failed, already-evaluated preflight predicate.
       // Later ownership checks use the same reads without changing action stage.
       let contextFailure=null;
@@ -2067,7 +2079,8 @@ R"YMSTEAM(
         ((((overview.app_type&0x40000000)!==0)===shortcut)||rejectedContext('menu-game-app-kind',diagnose)) &&
         ([1,4].includes(overview?.local_per_client_data?.display_status)||rejectedContext('menu-game-display-status',diagnose)) &&
         (Array.isArray(ui?.m_runningAppIDs)||rejectedContext('menu-game-running-list',diagnose)) &&
-        (ui.m_runningAppIDs.some(id=>Number.isInteger(id)&&(id>>>0)===appid)||rejectedContext('menu-game-running-app',diagnose));
+         (ui.m_runningAppIDs.some(id=>Number.isInteger(id)&&(id>>>0)===appid)||rejectedContext('menu-game-running-app',diagnose)) &&
+         (registrationUncontested()||rejectedContext('menu-game-registered-app-running',diagnose));
       if(!accountCurrent(true)||!overviewCurrent(true)||(a&&b&&a!==b)){
         stage=contextFailure||'menu-game-original-alias';fail('steam-menu-game-context-changed');
       }
@@ -2078,14 +2091,48 @@ R"YMSTEAM(
       const row=same[0];
       if(row.unPID!==proof.hostPid || row.nBrowserID!==proof.browserId || row.appID!==proof.registeredAppid || row.eBrowserType!==0 || row.eUIMode!==4)
         fail('steam-menu-game-registration-changed');
-      const w=windows?.GetInstanceForPID?.(proof.hostPid),p=w?.params,info=p?.browserInfo;
-      const current=()=>window.SteamUIStore===ui && ui.WindowStore===windows && accountCurrent() && overviewCurrent() &&
+      const ownersCurrent=()=>window.SteamUIStore===ui && ui.WindowStore===windows && accountCurrent() && overviewCurrent();
+      let w=windows?.GetInstanceForPID?.(proof.hostPid);
+      if(w==null&&restoreMissing){
+        // Steam can retain a native overlay registration and its cached row
+        // without a WindowStore receiver. Use only the original per-browser
+        // creation handler, never the global overlay or JS-context rebuild.
+        const store=window.overlayStore, cache=store?.m_mapBrowserInfo, create=windows?.OnOverlayBrowserCreated;
+        const main=windows?.GamepadUIMainWindowInstance;
+        // Valve's constructor uses the live main mode, not the overlay cache's mode.
+        if(ui.MainInstanceUIMode!==4||store?.m_eUIMode!==4||store.m_bVRMode!==false||!main||main.IsAnyVRWindow?.()!==false||
+           windows.BHasVRMainWindow?.()!==false||ui.GetShowingLockScreen?.()!==false||typeof create!=='function'||
+           !Number.isInteger(cache?.size)||cache.size<1||cache.size>16||typeof cache.values!=='function'||
+           rows.filter(r=>r?.unPID===proof.hostPid).length!==1||
+           ![row.nScreenWidth,row.nScreenHeight].every(x=>Number.isInteger(x)&&x>0&&x<=32768)||
+           !Number.isFinite(row.flDisplayScale)||row.flDisplayScale<=0||row.flDisplayScale>8)
+          fail('steam-menu-game-overlay-repair-unavailable');
+        const cached=Array.from(cache.values()).filter(r=>r?.m_unPID===proof.hostPid);
+        const matches=r=>r?.m_unPID===proof.hostPid&&r.m_nBrowserID===proof.browserId&&
+          r.m_unAppID===proof.registeredAppid&&r.m_gameID===proof.registere)YMSTEAM"
+R"YMSTEAM(dGameid64&&r.m_eBrowserType===0&&r.m_eUIMode===4;
+        if(cached.length!==1||!matches(cached[0])||!ownersCurrent()||window.overlayStore!==store||
+           store.m_mapBrowserInfo!==cache||store.m_eUIMode!==4||store.m_bVRMode!==false||
+           windows.GamepadUIMainWindowInstance!==main||windows.OnOverlayBrowserCreated!==create||
+           ui.GetShowingLockScreen?.()!==false||windows.GetInstanceForPID(proof.hostPid)!=null||ui.MainInstanceUIMode!==4)
+          fail('steam-menu-game-overlay-repair-context-changed');
+        const data={m_unPID:row.unPID,m_nBrowserID:row.nBrowserID,m_unAppID:row.appID,
+          m_gameID:row.gameID,m_eBrowserType:row.eBrowserType,m_eUIMode:row.eUIMode};
+        stage='menu-game-overlay-create';mutated=true;
+        const created=create.call(windows,data,row.nScreenWidth,row.nScreenHeight,row.flDisplayScale);
+        if(created!==undefined)fail('steam-menu-game-overlay-repair-uncertain');
+        w=windows.GetInstanceForPID(proof.hostPid);
+        if(!w)fail('steam-menu-game-overlay-repair-unconfirmed');
+        trace.overlayRepair='created-missing-receiver';
+      }
+      const p=w?.params,info=p?.browserInfo;
+      const current=()=>ownersCurrent() &&
         windows.GetInstanceForPID(proof.hostPid)===w && w?.IsGamepadUIOverlayWindow?.()===true && !w.IsAnyVRWindow?.() && !ui.GetShowingLockScreen?.() &&
         w.params===p && p.appid===proof.registeredAppid && p.gameid===proof.registeredGameid64 && p.browserInfo===info &&
         info?.m_unPID===proof.hostPid && info.m_nBrowserID===proof.browserId && info.m_unAppID===proof.registeredAppid && info.m_gameID===proof.registeredGameid64;
       if(!current()||typeof w[handler]!=='function')fail('steam-menu-game-window-changed');
       trace.version=3;trace.lookup='proven-game-overlay-selected';trace.identity=exact?'exact-gameid-confirmed':'native-registration-alias';
-      const receiver={window:w,source:'steam-proven-game-overlay',game:{current,appid,registeredAppid:proof.registeredAppid,registered:proof.registeredGameid64,logical:proof.gameid64}};
+      const receiver={window:w,source:'steam-proven-game-overlay',game:{current,registrationUncontested,appid,registeredAppid:proof.registeredAppid,registered:proof.registeredGameid64,logical:proof.gameid64}};
       receiver.game.entry=installMenuGameAlias(receiver,proof);
       return receiver;
     };
@@ -2107,8 +2154,7 @@ R"YMSTEAM(
          (previous.appid>>>0)!==previousId||previous.local_per_client_data?.display_status!==11)return;
       const cs=w.CompositionStateStore,navigate=w.NavigateToRunningApp;
       if(w.MenuStore?.GetOpenSideMenu?.()!==0||cs?.GetCompositionState?.()!==3||
-         cs.GetOverridingComposition?.()!==null||w.GetShowingGlobalModal?.()!==fa)YMSTEAM"
-R"YMSTEAM(lse||
+         cs.GetOverridingComposition?.()!==null||w.GetShowingGlobalModal?.()!==false||
          w.m_VirtualKeyboardManager?.IsShowingVirtualKeyboard?.Value!==false||
          w.HeaderStore?.GetForceHeaderAfterResume?.()!==false||w.BCanNavigate?.()!==true||
          typeof navigate!=="function")return;
@@ -2145,7 +2191,8 @@ R"YMSTEAM(lse||
         const expected={"GetEventTarget":"GetEventTarget(Zt,sr,lr=!1){let Rr=this.GetActiveContext();if(this.m_nSystemKeyAppIDHint&&!Rr?.FindNavTreeInFocusedWindow()){const mi=this.m_fnSystemKeyContextResolver?.(this.m_nSystemKeyAppIDHint);mi&&mi!=Rr&&this.BCanActivateContext(mi)&&(he(`GetEventTarget: using ${mi.LogName()} for system key AppID ${this.m_nSystemKeyAppIDHint} instead of ${Rr?.LogName()??\"no context\"}`),Rr?.ActiveWindow&&Rr.OnDeactivate(Rr.ActiveWindow),mi.OnActivate(mi.m_LastActiveFocusNavTree?.Window??mi.RootWindow),Rr=mi)}!Rr&&lr&&(Rr=this.FindAnActiveContext());let Ai=Rr?.ActiveWindow?.document.activeElement;if(Rr?.m_LastActiveNavTree){if(sr||(sr=this.m_navigationSource?.Value?.eActivationSourceType),!Rr.m_LastActiveNavTree.GetLastFocusedNode()&&(0,n.UE)(sr)&&(he(`GetEventTarget: Context ${Rr.LogName()} tree ${Rr.m_LastActiveNavTree.id} has no focused node, ${lr?\"finding one\":\"will not find one\"}`),lr&&Rr.m_LastActiveNavTree.TakeFocus(w.D$.GAMEPAD,!0),!this.BGlobalGamepadButton(Zt)))return[void 0,Rr];Rr.m_LastActiveNavTree.GetLastFocusedNode()?Ai=Rr.m_LastActiveNavTree?.GetLastFocusedNode()?.Element:he(`GetEventTarget: Context ${Rr.LogName()} tree ${Rr.m_LastActiveNavTree.id} still has no focused node - will fall back to document.activeElement`)}return[Ai,Rr]}","SetSystemKeyAppIDHint":"SetSystemKeyAppIDHint(Zt){this.m_nSystemKeyAppIDHint=Zt}","GetActiveContext":"GetActiveContext(){return this.m_ActiveContext}","BCanActivateContext":"BCanActivateContext(Zt){return!(!Zt||this.BHasVRGamepadNavigationContext()&&!Zt.BIsVR())}","GetFocusNavContext":"GetFocusNavContext(){return this.IsVRGamepadUIOverlayWindow()?l.oy.WindowStore.VRGamepadUIMainWindowInstance.GetFocusNavContext():l.oy.NavigationManager.FindContextForRootWindow(this.m_BrowserWindow)}","resolver":"sr=>this.WindowStore.GetOverlayInstances(sr).find(lr=>lr.IsGamepadUIOverlayWindow())?.GetFocusNavContext()"};
         for(const key of ['GetEventTarget','SetSystemKeyAppIDHint','GetActiveContext','BCanActivateContext']){
           if(typeof manager[key]!=='function'||Function.prototype.toString.call(manager[key])!==expected[key])
-            return skip('manager-source-unverified');
+            return skip('manager-so)YMSTEAM"
+R"YMSTEAM(urce-unverified');
         }
         const calls=Object.fromEntries(['GetEventTarget','SetSystemKeyAppIDHint','GetActiveContext','BCanActivateContext'].map(key=>[key,manager[key]]));
         const resolver=manager.m_fnSystemKeyContextResolver;
@@ -2190,8 +2237,7 @@ R"YMSTEAM(lse||
           manager.m_fnSystemKeyContextResolver===resolver&&
           Object.entries(calls).every(([key,value])=>manager[key]===value)&&
           dataField(manager,'m_rgCatchAllGamepadInput')===catches&&catches.length===0&&
-          dataField(manager,'m_rgAllContexts')===contexts&&contex)YMSTEAM"
-R"YMSTEAM(ts.filter(value=>value===context).length===1&&
+          dataField(manager,'m_rgAllContexts')===contexts&&contexts.filter(value=>value===context).length===1&&
           w.GetFocusNavContext()===context&&dataField(w,'m_FocusNavContext')===context&&
           dataField(context,'m_controller')===manager&&dataField(context,'m_bMounted')===true&&context.BIsVR?.()===false&&
           context.BIsGamepadInputSuppressed?.()===false&&manager.BCanActivateContext(context)===true&&game.current()&&game.entry.current();
@@ -2264,7 +2310,8 @@ R"YMSTEAM(ts.filter(value=>value===context).length===1&&
 
       try{
         if(!browserBefore?.known||!game.current()||!game.entry?.current?.())return skip('composition-owner-unavailable');
-        const ui=window.SteamUIStore,windows=ui?.WindowStore,cs=w.CompositionStateStore;
+        const ui=window.SteamUIStore,windows=ui?.WindowStore,cs=w.Composition)YMSTEAM"
+R"YMSTEAM(StateStore;
         const browser=w.BrowserWindow,info=w.params?.browserInfo,client=browser?.SteamClient,api=client?.Window;
         const set=api?.SetComposition,focus=windows?.GetAppFocusedWindowID;
         if(!browser||browser.browserInfo!==info||typeof set!=='function'||typeof focus!=='function'||
@@ -2308,8 +2355,7 @@ R"YMSTEAM(ts.filter(value=>value===context).length===1&&
         // A matching JS cache does not confirm native input handoff for the
         // observed short registration form. One explicit opening may reassert
         // this same held browser tuple; exact/base aliases and multiple games
-        // ret)YMSTEAM"
-R"YMSTEAM(ain the original zero-extra path. No queue or cache is rewritten.
+        // retain the original zero-extra path. No queue or cache is rewritten.
         // Reuse the primitive registration already bound to this held owner.
         // Observable params may use an accessor; final game.current() still
         // verifies its live value and the exact same parameter object.
@@ -2358,8 +2404,8 @@ R"YMSTEAM(ain the original zero-extra path. No queue or cache is rewritten.
     // from the window-focus coordinator; only the held active QAM popup may
     // reassert that original activation after the measured no-registration case.
     // Exact current React/Portal data only binds the observer. No callback or native focus is added.
-    const popupNativeFocusProfiles={"ye":"function Ye(nr){const{active:zt,embeddedView:ue,expanded:Qe,visible:mt,vr:Dt}=nr,$t=m.useRef(void 0),vr=(0,C.Dt)(nr.onFocusNavDeactivated),{onFocusNavActivated:Tr}=nr,Jr=m.useCallback(($r,ti)=>{for(let or=ti;!zt&&or;or=or.Parent)if(or===$r)return;Tr?.()},[zt,Tr]),Dr=m.useRef(void 0),Br=m.useRef(void 0),zr=(0,g.q3)(()=>Br.current?.BFocusWithin()??!1),pr=m.useCallback($r=>{zr&&ue&&Br.current.Node()?.GetLastFocusElement()?.scrollIntoView({behavior:\"auto\",inline:\"end\"})},[zr,ue,Br]),Wr=(0,ht.wY)(pr),kr=(0,C.Y$)(c.Ez.QuickAccess),xr=(0,He.fe)();m.useEffect(()=>{Dt||(zt?$t.current.Activate(!0):$t.current?.BIsActive()&&$t.current.Deactivate())},[zt,Dt]);const Ge=m.useCallback(()=>(Br.current.TakeFocus(),!0),[]),ie=m.useCallback(()=>(Dr.current.TakeFocus(),!0),[]),Re=(0,o.ch)(),Vt=(0,g.q3)(()=>Re.BQuickAccessContentFocusRequested());m.useEffect(()=>{if(!zt||!Vt)return;Re.SetQuickAccessContentFocusRequested(!1);const $r=Dr.current?.Node();$r?.Tree.DeferredFocus.RequestFocus($r,{bFocusDescendant:!0})},[zt,Vt,Re]);const Ct=ot(\"quick-access-menu\");let Pt=(0,c.i4)();const wt=(0,ct.Eb)();Pt=(0,g.q3)(()=>Ct.some(ti=>ti.key===Pt&&!jt(ti))?Pt:Ct.length>0?Ct[0].key:void 0);const dr=(0,O.A)(\"BasicUI\",xr,Z().Container,nr.visible&&Z().Open,Dt&&Z().BottomTabs,Dt&&Z().VR,wt&&Z().OOBE,Qe&&\"QAMFriendExpanded\",Qe&&Z().Expanded,nr.showHeaderAndFooter&&Z().HeaderAndFooterVisible);let ir=m.useCallback($r=>{$r.stopPropagation(),$r.preventDefault()},[]);const Kt=m.useCallback(()=>(Ge(),!0),[Ge]),Ir=(0,n.K1)();let Hr=(0,d.Qu)();const pi=(0,h.W6)(),Ei=m.useCallback(()=>{pi.replace(a.BV.GamepadUI.Keyboard())},[pi]),yi=m.useCallback(()=>{Ir(),Ei()},[Ir,Ei]);m.useEffect(()=>{Ge()},[Pt,Ge]);const Qi=(0,C.on)(),Xi=(0,O.A)(Z().QuickAccessMenu,nr.showHeaderAndFooter&&Z().HeaderAndFooterVisible),cn=(0,O.A)(Z().Tabs,nr.showHeaderAndFooter&&Z().TabsWithFooter),ln=(0,Xt.uw)(\"frame\"),Qr=(0,e.jsxs)(K.SR,{children:[(0,e.jsx)(st,{bQuickAccessMenuVisible:mt}),(0,e.jsxs)(M.g,{children:[(0,e.jsxs)(D.Z,{id:\"QuickAccess-Menu\",className:Xi,onClick:ir,children:[(0,e.jsx)(\"div\",{className:Z().HeaderContainer,children:(0,e.jsx)(i.hB,{quickAccessHeader:!0,visible:nr.showHeaderAndFooter})}),(0,e.jsxs)(D.Z,{className:Z().Menu,children:[(0,e.jsxs)(D.Z,{className:cn,ref:Wr,navRef:Br,autoFocus:!0,focusable:!1,onCancel:Dt?void 0:Ir,onActivate:ie,onMoveRight:ie,navEntryPreferPosition:y.iU.PREFERRED_CHILD,children:[(0,e.jsx)(cr,{tabs:Ct,activeTab:Pt,vr:Dt}),Hr&&!Dt&&(0,e.jsx)(D.Z,{className:Z().KeyboardButton,focusable:!0,onActivate:yi,children:(0,e.jsx)(R.ShowKeyboard,{})})]}),(0,e.jsx)(D.Z,{className:Z().PanelOuterNav,onMoveLeft:Dt?void 0:Kt,onMoveDown:Dt?Kt:void 0,onCancelButton:Dt?Ge:void 0,navRef:Dr,children:(0,e.jsx)(tt,{tabs:Ct,activeTab:Pt,bMenuVisible:mt})})]}),nr.showHeaderAndFooter&&(0,e.jsx)(Gt.w,{className:Z().Footer,location:\"quick-access\"})]}),!Dt&&(0,e.jsx)(Je.i,{bQAMVersion:!0})]})]});return Dt?(0,e.jsx)(D.Z,{className:dr,onMoveLeft:E.ru,onMoveRight:E.ru,children:Qr}):(0,e.jsx)(f.B2,{navID:\"QuickAccess-NA\",enabled:zt||kr,navTreeRef:$t,onActivated:Jr,onDeactivated:vr,autoFocus:!0,className:dr,onCancelButton:Ge,onGlobalButtonDown:Qi,...ln,children:nr.refModalManager?(0,e.jsx)(J,{refModalManager:nr.refModalManager,refContextMenuManager:nr.refContextMenuManager,children:Qr}):Qr})}","owner":"class Id{m_viewWindow;m_rootElement;m_renderWhenReady;m_bMounted=!1;m_browserView;m_browserViewName;m_DynamicCSSObserver;constructor(){}CreateView(E,T,L){const{name:R,strVROverlayKey:P,eCreationFlags:O}=T;this.m_browserView&&this.DestroyView();let v=L?.ownerWindow?.SteamClient.Browser.GetBrowserID(),z=\"BrowserViewPopup\";R?.length>0&&(z=R),v&&(z+=\"_uid\"+v),z=Id.GetUniqueBrowserViewName(z);const p={parentPopupBrowserID:v,strVROverlayKey:P,strName:z};let{strCreateURL:C,browserView:k}=SteamClient.BrowserView.CreatePopup(p);O&&(C+=\"&createflags=\"+O);let q=window.open(C,z,\"top=0,left=0,width=540,height=700,resizable=yes,status=0,toolbar=0,menubar=0,location=0\");if(!q){console.error(`Failed to create popup, browser/CEF may be blocking popups for \"${window.location.origin}\"`);return}q.document.write('<!DOCTYPE html><html ><head><title></title></head><body  style=\"overflow: hidden\"><div id=\"browserview_target\"></div></body></html>'),q.document.title=z,q.document.close();let V=q.document.getElementById(\"browserview_target\");q.addEventListener(\"unload\",this.OnUnload),this.m_viewWindow=q,this.m_rootE)YMSTEAM"
-R"YMSTEAM(lement=V,this.m_browserView=k,this.m_browserViewName=z,o.Oe(this.m_viewWindow,o.yU()),this.m_renderWhenReady=new n.Q(q.document,V),this.m_renderWhenReady.SetTarget(E)}DestroyView(){this.m_browserView&&(Id.DelayedReleaseBrowserViewName(this.m_browserViewName),SteamClient.BrowserView.Destroy(this.m_browserView),this.m_browserView=void 0),this.m_DynamicCSSObserver&&(this.m_DynamicCSSObserver.disconnect(),this.m_DynamicCSSObserver=void 0)}GetBrowserView(){return this.m_browserView}GetRenderElement(){return this.m_rootElement}GetViewWindow(){return this.m_viewWindow}OnUnload(){}static m_setActiveBrowserViewNames=new Set;static GetUniqueBrowserViewName(E){let T=E,L=0;for(;Id.m_setActiveBrowserViewNames.has(T);)T=`${E}_${L++}`;return Id.m_setActiveBrowserViewNames.add(T),T}static DelayedReleaseBrowserViewName(E){window.setTimeout(()=>Id.m_setActiveBrowserViewNames.delete(E),100)}}","focus":"()=>{j?.GetBrowserView().SetFocus(!0);const T=j?.GetViewWindow();T&&y?.OnActivate(T),I(),f.ToggleSideMenu(F,!0)}","subscriber":"($r,ti)=>{for(let or=ti;!zt&&or;or=or.Parent)if(or===$r)return;Tr?.()}","parent":"function(zt){const{active:ue}=zt,[Qe,mt]=m.useState(ue),Dt=Qe||ue;m.useEffect(()=>mt(ue),[ue]);const $t=(0,z.OU)(a.BV.GamepadUI.AppRunning());(0,i.iW)(Dt&&!$t,\"QuickAccessMenuBrowserView\");const vr=(0,L.Jo)({name:\"QuickAccess\"});(0,re.kV)(vr?.GetRenderElement()?.ownerDocument.defaultView);const Jr=(0,c.i4)()==c.qE.Friends,Dr=(0,g.q3)(()=>s.LN.qamFriendsExpanded)&&Jr,[Br,zr]=m.useState(null),[pr,Wr]=m.useState(null),kr=W(pr??void 0),xr=Dr||kr,{fnOnFocusNavActivated:Ge,fnOnFocusNavDeactivated:ie}=(0,C.k6)(c.Ez.QuickAccess,vr,Br??zt.ModalManager,xr&&pr||void 0);m.useEffect(()=>{ue||(pr?.ActiveMenu?.OnCancel(),Br?.CloseLegacyModals())},[ue,Br,pr]);const Re=(0,n.K1)();(0,s.PG)(vr?.GetViewWindow());const Vt=(0,pe.u6)(),Ct=(0,g.q3)(()=>lt.O.BKeyboardIMEVisible);if((0,C.Vs)(vr,ue),!vr)return null;const Pt={nDuration:300,fnStep:Lt},wt={nDuration:200,fnStep:vt};let dr=$t?\"transparent\":\"darkblur\",ir=(0,O.A)(Z().ViewPlaceholder,$t&&Z().FullHeight,xr&&Z().Expanded,Vt&&Z().OSKActive,Ct&&Z().IMEVisible,$t&&Z().HeaderAndFooterVisible);return(0,e.jsxs)(r.H,{appearance:dr,visible:Dt,onClick:Re,children:[(0,e.jsx)(L.m4,{className:ir,browser:vr.GetBrowserView(),visible:Dt,animateIn:Pt,animateOut:wt}),(0,e.jsx)(b.b5,{ownerWindow:vr.GetViewWindow(),children:w.createPortal((0,e.jsx)(Ye,{active:ue,visible:Dt,expanded:xr,showHeaderAndFooter:$t,onFocusNavActivated:Ge,onFocusNavDeactivated:ie,refModalManager:zr,refContextMenuManager:Wr}),vr.GetRenderElement())})]})}","b2":"function B(w){const{navID:h,onActivated:F,onDeactivated:j,navTreeRef:A,enabled:b=!0,modal:f=!1,virtualFocus:M=!1,historyMode:D,children:I,parentEmbeddedNavTree:y,onGlobalButtonDown:x,disableFocusClasses:E=!1,disabledRoot:T=!1,excludeFromScrollRegionSearch:L=!1,\"flow-children\":R,...P}=w,{elemProps:O,navOptions:v,gamepadEvents:z}=(0,i.sl)(P),{refDiv:p,tree:C}=d({navID:h,parentEmbeddedNavTree:y,disabledRoot:T,enabled:b,onGlobalButtonDown:x,navTreeRef:A,virtualFocus:M,modal:f,historyMode:D,excludeFromScrollRegionSearch:L});(0,a.hL)(C.OnActivateCallbacks,F),(0,a.hL)(C.OnDeactivateCallbacks,j),(0,l.KF)(z,p,C),o.useLayoutEffect(()=>{const H=(0,n.O)(R);C.Root.SetProperties({...v,layout:H})});const k=(0,r.Ue)(p,I.props.ref);return(0,e.jsx)(g,{tree:T?null:C,disableFocusClasses:E||T,children:(0,e.jsx)(i.TJ.Provider,{value:T?null:C.Root,children:o.cloneElement(I,{id:h,\"data-react-nav-root\":h,ref:k})})})}","deckyAfter":"function (...args) {\n        let ret = patch.original.call(this, ...args);\n        ret = handler.call(this, args, ret);\n        if (options.singleShot) {\n            patch.unpatch();\n        }\n        return ret;\n    }"};
+    const popupNativeFocusProfiles={"ye":"function Ye(nr){const{active:zt,embeddedView:ue,expanded:Qe,visible:mt,vr:Dt}=nr,$t=m.useRef(void 0),vr=(0,C.Dt)(nr.onFocusNavDeactivated),{onFocusNavActivated:Tr}=nr,Jr=m.useCallback(($r,ti)=>{for(let or=ti;!zt&&or;or=or.Parent)if(or===$r)return;Tr?.()},[zt,Tr]),Dr=m.useRef(void 0),Br=m.useRef(void 0),zr=(0,g.q3)(()=>Br.current?.BFocusWithin()??!1),pr=m.useCallback($r=>{zr&&ue&&Br.current.Node()?.GetLastFocusElement()?.scrollIntoView({behavior:\"auto\",inline:\"end\"})},[zr,ue,Br]),Wr=(0,ht.wY)(pr),kr=(0,C.Y$)(c.Ez.QuickAccess),xr=(0,He.fe)();m.useEffect(()=>{Dt||(zt?$t.current.Activate(!0):$t.current?.BIsActive()&&$t.current.Deactivate())},[zt,Dt]);const Ge=m.useCallback(()=>(Br.current.TakeFocus(),!0),[]),ie=m.useCallback(()=>(Dr.current.TakeFocus(),!0),[]),Re=(0,o.ch)()YMSTEAM"
+R"YMSTEAM(),Vt=(0,g.q3)(()=>Re.BQuickAccessContentFocusRequested());m.useEffect(()=>{if(!zt||!Vt)return;Re.SetQuickAccessContentFocusRequested(!1);const $r=Dr.current?.Node();$r?.Tree.DeferredFocus.RequestFocus($r,{bFocusDescendant:!0})},[zt,Vt,Re]);const Ct=ot(\"quick-access-menu\");let Pt=(0,c.i4)();const wt=(0,ct.Eb)();Pt=(0,g.q3)(()=>Ct.some(ti=>ti.key===Pt&&!jt(ti))?Pt:Ct.length>0?Ct[0].key:void 0);const dr=(0,O.A)(\"BasicUI\",xr,Z().Container,nr.visible&&Z().Open,Dt&&Z().BottomTabs,Dt&&Z().VR,wt&&Z().OOBE,Qe&&\"QAMFriendExpanded\",Qe&&Z().Expanded,nr.showHeaderAndFooter&&Z().HeaderAndFooterVisible);let ir=m.useCallback($r=>{$r.stopPropagation(),$r.preventDefault()},[]);const Kt=m.useCallback(()=>(Ge(),!0),[Ge]),Ir=(0,n.K1)();let Hr=(0,d.Qu)();const pi=(0,h.W6)(),Ei=m.useCallback(()=>{pi.replace(a.BV.GamepadUI.Keyboard())},[pi]),yi=m.useCallback(()=>{Ir(),Ei()},[Ir,Ei]);m.useEffect(()=>{Ge()},[Pt,Ge]);const Qi=(0,C.on)(),Xi=(0,O.A)(Z().QuickAccessMenu,nr.showHeaderAndFooter&&Z().HeaderAndFooterVisible),cn=(0,O.A)(Z().Tabs,nr.showHeaderAndFooter&&Z().TabsWithFooter),ln=(0,Xt.uw)(\"frame\"),Qr=(0,e.jsxs)(K.SR,{children:[(0,e.jsx)(st,{bQuickAccessMenuVisible:mt}),(0,e.jsxs)(M.g,{children:[(0,e.jsxs)(D.Z,{id:\"QuickAccess-Menu\",className:Xi,onClick:ir,children:[(0,e.jsx)(\"div\",{className:Z().HeaderContainer,children:(0,e.jsx)(i.hB,{quickAccessHeader:!0,visible:nr.showHeaderAndFooter})}),(0,e.jsxs)(D.Z,{className:Z().Menu,children:[(0,e.jsxs)(D.Z,{className:cn,ref:Wr,navRef:Br,autoFocus:!0,focusable:!1,onCancel:Dt?void 0:Ir,onActivate:ie,onMoveRight:ie,navEntryPreferPosition:y.iU.PREFERRED_CHILD,children:[(0,e.jsx)(cr,{tabs:Ct,activeTab:Pt,vr:Dt}),Hr&&!Dt&&(0,e.jsx)(D.Z,{className:Z().KeyboardButton,focusable:!0,onActivate:yi,children:(0,e.jsx)(R.ShowKeyboard,{})})]}),(0,e.jsx)(D.Z,{className:Z().PanelOuterNav,onMoveLeft:Dt?void 0:Kt,onMoveDown:Dt?Kt:void 0,onCancelButton:Dt?Ge:void 0,navRef:Dr,children:(0,e.jsx)(tt,{tabs:Ct,activeTab:Pt,bMenuVisible:mt})})]}),nr.showHeaderAndFooter&&(0,e.jsx)(Gt.w,{className:Z().Footer,location:\"quick-access\"})]}),!Dt&&(0,e.jsx)(Je.i,{bQAMVersion:!0})]})]});return Dt?(0,e.jsx)(D.Z,{className:dr,onMoveLeft:E.ru,onMoveRight:E.ru,children:Qr}):(0,e.jsx)(f.B2,{navID:\"QuickAccess-NA\",enabled:zt||kr,navTreeRef:$t,onActivated:Jr,onDeactivated:vr,autoFocus:!0,className:dr,onCancelButton:Ge,onGlobalButtonDown:Qi,...ln,children:nr.refModalManager?(0,e.jsx)(J,{refModalManager:nr.refModalManager,refContextMenuManager:nr.refContextMenuManager,children:Qr}):Qr})}","owner":"class Id{m_viewWindow;m_rootElement;m_renderWhenReady;m_bMounted=!1;m_browserView;m_browserViewName;m_DynamicCSSObserver;constructor(){}CreateView(E,T,L){const{name:R,strVROverlayKey:P,eCreationFlags:O}=T;this.m_browserView&&this.DestroyView();let v=L?.ownerWindow?.SteamClient.Browser.GetBrowserID(),z=\"BrowserViewPopup\";R?.length>0&&(z=R),v&&(z+=\"_uid\"+v),z=Id.GetUniqueBrowserViewName(z);const p={parentPopupBrowserID:v,strVROverlayKey:P,strName:z};let{strCreateURL:C,browserView:k}=SteamClient.BrowserView.CreatePopup(p);O&&(C+=\"&createflags=\"+O);let q=window.open(C,z,\"top=0,left=0,width=540,height=700,resizable=yes,status=0,toolbar=0,menubar=0,location=0\");if(!q){console.error(`Failed to create popup, browser/CEF may be blocking popups for \"${window.location.origin}\"`);return}q.document.write('<!DOCTYPE html><html ><head><title></title></head><body  style=\"overflow: hidden\"><div id=\"browserview_target\"></div></body></html>'),q.document.title=z,q.document.close();let V=q.document.getElementById(\"browserview_target\");q.addEventListener(\"unload\",this.OnUnload),this.m_viewWindow=q,this.m_rootElement=V,this.m_browserView=k,this.m_browserViewName=z,o.Oe(this.m_viewWindow,o.yU()),this.m_renderWhenReady=new n.Q(q.document,V),this.m_renderWhenReady.SetTarget(E)}DestroyView(){this.m_browserView&&(Id.DelayedReleaseBrowserViewName(this.m_browserViewName),SteamClient.BrowserView.Destroy(this.m_browserView),this.m_browserView=void 0),this.m_DynamicCSSObserver&&(this.m_DynamicCSSObserver.disconnect(),this.m_DynamicCSSObserver=void 0)}GetBrowserView(){return this.m_browserView}GetRenderElement(){return this.m_rootElement}GetViewWindow(){return this.m_viewWindow}OnUnload(){}static m_setActiveBrowserViewNames=new Set;static GetUniqueBrowserViewName(E){let T=E,L=0;for(;Id.m_setActiveBrowserViewNames.has(T);)T=`${E}_${L++}`;return Id.m_setActiveBrowserViewNames.add(T),T}static DelayedReleaseBrowserViewName(E){window.setTimeout(()=>Id.m_setActiveBrowserViewNames.delete(E),100)}}","focus":"()=>{j?.GetBrowserView().SetFocus(!0);const T=j?.GetViewWindow();T&&y?.OnActivate(T),I(),f.ToggleSideMenu(F,!0)}","subscriber":"($r,ti)=>{for(let or=ti;!zt&&or;or=or.Parent)if(or===$r)return;Tr?.()}","parent":"function(zt){const{active:ue}=zt,[Qe,mt]=m.useState(ue),Dt=Qe||ue;m.useEffect(()=>mt(ue),[ue]);const $t=(0,z.OU)(a.BV.GamepadUI.AppRunning());(0,i.iW)(Dt&&!$t,\"QuickAccessMenuBrowserView\");const vr=(0,L.Jo)({name:\"QuickAccess\"});(0,re.kV)(vr?.GetRenderElement()?.ownerDocument.defaultView);const Jr=(0,c.i4)()==c.qE.Friends,Dr=(0,g.q3)(()=>s.LN.qamFriendsExpanded)&&Jr,[Br,zr]=m.useState(null),[pr,Wr]=m.useState(null),kr=W(pr??void 0),xr=Dr||kr,{fnOnFocusNavActivated:Ge,fnOnFocusNavDeactivated:ie}=(0,C.k6)(c.Ez.QuickAccess,vr,Br??zt.ModalManager,xr&&pr||void 0);m.useEffect(()=>{ue||(pr?.ActiveMenu?.OnCancel(),Br?.CloseLegacyModals())},[ue,Br,pr]);const Re=(0,n.K1)();(0,s.PG)(vr?.GetViewWindow());const Vt=(0,pe.u6)(),Ct=(0,g.q3)(()=>lt.O.BKeyboardIMEVisible);if((0,C.Vs)(vr,ue),!vr)return null;const Pt={nDuration:300,fnStep:Lt},wt={nDuration:200,fnStep:vt};let dr=$t?\"transparent\":\"darkblur\",ir=(0,O.A)(Z().ViewPlaceholder,$t&&Z().FullHeight,xr&&Z().Expanded,Vt&&Z().OSKActive,Ct&&Z().IMEVisible,$t&&Z().HeaderAndFooterVisible);return(0,e.jsxs)(r.H,{appearance:dr,visible:Dt,onClick:Re,children:[(0,e.jsx)(L.m4,{className:ir,browser:vr.GetBrowserView(),visible:Dt,animateIn:Pt,animateOut:wt}),(0,e.jsx)(b.b5,{ownerWindow:vr.GetViewWindow(),children:w.createPortal((0,e.jsx)(Ye,{active:ue,visible:Dt,expanded:xr,showHeaderAndFooter:$t,onFocusNavActivated:Ge,onFocusNavDeactivated:ie,refModalManager:zr,refContextMenuManager:Wr}),vr.GetRenderElement())})]})}","b2":"function B(w){const{navID:h,onActivated:F,onDeactivated:j,navTreeRef:A,enabled:b=!0,modal:f=!1,virtualFocus:M=!1,historyMode:D,children:I,parentEmbeddedNavTree:y,onGlobalButtonDown:x,disableFocusClasses:E=!1,disabledRoot:T=!1,excludeFromScrollRegionSearch:L=!1,\"flow-children\":R,...P}=w,{elemProps:O,navOptions:v,gamepadEvents:z}=(0,i.sl)(P),{refDiv:p,tree:C}=d({navID:h,parentEmbeddedNavTree:y,disabledRoot:T,enabled:b,onGlobalButtonDown:x,navTreeRef:A,virtualFocus:M,modal:f,historyMode:D,excludeFromScrollRegionSearch:L});(0,a.hL)(C.OnActivateCallbacks,F),(0,a.hL)(C.OnDeactivateCallbacks,j),(0,l.KF)(z,p,C),o.useLayoutEffect(()=>{const H=(0,n.O)(R);C.Root.SetProperties({...v,layout:H})});const k=(0,r.Ue)(p,I.props.ref);return(0,e.jsx)(g,{tree:T?null:C,disableFocusClasses:E||T,children:(0,e.jsx)(i.TJ.Provider,{value:T?null:C.Root,children:o.cloneElement(I,{id:h,\"data-react-nav-root\":h,ref:k})})})}","deckyAfter":"function (...args) {\n        let ret = patch.original.call(this, ...args);\n        ret = handler.call(this, args, ret);\n        if (options.singleShot) {\n            patch.unpatch();\n        }\n        return ret;\n    }"};
     const captureCommittedPopupActivation=(element,tree,popup,context,menuStore,callbacks,profiles)=>{
       const note={schema:1,scope:'committed-current-qam-native-focus',status:'unavailable',
         capturedActive:null,currentActive:null,nativeRequestSubmitted:false,
@@ -2370,7 +2416,8 @@ R"YMSTEAM(lement=V,this.m_browserView=k,this.m_browserViewName=z,o.Oe(this.m_vie
         let reads=0;const rows=[],byObject=new WeakMap(),protos=[];
         const data=(object,key,optional=false)=>{
           if(++reads>4096||!object||!['object','function'].includes(typeof object))throw Error('data-budget-or-shape');
-          const d=own(object,key);if(!d||!('value'in d)){if(optional&&!d)return undefined;throw Error('own-data-required');}
+          const d=own(object,key);i)YMSTEAM"
+R"YMSTEAM(f(!d||!('value'in d)){if(optional&&!d)return undefined;throw Error('own-data-required');}
           let map=byObject.get(object);if(!map){map=new Map;byObject.set(object,map);}
           const previous=map.get(key);
           if(previous){if(previous.value!==d.value||previous.writable!==d.writable||previous.enumerable!==d.enumerable||previous.configurable!==d.configurable)throw Error('data-changed');}
@@ -2433,8 +2480,7 @@ R"YMSTEAM(lement=V,this.m_browserView=k,this.m_browserViewName=z,o.Oe(this.m_vie
               return {matches,otherMatches};
             };
             const original=scan(child);if(!original)return;
-            const parents=origi)YMSTEAM"
-R"YMSTEAM(nal.matches===1?[parent]:[],peer=data(parent,'alternate');
+            const parents=original.matches===1?[parent]:[],peer=data(parent,'alternate');
             if(peer&&peer!==parent&&data(peer,'alternate')===parent){
               const peerChild=data(peer,'child');
               // A shared list may leave child.return naming the old parent.
@@ -2508,7 +2554,8 @@ R"YMSTEAM(nal.matches===1?[parent]:[],peer=data(parent,'alternate');
             }
             hook=data(hook,'next');
           }
-          if(hook)throw Error('hook-budget');return found;
+        )YMSTEAM"
+R"YMSTEAM(  if(hook)throw Error('hook-budget');return found;
         };
         const currentHooks=hookRows(fiber).filter(h=>text(h.fn)===profiles.subscriber&&data(h.deps,'length')===2&&data(h.deps,'0')===true&&data(h.deps,'1')===focus);
         if(currentHooks.length!==1)return fail('committed-subscriber-unconfirmed');
@@ -2544,8 +2591,7 @@ R"YMSTEAM(nal.matches===1?[parent]:[],peer=data(parent,'alternate');
           const parent=Object.getPrototypeOf(methodOwner);protos.push([methodOwner,parent]);methodOwner=parent;
         }
         if(data(owner,'m_viewWindow')!==popup||data(owner,'m_rootElement')!==container||typeof nativeFocus!=='function'||!text(nativeFocus).includes('[native code]'))return fail('popup-holder-target-unconfirmed');
-        const nodeProto=popup.Node?.prototype,contains=own(nodeProto,'contains')?.value,documentGet=own(nodeProto,'ownerDocument')YMSTEAM"
-R"YMSTEAM()?.get,connected=own(nodeProto,'isConnected')?.get;
+        const nodeProto=popup.Node?.prototype,contains=own(nodeProto,'contains')?.value,documentGet=own(nodeProto,'ownerDocument')?.get,connected=own(nodeProto,'isConnected')?.get;
         if([contains,documentGet,connected].some(fn=>typeof fn!=='function'||!text(fn).includes('[native code]')))return fail('native-dom-source-unconfirmed');
         const document=popup.document;
         const dom=()=>Reflect.apply(documentGet,container,[])===document&&Reflect.apply(documentGet,element,[])===document&&Reflect.apply(connected,container,[])===true&&Reflect.apply(connected,element,[])===true&&Reflect.apply(contains,container,[element])===true;
@@ -2606,7 +2652,8 @@ R"YMSTEAM()?.get,connected=own(nodeProto,'isConnected')?.get;
       const result={schema:1,scope:'held-active-qam-popup-original-activation',
         status:'not-attempted',callbackSubmitted:false,inputCapabilityGranted:false,physicalInputProven:false};
       focusResult.menuTreeActivation=result;
-      const skip=reason=>{result.reason=reason;};
+      co)YMSTEAM"
+R"YMSTEAM(nst skip=reason=>{result.reason=reason;};
       const data=(object,key)=>{const d=object&&Object.getOwnPropertyDescriptor(object,key);return d&&'value'in d?d.value:undefined;};
       const text=fn=>typeof fn==='function'?Function.prototype.toString.call(fn):null;
       const methods={"OnActivate":"OnActivate(Zt){this.m_tsLastActivated=performance.now(),this.m_onActivateCallbacks.Dispatch(this,Zt),this.m_onActiveFocusStateChangedCallbacks.Dispatch(!0,this);for(let sr=this.m_lastFocusNode;sr;sr=sr.Parent)sr.SetFocusWithin(!0)}","BIsActive":"BIsActive(){return this.m_valueIsMounted.Value&&(this.m_Controller.IsActiveNavTree(this)||this.m_Controller.IsActiveFocusNavTree(this))}","BIsContextActive":"BIsContextActive(){return this.m_Controller.BIsInActiveContext(this)}","BIsEnabled":"BIsEnabled(){return this.m_bIsEnabled}"};
@@ -2648,8 +2695,7 @@ R"YMSTEAM()?.get,connected=own(nodeProto,'isConnected')?.get;
         const dispatch=callbacks.Dispatch,stateDispatch=stateCallbacks.Dispatch;
         const current=()=>{
           // Complete original observable calls before the held mount/owner
-          // suffix. A late composition or )YMSTEAM"
-R"YMSTEAM(game-current read may revoke it.
+          // suffix. A late composition or game-current read may revoke it.
           const isActive=tree.BIsActive(),contextActive=tree.BIsContextActive(),enabled=tree.BIsEnabled();
           const connected=element.isConnected,activeContext=manager.GetActiveContext();
           const rootWindow=context.RootWindow,activeWindow=context.ActiveWindow;
@@ -2715,7 +2761,8 @@ R"YMSTEAM(game-current read may revoke it.
         if(!pending){
           const entry=game.entry,startedAt=performance.now();
           if(!entry||entry.disposed||window.__ymccMenuGameAlias!==entry||!Number.isFinite(startedAt))
-            return skip('popup-ticket-owner-unavailable');
+            return skip('popup-ticke)YMSTEAM"
+R"YMSTEAM(t-owner-unavailable');
           const heldReceiver=Object.freeze({window:w,source:receiver.source,game:Object.freeze({...game})});
           entry.popupActivationPending=Object.freeze({id:token,receiver:heldReceiver,
             proof:Object.freeze({...request.menuGame}),tree,context,browser,popup,startedAt});
@@ -2765,8 +2812,7 @@ R"YMSTEAM(game-current read may revoke it.
             }
             const original=descriptor.value,state={active:true,object,first,second,note,phaseState,label};
             const observer=function(){
-              'us)YMSTEAM"
-R"YMSTEAM(e strict';
+              'use strict';
               const args=arguments;
               if(!state.active||!state.phaseState.active)return Reflect.apply(original,this,args);
               const observation=state.note,phase=state.phaseState,previous=phase.phase;
@@ -2830,7 +2876,8 @@ R"YMSTEAM(e strict';
                 const value=Reflect.apply(original,this,args);
                 if(matched&&state.active)note.returned=Math.min(16,note.returned+1);
                 return value;
-              }catch(error){if(matched&&state.active)note.threw=Math.min(16,note.threw+1);throw error;}
+        )YMSTEAM"
+R"YMSTEAM(      }catch(error){if(matched&&state.active)note.threw=Math.min(16,note.threw+1);throw error;}
             };
             const installed=own?{...own,value:observer}:{value:observer,writable:true,configurable:true,enumerable:false};
             Object.defineProperty(context,'OnActivate',installed);
@@ -2881,8 +2928,7 @@ R"YMSTEAM(e strict';
       const skip=reason=>{result.reason=reason;};
       const data=(object,key)=>{const d=object&&Object.getOwnPropertyDescriptor(object,key);return d&&'value'in d?d.value:undefined;};
       const text=fn=>typeof fn==='function'?Function.prototype.toString.call(fn):null;
-      const expectedCoordinator="class m{m_rgTrees=[];m_mapChildTreeClea)YMSTEAM"
-R"YMSTEAM(nup=new Map;FindTree(M){return this.m_rgTrees.find(D=>D.tree==M)}FindTreeByName(M){return this.m_rgTrees.find(D=>D.name==M)}FindTreeByBrowser(M){return this.m_rgTrees.find(D=>D.browser==M)}RegisterNavTree(M,D,I){(0,n.wT)(!this.FindTreeByName(M),`Duplicate focus nav tree ${M}`),S(`Registering tree ${M}`);const y=new s.e0,x={name:M,tree:D,browserContext:I};return this.m_rgTrees.push(x),y.Push(()=>i.x9(this.m_rgTrees,x)),y.Push(D.OnActivateCallbacks.Register(this.OnTreeActivated).Unregister),y.Push(D.OnDeactivateCallbacks.Register(this.OnTreeDeactivated).Unregister),y.Push(D.OnChildTreesChangedCallbacks.Register((E,T)=>this.OnChildTreesChanged(M,I,E,T)).Unregister),y.Push(()=>D.ChildTrees.forEach(E=>this.UnregisterChildTree(E))),D.BIsActive()&&this.OnTreeActivated(D),y.GetUnregisterFunc()}OnChildTreesChanged(M,D,I,y){I==\"add\"?this.RegisterChildTree(M,D,y):I==\"remove\"&&this.UnregisterChildTree(y)}RegisterChildTree(M,D,I){const y=`${M}/${I.id}`;this.m_mapChildTreeCleanup.set(I,this.RegisterNavTree(y,I,D)),I.ChildTrees.forEach(x=>this.RegisterChildTree(y,D,x))}UnregisterChildTree(M){const D=this.m_mapChildTreeCleanup.get(M);D&&D(),this.m_mapChildTreeCleanup.delete(M)}SetBrowserViewFocus(M,D){const I=this.FindTree(D);g(I?.browserContext,`CBrowserViewWindowFocusCoordinator Focusing browser view in ${I?.name}, ${I?\"blurring main window\":\"not changing main window focus\"}`),I&&(I.browser=M,A(I.browserContext)),M.SetFocus(!0)}SetBrowserViewBlurred(M,D){const I=this.FindTree(D);g(I?.browserContext,`CBrowserViewWindowFocusCoordinator Blurring browser view in ${I?.name}, ${I?\"giving main window focus\":\"not changing main window focus\"}`),M.SetFocus(!1),I&&(delete I.browser,j(I.browserContext))}GetActiveBrowserViewWithinTree(M){return this.FindTree(M)?.browser}OnTreeActivated(M){const D=this.FindTree(M);D.browser?(g(D?.browserContext,`CBrowserViewWindowFocusCoordinator Activating tree ${D?.name} but browser view has focus`),D.browser.SetFocus(!0)):(b(D?.browserContext),M.BIsContextActive()?(g(D?.browserContext,`CBrowserViewWindowFocusCoordinator Activating tree ${D?.name} and giving main window focus`),j(D.browserContext)):g(D?.browserContext,`CBrowserViewWindowFocusCoordinator tree ${D?.name} was activated, but ignoring because the window is not active`))}OnTreeDeactivated(M,D){const I=this.FindTree(M),y=this.FindTree(D);if(y){g(I?.browserContext,`CBrowserViewWindowFocusCoordinator Focus transfer from ${I?.name} to ${y?.name}, both within main window`);return}I.browser?(g(I?.browserContext,\"CBrowserViewWindowFocusCoordinator From tree had browser, blurring the browser\"),I.browser.SetFocus(!1)):(g(I?.browserContext,\"CBrowserViewWindowFocusCoordinator Blurring main window\"),A(I.browserContext))}}";
+      const expectedCoordinator="class m{m_rgTrees=[];m_mapChildTreeCleanup=new Map;FindTree(M){return this.m_rgTrees.find(D=>D.tree==M)}FindTreeByName(M){return this.m_rgTrees.find(D=>D.name==M)}FindTreeByBrowser(M){return this.m_rgTrees.find(D=>D.browser==M)}RegisterNavTree(M,D,I){(0,n.wT)(!this.FindTreeByName(M),`Duplicate focus nav tree ${M}`),S(`Registering tree ${M}`);const y=new s.e0,x={name:M,tree:D,browserContext:I};return this.m_rgTrees.push(x),y.Push(()=>i.x9(this.m_rgTrees,x)),y.Push(D.OnActivateCallbacks.Register(this.OnTreeActivated).Unregister),y.Push(D.OnDeactivateCallbacks.Register(this.OnTreeDeactivated).Unregister),y.Push(D.OnChildTreesChangedCallbacks.Register((E,T)=>this.OnChildTreesChanged(M,I,E,T)).Unregister),y.Push(()=>D.ChildTrees.forEach(E=>this.UnregisterChildTree(E))),D.BIsActive()&&this.OnTreeActivated(D),y.GetUnregisterFunc()}OnChildTreesChanged(M,D,I,y){I==\"add\"?this.RegisterChildTree(M,D,y):I==\"remove\"&&this.UnregisterChildTree(y)}RegisterChildTree(M,D,I){const y=`${M}/${I.id}`;this.m_mapChildTreeCleanup.set(I,this.RegisterNavTree(y,I,D)),I.ChildTrees.forEach(x=>this.RegisterChildTree(y,D,x))}UnregisterChildTree(M){const D=this.m_mapChildTreeCleanup.get(M);D&&D(),this.m_mapChildTreeCleanup.delete(M)}SetBrowserViewFocus(M,D){const I=this.FindTree(D);g(I?.browserContext,`CBrowserViewWindowFocusCoordinator Focusing browser view in ${I?.name}, ${I?\"blurring main window\":\"not changing main window focus\"}`),I&&(I.browser=M,A(I.browserContext)),M.SetFocus(!0)}SetBrowserViewBlurred(M,D){const I=this.FindTree(D);g(I?.browserContext,`CBrowserViewWindowFocusCoordinator Blurring browser view in ${I?.name}, ${I?\"giving main window focus\":\"not changing main window focus\"}`),M.SetFocus(!1),I&&(delete I.browser,j(I.browserContext))}GetActiveBrowserViewWithinTree(M){return this.FindTree(M)?.browser}OnTreeActivated(M){const D=this.FindTree(M);D.browser?(g(D?.browserContext,`CBrowserViewWindowFocusCoordinator Activating tree ${D?.name} but browser view has focus`),D.browser.SetFocus(!0)):(b(D?.browserContext),M.BIsContextActive()?(g(D?.browserContext,`CBrowserViewWindowFocusCoordinator Activating tree ${D?.name} and giving main window focus`),j(D.browserContext)):g(D?.browserContext,`CBrowserViewWindowFocusCoordinator tree ${D?.name} was activated, but ignoring because the window is not active`))}OnTreeDeactivated(M,D){const I=this.FindTree(M),y=this.FindTree(D);if(y){g(I?.browserContext,`CBrowserViewWindowFocusCoordinator Focus transfer from ${I?.name} to ${y?.name}, both within main window`);return}I.browser?(g(I?.browserContext,\"CBrowserViewWindowFocusCoordinator From tree had browser, blurring the browser\"),I.browser.SetFocus(!1)):(g(I?.browserContext,\"CBrowserViewWindowFocusCoordinator Blurring main window\"),A(I.browserContext))}}";
       const bindGetter='get(){let c=s.value.bind(this);return Object.prototype.hasOwnProperty.call(this,e)||Object.defineProperty(this,e,{value:c}),c}';
       const boundShape=d=>!!d&&'value'in d&&typeof d.value==='function'&&d.writable===false&&
         d.enumerable===false&&d.configurable===false&&d.value.name==='bound OnTreeActivated'&&
@@ -2904,7 +2950,8 @@ R"YMSTEAM(nup=new Map;FindTree(M){return this.m_rgTrees.find(D=>D.tree==M)}FindT
           const seen=windows.find(value=>value.window===sourceWindow);
           if(seen){seen.observation.origins.push(origin);continue;}
           const observation={origins:[origin],present:false,profileVerified:false,registeredTreeCount:null,
-            findReturnedRow:null,matchingDataRows:null,rowTreeSlot:null};
+            findReturne)YMSTEAM"
+R"YMSTEAM(dRow:null,matchingDataRows:null,rowTreeSlot:null};
           observations.push(observation);
           const slot=Object.getOwnPropertyDescriptor(sourceWindow,'g_WindowFocusCoordinator');
           const coordinator=slot&&'value'in slot?slot.value:undefined;
@@ -2947,8 +2994,7 @@ R"YMSTEAM(nup=new Map;FindTree(M){return this.m_rgTrees.find(D=>D.tree==M)}FindT
         const selectedRecord=selected[0],{coordinator,proto,ctor,rows,find,viewLookup,descriptor,row,holder}=selectedRecord;
         result.coordinatorSelection.selectedOrigins=[...holder.observation.origins];
         result.registeredTreeCount=rows.length;
-        const browserContext=d)YMSTEAM"
-R"YMSTEAM(ata(row,'browserContext'),owner=data(browserContext,'ownerWindow'),view=data(row,'browser');
+        const browserContext=data(row,'browserContext'),owner=data(browserContext,'ownerWindow'),view=data(row,'browser');
         const noView=()=>{const d=Object.getOwnPropertyDescriptor(row,'browser');return d?'value'in d&&d.value==null:!('browser'in row);};
         const treeActive=tree.BIsActive?.(),contextActive=tree.BIsContextActive?.();
         Object.assign(result,{registeredTreeConfirmed:true,ownerWindowPresent:!!owner,
@@ -3004,7 +3050,8 @@ R"YMSTEAM(ata(row,'browserContext'),owner=data(browserContext,'ownerWindow'),vie
           data(coordinator,'OnTreeActivated')===callback&&owner.SteamClient===client&&client.Window===api&&
           api.MarkLastFocused===mark&&api.SetKeyFocus===key&&game.current()&&game.entry?.current?.()&&
           ui.m_runningAppIDs===running&&running.length===1&&(running[0]>>>0)===game.appid;
-        if(!current())return skip('registered-focus-owner-changed-before-callback');
+        if(!current())return skip('registered-focu)YMSTEAM"
+R"YMSTEAM(s-owner-changed-before-callback');
         mutated=true;result.callbackSubmitted=true;result.status='original-focus-callback-submitted';
         try{
           const reply=callback.call(coordinator,tree);
@@ -3062,8 +3109,7 @@ R"YMSTEAM(ata(row,'browserContext'),owner=data(browserContext,'ownerWindow'),vie
         if(Number.isInteger(app)&&app>0&&app<=0xffffffff && Number.isInteger(pid)&&pid>=0&&pid<=0xffffffff &&
             typeof store?.GetOverlayInstance==='function') {
           const overlay=store.GetOverlayInstance(app,pid);
-          if(trace)trace.lookup=overlay?'not-gamepad-or-handler-una)YMSTEAM"
-R"YMSTEAM(vailable':'overlay-not-found';
+          if(trace)trace.lookup=overlay?'not-gamepad-or-handler-unavailable':'overlay-not-found';
           if(overlay?.IsGamepadUIOverlayWindow?.()===true && typeof overlay[handler]==='function')
             {if(trace)trace.lookup='game-overlay-selected';return {window:overlay,source:'steam-focused-game-overlay'};}
         }
@@ -3074,19 +3120,31 @@ R"YMSTEAM(vailable':'overlay-not-found';
     // Passive receiver bookkeeping only. Native owns the click-only 750ms
     // deadlines; this bridge never sleeps, starts a timer or sends a second toggle
     // from an asynchronous JS callback. A lost receiver edge is not permission.
-    const qamFollowup = (w, phase, ticket) => {
+    const qamFollowup = (w, phase, ticket, game=null) => {
       const s=window.SteamUIStore, m=w?.MenuStore, now=Date.now();
       const result=(status,terminal=true,extra={})=>({status,terminal,...extra});
       const read=()=>{try{const v=m?.GetOpenSideMenu?.();return [0,1,2].includes(v)?v:null;}catch{return null;}};
       if(!w||!m||typeof w.OnQuickAccessButtonPressed!=='function')return result('receiver-unavailable');
       let state=window.__ymccQamFollowup;
-      if(state?.version!==2||state.store!==s){
+      if(state?.version!==3||state.store!==s){
         state?.dispose?.();
-        state={version:2,store:s,entries:[],ticket:null};
-        state.dispose=()=>{for(const e of state.entries)try{if(e.window.OnQuickAccessButtonPressed===e.wrapper){if(e.own)Object.defineProperty(e.window,'OnQuickAccessButtonPressed',e.own);else delete e.window.OnQuickAccessButtonPressed;}}catch{}state.entries=[];state.ticket=null;};
+        state={version:3,store:s,entries:[],ticket:null,gameGesture:null};
+        state.dispose=()=>{for(const e of state.entries)try{if(e.window.OnQuickAccessButtonPressed===e.wrapper){if(e.own)Object.defineProperty(e.window,'OnQuickAccessButtonPressed',e.own);else delete e.window.OnQuickAccessButtonPressed;}}catch{}state.entries=[];state.ticket=null;state.gameGesture=null;};
         window.__ymccQamFollowup=state;
       }
+      const validTicket=()=>ticket&&typeof ticket.id==='string'&&ticket.id.length<=96&&Number.isSafeInteger(ticket.startedAt)&&
+        ticket.startedAt<=now&&now-ticket.startedAt<3000;
+      const gameKey=game?JSON.stringify(['account','appid','gameid64','gamePid','gameCreated','steamPid','steamCreated',
+        'hostPid','hostCreated','browserId','registeredAppid','registeredGameid64'].map(k=>request.menuGame[k])):null;
+      const gesture=state.gameGesture;
       let entry=state.entries.find(e=>e.window===w&&e.menu===m);
+      if(phase!=='prepare'){
+        if(!validTicket())return result('expired');
+        // Only the original game's registration, receiver, and button edge can retry.
+        if(game&&(!gesture||gesture.id!==ticket.id||gesture.startedAt!==ticket.startedAt||
+                  gesture.key!==gameKey||!entry||gesture.entry!==entry))return result('context-changed');
+        if(!game&&gesture?.id===ticket.id)return result('context-changed');
+      }
       if(!entry){
         // At most the current main/overlay contexts; restore an evicted wrapper.
         if(state.entries.length===2){const e=state.entries.shift();try{if(e.window.OnQuickAccessButtonPressed===e.wrapper){if(e.own)Object.defineProperty(e.window,'OnQuickAccessButtonPressed',e.own);else delete e.window.OnQuickAccessButtonPressed;}}catch{}}
@@ -3110,13 +3168,16 @@ R"YMSTEAM(vailable':'overlay-not-found';
         try{w.OnQuickAccessButtonPressed=entry.wrapper;}catch{return result('receiver-not-writable');}
         if(w.OnQuickAccessButtonPressed!==entry.wrapper)return result('receiver-not-writable');
         state.entries.push(entry);
+      })YMSTEAM"
+R"YMSTEAM(
+      if(phase==='prepare'){
+        if(game&&validTicket()&&game.current())
+          state.gameGesture={id:ticket.id,startedAt:ticket.startedAt,key:gameKey,entry,serial:entry.serial+1};
+        return result('receiver-prepared');
       }
-      if(phase==='prepare')return result('receiver-prepared');
-      if(!ticket||typeof ticket.id!=='string'||ticket.id.length>96||!Number.isSafeInteger(ticket.startedAt)||
-          ticket.startedAt>now||now-ticket.startedAt>=3000)return result('expired');
       checkAccount();
       if(window.SteamUIStore!==s||s.GetShowingLockScreen?.()||w.IsAnyVRWindow?.()||
-          menuReceiver('OnQuickAccessButtonPressed').window!==w||w.MenuStore!==m||
+          !(game?game.current():menuReceiver('OnQuickAccessButtonPressed').window===w)||w.MenuStore!==m||
           w.OnQuickAccessButtonPressed!==entry.wrapper)return result('context-changed');
       // An evaluation already sent before cancellation may return late. It
       // cannot replace a newer ticket, even when callbacks share a millisecond.
@@ -3129,7 +3190,11 @@ R"YMSTEAM(vailable':'overlay-not-found';
       if(!t.event){
         // Retain two receiver edges. A delayed first observation must detect
         // a later physical/user press rather than adopt it as the original.
-        if(entry.previous?.at>=ticket.startedAt)t.event=entry.previous;
+        if(game){
+          if(entry.serial<gesture.serial)return result('waiting-receiver',false,{menu:read()});
+          if(entry.event?.serial!==gesture.serial)return result('newer-user-input');
+          t.event=entry.event;
+        }else if(entry.previous?.at>=ticket.startedAt)t.event=entry.previous;
         else if(entry.event?.at>=ticket.startedAt)t.event=entry.event;
         else return result('waiting-receiver',false,{menu:read()});
       }
@@ -3160,8 +3225,8 @@ R"YMSTEAM(vailable':'overlay-not-found';
       checkAccount();const after=read();
       return result(after===2?'menu-open':'supplement-sent',after===2||t.attempts===3,{menu:after,attempts:t.attempts,supplementSent:true});
     };
-    const passiveQamFollowup=(w,phase,ticket)=>{
-      try{return qamFollowup(w,phase,ticket);}catch{return {status:'recorder-unavailable',terminal:true};}
+    const passiveQamFollowup=(w,phase,ticket,game)=>{
+      try{return qamFollowup(w,phase,ticket,game);}catch{return {status:'recorder-unavailable',terminal:true};}
     };
     // Second evaluation of the SAME explicit QAM action. Native retains its
     // original power/process/host admission. This branch sends no second key,
@@ -3174,8 +3239,7 @@ R"YMSTEAM(vailable':'overlay-not-found';
          typeof request.menuGamePopupActivation!=='string'||!/^[A-Za-z0-9._:-]{1,96}$/.test(request.menuGamePopupActivation)||
          !request.menuGame||typeof request.menuGame!=='object'||Array.isArray(request.menuGame))
         fail('invalid-steam-menu-popup-continuation');
-      const entry=window.__ymccMenuGameAlias,)YMSTEAM"
-R"YMSTEAM(descriptor=entry&&Object.getOwnPropertyDescriptor(entry,'popupActivationPending');
+      const entry=window.__ymccMenuGameAlias,descriptor=entry&&Object.getOwnPropertyDescriptor(entry,'popupActivationPending');
       const pending=descriptor&&'value'in descriptor?descriptor.value:null;
       if(!pending||!Object.isFrozen(pending)||pending.id!==request.menuGamePopupActivation||
          pending.receiver?.game?.entry!==entry)return finish('popup-ticket-not-current');
@@ -3213,20 +3277,22 @@ R"YMSTEAM(descriptor=entry&&Object.getOwnPropertyDescriptor(entry,'popupActivati
       const w=receiver.window;
       const phase=request.operation.slice('menu.qam.'.length);
       stage='qam-followup';
-      const recovery=qamFollowup(w,phase,request.qamFollowup);
+      const recovery=qamFollowup(w,phase,request.qamFollowup,receiver.game);
       mutated=recovery.supplementSent===true;
       const menuGameState=phase==='prepare'?null:syncMenuGameState(receiver);
       if(menuGameState)recovery.menuGameState=menuGameState;
       projectMenuGameInputTrace(receiver,recovery,'receipt');
       return {ok:true,mutated,qamRecovery:recovery,via:'live'};
     }
-    if (['menu.button', 'menu.toggle', 'menu.inspect'].includes(request.operation)) {
+    if (['menu.button', 'menu.toggle', )YMSTEAM"
+R"YMSTEAM('menu.inspect'].includes(request.operation)) {
       if (!['main', 'quick-access'].includes(request.menu)) fail('invalid-steam-menu');
       const s = window.SteamUIStore;
       // GLOBAL functional-key semantics. Steam, not an OS HWND/PID chosen by
       // YMCC, supplies its own routing context. Never focus or activate a window.
       const handler = request.menu === 'main' ? 'OnHomeButtonPressed' : 'OnQuickAccessButtonPressed';
-      const routeTrace={}, receiver=request.menuGame?await menuGameReceiver(handler,request.menuGame,routeTrace):menuReceiver(handler,routeTrace), w=receiver.window;
+      const routeTrace={}, receiver=request.menuGame?await menuGameReceiver(handler,request.menuGame,routeTrace,
+        request.operation==='menu.button'&&request.menu==='quick-access'):menuReceiver(handler,routeTrace), w=receiver.window;
       const m = w?.MenuStore;
       menuTarget = { source: receiver.source,
         windowType: Number.isInteger(w?.WindowType) ? w.WindowType : null, isGameOverlay: !!w?.IsOverlayWindow?.(),
@@ -3282,8 +3348,7 @@ R"YMSTEAM(descriptor=entry&&Object.getOwnPropertyDescriptor(entry,'popupActivati
           // Bounded reads of existing Steam caches only; never input authority.
           const integer=(v,min=0,max=0xffffffff)=>Number.isSafeInteger(v)&&v>=min&&v<=max?v:null;
           const ownInteger=(object,key,min=0,max=0xffffffff)=>{
-   )YMSTEAM"
-R"YMSTEAM(         try{const d=object&&Object.getOwnPropertyDescriptor(object,key);return d&&'value'in d?integer(d.value,min,max):null;}catch{return null;}
+            try{const d=object&&Object.getOwnPropertyDescriptor(object,key);return d&&'value'in d?integer(d.value,min,max):null;}catch{return null;}
           };
           const originalCacheRead=(object,key,expected,getter=false,field=null)=>{
             try{
@@ -3320,7 +3385,8 @@ R"YMSTEAM(         try{const d=object&&Object.getOwnPropertyDescriptor(object,ke
             focusedOverlayAppidUnsigned:appid,
             focusedOverlayPid:pidKnown?overlayPid:null,
             focusedAppidMatchesRegistered:appidKnown?appid===request.menuGame.registeredAppid:null,
-            focusedAppidMatchesLogical:appidKnown?appid===receiver.game.appid:null,
+            focusedAppidMatchesLogical:a)YMSTEAM"
+R"YMSTEAM(ppidKnown?appid===receiver.game.appid:null,
             focusedPidMatchesHeldHost:pidKnown?overlayPid===request.menuGame.hostPid:null,
             navigation,
           };
@@ -3338,12 +3404,14 @@ R"YMSTEAM(         try{const d=object&&Object.getOwnPropertyDescriptor(object,ke
       }
       if(request.operation==='menu.button'&&request.menu==='quick-access')returnMenuGameToRunning(receiver,menuTarget);
       prepareMenuGameInputContext(receiver,menuTarget);
-      if(request.menu==='quick-access'&&request.qamFollowup)passiveQamFollowup(w,'prepare',null);
+      if(request.operation==='menu.button'&&request.menu==='quick-access'&&request.qamFollowup)
+        passiveQamFollowup(w,'prepare',request.qamFollowup,receiver.game);
       let compositionBrowserBefore={known:false,browser:null};
       if(receiver.game){try{
         const browser=w.BrowserWindow,client=browser?.SteamClient,api=client?.Window,set=api?.SetComposition;
         compositionBrowserBefore={known:browser==null||!!client&&!!api&&typeof set==='function',browser,client,api,set};
       }catch{}}
+      if(receiver.game&&!receiver.game.current())fail('steam-menu-game-window-changed');
       stage = 'button'; mutated = true;
       // These are Steam's actual Guide/QAM key receivers, including its own
       // debounce, suppression and navigation behavior. Do not set menu flags.
@@ -3362,8 +3430,9 @@ R"YMSTEAM(         try{const d=object&&Object.getOwnPropertyDescriptor(object,ke
       const expected = before === menu ? 0 : menu, confirmed = known && after === expected;
       projectMenuGameInputTrace(receiver,menuTarget,'after',confirmed&&after===menu);
       menuTarget.runtimeAccepted = confirmed;
-      const qamRecovery=request.menu==='quick-access'&&request.qamFollowup?passiveQamFollowup(w,'observe',request.qamFollowup):undefined;
-      return { ok: true, before, menu: after, menuTarget, keyDelivered: true, ...(qamRecovery?{qamRecovery}:{}),
+      const qamRecovery=request.menu==='quick-access'&&request.qamFollowup?passiveQamFollowup(w,'observe',request.qamFollowup,receiver.game):undefined;
+      return { ok: true, before, menu: after, menuTarget, keyDelivered: true,
+        ...(routeTrace.overlayRepair?{mutated:true}:{}), ...(qamRecovery?{qamRecovery}:{}),
         menuStateChanged: known ? before !== after : null, runtimeAccepted: confirmed,
         response: !known ? 'key-delivered-menu-state-unknown' : confirmed ? 'menu-state-confirmed' :
           before !== after ? 'key-delivered-other-menu-response' : 'key-delivered-no-menu-state-change', via: 'live' };
@@ -3394,8 +3463,7 @@ R"YMSTEAM(         try{const d=object&&Object.getOwnPropertyDescriptor(object,ke
       // Preflight every field before the first mutation. One request/one Steam context,
       // setters remain Steam-owned; never write its live VDF from YMCC.
       for(const key of keys){
- )YMSTEAM"
-R"YMSTEAM(       checkAccount();const value=desired[key];
+        checkAccount();const value=desired[key];
         if(before[key]!==value){stage='setting';mutated=true;await bounded(s.GetClientSetting(key)[1](value));}
       }
       await waitFor(()=>keys.every(key=>{const value=s.GetClientSetting(key)[0];return typeof value==='number'?Math.abs(value-desired[key])<1e-5:value===desired[key]}));
@@ -3431,7 +3499,8 @@ R"YMSTEAM(       checkAccount();const value=desired[key];
     if (!Number.isInteger(index) || index < 0) fail('live-controller-ambiguous');
     const checkIdle = () => {
       if (typeof s.m_nEditNumber !== 'number' || typeof s.m_nLastSavedEditNumber !== 'number') fail('live-api-unavailable');
-      if (s.m_nEditNumber !== s.m_nLastSavedEditNumber || s.IsUpdatingEditingConfiguration || s.PreviewedConfiguration) fail('live-editor-busy');
+      if (s.m_nEditNumber !== s.m_nLastSavedEditNumber || s.IsUpdatingEditingConfigura)YMSTEAM"
+R"YMSTEAM(tion || s.PreviewedConfiguration) fail('live-editor-busy');
       if (s.EditingConfigurationAppId != null && s.EditingConfigurationAppId !== -1 && s.EditingConfigurationAppId !== 413080) fail('live-editor-busy');
       if (s.EditingConfigurationAppId === 413080 && s.EditingConfigurationControllerIndex != null && s.EditingConfigurationControllerIndex !== index) fail('live-editor-busy');
     };
@@ -3502,8 +3571,7 @@ R"YMSTEAM(       checkAccount();const value=desired[key];
       ...(settledNativeReturn ? { nativeReturn: settledNativeReturn } : {}), ...(menuTarget ? { menuTarget, keyDelivered } : {}) };
   } finally {
     if (window.__ymccSteamLiveBusy === token) delete window.__ymccSteamLiveBusy;
- )YMSTEAM"
-R"YMSTEAM( }
+  }
 }))YMSTEAM";
 inline constexpr const char kUiModeScript[] =
 R"YMSTEAM(// Embedded in steam_live_script.h. Regenerate/check with tools/steam_live_script_embed.mjs.
@@ -3700,7 +3768,7 @@ R"YMSTEAM(FrontendLoaded = !!window.deckyHasLoaded || !!window.DeckyPluginLoader
       const deckyAccountWatchAvailable=accountWatch?.version===1&&!!observedAccount&&accountWatch.read(observedAccount);
       // Reviewed official v3.3.1 fields. Unknown versions remain UNKNOWN;
       // installed hooks are only a structural check, never visual acceptance.
-      let deckyBackendConnected,deckyBackendState,deckyHooksInstalled,deckyClientConnected,deckyClientVerified,deckyClientChecking,deckyClientState;
+      let deckyBackendConnected,deckyBackendState,deckyHooksInstalled,deckyClientConnected,deckyClientVerified,deckyClientChecking,deckyClientState,deckyQamPanelState;
       try {
         if(window===window.top&&window.location.origin==='https://steamloopback.host'&&
            window.DeckyPluginLoader?.deckyState?.publicState?.()?.versionInfo?.current==='v3.3.1'){
@@ -3713,9 +3781,9 @@ R"YMSTEAM(FrontendLoaded = !!window.deckyHasLoaded || !!window.DeckyPluginLoader
           const hooks=window.__TABS_HOOK_INSTANCE,frontend=window.__YMCC_DECKY_FRONTEND__;
           const active=patch=>!!patch&&patch.hasUnpatched===false;
           deckyHooksInstalled=!!(hooks&&hooks===window.DeckyPluginLoader.tabsHook&&active(hooks.qamBrowserViewPatch)&&
-            (!hooks.qamEmbeddedPatch||active(hooks.qamEmbeddedPatch))&&frontend?.qamReady!==false&&
-            Arr)YMSTEAM"
-R"YMSTEAM(ay.isArray(hooks.tabs)&&hooks.tabs.some(tab=>tab?.id===999));
+            (!hooks.qamEmbeddedPatch||active(hooks.qamEmbeddedPatch))&&frontend?.qamReady!==fals)YMSTEAM"
+R"YMSTEAM(e&&
+            Array.isArray(hooks.tabs)&&hooks.tabs.some(tab=>tab?.id===999));
           deckyClientConnected=frontend?.active===true&&frontend.connectionReady===true;
           deckyClientChecking=frontend?.active===true&&frontend.connectionChecking===true;
           // Optional native reply proof is a memory getter, not another request.
@@ -3727,9 +3795,15 @@ R"YMSTEAM(ay.isArray(hooks.tabs)&&hooks.tabs.some(tab=>tab?.id===999));
             else if(frontend.active!==true)deckyClientState='frontend-inactive';
             else{const state=frontend.connectionState;if(['disposed','native-run-missing','binding-run-missing','run-mismatch','socket-missing','socket-connecting','socket-closing','socket-closed','socket-unavailable','transport-unconfirmed','opening-reply-missing','connected','module-dismounted','frontend-absent','frontend-inactive','read-failed'].includes(state))deckyClientState=state;}
           }catch{deckyClientState='read-failed';}
+          // Optional commit evidence. Missing/hidden and old frontends cannot
+          // prove a failed mount, and this value never changes hook health.
+          try{
+            const state=mode==='bigpicture'&&frontend?.active===true?frontend.qamPanelState:undefined;
+            if(state==='unobserved'||state==='committed'||state==='native-ready-commit')deckyQamPanelState=state;
+          }catch{}
         }
       }catch{} // Never emit credentials, router URL, source objects or exception text.
-      return { ok: true, ...(typeof deckyBackendConnected==='boolean'?{deckyBackendConnected}:{}), ...(typeof deckyBackendState==='string'?{deckyBackendState}:{}), ...(typeof deckyHooksInstalled==='boolean'?{deckyHooksInstalled}:{}), ...(typeof deckyClientConnected==='boolean'?{deckyClientConnected}:{}), ...(typeof deckyClientChecking==='boolean'?{deckyClientChecking}:{}), ...(typeof deckyClientVerified==='boolean'?{deckyClientVerified}:{}), ...(typeof deckyClientState==='string'?{deckyClientState}:{}), ...(observedAccount?{observedAccount}:{}), deckyAccountWatchAvailable, mode, rawMode: Number.isInteger(raw) ? raw : null, modeEpoch: watch.active ? watch.id + ':' + watch.entries : '', ...(deckyUpdateResidue?{deckyUpdateResidue}:{}), ...(deckyEmptyFrontend?{deckyEmptyFrontend}:{}), ...(typeof deckyFrontendLoaded === 'boolean'?{deckyFrontendLoaded}:{}), mutated: false, via: 'live' };
+      return { ok: true, ...(typeof deckyBackendConnected==='boolean'?{deckyBackendConnected}:{}), ...(typeof deckyBackendState==='string'?{deckyBackendState}:{}), ...(typeof deckyHooksInstalled==='boolean'?{deckyHooksInstalled}:{}), ...(typeof deckyClientConnected==='boolean'?{deckyClientConnected}:{}), ...(typeof deckyClientChecking==='boolean'?{deckyClientChecking}:{}), ...(typeof deckyClientVerified==='boolean'?{deckyClientVerified}:{}), ...(typeof deckyClientState==='string'?{deckyClientState}:{}), ...(deckyQamPanelState?{deckyQamPanelState}:{}), ...(observedAccount?{observedAccount}:{}), deckyAccountWatchAvailable, mode, rawMode: Number.isInteger(raw) ? raw : null, modeEpoch: watch.active ? watch.id + ':' + watch.entries : '', ...(deckyUpdateResidue?{deckyUpdateResidue}:{}), ...(deckyEmptyFrontend?{deckyEmptyFrontend}:{}), ...(typeof deckyFrontendLoaded === 'boolean'?{deckyFrontendLoaded}:{}), mutated: false, via: 'live' };
     }
   } catch (error) {
     // A later account/interactive veto must retain a settled bounded native

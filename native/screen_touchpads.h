@@ -815,7 +815,8 @@ inline DWORD outlineBorderPixel(int x,int y,int width,int height,int transparenc
     const double radius=std::min(10.0,std::min(width,height)/2.0-2.0);
     const double qx=std::abs(x+0.5-width/2.0)-(width/2.0-1.5-radius);
     const double qy=std::abs(y+0.5-height/2.0)-(height/2.0-1.5-radius);
-    const double distance=std::hypot(std::max(qx,0.0),std::max(qy,0.0))+std::min(std::max(qx,qy),0.0)-radius;
+    // Only corners need a two-axis norm; straight segments use the nearest edge.
+    const double distance=(qx>0.0 && qy>0.0?std::hypot(qx,qy):std::max(qx,qy))-radius;
     const auto alpha=(DWORD)std::lround(outlineAlpha(transparency)*std::clamp(1.0-std::abs(distance),0.0,1.0));
     if(!alpha) return 0;
     return (alpha<<24)|(alpha<<16)|(alpha<<8)|alpha;

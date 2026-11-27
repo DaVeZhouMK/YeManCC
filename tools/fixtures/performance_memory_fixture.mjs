@@ -19,7 +19,7 @@ export const persona=evaluatePerformanceModule(fs.readFileSync('src/bridge/contr
 const clone=x=>structuredClone(x);
 export function createPerformanceMemoryFixture({side='ac',mode='manual',dedicated=false,float=false,configured=true,legacy=false,gameActive=false,ports={},source=file=>fs.readFileSync(file,'utf8')}={}) {
   const controls={version:1,ac:{...models.defaultContinuousBank('ac'),mode},dc:{...models.defaultContinuousBank('dc'),mode}};
-  let settings=ports.initialSettings?clone(ports.initialSettings):{performanceSchedule:{version:2,configured,enabled:true,...(legacy?{enabled:false}:{controls})},rtss:{frameRates:frames.frameRatePair({})}};
+  let settings={input:{},...(ports.initialSettings?clone(ports.initialSettings):{performanceSchedule:{version:2,configured,enabled:true,...(legacy?{enabled:false}:{controls})},rtss:{frameRates:frames.frameRatePair({})}})};
   let game=dedicated||gameActive?{pid:22,processCreated:'created-22',name:'game.exe',path:'C:/Games/game.exe'}:null;
   const custom=ports.initialCustom?clone(ports.initialCustom):{version:1,entries:dedicated?{'game.exe':{displayName:'Game',enabled:true,controls:clone(controls)}}:{},rtss:{}};
   const customPath='C:\\SOFT\\YeMan\\PowerControl\\game-custom.json'.replace(/\\\\/g,'\\');
@@ -60,14 +60,30 @@ export function createPerformanceMemoryFixture({side='ac',mode='manual',dedicate
     switchScheme:async key=>{assert.equal(key,'bal');effects.push('windows-balanced');if(switchFailure)throw Error('overlay rejected');activeScheme='test-balanced';hardwareWrites.push({kind:'balanced'});},ensureRememberedYemanSchemeActive:async()=>effects.push('ensure-scheme'),
     setActiveScheme:async guid=>{activeScheme=guid;effects.push('set-active');hardwareWrites.push({kind:'active-scheme',guid})},detectCoreArchitecture:async()=>({heterogeneous:true}),
     setCoreModeAc:async mode=>{effects.push('core-ac');hardwareWrites.push({kind:'core',side:'ac',mode})},setCoreModeDc:async mode=>{effects.push('core-dc');hardwareWrites.push({kind:'core',side:'dc',mode})},
+    setCoreModeForPowerScope:async(side,mode,scope)=>{ports.onScopedCoreWrite?.(scope);return side==='ac'?yeman.setCoreModeAc(mode):yeman.setCoreModeDc(mode)},
+    setActiveSchemeForPowerScope:async(guid,scope)=>{ports.onScopedActivation?.(scope);return yeman.setActiveScheme(guid)},
     setTdp:async(s,w,opts)=>{await ports.beforeTdpWrite?.(s,w);if(opts.isCurrent&&!opts.isCurrent())return false;effects.push('tdp-'+s);hardwareWrites.push({kind:'tdp',side:s,watts:w});await ports.afterTdpWrite?.(s,w);if(opts.isCurrent&&!opts.isCurrent())return false;opts.onAccepted?.(w);ports.onTdpAccepted?.(s,w);return true},
     applyManualPowerParams:async(p,admission)=>{await ports.beforeCpuWrite?.(clone(p));if(admission?.isCurrent?.()===false)return false;effects.push('cpu-'+p.sides[0]);hardwareWrites.push({kind:'cpu',params:clone(p)});await ports.afterCpuWrite?.(clone(p));return admission?.isCurrent?.()!==false},setRtssLimit:async()=>effects.push('rtss'),readRtssLimit:async()=>120,rebuildYemanScheme:async()=>effects.push('rebuild')};
   // Optional actual frame owner; default fixture behavior remains unchanged.
   const frameRateService=ports.frameRateService?.({repository:repo,targets,gameDetection,yeman,powerSource:sourceMode,
     loadGameCustomConfig:()=>schedule.loadGameCustomConfig()})??{...frames,ensureGlobalFrameRates:async()=>clone(settings.rtss.frameRates),applyIndependentFrameRates:async()=>{effects.push('fps');return true},publishFrameRatesChanged(){}};
+  const runtimePowerEvents=new Map();
+  const defaultPower={phase:'ready',hardwareWritesAllowed:true,generation:1,suspendSerial:0,observedNotificationSequence:0};
+  const sharedPower=evaluatePerformanceModule(source('src/bridge/powerLifecycleState.ts'),{'./ipc':{invoke:async()=>ports.lifecycle??defaultPower,on:(name,callback)=>{runtimePowerEvents.set(name,callback);return()=>runtimePowerEvents.delete(name)}}},{window:{},AbortController});
+  const coreWrite=async call=>{corePolicyCalls.push(call);return (await ports.onCorePolicyCall?.(call))??true};
+  const corePolicy=evaluatePerformanceModule(source('src/bridge/gameCorePolicy.ts'),{'./ipc':{invoke:async(command,body,options)=>{
+    ports.onCorePolicyTransport?.(options);
+    if(command==='game.corePolicy.apply'){
+      const {mode,hyperThreadMode,powerScope,...target}=body;
+      const ok=await coreWrite({kind:'apply',args:clone([target,mode,hyperThreadMode,powerScope])});return {ok,applied:ok};
+    }
+    assert.equal(command,'game.corePolicy.clear');const {powerScope,...target}=body;
+    return {ok:await coreWrite({kind:'clear',powerScope:clone(powerScope),...(Object.keys(target).length?{target:clone(target)}:{})})};
+  }}});
   const schedule=evaluatePerformanceModule(source('src/bridge/performanceSchedule.ts'),{
     './bootModeGlobalPreferences':bootPreferences,'./controllerPersona':persona,'./performanceControls':models,'./powerSource':{powerSourceMode:sourceMode},
-    './gameCorePolicy':{detectGameCorePolicy:async()=>({detected:ports.topologyDetected??true,heterogeneous:ports.heterogeneous??true,smtAvailable:ports.smtAvailable??true}),applyGameCorePolicy:async(...args)=>{corePolicyCalls.push({kind:'apply',args:clone(args)});return {ok:true,applied:true}},clearGameCorePolicy:async target=>{corePolicyCalls.push({kind:'clear',target:clone(target)});return true}},
+    './powerLifecycleState':sharedPower,
+    './gameCorePolicy':{...corePolicy,detectGameCorePolicy:async signal=>{await ports.beforeRestoreCoreRead?.(signal);return {detected:ports.topologyDetected??true,heterogeneous:ports.heterogeneous??true,smtAvailable:ports.smtAvailable??true}}},
     './gamePolicyTarget':targets,'./gamedetect':gameDetection,'./settingsSnapshot':snapshots,'./settingsRepository':repo,'./yeman':yeman,'./cpuProfiles':ports.actualCpuProfiles?evaluatePerformanceModule(source('src/bridge/cpuProfiles.ts'),{'./settingsRepository':repo}):{loadCpuProfiles:async()=>({profiles:{}})},
     './api':{powerLifecycle:{get:async()=>ports.lifecycle??({phase:'ready',hardwareWritesAllowed:true,generation:1})},fs:{exists:async p=>files.has(p),readTextFile:async p=>{if(ports.beforeCustomRead)await ports.beforeCustomRead(p);if(ports.customReadFailure)throw Error('fixture-custom-read-denied');return files.get(p)},writeTextFileAtomic:async(p,v)=>{effects.push('file-save');files.set(p,v)},writeTextFile:async(p,v)=>{effects.push('file-save');files.set(p,v)}}},
     './frameRateLimits':frameRateService,
@@ -78,22 +94,34 @@ export function createPerformanceMemoryFixture({side='ac',mode='manual',dedicate
     ...(ports.scheduleStringify?{JSON:{parse:JSON.parse,stringify:ports.scheduleStringify}}:{}),
   });
   const powerListeners=new Set(),tasks=new Map();
+  const runtimeFrameReader=ports.runtimeFrameReads ? evaluatePerformanceModule(source('src/bridge/frameRateLimits.ts'),{
+    './frameRateModel':frames,'./settingsRepository':repo,'./yeman':{...yeman,detectPerformanceTemplate:ports.runtimeFrameTemplate},
+    './api':{},'./powerLifecycleState':sharedPower,'./gamedetect':gameDetection,'./powerSource':{powerSourceMode:sourceMode},
+    './gamePolicyTarget':targets,'./performanceSchedule':schedule,'./autofloat':{},
+  }).loadGlobalFrameRates : null;
   const runtime=evaluatePerformanceModule(source('src/bridge/gamePolicyRuntime.ts'),{
     './powerResume':evaluatePerformanceModule(source('src/bridge/powerResume.ts')),
-    './powerLifecycleState':evaluatePerformanceModule(source('src/bridge/powerLifecycleState.ts'),{'./ipc':{invoke:async()=>ports.lifecycle??({phase:'ready',hardwareWritesAllowed:true,generation:1}),on:()=>()=>{}}}),
+    './powerLifecycleState':sharedPower,
     'vue':{watch:(_ref,callback)=>{const listeners=_ref===batteryPresent?batteryListeners:powerListeners;listeners.add(callback);return()=>listeners.delete(callback)}},
-    './performanceControls':models,'./powerSource':{powerSourceMode:sourceMode,powerSourceBatteryPresent:batteryPresent},'./yeman':yeman,'./performanceSchedule':schedule,'./gamedetect':gameDetection,
+    './performanceControls':models,'./powerSource':{powerSourceMode:sourceMode,powerSourceBatteryPresent:batteryPresent},'./yeman':runtimeFrameReader?{...yeman,detectPerformanceTemplate:ports.runtimeFrameTemplate}:yeman,'./performanceSchedule':schedule,'./gamedetect':gameDetection,
     './autofloat':{setFloatRtssLinked(){},getFloatInfo:()=>({enabled:floating,tdpApplied:ownerWatts,tdpOwnerCurrent:!!ownerLease&&ownerLease.isCurrent?.()!==false})},
     './monitorData':{subscribeMonitorSnapshot:callback=>{monitorListeners.add(callback);return()=>monitorListeners.delete(callback)}},
     './monitorSnapshotSignals':{monitorProofFresh:(at,now,age)=>Number.isFinite(at)&&at<=now&&now-at<=age},
     './gamePolicyTarget':{...targets,isPolicyGameInitialized:()=>true,subscribePolicyGameStatus:callback=>{gameListeners.add(callback);callback(game);return()=>gameListeners.delete(callback)}},
-    './frameRateLimits':{...frames,loadGlobalFrameRates:async()=>{await ports.beforeRuntimeFrames?.();return clone(settings.rtss.frameRates)},onFrameRatesChanged:()=>()=>{},applyIndependentFrameRates:async()=>true},
-    './api':{powerLifecycle:{get:async()=>ports.lifecycle??({phase:'ready',hardwareWritesAllowed:true,generation:1})}},
+    './frameRateLimits':{...frames,loadGlobalFrameRates:runtimeFrameReader??(async()=>{await ports.beforeRuntimeFrames?.();return clone(settings.rtss.frameRates)}),onFrameRatesChanged:()=>()=>{},applyIndependentFrameRates:async()=>true},
+    './api':{powerLifecycle:{get:async(_timeout,signal)=>{const power=ports.lifecycle??({phase:'ready',hardwareWritesAllowed:true,generation:1});await ports.beforeRuntimePowerRead?.(signal);return power}}},
     '@/scheduler':{registerScheduledTask:(name,_ms,run)=>{tasks.set(name,run);return()=>tasks.delete(name)}},
     './quickActionLock':{isQuickActionBusy:()=>ports.isQuickActionBusy?.()??false},
-    './gameCorePolicy':{detectGameCorePolicy:async()=>({detected:true,heterogeneous:false,smtAvailable:ports.smtAvailable??false}),clearGameCorePolicy:async()=>{corePolicyCalls.push({kind:'clear'});return true},applyGameCorePolicy:async(...args)=>{corePolicyCalls.push({kind:'apply',args:clone(args)});return {ok:true,applied:true}}}
-  },{Date:class extends Date{static now(){return ports.now??Date.now()}}});
+    './gameCorePolicy':{...corePolicy,detectGameCorePolicy:async signal=>{if(ports.beforeRuntimeCoreRead)await ports.beforeRuntimeCoreRead(signal);return {detected:true,heterogeneous:false,smtAvailable:ports.smtAvailable??false}}}
+  },{AbortController,Date:class extends Date{static now(){return ports.now??Date.now()}}});
   return {schedule,runtime,frameRateService,powerTerminals:yeman,settingsRepository:repo,effects,hardwareWrites,schemeAttempts,corePolicyCalls,sourceMode,powerListeners,tasks,get activeScheme(){return activeScheme},get settings(){return settings},get floating(){return floating},get game(){return game},get ownerLease(){return ownerLease},get ownerSide(){return ownerSide},
+    observePower:(listener=()=>{},options)=>sharedPower.onSharedPowerLifecycle(listener,options),
+    beginPowerReadback:sharedPower.beginSharedPowerLifecycleReadback,
+    isPowerAdmitted:sharedPower.isSharedPowerLifecycleAdmitted,
+    powerWriteScope:sharedPower.sharedPowerWriteScope,
+    readRuntimePower:()=>sharedPower.getSharedPowerLifecycle(),
+    publishRuntimePower:value=>{ports.lifecycle={...(ports.lifecycle??defaultPower),...value};runtimePowerEvents.get('power.lifecycleChanged')?.(ports.lifecycle)},
+    runtimePowerListenerCount:()=>runtimePowerEvents.size,
     setTemplate:value=>{ports.template=value;batteryPresent.value=value==='desktop'?false:true;for(const callback of batteryListeners)callback()},
     setSwitchFailure:value=>{switchFailure=value},setGame:next=>{game=next;for(const callback of gameListeners)callback(game)},setGameReady:value=>{ports.gameReady=value;for(const callback of readinessListeners)callback(value)},publishMonitor:view=>{for(const callback of monitorListeners)callback(view)},
     setEntry:async entry=>{const value=await schedule.loadGameCustomConfig();if(entry)value.entries['game.exe']=entry;else delete value.entries['game.exe'];await schedule.saveGameCustomConfig(value)}

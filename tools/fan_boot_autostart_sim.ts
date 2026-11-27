@@ -47,7 +47,7 @@ const wakeStart = appSource.indexOf('function onFanResumeReady(');
 const wakeEnd = appSource.indexOf('\nfunction onPowerResumed(', wakeStart);
 assert(wakeStart >= 0 && wakeEnd > wakeStart, 'APP_FAN_WAKE_ENTRY_UNIQUE');
 const wakeLines = appSource.slice(wakeStart, wakeEnd).trimEnd().split('\n');
-wakeLines[0] = 'function onFanResumeReady(resumeGeneration) {';
+wakeLines[0] = 'function onFanResumeReady(resumeGeneration, fromPublicReady = false) {';
 const wakeSource = wakeLines.join('\n').replace(/false as const/g, 'false');
 const fanPublicDelivery = appSource.match(/^    if \(admitted\).*\.retryAfterPublicReady\?\.\(state\);$/m)?.[0];
 assert(fanPublicDelivery, 'actual public Ready retry delivery missing');
@@ -251,7 +251,7 @@ interface SimEnv {
   preference: boolean;
   readPreference?: () => Promise<{ fanControl?: boolean }>;
   autoApplyInputs: FanNode[][];
-  autoStartInputs: Array<{ manualRecovery?: boolean; reason?: string } | undefined>;
+  autoStartInputs: Array<{ manualRecovery?: boolean; publishedWakeGeneration?: number; reason?: string } | undefined>;
   featureEnabled: boolean;
   curve: FanNode[];
   logs: string[];
@@ -291,11 +291,11 @@ function buildOrchestrator(lifecycle: FanHostLifecycle, logs: string[]) {
     '  get hasControlIntent() { return env.lifecycle.hasControlIntent; },',
     '  get controlCancellationRevision() { return env.lifecycle.controlCancellationRevision; },',
     '  get coordinatorSnapshot() { return env.lifecycle.coordinatorSnapshot; },',
-    '  resumeAfterNativeReady: (g) => env.lifecycle.resumeAfterNativeReady(g),',
-    '  resumeAfterCommittedPowerWake: (g) => env.lifecycle.resumeAfterCommittedPowerWake(g),',
+    '  resumeAfterNativeReady: (g, committed) => env.lifecycle.resumeAfterNativeReady(g, committed),',
+    '  publishedStartupWakeAdmission: (g, current, preferenceStillOn) => env.lifecycle.publishedStartupWakeAdmission(g, current, preferenceStillOn),',
     '  observePowerBoundary: (event, g) => env.lifecycle.observePowerBoundary(event, g),',
     '  start: (options) => { env.autoStartInputs.push(options ? {...options} : undefined); return env.lifecycle.start(options); },',
-    '  apply: (nodes) => { env.autoApplyInputs.push(nodes.map(n => ({...n}))); return env.lifecycle.apply(nodes); },',
+    '  apply: (nodes, wakeGeneration) => { env.autoApplyInputs.push(nodes.map(n => ({...n}))); return env.lifecycle.apply(nodes, wakeGeneration); },',
     '};',
     'const readSettingsSection = async () => env.readPreference ? env.readPreference() : ({ fanControl: env.preference });',
     // No scene override: these cases consume the enabled/disabled startup preference.
@@ -469,7 +469,7 @@ async function main(): Promise<void> {
     await api.ensureFanAutoStart('resume', 1);
     const afterCalls = adapter.calls.slice(beforeResumeCalls);
     assert.deepEqual(launcher.calls, ['start'], `唤醒自动启动应恰好一次（launcher=${launcher.calls.join(',')}）`);
-    assert.deepEqual(afterCalls, ['handshake', 'state', 'resume', 'state', 'state', 'acquire', 'enable'],
+    assert.deepEqual(afterCalls.filter(call => call !== 'state'), ['handshake', 'resume', 'acquire', 'enable'],
       `唤醒自动启动必须由唯一 Host resume owner 证明重开后再租约→写曲线（calls=${afterCalls.join(',')}；logs=${logs.join(';')}）`);
     assert.deepEqual(adapter.sessionTransitions, ['Open', 'OpenEvents'],
       'resume owner 必须完成 Open→OpenEvents，不能以 handshake 或 Ready 空壳冒充重开');
@@ -697,11 +697,10 @@ async function main(): Promise<void> {
     lifecycle.observePowerBoundary('resuming', 1);
     api.setLatestResumeGeneration(1);
     await api.ensureFanAutoStart('resume', 1);
-    // An enabled preference has the same recovery authority as a click: it
-    // may ask the existing Host owner to rebuild once. This is not native
-    // write permission; the unchanged acquire/write/success negatives below
-    // must still hold while native remains Resuming without a ready receipt.
-    assert.equal(adapter.calls.filter(c => c === 'resume').length, 1, '已授权自动开启可进入一次原恢复链');
+    // A saved preference may claim control after public wake admission.
+    // Without that admission it cannot launch a Host or request device resume.
+    assert.equal(launcher.calls.length, 0, '未确认唤醒不得启动宿主');
+    assert.equal(adapter.calls.filter(c => c === 'resume').length, 0, '未确认唤醒不得请求设备恢复');
 
     assert.equal(adapter.calls.filter(c => c === 'acquire').length, 0, '未确认唤醒不得取租约');
     assert.equal(adapter.enables, 0, '未确认唤醒不得写曲线');
@@ -738,6 +737,8 @@ async function main(): Promise<void> {
       assert.equal(adapter.enables, 1, 'the first authorized automatic call must actually write');
       assert.equal(env.autoStartInputs.length, 1);
       assert.equal(env.autoStartInputs[0]?.manualRecovery, true, 'the extracted production auto request must actually dispatch authorized recovery');
+      assert.equal(env.autoStartInputs[0]?.publishedWakeGeneration, reason === 'resume' ? 6 : undefined,
+        'Host repair can use manual startup mechanics, but resume supplies its public generation');
       assert.deepEqual(adapter.enabledNodeSets, [SAVED_CURVE]); assert.deepEqual(env.autoApplyInputs, [SAVED_CURVE]);
       assert.deepEqual(adapter.enabledOwners, [expectedOwner]); assert.deepEqual(adapter.eventsOwners, [expectedOwner]);
       assert.equal(adapter.calls.includes('resume'), false, 'an empty or zero-receipt shell has no resume result to invent');
@@ -847,6 +848,40 @@ async function main(): Promise<void> {
       api.requestFanCommittedResume(2);api.onFanResumeReady(2);await flush();assert.equal(adapter.enables,variant==='enabled'?1:0,'duplicate notification rewrote or revived the same request');
       if(variant==='enabled'){await lifecycle.disable();api.requestFanCommittedResume(2);api.onFanResumeReady(2);await flush();assert.equal(adapter.enables,1,'explicit OFF after recovery was overwritten');}
       await lifecycle.close();observations.push({reason:'public-ready-auto',variant,enables:adapter.enables,manualClicks:0,fanOnlyEventsBeforeFirstResult:0});
+    }
+  });
+  if (process.env.YMCC_FAN_AUTO_CASE === 'PUBLIC-READY') await test('PUBLIC-READY cannot manufacture current Fan readiness', async () => {
+    const ready = { known: true, phase: 'ready', generation: 1, hardwareWritesAllowed: true,
+      inputReady: true, resumeReady: true, hibernateAvailable: false, notificationPending: false } as const;
+    for (const variant of ['pending', 'suspended', 'newer'] as const) {
+      let native: import('@/bridge/api').PowerLifecycleState = ready;
+      const adapter = new AutoOwnerHost(), launcher = new SimLauncher();
+      const lifecycle = newLifecycle(adapter, launcher, 250, 1, async () => native);
+      const {api} = buildOrchestrator(lifecycle, []);
+      const flush = async () => { for (let i = 0; i < 1000; i++) await Promise.resolve(); await api.autoStartSettled(); };
+      lifecycle.stagePendingControlCurve(SAVED_CURVE);
+      await lifecycle.start({manualRecovery:true, reason:'fixture-initial-user-control'});
+      await lifecycle.apply(SAVED_CURVE);
+      const before = adapter.enables;
+      lifecycle.setPowerGeneration(2);
+      lifecycle.observePowerBoundary('suspending',2);
+      await adapter.suspend(); await lifecycle.suspend();
+      api.onPowerResuming(2);
+      lifecycle.observePowerBoundary('resumed',2); api.setLatestResumeGeneration(2);
+      native = { ...ready, generation: variant==='newer'?3:2, phase: variant==='suspended'?'suspending':'ready',
+        resumeReady: variant==='newer', hardwareWritesAllowed: variant==='newer', notificationPending: variant==='pending' };
+      try {
+        api.requestFanCommittedResume(2); await flush();
+        assert.notEqual(lifecycle.coordinatorSnapshot.wakeReadyGeneration, 2, `${variant}: public Ready granted unconfirmed Fan F5`);
+        assert.equal(adapter.enables, before, `${variant}: unconfirmed Fan F5 replayed the curve`);
+        native = {...ready,generation:2}; await adapter.resume({generation:2});
+        api.onFanResumeReady(2); await flush();
+        assert.equal(lifecycle.coordinatorSnapshot.wakeReadyGeneration, 2, `${variant}: a valid Fan confirmation did not recover`);
+        assert.equal(adapter.enables, before+1, `${variant}: the retained curve must recover once`);
+        api.onFanResumeReady(2); api.requestFanCommittedResume(2); await flush();
+        assert.equal(adapter.enables, before+1, `${variant}: a duplicate triggered another replay`);
+        observations.push({reason:'public-ready-needs-fan-confirmation',variant,retainedCurveRecovered:true});
+      } finally { await lifecycle.close(); }
     }
   });
   if (process.env.YMCC_FAN_AUTO_CASE === 'FAN-PUBLIC-RETRY') await test('FAN-PUBLIC-RETRY one newer public admission continues the refused physical wake', async () => {

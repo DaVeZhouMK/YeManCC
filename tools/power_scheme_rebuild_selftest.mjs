@@ -18,6 +18,7 @@ const YM='1cb8b882-a900-4b9f-9bac-99d151e64441',BAL='381b4222-f694-41f0-9685-ff5
 const A='9e3d8a66-1513-451a-b489-f99dbdd37198',B='dfa153a8-6515-46c4-bb03-54a97e0fb8c0';
 const NONE='fea3413e-7e05-4911-9a71-700331f1c294',PERSONALITY='245d8541-3943-4422-b025-13a784f679b7';
 const listeners=[],windowListeners=new Map();let fixture=null,fixtureScope=0;const tests=[];const NO_REPLY=Symbol('no IPC response');
+const deliver=(id,result)=>{for(const fn of listeners)fn({data:{id,result}});};
 const readyPower=()=>({phase:'ready',known:true,generation:41,hardwareWritesAllowed:true,notificationPending:false,observedNotificationSequence:8,publicationRevision:12});
 function publishPower(){
  for(const fn of listeners)fn({data:{event:'power.lifecycleChanged',data:{...fixture.power}}});
@@ -52,12 +53,18 @@ function dispatch(cmd,args){
  }
  if(cmd==='power.setActiveScheme'){
   if(!fixture.nativeSetActiveScheme)throw Error('unknown command: power.setActiveScheme');
-  assert.deepEqual(Object.keys(args),['scheme']);const guid=args.scheme;
+  assert.deepEqual(Object.keys(args),fixture.expectedScope?['scheme','powerScope']:['scheme']);
+  if(fixture.expectedScope)assert.deepEqual(args.powerScope,fixture.expectedScope);
+  const guid=args.scheme;
   if(fixture.activationFailure===guid||fixture.activationFailure?.includes?.(guid))return {ok:false,code:5};
   if(!fixture.plans.has(guid))return {ok:false,code:87};
   if(fixture.activationIgnored!==guid&&!fixture.activationIgnored?.includes?.(guid))fixture.active=guid;
   if(fixture.personalityAfterActivation)fixture.personality=[...fixture.personalityAfterActivation];
   return {ok:true,code:0};
+ }
+ if(cmd==='registry.writePowerBatch'){
+  assert.deepEqual(args.powerScope,fixture.expectedScope);
+  return {ok:true,written:args.entries.length,failed:[]};
  }
  if(cmd==='log.write'){
   assert.equal(args.level,'info');assert(args.message.startsWith('[power.personality] '));
@@ -120,7 +127,7 @@ function dispatch(cmd,args){
  throw Error('Unhandled memory-only IPC: '+cmd);
 }
 globalThis.window={chrome:{webview:{addEventListener:(_,fn)=>listeners.push(fn),postMessage:r=>queueMicrotask(()=>{
- try{const result=dispatch(r.cmd,r.args||{});if(result===NO_REPLY)return;for(const fn of listeners)fn({data:{id:r.id,result}})}
+ try{const result=dispatch(r.cmd,r.args||{});if(result===NO_REPLY||fixture.deferReply?.(r,result))return;deliver(r.id,result)}
  catch(error){for(const fn of listeners)fn({data:{id:r.id,error:String(error.message)}})}
 })}},addEventListener(name,fn){if(!windowListeners.has(name))windowListeners.set(name,new Set());windowListeners.get(name).add(fn)},
  removeEventListener(name,fn){windowListeners.get(name)?.delete(fn)},
@@ -357,6 +364,126 @@ assert.equal(resetWrites(absent).length,0);assert(!absent.plans.has(YM));assert.
 await new Promise(resolve=>realSetTimeout(resolve,25));
 assert.equal(ownedTimers.size,0,'Every fixture-owned IPC timeout is cleared or expires, including no-reply cases');
 const coverage={originalCases:originalCaseCount,addedCases:tests.length-originalCaseCount,forwardedArgumentSubcases:forwarded.length,failClosedReceiptSubcases:failures.length,failClosedConsumerInvocations:failures.length*3};
+const flushWake=async()=>{for(let i=0;i<240;i++)await Promise.resolve();};
+const manualScheme={version:2,mode:'manual',guid:YM,selectedGuid:A,name:'Fixture',remembered:true};
+const wakeScheme=()=>yeman.reconcilePowerSchemeAfterWake();
+async function wakeCase(name,options,run){
+ const f=resetFixture({nativeSchemeExists:true,nativeSetActiveScheme:true,active:A,settings:{schemaVersion:1,power:{scheme:manualScheme}},power:{...readyPower(),suspendSerial:0},...options});
+ yeman.setPowerControlDir(f.directory);
+ const off=power.onSharedPowerLifecycle(()=>{});publishPower();
+ const now=Date.now;Date.now=()=>now()+60000; // Expire the earlier rebuild cases' protection window.
+ try{await run(f);}finally{Date.now=now;off();}
+ tests.push({name,action:'reconcilePowerSchemeAfterWake',pass:true,calls:f.calls,ipc:f.ipc});
+}
+await wakeCase('same generation Ready releases an old active scheme read before its reply',{},async f=>{
+ let held;let attempts=0;let first,second;
+ f.deferReply=(r,result)=>{if(r.cmd==='power.activeScheme'&&++attempts===1){held={id:r.id,result};return true;}return false;};
+ const old=wakeScheme().then(result=>{first=result;});
+ try{
+  await flushWake();assert(held);assert.equal(first,undefined);
+  changePower({});await flushWake();assert.equal(first,undefined,'publication-only changes keep the active read');
+  changePower({observedNotificationSequence:f.power.observedNotificationSequence+1});
+  const next=wakeScheme().then(result=>{second=result;});await flushWake();
+  assert.equal(second,'manual','successor must finish before the old read returns');
+  assert.equal(first,'retry-on-ready');assert.equal(attempts,2);assert.deepEqual(f.calls,[]);
+  deliver(held.id,B);await Promise.all([old,next]);assert.deepEqual(f.calls,[]);
+ }finally{if(held)deliver(held.id,held.result);await old;}
+});
+await wakeCase('same generation Ready preserves settlement of an issued scheme activation',{active:B},async f=>{
+ let held,first,second;
+ f.deferReply=(r,result)=>{if(!held&&(r.cmd==='power.setActiveScheme'||(r.cmd==='shell.run'&&r.args.args[0]==='/setactive'))){held={id:r.id,result};return true;}return false;};
+ const old=wakeScheme().then(result=>{first=result;});
+ try{
+  await flushWake();assert(held);assert.equal(f.active,A);
+  changePower({observedNotificationSequence:f.power.observedNotificationSequence+1});
+  const next=wakeScheme().then(result=>{second=result;});await flushWake();
+  assert.equal(first,undefined);assert.equal(second,undefined,'successor must wait for an issued write receipt');
+  deliver(held.id,held.result);await Promise.all([old,next]);
+  assert.equal(first,'unconfirmed');assert.equal(second,'manual');
+  const activations=f.ipc.filter(r=>r.cmd==='power.setActiveScheme'||(r.cmd==='shell.run'&&r.args.args[0]==='/setactive'));
+  assert.equal(activations.length,1);
+  assert.equal(activations[0].args.expectedPowerGeneration,f.power.generation);
+  assert.equal(activations[0].args.expectedPowerNotificationSequence,f.power.observedNotificationSequence-1);
+  assert.equal(activations[0].args.expectedPowerSuspendSerial,0);
+ }finally{if(held)deliver(held.id,held.result);await old;}
+});
+await wakeCase('revoking a DC scheme read does not release its issued AC write',{
+ active:YM,personality:[2,1],settings:{schemaVersion:1,power:{scheme:{...manualScheme,mode:'auto',selectedGuid:undefined}}},
+},async f=>{
+ let read,write,first,second;
+ f.deferReply=(r,result)=>{
+  if(!read&&r.cmd==='registry.read'&&r.args.name==='DCSettingIndex'){read={id:r.id,result};return true;}
+  if(!write&&r.cmd==='shell.run'&&r.args.args[0]==='/setacvalueindex'){write={id:r.id,result};return true;}
+  return false;
+ };
+ const old=wakeScheme().then(result=>{first=result;});
+ try{
+  await flushWake();assert(read&&write);assert.deepEqual(f.personality,[1,1]);
+  changePower({suspendSerial:1});
+  const next=wakeScheme().then(result=>{second=result;});await flushWake();
+  assert.equal(first,undefined);assert.equal(second,undefined);
+  assert.equal(personalityReads(f).length,2,'the successor must not pass the pending write');
+  deliver(write.id,write.result);await Promise.all([old,next]);
+  assert.equal(first,'unconfirmed');assert.equal(second,'auto');
+  assert.equal(personalityReads(f).length,4);
+  deliver(read.id,2);await flushWake();
+  assert.equal(personalityWrites(f).length,1,'the retired DC read cannot dispatch with its late result');
+ }finally{if(write)deliver(write.id,write.result);if(read)deliver(read.id,read.result);await old;}
+});
+await wakeCase('automatic wake scheme loses a queued request before it touches the plan',{power:{...readyPower(),suspendSerial:2}},async f=>{
+ let held;
+ f.deferReply=(r,result)=>{if(!held&&r.cmd==='power.activeScheme'){held={id:r.id,result};return true;}return false;};
+ const blocker=yeman.reconcileRememberedPowerScheme();
+ let old;
+ try{
+  const handoff=()=>new Promise(resolve=>setImmediate(resolve));
+  await handoff();assert(held);
+  const sequence=power.getSharedPowerLifecycle()?.observedNotificationSequence;
+  assert.equal(sequence,f.power.observedNotificationSequence,'Automatic request needs its own published Ready');
+  const current=()=>power.getSharedPowerLifecycle()?.observedNotificationSequence===sequence;
+  let outcome;
+  old=yeman.ensureRememberedYemanSchemeActive({
+   current,
+   read:work=>work(),
+  }).then(()=>{outcome=null;},error=>{outcome=error;});
+  changePower({observedNotificationSequence:sequence+1});
+  await handoff();
+  assert.equal(power.getSharedPowerLifecycle()?.observedNotificationSequence,sequence+1);
+  assert.equal(outcome,undefined,'The older plan activity must retain its queue position');
+  deliver(held.id,held.result);
+  assert.equal(await blocker,'manual');
+  await old;assert.match(outcome?.message??'',/request retired/);
+  assert.equal(f.active,A);
+  assert.equal(f.settings.power.scheme.mode,'manual');
+  assert.equal(resetWrites(f).length,0);
+  assert.equal(personalityReads(f).length,0);
+  await yeman.ensureRememberedYemanSchemeActive({current:()=>true,read:work=>work()});
+  assert.equal(f.active,YM);
+  assert.equal(f.settings.power.scheme.mode,'auto');
+  const activation=f.ipc.filter(r=>r.cmd==='shell.run'&&r.args.args[0]==='/setactive');
+  assert.equal(activation.length,1);
+  assert.equal(activation[0].args.expectedPowerNotificationSequence,sequence+1);
+  assert.equal(activation[0].args.expectedPowerSuspendSerial,2);
+ }finally{if(held)deliver(held.id,held.result);await blocker;await old;}
+});
+for(const side of ['ac','dc']){
+ const expectedScope=[4,2,8],f=resetFixture({nativeSetActiveScheme:true,expectedScope});
+ await yeman.setCoreModeForPowerScope(side,'only-small',expectedScope);
+ await yeman.setActiveSchemeForPowerScope(YM,expectedScope);
+ assert.deepEqual(f.ipc.map(row=>row.cmd),['registry.writePowerBatch','power.setActiveScheme']);
+ const batch=f.ipc[0].args;
+ assert.equal(batch.scheme,YM);assert.equal(batch.subGroup,yeman.PW.SUB);
+ assert.equal(batch.valueName,side==='ac'?'ACSettingIndex':'DCSettingIndex');
+ assert.deepEqual(batch.entries,[{setting:yeman.PW.G_CORE,value:2},{setting:yeman.PW.G_HETERO,value:3},{setting:yeman.PW.G_SHORT,value:3}]);
+ assert.deepEqual(f.ipc.map(row=>row.args.powerScope),[expectedScope,expectedScope]);
+ tests.push({name:'Scoped delayed core refresh wire '+side,action:'setCoreModeForPowerScope',pass:true,ipc:f.ipc});
+}
+{
+ const f=resetFixture();
+ await assert.rejects(yeman.setActiveSchemeForPowerScope(YM,[4,2,8]),/unknown command/);
+ assert.deepEqual(f.ipc.map(row=>row.cmd),['power.setActiveScheme']);
+ tests.push({name:'Scoped activation cannot fall back to an unscoped command',action:'setActiveSchemeForPowerScope',pass:true,ipc:f.ipc});
+}
 const runtimeClosure={remainingOwnedTimers:ownedTimers.size,memoryWebViewOnly:true,realPowercfgExecuted:false,nativeApiExecuted:false,ipcTimeoutMs:5000,timeoutClock:'No-reply cases use the original bounded fast clock (10ms); requested IPC timeout is asserted as 5000ms'};
 writeFileSync(process.argv[2],JSON.stringify({passed:tests.length,total:tests.length,tests,coverage,runtimeClosure,actualBridgeModule:true,memoryIpcOnly:true,realPowercfgExecuted:false},null,2));
 console.log(tests.length+'/'+tests.length+' power-scheme rebuild tests passed');

@@ -27,8 +27,8 @@ async function fixture(family:typeof families[number]=families[1],withoutIntent=
  const clock=new Clock(),saved={setTimeout,clearTimeout,setInterval,clearInterval},perf=Object.getOwnPropertyDescriptor(globalThis,'performance')!;
  Object.assign(globalThis,{setTimeout:(fn:()=>void,ms:number)=>clock.add(fn,ms),clearTimeout:(h:any)=>clock.clear(h),setInterval:(fn:()=>void,ms:number)=>clock.add(fn,ms,ms),clearInterval:(h:any)=>clock.clear(h)});Object.defineProperty(globalThis,'performance',{configurable:true,value:{now:()=>clock.now}});
  const host=new CleanupHost();host.factoryType=family[1];host.route=family[2];let native:any={generation:6,phase:'ready',hardwareWritesAllowed:true,resumeReady:true,inputReady:true,hibernateAvailable:true};let starts=0,stops=0,maxLive=0,denyExit=false;const live=new Set<number>(),allHolds:ReturnType<typeof held<void>>[]=[];let stopHold:ReturnType<typeof held<void>>|null=null,startHold:ReturnType<typeof held<void>>|null=null;const trace:string[]=[];
- const life=new FanHostLifecycle({enabled:true,adapter:host,heartbeatIntervalMs:5000,readNativeActivity:async()=>null,readNativePowerState:async()=>native,
-  launcher:{async start(){assert.equal(live.size,0,'second Host before exact old exit');if(startHold){const g=startHold;startHold=null;g.entered();await g.promise;}const pid=116300+(++starts);host.reset();live.add(pid);maxLive=Math.max(maxLive,live.size);trace.push('launch:'+pid);return{pid,executable:'inert-fan.exe'};},async stop(process){if(stopHold){const g=stopHold;stopHold=null;g.entered();await g.promise;}if(denyExit)throw Error('exact predecessor exit unconfirmed');assert(live.has(process.pid));live.delete(process.pid);stops++;trace.push('exact-exit:'+process.pid);}}});
+  const life=new FanHostLifecycle({enabled:true,adapter:host,heartbeatIntervalMs:5000,readNativeActivity:async()=>null,readNativePowerState:async()=>typeof native==='function'?native():native,
+   launcher:{async start(_config,assertCurrent){assert.equal(live.size,0,'second Host before exact old exit');if(startHold){const g=startHold;startHold=null;g.entered();await g.promise;}await assertCurrent?.('spawn');const pid=116300+(++starts);host.reset();live.add(pid);maxLive=Math.max(maxLive,live.size);trace.push('launch:'+pid);return{pid,executable:'inert-fan.exe'};},async stop(process){if(stopHold){const g=stopHold;stopHold=null;g.entered();await g.promise;}if(denyExit)throw Error('exact predecessor exit unconfirmed');assert(live.has(process.pid));live.delete(process.pid);stops++;trace.push('exact-exit:'+process.pid);}}});
  if(process.env.YMCC_FAN_CLEANUP_DEBUG){const owner=life as any,original=owner.startInternal.bind(owner);owner.startInternal=async(...args:any[])=>{trace.push('startInternal:'+JSON.stringify({state:owner.state,session:owner.sessionGeneration,phase:owner.coordinatorSnapshot.phase,host:owner.processId,selfHeal:!!args[4],startup:owner.recoveryIntent?.selfHeal?.startupRequired}));try{return await original(...args);}catch(e){trace.push('startError:'+String(e));throw e;}};}
  life.setPowerGeneration(6);life.observePowerBoundary('resume-ready',6);await life.start();if(!withoutIntent)await life.apply(curve(100));host.enterPending();
  return{life,host,clock,trace,counts:()=>({starts,stops,maxLive}),native:(v:any)=>native=v,denyExit:(v:boolean)=>denyExit=v,
@@ -190,6 +190,86 @@ async function main(){
    const end=f.host.calls.length;await f.clock.advance(10000);assert.equal(f.host.calls.length,end,'exhausted observer kept running');
    f.host.snapshot=snapshot;return f.counts();
  });
+ for(const outcome of ['exit-regrant','acquire-regrant','exit-off','exit-new-sleep'] as const)await check('public wake self-heal checks permit: '+outcome,async f=>{
+   const waitingForExit=outcome!=='acquire-regrant';
+   const power={generation:6,phase:'ready',hardwareWritesAllowed:true,resumeReady:true,physicalWakeObserved:true};
+   f.native(power);f.host.settle('open');
+   const enable=f.host.enable.bind(f.host),acquire=f.host.acquireControl.bind(f.host),getState=f.host.getState.bind(f.host);
+   let readsAfterExit=0;
+   f.host.getState=async()=>{
+     const {starts,stops}=f.counts();
+     if(starts===stops){readsAfterExit++;throw new FanApiError('no live process',0,'FAN_HTTP_RESULT_UNKNOWN');}
+     return getState();
+   };
+   let submitted=false;const acquiring=held<void>();
+   f.host.enable=async nodes=>{
+     if(submitted)return enable(nodes);
+     submitted=true;f.host.calls.push('enable-rejected');f.host.nodes=null;f.host.lease=null;
+     f.host.settle('fault');f.host.closed=false;
+     throw new FanApiError('public scope retired',409,'FAN_PUBLIC_POWER_SUPERSEDED');
+   };
+   f.host.acquireControl=async()=>{
+     const lease=await acquire();
+     if(!waitingForExit&&f.counts().starts===2&&!acquiring.wasEntered){acquiring.entered();await acquiring.promise;}
+     return lease;
+   };
+   const gate=waitingForExit?f.holdStop():acquiring;
+   const initialWrites=f.host.calls.filter(c=>c==='enable').length;
+   try{
+     assert.equal(await f.life.requestRecoveryAfterObservedHostState('telemetry-host-not-ready'),true);
+     await f.clock.advance(1600);
+     assert(submitted&&gate.wasEntered,'automatic recovery did not reach the held boundary');
+     f.native({...power,resumeReady:false});gate.resolve();await f.clock.advance(1800);
+     assert.equal(f.counts().starts,waitingForExit?1:2,'a revoked permit spawned a Host');
+     assert.equal(f.host.calls.filter(c=>c==='enable').length,initialWrites,'a revoked permit wrote the curve');
+     if(outcome==='exit-off')await f.life.disable();
+     if(outcome==='exit-new-sleep'){
+       f.native({generation:7,phase:'suspending',resumeReady:false,hardwareWritesAllowed:false});
+       f.life.setPowerGeneration(7);f.life.observePowerBoundary('suspending',7);
+     }
+     f.native(power);await f.clock.advance(12000);
+     const continued=outcome.endsWith('regrant');
+     assert.equal(f.host.calls.filter(c=>c==='enable').length,initialWrites+(continued?1:0),'wrong replay after regrant');
+     assert.deepEqual(f.counts(),{starts:continued?2:1,stops:1,maxLive:1});
+     assert.equal(readsAfterExit,0,'continuation queried the exited Host');
+     assert.equal(f.life.recoveryActive,false);return{...f.counts(),readsAfterExit};
+   }finally{gate.resolve();}
+ });
+ for(const boundary of ['before-observation','before-events','off','new-sleep'] as const)await check('public wake Open acknowledgement loss waits for grant: '+boundary,async f=>{
+   const power={generation:6,phase:'ready',hardwareWritesAllowed:true,resumeReady:true,physicalWakeObserved:true};
+   f.native(power);f.host.reset();
+   f.life.stagePendingControlCurve(curve(65));
+   const open=f.host.open.bind(f.host);
+   let submitted=false;
+   f.host.open=async()=>{
+     const snapshot=await open();
+     if(submitted)return snapshot;
+     submitted=true;throw new FanApiError('Open response lost',0,'FAN_HTTP_RESULT_UNKNOWN','/api/open');
+   };
+   const count=(name:string)=>f.host.calls.filter(c=>c===name).length;
+   const before={open:count('open'),events:count('events'),enable:count('enable')};
+   await assert.rejects(f.life.resumeAfterNativeReady(6),e=>e instanceof FanApiError&&e.requestPath==='/api/open');
+   assert(submitted&&f.life.recoveryActive,'lost Open did not transfer to the real observer');
+   let reads=0;
+   f.native(()=>({...power,resumeReady:boundary==='before-events'&&++reads===1}));
+   await f.clock.advance(1800);
+   assert.equal(count('events'),before.events,'a revoked permit reached OpenEvents');
+   assert.equal(count('acquire'),0,'a revoked permit reached Acquire');
+   assert.equal(count('enable'),before.enable);
+   if(boundary==='off')await f.life.disable();
+   if(boundary==='new-sleep'){
+     f.native({generation:7,phase:'suspending',hardwareWritesAllowed:false,resumeReady:false});
+     f.life.setPowerGeneration(7);f.life.observePowerBoundary('suspending',7);
+   }
+   f.native(power);await f.clock.advance(9000);
+   const continued=boundary==='before-observation'||boundary==='before-events';
+   assert.equal(count('open'),before.open+1,'the already-issued Open was replayed');
+   assert.equal(count('events'),before.events+(continued?1:0),'wrong continuation of the original Open');
+   assert.equal(count('acquire'),continued?1:0,'wrong lease acquisition after a grant');
+   assert.equal(count('enable'),before.enable+(continued?1:0),'wrong curve submission after a grant');
+   assert.equal(f.life.recoveryActive,false);
+   return f.counts();
+ },families[1],true);
  await check('OEM retired owner waits for exact predecessor exit',async f=>{
    await loseThenRetire(f);const gate=f.holdStop();await f.clock.advance(250);assert(gate.wasEntered,'automatic recovery did not reach exact exit');
    assert.equal(f.counts().starts,1);assert.equal(f.host.calls.filter(x=>x==='enable').length,2);
@@ -321,6 +401,20 @@ async function main(){
    assert.deepEqual(f.counts(),{starts:2,stops:1,maxLive:1});assert.equal(f.host.calls.filter(x=>x==='resume').length,1);
    assert.equal(f.host.calls.filter(x=>x==='close').length,0);return f.counts();
  },family);
+ await check('committed wake rebuild failure cannot replace a retired Host until grant returns',async f=>{
+   await assert.rejects(failingWake(f),e=>e instanceof FanApiError&&e.errorCode==='HC_RESUME_REBUILD_FAILED');
+   assert(f.life.recoveryActive,'the failed rearm did not retain its curve');
+   const power={generation:7,phase:'ready',hardwareWritesAllowed:true,resumeReady:true};
+   f.native({...power,resumeReady:false,physicalWakeObserved:false});
+   const before=f.host.calls.filter(c=>c==='enable').length;
+   await f.clock.advance(1800);
+   assert.deepEqual(f.counts(),{starts:1,stops:0,maxLive:1},'the retired grant replaced a Host');
+   assert.equal(f.host.calls.filter(c=>c==='enable').length,before);
+   f.native(power);await f.clock.advance(5000);
+   assert.deepEqual(f.counts(),{starts:2,stops:1,maxLive:1});
+   assert.equal(f.host.calls.filter(c=>c==='enable').length,before+1);
+   assert.deepEqual(f.host.nodes,curve(100));assert(!f.life.recoveryActive);return f.counts();
+ });
  await check('committed wake rebuild failure without retirement stops and permits new manual control',async f=>{
    await assert.rejects(failingWake(f,'HC_RESUME_REBUILD_FAILED',409,false));assert(f.life.recoveryActive);
    const enables=f.host.calls.filter(x=>x==='enable').length;await f.clock.advance(35000);

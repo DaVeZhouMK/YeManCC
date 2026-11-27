@@ -31,6 +31,32 @@ static std::vector<OemVendorTaskLease> g_oemVendorTaskLeases;
 static std::vector<std::wstring> g_oemVendorTaskPaths;
 static bool g_oemVendorTaskDiscoveryComplete = false;
 static constexpr size_t kOemVendorMaxTaskPaths = 64;
+struct OemVendorWakeReadback {
+    unsigned long long generation = 0;
+    bool repeat = false, noProcessMatches = false;
+};
+// Only these readback records use the early detail gate. Keep diagnostics from
+// overwriting the status of the scheduler/process query that just completed.
+template<class MakeRow>
+static void oemVendorStackReadbackLog(const OemVendorWakeReadback& readback, bool repeat, MakeRow makeRow) noexcept {
+    const DWORD savedError = GetLastError();
+    try {
+        if (!repeat || domainLogEnabled("virtual")) {
+            json row = makeRow();
+            if (readback.generation) row["wakeGuardGeneration"] = readback.generation;
+            if (repeat) row["wakeGuardQuietRepeat"] = true;
+            appendNativeLifecycleLog("oem-vendor-stack", row);
+        }
+    } catch (...) { /* Diagnostic readbacks cannot change lease outcomes. */ }
+    SetLastError(savedError);
+}
+static unsigned long long oemVendorStackLogDeliveryEpoch() noexcept {
+#ifdef YMCC_VENDOR_STACK_FIXTURE
+    return fixtureVendorLogDeliveryEpoch;
+#else
+    return ymcc::logging::nativeLogFailureEvidence().recoveryEpoch();
+#endif
+}
 static bool g_oemVendorStackWanted = false, g_oemVendorStackOpQueued = false;
 // A serial closure owns this publication until it settles or is discarded.
 // Dropping a queued closure does not spend an attempt or start any new work.
@@ -517,7 +543,8 @@ static bool oemVendorProcessMatches(const std::wstring& image, const std::vector
     const auto base = image.substr(pos == std::wstring::npos ? 0 : pos + 1);
     return std::any_of(names.begin(), names.end(), [&](const auto& n) { return _wcsicmp(base.c_str(), (n + L".exe").c_str()) == 0; });
 }
-static bool oemVendorProcessesStop(const std::vector<std::wstring>& names, unsigned long long epoch) {
+static bool oemVendorProcessesStop(const std::vector<std::wstring>& names, unsigned long long epoch,
+                                  OemVendorWakeReadback* wake = nullptr) {
     if (names.empty()) return true;
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) {
@@ -576,12 +603,15 @@ static bool oemVendorProcessesStop(const std::vector<std::wstring>& names, unsig
         }
     }
     CloseHandle(snapshot);
-    appendNativeLifecycleLog("oem-vendor-stack", {{"state", "process-stop-observation"}, {"requestedEpoch", epoch},
+    if (wake) wake->noProcessMatches = ok && enumerationComplete && matched == 0;
+    const OemVendorWakeReadback none;
+    oemVendorStackReadbackLog(wake ? *wake : none, wake && wake->repeat && wake->noProcessMatches, [&] { return json{
+        {"state", "process-stop-observation"}, {"requestedEpoch", epoch},
         {"snapshotRead", true}, {"enumerationComplete", enumerationComplete}, {"operationOk", ok},
         {"matchedInSnapshot", matched}, {"terminationAttempts", terminationAttempts},
         {"terminatedAndExited", terminatedAndExited}, {"alreadyExited", alreadyExited},
         {"observationScope", "initial-snapshot-and-held-process-exit; later-relaunch-not-checked"},
-        {"externalDefaultActionSuppressed", "DEVICE_UNVERIFIED"}});
+        {"externalDefaultActionSuppressed", "DEVICE_UNVERIFIED"}}; });
     return ok;
 }
 #else
@@ -591,7 +621,7 @@ static bool oemVendorTaskSet(const std::wstring&, bool, bool, bool);
 static bool oemVendorTaskRemovalReady(const std::wstring&);
 static bool oemVendorTaskRemove(const std::wstring&);
 static bool oemVendorTaskImport(const std::wstring&);
-static bool oemVendorProcessesStop(const std::vector<std::wstring>&, unsigned long long);
+static bool oemVendorProcessesStop(const std::vector<std::wstring>&, unsigned long long, OemVendorWakeReadback* = nullptr);
 #endif
 
 static std::wstring oemVendorStackJournalPath() { return POWER_CONTROL_DIR + L"\\oem-vendor-stack-lease.json"; }
@@ -857,6 +887,9 @@ static bool oemVendorStackRestoreLocked(const char* reason, bool tasksOnly = fal
         }
         // An absent task is not mutated; keep its recovery debt for explicit review.
         ok = ok && facts.exists;
+#ifndef YMCC_VENDOR_STACK_FIXTURE
+        if (ok && imported) oemVendorMsiRetire(lease.name);
+#endif
         appendNativeLifecycleLog("oem-vendor-stack", {{"state", ok ? "task-restored" : "task-restore-failed"},
             {"task", W2U(lease.name)}, {"imported", imported}, {"definitionPolicy", lease.removePrepared ? "xml-import" : "enable-restore"},
             {"enabledReadback", facts.enabled}, {"runningReadback", facts.running}, {"readbackVerified", ok},
@@ -873,6 +906,15 @@ static bool oemVendorStackRestoreLocked(const char* reason, bool tasksOnly = fal
     return (tasksOnly || g_oemVendorServiceLeases.empty()) && g_oemVendorTaskLeases.empty();
 }
 static bool oemVendorStackApplyIfNeeded(const char* reason, unsigned long long requestedEpoch = 0) {
+    // The serial I/O owner protects this one memo. Consume it up front, so a
+    // failed, skipped, or ordinary apply cannot certify any later pass as quiet.
+    struct QuietPass {
+        unsigned long long generation = 0, epoch = 0, delivery = 0;
+        PowerLifecycle phase = PowerLifecycle::Ready;
+    };
+    static QuietPass previousQuietPass;
+    const auto previous = previousQuietPass;
+    previousQuietPass = {};
     if (!oemVendorStackLoadJournal()) return false;
     const bool controllerOnly = oemVendorShieldWantedSnapshot();
     const auto names = controllerOnly ? std::vector<std::wstring>{} : oemVendorServiceNamesForFamily(g_machineIdentity.family);
@@ -887,10 +929,20 @@ static bool oemVendorStackApplyIfNeeded(const char* reason, unsigned long long r
     if (g_exitRequested.load(std::memory_order_acquire)) return false;
     if (!oemVendorStackMachineSupported()) return false;
     unsigned long long epoch; bool wakePass;
+    OemVendorWakeReadback wake;
     { std::lock_guard<std::mutex> lock(g_oemVendorStackMx);
       epoch = requestedEpoch ? requestedEpoch : g_oemVendorStackRequested;
-      wakePass = epoch == g_oemVendorShieldWake.epoch; }
+      wakePass = epoch == g_oemVendorShieldWake.epoch;
+      if (wakePass && controllerOnly && !taskReleaseWanted) wake.generation = g_oemVendorShieldWake.generation; }
     if (!oemVendorStackIntentCurrent(epoch)) return false;
+    const auto delivery = wake.generation ? oemVendorStackLogDeliveryEpoch() : 0;
+    const auto observedPhase = wake.generation ? g_powerLifecycle.load(std::memory_order_acquire) : PowerLifecycle::Ready;
+    const bool cachedPaths = !taskNames.empty() && !g_oemVendorTaskPaths.empty() && g_oemVendorTaskDiscoveryComplete;
+    // Wake passes reuse the same cached task paths. Ordinary or new discovery
+    // never qualifies, and a retried request cannot impersonate the next pass.
+    wake.repeat = wake.generation && cachedPaths && epoch && previous.epoch == epoch - 1 &&
+        previous.generation == wake.generation && previous.delivery == delivery && previous.phase == observedPhase;
+    bool allTasksAbsent = cachedPaths;
     // An explicit OFF owns the return of these two tasks even while shortcut
     // takeover still owns its separate process/key policy. Never disable them again here.
     bool allOk = !taskReleaseWanted || oemVendorStackRestoreLocked("msi-shield-task-release", true);
@@ -925,14 +977,17 @@ static bool oemVendorStackApplyIfNeeded(const char* reason, unsigned long long r
         if (!oemVendorStackIntentCurrent(epoch)) return false;
         OemVendorTaskFacts facts;
         if (!oemVendorTaskQuery(name, facts)) {
+            allTasksAbsent = false;
             allOk = false;
             appendNativeLifecycleLog("oem-vendor-stack", {{"state", "task-unavailable"}, {"task", W2U(name)}, {"requestedEpoch", epoch}, {"win32Error", GetLastError()}});
             continue;
         }
         if (!facts.exists) {
-            appendNativeLifecycleLog("oem-vendor-stack", {{"state", "task-absent"}, {"task", W2U(name)}, {"requestedEpoch", epoch}});
+            oemVendorStackReadbackLog(wake, wake.repeat && allTasksAbsent, [&] { return json{
+                {"state", "task-absent"}, {"task", W2U(name)}, {"requestedEpoch", epoch}}; });
             continue;
         }
+        allTasksAbsent = false;
         auto lease = std::find_if(g_oemVendorTaskLeases.begin(), g_oemVendorTaskLeases.end(), [&](const auto& x){return oemVendorTaskPathEqual(x.name, name);});
         if (controllerOnly) {
             // Mirror YMCC task switches: remove while shielded, import the shipped XML on return.
@@ -952,6 +1007,9 @@ static bool oemVendorStackApplyIfNeeded(const char* reason, unsigned long long r
                 if (ok) {
                     ok = oemVendorTaskQuery(name, facts);
                     if (ok && facts.exists) { SetLastError(ERROR_REVISION_MISMATCH); ok = false; }
+#ifndef YMCC_VENDOR_STACK_FIXTURE
+                    if (ok && !oemVendorMsiConfirmRemoved(name)) { SetLastError(ERROR_WRITE_FAULT); ok = false; }
+#endif
                 }
             }
             appendNativeLifecycleLog("oem-vendor-stack", {{"state", ok ? "task-removed" : "task-remove-failed"},
@@ -1043,7 +1101,12 @@ static bool oemVendorStackApplyIfNeeded(const char* reason, unsigned long long r
         oemVendorStackIoCall("apply", "CloseServiceHandle", name.c_str(), [&] { return CloseServiceHandle(service); });
     }
     if (scm) oemVendorStackIoCall("apply", "CloseServiceHandle:SCM", L"SCM", [&] { return CloseServiceHandle(scm); });
-    if (oemVendorStackIntentCurrent(epoch)) allOk = oemVendorProcessesStop(processNames, epoch) && allOk;
+    if (oemVendorStackIntentCurrent(epoch)) {
+        // Preserve the process evidence when task presence, discovery or a
+        // failure has already made this pass interesting.
+        wake.repeat = wake.repeat && allTasksAbsent && allOk;
+        allOk = oemVendorProcessesStop(processNames, epoch, wake.generation ? &wake : nullptr) && allOk;
+    }
     else allOk = false;
     if (controllerOnly && !wakePass) {
         json observation = msiShieldReadProtectedService();
@@ -1057,12 +1120,15 @@ static bool oemVendorStackApplyIfNeeded(const char* reason, unsigned long long r
     // Missing declared services are explicit, not an assertion of a suppressed key.
     const bool serviceTargetsOk = names.empty() || (existing > 0 && confirmed == existing && unavailable == 0);
     allOk = allOk && serviceTargetsOk && oemVendorStackIntentCurrent(epoch);
-    appendNativeLifecycleLog("oem-vendor-stack", {{"state", allOk ? "applied" : "partial-or-unavailable"}, {"existingServices", existing},
+    const bool quiet = wake.generation && allOk && allTasksAbsent && wake.noProcessMatches;
+    oemVendorStackReadbackLog(wake, quiet && wake.repeat, [&] { return json{
+        {"state", allOk ? "applied" : "partial-or-unavailable"}, {"existingServices", existing},
         {"unreadableServices", unavailable}, {"confirmedStoppedServices", confirmed},
         {"requestedEpoch", epoch}, {"requiresReboot", false},
         {"mode", controllerOnly ? "msi-controller-only" : "legacy-oem-takeover"},
         {"servicePolicy", controllerOnly ? "preserve-unverified-dependencies" : "configured-oem-rule"},
-        {"externalDefaultActionSuppressed", "DEVICE_UNVERIFIED"}});
+        {"externalDefaultActionSuppressed", "DEVICE_UNVERIFIED"}}; });
+    if (quiet) previousQuietPass = {wake.generation, epoch, delivery, observedPhase};
     // Observation only: no wider stop lists or CTW Appx removal.
 #ifndef YMCC_VENDOR_STACK_FIXTURE
     if(!wakePass && g_machineIdentity.family==YmccFamily::MsiClaw)msiOemSuppressionObserveAfterTakeover(epoch,allOk);

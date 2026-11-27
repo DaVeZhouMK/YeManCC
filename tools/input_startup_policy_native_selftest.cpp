@@ -77,6 +77,7 @@ int main(int argc, char** argv) {
             auto params = ymcc::startupGyroPresetParams(key, nullptr);
             expect(params["innerDeadzone"] == 1 && params["antiDeadzone"] == 20 && params["autoCalibrate"] == true);
             if (std::string(key) == "fps") expect(params["motionMode"] == "off" && params["motionTrigger"] == "LT");
+            else if (std::string(key) == "steam") expect(params["motionMode"] == "off" && params["motionTrigger"].is_null());
             else expect(params["motionMode"] == "on" && params["motionTrigger"].is_null());
         }
     });

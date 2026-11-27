@@ -152,7 +152,12 @@ local ok,err=pcall(function()
  local timer=createTimer(nil,false);timer.Interval=150
  timer.OnTimer=function()
   local success,failure=pcall(function()
-   local lease=read(C.root..'\\ce-lease.txt',4096) or ''
+   -- A heartbeat is a replaceable observation, not a command. File.Replace
+   -- can briefly collide with CE's TFileStream open on Windows. A failed read
+   -- must not renew the lease or terminate an otherwise healthy scan. Retry on
+   -- the existing timer; the original 8-second expiry and explicit stop remain.
+   local leaseOk,lease=pcall(read,C.root..'\\ce-lease.txt',4096)
+   lease=leaseOk and lease or ''
    local sequence=lease:match('^'..C.token..'\n([1-9]%d*)$')
    if sequence and #sequence<=16 then local number=tonumber(sequence);if number and number>lastLeaseNumber and number<=9007199254740991 then lastLease=lease;lastLeaseNumber=number;leaseAt=getTickCount() end end
    if getTickCount()-leaseAt>8000 then closing=true end

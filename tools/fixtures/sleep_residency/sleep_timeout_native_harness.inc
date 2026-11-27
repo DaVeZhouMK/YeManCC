@@ -26,6 +26,7 @@ namespace sleep_timeout_fixture {
 #include "production_timeout_types.inc"
 #ifdef YMCC_SLEEP_LATE_WAKE_ENABLE
 #include "production_late_wake_types.inc"
+#include "production_late_wake_resume_state.inc"
 #endif
 static constexpr UINT timeoutTimerId=0xA214,retryTimerId=0xA20C;
 static constexpr ULONGLONG epoch=134372000000000000ULL;
@@ -106,6 +107,7 @@ static bool sgResumeClassificationHeld(ULONGLONG) {return false;}
 [[maybe_unused]] static void sgResumeEntryObservationInterrupt(int,ULONGLONG,ULONGLONG) {throw std::runtime_error("unselected entry-observation interruption");}
 static bool sgSleepTimeoutDeferClassification();
 static bool sgSleepTimeoutSuccessAfter(ULONGLONG);
+static bool sgContinuedWakeAge(ULONGLONG&);
 static ULONGLONG sgSleepTimeoutSuccessfulExitTime();
 static ULONGLONG sgSleepTimeoutOriginalIntent();
 static void sgStartSleepRetry(SgRetryKind,const char*,const ymcc::sleeprequest::CompletionWitness* originalSuccess=nullptr);
@@ -114,6 +116,7 @@ static void sgObserveUnattributedSleepRetryFailure(const char*,int=-1,ULONGLONG=
 static void sgScheduleNextSleepRetry(const char*);
 static bool sgSleepRetryActive(){return g_sgRetryInProgress&&g_sgTask.retryKind!=SgRetryKind::None;}
 static bool sgModernStandbyRepairSupported(){return modern;}
+static std::atomic<ULONGLONG> g_sgLastKernel507EventFileTime{0};
 #ifdef YMCC_SLEEP_LATE_WAKE_ENABLE
 static bool sgNonUserWakeGuardEnabled();
 static bool sgExternalDeviceWakeIntentAge(ULONGLONG&);
@@ -121,7 +124,6 @@ static bool sgObserveNonUserWake(const char*);
 static void sgEvaluateExternalDeviceWake();
 static void sgClearUnexpectedWake(const char*,bool);
 
-static std::atomic<ULONGLONG> g_sgLastKernel507EventFileTime{0};
 static std::atomic<int> g_sgLastKernel506Reason{1};
 static ULONGLONG g_sgIgnoredEarlyWakeFileTime=0,g_sgLastS0WakeTick=0,g_sgLastPowerButtonWakeTick=0;
 // Legacy fact-monitor preference is extracted from main, not a high-frequency gate.
@@ -244,9 +246,13 @@ static BOOL unselectedTimeoutPost(HWND,UINT,WPARAM,LPARAM){throw std::runtime_er
 [[maybe_unused]] static const auto timeoutSettleCompileReference=&sgSleepTimeoutSettleClassification;
 [[maybe_unused]] static const auto timeoutReentryCompileReference=&sgSleepTimeoutStageReentry;
 [[maybe_unused]] static const auto timeoutWakeOrderCompileReference=&sgKernelPowerWakePredatesLatestEntry;
+[[maybe_unused]] static const auto timeoutContinuedWakeCompileReference=&sgBindContinuedWake;
 [[maybe_unused]] static const auto timeoutReentryResumeCompileReference=&sgSleepTimeoutResumeDeferredReentry;
 #ifdef YMCC_SLEEP_LATE_WAKE_ENABLE
+#include "production_late_wake_s4_state.inc"
+#include "production_late_wake_s4_veto.inc"
 #include "production_late_wake_bindings.inc"
+static void fanHostObserveKernelExit(unsigned long long,ULONGLONG,bool=false,std::uint64_t=0,ULONGLONG=0) noexcept {}
 static LRESULT s0WakeMessageNative(WPARAM w,LPARAM l){
 #include "production_late_wake_message.inc"
 }
@@ -295,6 +301,7 @@ static void reset(){
     timerAvailable=activeSchemeKnown=statusKnown=acKnown=dcKnown=capabilitiesKnown=modern=classic=apiAccepted=true;acLine=1;acAction=dcAction=1;apiError=ERROR_ACCESS_DENIED;lastError=0;
     timerWrites=timerKills=powerReads=capabilityReads=apiCalls=finishes=aborts=markerClears=boundaryCalls=monitorCalls=0;
 #ifdef YMCC_SLEEP_LATE_WAKE_ENABLE
+    g_sgFailedS4Delivery={};g_sgOriginalHibernateIngress={};
     g_sgNonUserWakeObserved=false;g_sgLastKernel507EventFileTime=0;g_sgLastKernel506Reason=1;g_sgIgnoredEarlyWakeFileTime=g_sgLastS0WakeTick=g_sgLastPowerButtonWakeTick=0;g_sgLastS0WakeReason=-1;g_sgFactMonitorEnabled=false;uiRecoveryCalls=0;
 #endif
     timers.clear();apiArguments.clear();facts.clear();at(0);
@@ -325,7 +332,63 @@ static unsigned runTests(){
     scenario("239999ms early tick preserves original deadline",[]{arm();const auto first=timers.at(timeoutTimerId);at(239999);sgSleepTimeoutTick();check(g_sgSleepTimeoutWindow.waiting&&!apiCalls&&!sgSleepRetryActive()&&timers.at(timeoutTimerId)==first,"early tick rearms only remaining one millisecond");check(timerWrites==2,"early delivery has bounded single remaining timer");});
     scenario("240000ms enters actual shared sender once",[]{arm();deadline();check(!g_sgSleepTimeoutWindow.waiting&&g_sgSleepTimeoutWindow.requested&&sgSleepRetryActive()&&g_sgTask.retryKind==SgRetryKind::SleepTimeout&&!apiCalls,"deadline hands off to existing scheduler");dispatch();check(apiCalls==1&&g_sgAutomaticSleepBudget.requests()==1,"actual dispatcher charges shared budget exactly once");const auto writes=timerWrites;for(unsigned i=0;i<8;++i)sgSleepTimeoutTick();check(apiCalls==1&&timerWrites==writes&&!timers.count(timeoutTimerId),"consumed oneShot never polls or duplicates accepted request");});
     scenario("late original506 uses remaining time",[]{at(230000);arm();check(timers.at(timeoutTimerId)-fixtureTick==10000,"delivery latency does not restart240seconds");deadline();dispatch();check(apiCalls==1,"late original reaches original deadline");});
-    scenario("already overdue506 waits at most one millisecond",[]{at(300000);arm();check(timers.at(timeoutTimerId)-fixtureTick==1,"overdue intent schedules oneShot not fresh240seconds");sgSleepTimeoutTick();dispatch();check(apiCalls==1,"overdue original sends once");});
+    const std::array<const char*,8> continuationCases{"late exact pair with legacy fields missing","missing exit","longer sleep","new entry",
+        "late matching Windows IDs","wrong exit V2 ID","wrong exit BootId","wrong successor BootId"};
+    for(int variant=0;variant<static_cast<int>(continuationCases.size());++variant)
+        scenario("Win5 continuing 507 receipt across the deadline: "+std::string(continuationCases[variant]),[=]{
+        constexpr int reason=16777220;
+        const auto fieldsFor=[=](unsigned boot,unsigned v2){
+            if(variant<4)return std::string{};
+            return "<Data Name='BootId'>"+std::to_string(boot)+"</Data><Data Name='ScenarioInstanceIdV2'>"+std::to_string(v2)+"</Data>";
+        };
+        const auto continuing=[&](ULONGLONG stamp,ULONGLONG span,ULONGLONG sleep,unsigned v2,unsigned boot=1){
+            const auto fields=windowsSession(span,sleep)+"<Data Name='IsCsSessionInProgressOnExit'>true</Data>"+fieldsFor(boot,v2);
+            const auto xml="<Event><EventData>"+fields+"</EventData></Event>";
+            sgSleepTimeoutRecordKernel(507,reason,stamp,771,true,false,sgKernelExitIdentity(ymcc::sleep_residency::makeEvidence(xml)));
+            check(!::productionCapture(true,xml,stamp,771,reason),
+                "a continuing exit is not a public final wake");
+            ::captured.clear();
+        };
+        const auto successor=[&](ULONGLONG stamp,unsigned v2,unsigned boot=1){
+            sgSleepTimeoutRecordKernel(506,reason,stamp,771,false,false,
+                sgKernelEntryIdentity("<Event><EventData>"+fieldsFor(boot,v2)+"</EventData></Event>"));
+            g_sgLatestSleepEntryFileTime=stamp;
+        };
+        sgSleepTimeoutRecordKernel(506,1,epoch,771,false,false,
+            sgKernelEntryIdentity("<Event><EventData>"+fieldsFor(1,25)+"</EventData></Event>"));
+        arm();
+        at(1105);continuing(epoch+11034825ULL,1104303,1073547,25);successor(epoch+11041431ULL,27);
+        at(19564);continuing(epoch+195617623ULL,18458336,1007398,27);successor(epoch+195624044ULL,29);
+        at(242279);successor(epoch+2422781025ULL,31,variant==7?2:1);sgSleepTimeoutTick();
+        if(variant==7){
+            check(!g_sgSleepTimeoutWindow.active()&&!timers.count(timeoutTimerId)&&!apiCalls&&
+                !g_sgAutomaticSleepBudget.requests(),"conflicting successor boot rejects even pending observation");
+            return;
+        }
+        check(g_sgSleepTimeoutWindow.waiting&&g_sgSleepTimeoutWindow.origin==epoch&&
+            timers.count(timeoutTimerId)&&timers.at(timeoutTimerId)==fixtureTick+1000,
+            "one missing continuing exit behind a proved prefix keeps observation for one recheck");
+        check(!sgSleepTimeoutDispatchPermitted()&&!sgSleepRetryActive(),"waiting cannot start the shared sender");
+        const auto writes=timerWrites;
+        at(243000);
+        if(variant==0||variant==2||variant>=4)
+            continuing(epoch+2422762806ULL,222714334,variant==2?10000000:1004539,variant==5?27:29,variant==6?2:1);
+        if(variant==3){successor(fixtureFileTime,33);continuing(epoch+2422762806ULL,222714334,1004539,29);}
+        sgSleepTimeoutTick();
+        check(timerWrites==writes,"early timer message cannot spend the one recheck or reset its timer");
+        at(243279);sgSleepTimeoutTick();
+        const bool paired=variant==0||variant==4;
+        check(g_sgSleepTimeoutWindow.active()==paired&&!sgSleepTimeoutDispatchPermitted(),
+            "only the exact brief pair keeps read-only observation");
+        if(paired)check(timers.at(timeoutTimerId)==fixtureTick+26721,"pairing preserves the original 270-second stop");
+        else check(!timers.count(timeoutTimerId),"unconfirmed or superseded pair leaves no timer");
+        at(270000);sgSleepTimeoutTick();
+        check(!g_sgSleepTimeoutWindow.active()&&!apiCalls&&!g_sgAutomaticSleepBudget.requests(),
+            "the continuation observer expires without dispatch or budget consumption");
+    });
+    scenario("Win5 101742 overdue timer without a delivered 507 does not send",[]{originalEntry();arm();at(708160);sgSleepTimeoutTick();if(g_sgRetryDueTick)dispatch();check(!apiCalls&&!g_sgAutomaticSleepBudget.requests()&&!g_sgSleepTimeoutWindow.active()&&!timers.count(timeoutTimerId),"Win5 overdue timer caused an extra sleep request before completion arrived");});
+    scenario("a scheduled timeout cannot send if the final dispatch runs too late",[]{arm();deadline();check(sgSleepRetryActive(),"the timely deadline must schedule before testing the sender veto");at(708160);dispatch();check(!apiCalls&&!g_sgAutomaticSleepBudget.requests()&&!g_sgSleepTimeoutWindow.active(),"late dispatch must retire without spending a request");});
+    scenario("slightly overdue506 waits at most one millisecond",[]{at(245000);arm();check(timers.at(timeoutTimerId)-fixtureTick==1,"overdue intent schedules oneShot not fresh240seconds");sgSleepTimeoutTick();dispatch();check(apiCalls==1,"recent overdue original sends once");});
     scenario("manual wake before arm",[]{wake();arm();check(!g_sgSleepTimeoutWindow.active()&&!timerWrites,"wake at original timestamp blocks arm");});
     scenario("manual wake during arm power read",[]{afterPowerRead=[]{wake();};arm();check(!g_sgSleepTimeoutWindow.active()&&!timerWrites,"callback-side wake after arm read blocks timer");});
     scenario("manual wake before deadline tick",[]{arm();at(240000);wake();sgSleepTimeoutTick();check(!g_sgSleepTimeoutWindow.active()&&!apiCalls&&!sgSleepRetryActive(),"tick respects manual wake");});

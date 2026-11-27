@@ -356,13 +356,15 @@ function validSourceFanHandshake(value: FanResponseObject): boolean {
     || (isFanResponseObject(identity) && identity.identityKind === 'fixed-source-dmi');
   if (!source) return true;
   if (typeof value.sourceModelClass !== 'string' || !value.sourceModelClass.trim()
-      || typeof value.sourceCommit !== 'string' || !/^[0-9a-f]{40}$/i.test(value.sourceCommit)
+      || typeof value.sourceCommit !== 'string'
       || (value.deviceClass !== undefined && value.deviceClass !== null)
       || !isFanResponseObject(identity)) return false;
   if (identity.identityKind !== 'fixed-source-dmi' || identity.runtimeFactory !== 'not-constructed'
       || identity.capabilityModelClass !== value.sourceModelClass || identity.capabilitySourceCommit !== value.sourceCommit
       || typeof identity.capabilityDeviceId !== 'string' || !identity.capabilityDeviceId.trim()
       || typeof identity.capabilitySourceSha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(identity.capabilitySourceSha256)) return false;
+  // Source revisions can be a Git commit or the exact digest of an OEM binary.
+  if (!/^[0-9a-f]{40}$/i.test(value.sourceCommit) && value.sourceCommit !== identity.capabilitySourceSha256) return false;
   return typeof identity.manufacturer === 'string' && !!identity.manufacturer.trim()
     && typeof identity.product === 'string' && !!identity.product.trim();
 }

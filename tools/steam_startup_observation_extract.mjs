@@ -12,7 +12,8 @@ function blockEnd(opening,marker,open='{',close='}'){
  assert.equal(depth,0,marker);return at;
 }
 function lambda(marker){const start=text.indexOf(marker);assert(start>=0&&text.indexOf(marker,start+marker.length)<0,marker);const expressionStart=text.indexOf('[',start);assert(expressionStart>=start,marker+' capture');const captureEnd=blockEnd(expressionStart,marker,'[',']'),opening=text.indexOf('{',captureEnd),end=blockEnd(opening,marker);return text.slice(expressionStart,end);}
-const ensure=lambda('cssGuard.ensure ='),confirm=lambda('cssGuard.confirmIdle ='),sidebar=lambda('[]() -> ymcc::deckysidebar::LaunchAdmission'),changed=lambda('modeObserver.changed ='),cssBigPicture=lambda('modeObserver.cssBigPicturePublished =');
+const ensure=lambda('cssGuard.ensure ='),confirm=lambda('cssGuard.confirmIdle ='),sidebar=lambda('[]() -> ymcc::deckysidebar::LaunchAdmission'),changed=lambda('modeObserver.changedWithTrigger ='),cssBigPicture=lambda('modeObserver.cssBigPicturePublished =');
+assert.match(changed,/^\[\]\s*\(\s*const ymcc::steamsession::Session&\s+session\s*,\s*const json&\s+state\s*,\s*const char\*\s*publicationTrigger\s*\)\s*\{/,'Current mode publication callback signature');
 for (const callback of [ensure,confirm,sidebar,changed,cssBigPicture]) assert(!/\b(?:ShellExecute(?:Ex)?W|CreateProcess(?:AsUser|WithToken)?W|TerminateProcess|WinExec|SendInput|SetForegroundWindow|SetUIMode|SwitchToGamepadUI)\s*\(/.test(callback),'Unsafe direct external action in startup regression callback');
 const health=lambda('config.connectionHealth=');
 const stable=lambda('modeObserver.stableBigPicture =');

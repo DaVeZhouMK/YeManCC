@@ -25,8 +25,8 @@ vm.runInNewContext(transformSync(fs.readFileSync(path.join(root, 'src/bridge/hid
 const policy = module.exports;
 assert.equal(policy.DEFAULT_GAMEPAD_REDIST_DIRECTORY, String.raw`C:\SOFT\YeMan\PowerControl\redist`);
 for (const driverSetup of [0, 1, 2, 4, 5, 8, 9]) assert.equal(policy.hidHideManualInstallPrompt({ driverSetup, hidHideSetupNotice: 1 }), null);
-for (const hidHideSetupNotice of [0, 7, 8]) assert.equal(policy.hidHideManualInstallPrompt({ driverSetup: 3, hidHideSetupNotice }), null);
-for (const hidHideSetupNotice of [1, 2, 3, 4, 5, 6]) assert(policy.hidHideManualInstallPrompt({ driverSetup: 3, hidHideSetupNotice }));
+for (const hidHideSetupNotice of [0, 4, 7, 8, 9]) assert.equal(policy.hidHideManualInstallPrompt({ driverSetup: 3, hidHideSetupNotice }), null);
+for (const hidHideSetupNotice of [1, 2, 3, 5, 6]) assert(policy.hidHideManualInstallPrompt({ driverSetup: 3, hidHideSetupNotice }));
 cases.push('native result distinctions preserved by UI policy');
 const gate = policy.createHidHideSetupPromptGate();
 gate.update({ driverSetup: 3, hidHideSetupNotice: 2 });
@@ -59,6 +59,18 @@ for(const snapshot of [{driverSetup:3,hidHideSetupNotice:0,driverSetupResult:11}
 }
 for(const driverSetup of [0,2])assert.equal(environment({driverSetup}),null);
 for(const driverSetup of [1,5])assert.doesNotMatch(environment({driverSetup}).description,/自动补装仍在|观察同一次安装/);
+const oldDriver = environment({ driverSetup: 2, hidHideUnsupportedVersion: '1.1.50.0', driverSetupRedistDir: 'D:\\YMCC\\redist' });
+assert.match(oldDriver.title, /1\.1\.50\.0.*虚拟手柄未启用/);
+assert(oldDriver.description.includes(String.raw`D:\YMCC\redist\HidHide_1.5.230_x64.exe`));
+assert.match(oldDriver.description, /重启 Windows/);
+assert.match(environment({ driverSetup: 3, hidHideSetupNotice: 4 }).title, /安装不完整，未自动补装/);
+assert.match(environment({ driverSetup: 3, hidHideSetupNotice: 9 }).title, /版本过旧/);
+assert.match(environment({ driverSetup: 4, hidHideSetupNotice: 7 }).title, /需要重启/);
+assert.match(environment({ driverSetup: 3, hidHideSetupNotice: 10, hidHideUnsupportedVersion: '1.1.50.0', hidHideMaintenanceExit: 1603 }).title, /卸载失败.*1603/);
+assert.doesNotMatch(environment({ driverSetup: 3, hidHideSetupNotice: 11, hidHideMaintenanceExit: 0 }).title, /错误码/);
+assert.match(environment({ driverSetup: 3, hidHideSetupNotice: 12 }).title, /未能自动卸载/);
+assert.match(environment({ driverSetup: 4, hidHideSetupNotice: 14 }).description, /清除后会自动安装/);
+assert.match(environment({ driverSetup: 4, hidHideSetupNotice: 15 }).description, /新版核验通过前/);
 cases.push('actual environment formatter distinguishes installed packages, maintenance refusal and live binding without claiming runtime success');
 
 // Compile and exercise the actual Windows setup launcher against a harmless test child.
@@ -92,24 +104,26 @@ const styles = [];
 const mocks = {
   '@/bridge/performanceSchedule': 'export async function loadPerformanceSchedule(){return {quickMode:false}};',
   '@/bridge/yeman': 'export async function summonGet(){return {enabled:true}};',
-  '@/robust/frontendDiagnostics': 'export function reportFrontendTrace(){};',
+  '@/robust/frontendDiagnostics': 'export function reportFrontendTrace(){}; export function observeGamepadOverlaySessionEntry(){};',
   '@/router': "export const ROUTES=[{path:'/controller'}];",
 };
 const built = await build({ stdin: { resolveDir: root, loader: 'ts', contents: `
 import {createApp, nextTick} from 'vue';
 import Prompt from './src/components/HidHideInstallPrompt.vue';
 import {startGamepad} from './src/gamepad/engine';
+import {startUiPowerReconciliation} from './src/bridge/uiLifecycle';
 const fixtureState=window.__fixture;
 if(fixtureState.lateReady)window.__YMCC_STARTUP_READY__={generation:'fixture',navigationId:'1'};
 if(fixtureState.cachedState)fixtureState.message({event:'gamepad.state',data:fixtureState.cachedState});
 let app=createApp(Prompt);app.mount('#app');
+startUiPowerReconciliation();
 startGamepad({router:{currentRoute:{value:{path:'/controller'}},push:async()=>{}},onAction(){}});
 fixtureState.ready=()=>window.dispatchEvent(new Event('app-startup-ready'));
 fixtureState.action=(action)=>fixtureState.message({event:'gamepad.ui-input',data:{action,uiSeq:++fixtureState.sequence,provenance:{session:'fixture'}}});
 fixtureState.unmount=()=>app.unmount();
 fixtureState.remount=()=>{app.unmount();app=createApp(Prompt);app.mount('#app')};
 nextTick(()=>fixtureState.mounted=true);
-` }, bundle: true, write: false, format: 'iife', platform: 'browser', loader: { '.png': 'dataurl' }, alias: { '@': path.join(root, 'src') }, define: { 'process.env.NODE_ENV': '"production"' }, plugins: [{ name: 'hidhide-isolated-native', setup(b) {
+` }, bundle: true, write: false, format: 'iife', platform: 'browser', loader: { '.png': 'dataurl', '.svg': 'dataurl' }, alias: { '@': path.join(root, 'src') }, define: { 'process.env.NODE_ENV': '"production"' }, plugins: [{ name: 'hidhide-isolated-native', setup(b) {
   b.onResolve({ filter: /.*/ }, args => args.path in mocks ? { path: args.path, namespace: 'fixture' } : undefined);
   b.onLoad({ filter: /.*/, namespace: 'fixture' }, args => ({ contents: mocks[args.path], loader: 'ts' }));
   b.onLoad({ filter: /\.vue$/ }, args => {
@@ -129,6 +143,8 @@ if(query.has('cached-pending'))f.cachedState={driverSetup:1,hidHideSetupNotice:0
 f.setupState=query.has('cached-pending')?{driverSetup:3,hidHideSetupNotice:2,driverSetupSession:'cached-pending-session'}:f.cachedState||{driverSetup:0,hidHideSetupNotice:0};
 const listeners=[];
 f.message=(data)=>{for(const listener of listeners)listener({data})};
+f.powerState={phase:'ready',generation:1,known:true,hardwareWritesAllowed:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:1,suspendSerial:0};
+f.power=(phase,generation)=>{f.powerState={phase,generation,known:true,hardwareWritesAllowed:phase==='ready',notificationPending:false,publicationRevision:generation,observedNotificationSequence:generation,suspendSerial:1};f.message({event:'power.lifecycleChanged',data:f.powerState})};
 f.emit=(state)=>{f.setupState=state;f.message({event:'gamepad.state',data:state})};
 f.emitSetup=(state)=>{f.setupState=state;f.message({event:'gamepad.driverSetup',data:state})};
 f.releaseRead=()=>{for(const reply of f.heldReads.splice(0))f.message(reply)};
@@ -136,6 +152,7 @@ f.releaseOpen=(result=true)=>{for(const id of f.heldOpens.splice(0))f.message({i
 const chromeObject=window.chrome||(window.chrome={});
 chromeObject.webview={addEventListener(event,listener){if(event==='message')listeners.push(listener)},postMessage(message){
   f.requests.push(message);
+  if(message.cmd==='power.lifecycle'){const reply={id:message.id,result:structuredClone(f.powerState)};queueMicrotask(()=>f.message(reply));return;}
   if(message.cmd==='gamepad.driverSetup.get'){
     const reply={id:message.id,result:structuredClone(f.setupState)};
     if(f.readHold)f.heldReads.push(reply);else queueMicrotask(()=>f.message(reply));return;
@@ -180,7 +197,7 @@ try {
   assert.deepEqual(await page.evaluate(()=>window.__fixture.opened),[]);
   cases.push('hidden window defers prompt; real B cancels and restores prior focus');
 
-  for(const notice of [1,2,3,4,5,6]){
+  for(const notice of [1,2,3,5,6]){
     await fresh();await ready();await emit({...failure,hidHideSetupNotice:notice});await dialog.waitFor();
     const text=await dialog.textContent();assert(text.includes(policy.HIDHIDE_INSTALLER_NAME));assert(text.includes(policy.DEFAULT_GAMEPAD_REDIST_DIRECTORY));
     if(notice===5)assert(text.includes('完整安装包恢复安装器'));
@@ -188,6 +205,9 @@ try {
     await cancel.click();await dialog.waitFor({state:'hidden'});
     cases.push('distinct manual-install reason '+notice);
   }
+  await fresh();await ready();await emit({...failure,hidHideSetupNotice:4});
+  assert.equal(await dialog.count(),0);
+  cases.push('an existing partial installation is reported on the controller page, without offering another installer in a popup');
   await fresh();await ready();
   for(const state of [{driverSetup:9,hidHideSetupNotice:0,driverSetupResult:19},{driverSetup:9,hidHideSetupNotice:2,driverSetupResult:19},{driverSetup:8,hidHideSetupNotice:8,driverSetupResult:18},{driverSetup:8,hidHideSetupNotice:2,driverSetupResult:18},{driverSetup:1,hidHideSetupNotice:1},{driverSetup:5,hidHideSetupNotice:1},{driverSetup:2,hidHideSetupNotice:0},{driverSetup:3,hidHideSetupNotice:0},{driverSetup:4,hidHideSetupNotice:7},{driverSetup:3,hidHideSetupNotice:8,driverSetupResult:2}]){
     await fresh();await ready();await emit(state);assert.equal(await dialog.count(),0);
@@ -258,8 +278,8 @@ try {
   await page.evaluate(()=>Object.defineProperty(window,'sessionStorage',window.__fixture.storageDescriptor));
   cases.push('storage denial does not break cancel or in-document dismissal');
 
-  await fresh();await ready();await page.evaluate(()=>window.__fixture.message({event:'power.suspending',data:{}}));await emit(failure);assert.equal(await dialog.count(),0);
-  await page.evaluate(()=>window.__fixture.message({event:'power.resumed',data:{}}));await dialog.waitFor();await cancel.click();await dialog.waitFor({state:'hidden'});
+  await fresh();await ready();await page.evaluate(()=>window.__fixture.power('suspending',2));await emit(failure);assert.equal(await dialog.count(),0);
+  await page.evaluate(()=>window.__fixture.power('ready',3));await dialog.waitFor();await cancel.click();await dialog.waitFor({state:'hidden'});
   cases.push('power transition defers prompt until shared frontend lifecycle is ready');
 
   await fresh();await ready();await emit(failure);await dialog.waitFor();

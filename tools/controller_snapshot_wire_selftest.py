@@ -140,6 +140,8 @@ def main():
  fixture=REPO/'tools/controller_snapshot_wire_selftest.cpp';state=REPO/'tools/controller_snapshot_wire_fixture.inc'
  (out/'fixture.cpp').write_bytes(fixture.read_bytes());(out/'fixture_state.inc').write_bytes(state.read_bytes())
  manifest={'baselineMainSha256':sha(baseline),'currentMainSha256':sha(current),'ownedControllerEnvelope':args.own_controller_envelope,'phase':'final-correctness' if args.baseline else 'unapplied-candidate','fragments':{k:{'baseline':sha(original[k]) if k in original else None,'candidate':sha(v)} for k,v in desired.items()},'sourcePath':str(path),'jsonHeaderSha256':sha((REPO/'deps/json/json.hpp').read_bytes()),'runnerSha256':sha(Path(__file__).read_bytes()),'fixtureSha256':sha(fixture.read_bytes()),'boundarySha256':sha(state.read_bytes()),'negativeStaleCache':args.negative_stale_cache,'negativeConversionCache':args.negative_conversion_cache,'productionWritten':False,'performanceRun':not args.correctness_only}
+ power_header=REPO/'native/sleep_power_state.h'
+ manifest['sharedPowerHeaderSha256']=sha(power_header.read_bytes())
  (out/'source-binding.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
  vc=Path('C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat')
  env=os.environ.copy();env['PATH']=r'C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0';env['VSCMD_SKIP_SENDTELEMETRY']='1'
@@ -148,7 +150,7 @@ def main():
   exe=out/(profile+'.exe');flags='/O2 /DNDEBUG /MT' if profile=='Release' else '/Od /D_DEBUG /MTd /Zi'
   if args.own_controller_envelope:flags+=' /DYMCC_CONTROLLER_OWNED_ENVELOPE'
   if 'event-broadcast' in desired:flags+=' /DYMCC_GENERIC_EVENT_WIRE_REUSE'
-  cmd='@echo off\ncall "'+str(vc)+'" >nul\nif errorlevel 1 exit /b %errorlevel%\ncl /nologo /std:c++20 /EHsc /W4 /WX /utf-8 /DWIN32_LEAN_AND_MEAN '+flags+' /I"'+str(REPO/'deps/json')+'" "'+str(out/'fixture.cpp')+'" /Fe:"'+str(exe)+'" /Fo:"'+str(out/(profile+'.obj'))+'"\n'
+  cmd='@echo off\ncall "'+str(vc)+'" >nul\nif errorlevel 1 exit /b %errorlevel%\ncl /nologo /std:c++20 /EHsc /W4 /WX /utf-8 /DWIN32_LEAN_AND_MEAN '+flags+' /I"'+str(REPO/'deps/json')+'" /I"'+str(REPO/'native')+'" "'+str(out/'fixture.cpp')+'" /Fe:"'+str(exe)+'" /Fo:"'+str(out/(profile+'.obj'))+'"\n'
   bat=out/('build-'+profile+'.cmd');bat.write_text(cmd,encoding='utf-8')
   p=subprocess.run(['cmd.exe','/d','/c',str(bat)],cwd=out,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=240);(out/('compile-'+profile+'.log')).write_bytes(p.stdout)
   if p.returncode:raise RuntimeError('compile failed '+str(out/('compile-'+profile+'.log')))
@@ -162,6 +164,7 @@ def main():
  after=path.read_bytes();now={k:extract(after,k)['bytes'] for k in (desired if args.baseline else original)}
  manifest['relevantLiveFragmentsStableAtEnd']=all(normalize(v)==normalize((desired if args.baseline else original)[k]) for k,v in now.items())
  manifest['wholeMainStableAtEnd']=sha(after)==sha(current)
+ assert sha(power_header.read_bytes())==manifest['sharedPowerHeaderSha256'],'shared power fixture header changed during execution'
  summary={'run':str(out),'manifest':manifest,'profiles':results,'correctnessPassed':all(x['correctnessPassed'] for x in results.values()),'performanceAccepted':None if args.correctness_only else all(x['performanceAccepted'] for x in results.values()),'productionEdited':False}
  (out/'RESULT.json').write_text(json.dumps(summary,indent=2)+'\n',encoding='utf-8');args.out.mkdir(parents=True,exist_ok=True);(args.out/'LATEST.json').write_text(json.dumps(summary,indent=2)+'\n',encoding='utf-8')
  print(json.dumps({'run':str(out),'correctnessPassed':summary['correctnessPassed'],'performanceAccepted':summary['performanceAccepted'],'fragmentsStable':manifest['relevantLiveFragmentsStableAtEnd']}))

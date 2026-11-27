@@ -255,20 +255,30 @@ static json routeAdmissionLogProjection(const json& snapshot){
     }
     return result;
 }
-static void publish(const std::shared_ptr<Control>& c,json value,const Pending* routeAdmission=nullptr){
+enum class RouteStateLog { admission, noUniqueGame };
+static json noUniqueGameRouteLogProjection(const json& snapshot){
+    json receipt=json::object();
+    // The previous aggregate belongs to its own dual-route-finished receipt.
+    for(auto it=snapshot.begin();it!=snapshot.end();++it)
+        if(it.key()!="dualRoutes")receipt[it.key()]=it.value();
+    receipt["routeNoUniqueGameLogSchema"]=1;
+    return receipt;
+}
+static void publish(const std::shared_ptr<Control>& c,json value,const Pending* routeEvent=nullptr,
+                    RouteStateLog routeLog=RouteStateLog::admission){
     value["owner"]="ymcc-native";value["extraExecutables"]=0;value["periodicPolling"]=false;
     value["storageLayout"]={{"schema",2},{"evidenceRoot",W2U(root())},{"runtimeRoot",W2U(runtimeRoot())},
         {"loadedImagesInEvidenceRoot",false},{"logClearResetsRecoveryBudget",false}};
     value["gamePidSource"]="ymcc-unique-game-valve";value["atFileTime"]=std::to_string(sgNowFileTime());
     {std::lock_guard<std::mutex> lock(c->snapshotMx);c->snapshot.update(value);value=c->snapshot;}
-    saveJson(root()+L"\\status.json",value);
-    if(routeAdmission){
-        // This receipt precedes fresh route qualification. Inherited target,
-        // binding and dual-route fields remain in the full status document.
+    // Route admission is a pre-qualification breadcrumb. Keep it live and in
+    // the log; persist status when the route reports an outcome.
+    if(!routeEvent||routeLog!=RouteStateLog::admission)saveJson(root()+L"\\status.json",value);
+    if(routeEvent){
         try{
-            auto receipt=routeAdmissionLogProjection(value);
-            receipt["queuedTrigger"]=ymcc::steamOriginal::name(routeAdmission->kind);
-            receipt["queuedPowerGeneration"]=routeAdmission->generation?json(std::to_string(routeAdmission->generation)):json(nullptr);
+            auto receipt=routeLog==RouteStateLog::admission?routeAdmissionLogProjection(value):noUniqueGameRouteLogProjection(value);
+            receipt["queuedTrigger"]=ymcc::steamOriginal::name(routeEvent->kind);
+            receipt["queuedPowerGeneration"]=routeEvent->generation?json(std::to_string(routeEvent->generation)):json(nullptr);
             receipt["writerProcessCreation100ns"]=ymcc::sleepfactlog::writerCreation100nsJson();
             log(c,"state",std::move(receipt));
             return;
@@ -812,7 +822,8 @@ static void runRoute(const std::shared_ptr<Control>& c,Pending pending,const jso
         const auto session=SleepSteamRecovery::session();
         c->ownsRunning=false;publish(c,{{"phase","waiting"},{"reason","ymcc-unique-game-unavailable"},
             {"target",nullptr},{"steam",asJson(identity(session.pid,session.created,session.root+L"\\steam.exe"))},
-            {"currentBindingValid",false},{"nativeRunning",nullptr},{"lastResultHistorical",true}});return;
+            {"currentBindingValid",false},{"nativeRunning",nullptr},{"lastResultHistorical",true}},
+            &pending,RouteStateLog::noUniqueGame);return;
     }
     const auto client=sleepOriginal?original.client:SleepSteamRecovery::session();
     std::wstring parentPath;ULONGLONG parentBirth=0;

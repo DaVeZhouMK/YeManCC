@@ -8,6 +8,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import {originalCommittedReadyConsumer} from './owned-run.mjs';
+import {extractDeckyReady} from '../decky-update-recovery/native-source-admission.mjs';
 
 const MODULE = 'tools/ymcc_sim/global/decky-persistent-lifecycle';
 const LEGACY = 'tools/decky_binding_cancel_selftest.cpp';
@@ -26,13 +27,12 @@ const fail = label => 'TYPED_ASYNC_PARENT_' + label;
 export function verifyTypedAsyncReadyExtraction(row,{repo,workRoot,sourcePins}) {
   const origin='native/main.cpp',sourceFile=path.join(repo,origin),source=fs.readFileSync(sourceFile,'utf8');
   assert.equal(sourcePins.get(origin),digest(sourceFile),fail('READY_SOURCE_PREBINDING'));
-  const matches=[...source.matchAll(/static bool deckySidebarResumeAfterIntent\(unsigned long long generation(?:,const char\* scope="sleep-intent-ready")?\) \{[\s\S]*?\n\}/g)],match=matches[0];
-  assert(match,fail('READY_SOURCE_REQUIRED'));assert.equal(matches.length,1,fail('READY_SOURCE_UNIQUE'));
+  const ready=extractDeckyReady(source);
   assert(row&&row.origin===origin,fail('READY_ORIGIN'));assert.equal(row.originSha256,sourcePins.get(origin));
-  assert.deepEqual(row.slice,{begin:match.index,end:match.index+match[0].length,appendNewline:true});assert.equal(row.bytePreserved,true);
+  assert.deepEqual(row.slice,{begin:ready.index,end:ready.index+ready.code.length,appendNewline:true});assert.equal(row.bytePreserved,true);
   samePath(row.path,path.join(workRoot,'s/native/decky_wake_ready_consumer.inc'),fail('READY_PATH'));
   assert(inside(workRoot,row.path),fail('READY_SCOPE'));samePath(fs.realpathSync(row.path),row.path,fail('READY_REPARSE'));
-  assert.equal(row.sha256,hash(Buffer.from(match[0]+'\n')),fail('READY_BYTES'));assert.equal(digest(row.path),row.sha256,fail('READY_CHANGED'));
+  assert.equal(row.sha256,hash(Buffer.from(ready.code+'\n')),fail('READY_BYTES'));assert.equal(digest(row.path),row.sha256,fail('READY_CHANGED'));
   return row;
 }
 

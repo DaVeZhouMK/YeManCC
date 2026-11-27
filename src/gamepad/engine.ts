@@ -25,7 +25,6 @@ import { getSharedPowerLifecycle, isSharedPowerLifecycleAdmitted, onSharedPowerL
 import { ROUTES } from '@/router';
 import { isRadialTestingEnabled } from '@/radial/testingState';
 import { isNavigationFailure, type Router } from 'vue-router';
-import { loadPerformanceSchedule } from '@/bridge/performanceSchedule';
 import { summonGet, type GamepadSettings } from '@/bridge/yeman';
 import { isUiVisible, onUiVisibilityChange, getUiVisibilityState } from '@/bridge/uiLifecycle';
 import { focusGamepadElement, setGamepadFocused, recoverGamepadFocus } from '@/gamepad/focus';
@@ -314,10 +313,6 @@ if (typeof window !== 'undefined') {
       stopGamepadLoop();
     }
   });
-  window.addEventListener('performance-schedule:visibility', (e: Event) => {
-    const enabled = Boolean((e as CustomEvent<{ detail?: { enabled?: boolean }; enabled?: boolean }>).detail?.enabled);
-    setVisibleRoutes(enabled);
-  });
   window.addEventListener('ipc:gamepad.ui-input', ((e: CustomEvent<{
     action?: string; uiSeq?: number; repeat?: boolean; heldMs?: number; provenance?: Record<string, unknown>;
   }>) => {
@@ -552,21 +547,8 @@ function getPad(): Gamepad | null {
 }
 
 // One pure route policy for pointer navigation and controller LB/RB.
-let visibleRoutePaths: string[] = residentNavigationRoutes(ROUTES, false).map((r) => r.path);
-let visibleRouteTitles: string[] = residentNavigationRoutes(ROUTES, false).map((r) => r.title);
-let performanceScheduleEnabled = false;
-
-function setVisibleRoutes(enabled: boolean) {
-  performanceScheduleEnabled = enabled;
-  const visible = residentNavigationRoutes(ROUTES, enabled, isRadialTestingEnabled());
-  visibleRoutePaths = visible.map((r) => r.path);
-  visibleRouteTitles = visible.map((r) => r.title);
-}
-
-async function refreshVisibleRoutes() {
-  const cfg = await loadPerformanceSchedule().catch(() => null);
-  setVisibleRoutes(cfg?.enabled === true);
-}
+const controllerRoutes = residentNavigationRoutes(ROUTES, false);
+const controllerTestingRoutes = residentNavigationRoutes(ROUTES, false, true);
 
 // ── 页面切换 ──
 /** A mounted full-window page may consume admitted controller commands. */
@@ -617,14 +599,12 @@ async function navigateNow(opts: GamepadEngineOptions, dir: -1 | 1, link?: Nativ
     if (link) tracePageNavigation('nav-not-started', dir, link, { gate: 'after-queue', reason: modalOpen ? 'modal-open' : 'page-lock' });
     return;
   }
-  // Reconcile quick-mode navigation without a handshake or asset probe.
-  setVisibleRoutes(performanceScheduleEnabled);
-  const order = visibleRoutePaths;
+  const order = isRadialTestingEnabled() ? controllerTestingRoutes : controllerRoutes;
   const cur = opts.router.currentRoute.value.path;
-  let idx = order.indexOf(cur);
+  let idx = order.findIndex(route => route.path === cur);
   if (idx < 0) idx = 0;
   idx = (idx + dir + order.length) % order.length;
-  const target = order[idx];
+  const { path: target, title } = order[idx];
   const startedAt = performance.now();
   // Distinguish reaching router.push from waiting in the input queue.
   tracePageNavigation('nav-start', dir, link, {
@@ -649,7 +629,7 @@ async function navigateNow(opts: GamepadEngineOptions, dir: -1 | 1, link?: Nativ
     });
     throw error; // 保持原行为：由 enqueueGamepadTaskDetached 统一 catch
   }
-  log(opts, `切页 → ${visibleRouteTitles[idx]}`);
+  log(opts, `切页 → ${title}`);
 }
 
 // 自动聚焦页面内首个可见可聚焦元素（手柄初值光标位置）
@@ -1854,7 +1834,6 @@ export function startGamepad(opts: GamepadEngineOptions): () => void {
   inputOwnerRuntime.start();
   traceGamepadAdmission('engine-start', '', { ownerTransitionSchema: 1, phase: 'after-call', transition: 'start', trigger: 'app-mount' });
   publishOwnerTrace();
-  void refreshVisibleRoutes();
   gamepadWakeCleanup?.();
   gamepadWakeCleanup = watchGamepadWake(opts);
   if (rafId) return () => stopGamepad();

@@ -7,6 +7,10 @@ import { fileURLToPath } from 'node:url';
 import { configureCandidateAdapters, validateCommonHidSelection } from './candidate-options.mjs';
 import { sha256File, runAdapters, validateAdapters, verdictFor, compareRuns, makeRunDirectory, defaultEvidenceRoot, makeCoverageWorkItems } from './runner.mjs';
 
+function isCandidateFile(file) {
+  try { return fs.statSync(file).isFile(); } catch { return false; }
+}
+
 export function missingCatalogTools(resolve=specifier=>import.meta.resolve(specifier)){
   const missing=[];
   for(const specifier of ['typescript','vue/compiler-sfc']){
@@ -232,7 +236,16 @@ export async function main(args = process.argv.slice(2), { repoRoot = path.resol
   const catalog = { ...sourceCatalog, ownershipCatalog };
   fs.writeFileSync(path.join(runDir, 'catalog.json'), JSON.stringify(catalog, null, 2));
   // A declared prerequisite refusal takes precedence over the payload check.
-  const plan = selected.map(item => ({ ...item, runnableHere: !item.blockedReason && (item.kind !== 'powershell' || item.scope !== 'host-mock' || Boolean(options.payloadRoot)) }));
+  const plan = selected.map(item => {
+    const reason = item.blockedReason || (item.kind === 'powershell' && item.scope === 'host-mock' && !options.payloadRoot
+      ? 'EXPLICIT_CURRENT_HOST_PAYLOAD_REQUIRED' : null);
+    if (!reason && item.id === 'fan.parent-exit-contract' && options.payloadRoot) {
+      // Report the runner's existing artifact prerequisite without hashing twice.
+      const missing = (item.artifactInputs ?? []).filter(file => !isCandidateFile(file));
+      if (missing.length) return { ...item, blockedReason: 'EXPLICIT_CANDIDATE_ARTIFACT_MISSING', missingCandidateArtifacts: missing, runnableHere: false };
+    }
+    return { ...item, ...(reason ? { blockedReason: reason } : {}), runnableHere: !reason };
+  });
   fs.writeFileSync(path.join(runDir, 'plan.json'), JSON.stringify({ schemaVersion: 1, profile: options.profile, adapters: plan, ownershipCatalog, ...(capabilitySelection ? {capabilitySelection} : {}), noTestsExecuted: true }, null, 2));
   const run = {
     schemaVersion: 1, tool: 'ymcc_sim-global', runId, mode: options.mode, profile: options.profile,
@@ -240,7 +253,7 @@ export async function main(args = process.argv.slice(2), { repoRoot = path.resol
     plannedTests: selected.length, results: [], catalog, ownershipCatalog,
     ...(capabilitySelection ? {capabilitySelection} : {}),
     candidateInputs: Object.fromEntries(['payloadRoot','completeHostContract','runtimeRoot','sharedRuntimeRoot','lightingPayloadRoot','expectedHelperSha256','hcProfile','hcVersion','legacyHostRoot','fanToolLoadPlan','fanToolLoadPlanSha256'].filter(key => options[key] !== undefined).map(key => [key, options[key]])),
-    hostPayload: options.payloadRoot ? { root: path.resolve(options.payloadRoot), binaries: ['YeManFanHost.exe','YeManFanHost.dll','YeManFanBackend.dll','Microsoft.Windows.SDK.NET.dll','WinRT.Runtime.dll'].map(name => { const file = path.join(options.payloadRoot, name); return { name, sha256: fs.existsSync(file) ? sha256File(file) : null }; }) } : null,
+    hostPayload: options.payloadRoot ? { root: path.resolve(options.payloadRoot), binaries: ['YeManFanHost.exe','YeManFanHost.dll','YeManFanBackend.dll','Microsoft.Windows.SDK.NET.dll','WinRT.Runtime.dll'].map(name => { const file = path.join(options.payloadRoot, name); return { name, sha256: isCandidateFile(file) ? sha256File(file) : null }; }) } : null,
     safetyScope: { realSleepPerformed: false, hardwareWritesPerformed: false, installedApplicationMutated: false },
     coverageMeaning: 'source-entry-association-only-not-complete-behavioral-validation',
     fullProductAcceptance: false,

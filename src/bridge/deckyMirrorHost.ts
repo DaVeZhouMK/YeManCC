@@ -24,8 +24,8 @@ import { effectiveInputPersona } from './gameInputOverride';
 import { VirtualStartProtectionView } from './virtualStartProtectionView';
 import { acceptVirtualOutputRuntime, virtualOutputPresentation, type VirtualOutputRuntimeState, type ExternalPriorityRuntimeState } from './virtualOutputStatus';
 import { invoke, on, getLastGamepadState } from './ipc';
-import { powerLifecycle } from './api';
-import { onSharedPowerLifecycle,isSharedPowerLifecycleAdmitted,type SharedPowerLifecycleSnapshot } from './powerLifecycleState';
+import { powerLifecycle, type PowerLifecycleState } from './api';
+import { beginSharedPowerLifecycleReadback,getSharedPowerLifecycle,onSharedPowerLifecycle,isSharedPowerLifecycleAdmitted,type SharedPowerLifecycleSnapshot } from './powerLifecycleState';
 import { powerSourceMode, refreshPowerSourceSnapshot } from './powerSource';
 import { readLosslessScaling, losslessField, setLosslessFromMirror, onLosslessScalingChanged, type LsDocument } from './losslessScaling';
 import {retainLosslessObservation,readLosslessProgram} from './losslessRuntimeState';
@@ -44,7 +44,7 @@ import { tryAcquireQuickAction, isQuickActionBusy } from './quickActionLock';
 import { closeJoyxoffIfRunning } from './gameproc';
 import { observeFanMirrorDisplay, getFanMirrorDisplay, onFanMirrorDisplay, isFanMirrorUiBusy, onFanMirrorUiGate } from './deckyFanDisplay';
 import { fanHostLifecycle } from './fanHost';
-import { ReadOnlyMirrorRelay, type MirrorPeer, type MirrorRequest, type RelayReadSnapshot } from './deckyMirrorRelay';
+import { mirrorPowerScope, ReadOnlyMirrorRelay, type MirrorPeer, type MirrorRequest, type RelayReadSnapshot, type RelayMutationContext } from './deckyMirrorRelay';
 import type { SteamRunningObservation } from '../../decky-plugin/src/steamRunningContext';
 import type { Choice, MirrorField, MirrorSnapshot } from '../../decky-plugin/src/mirrorClient';
 
@@ -90,22 +90,24 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
   };
   const controllerLocked=()=>observeController(getLastGamepadState()).locked;
   const gameTargetReady=()=>hostReady&&!ended&&isGameStatusCurrent();
+  const readMutationPower=({readPower}:RelayMutationContext)=>readPower?
+    readPower(signal=>powerLifecycle.get(undefined,signal)):powerLifecycle.get();
   const updaterHost=startDeckyUpdaterHost(()=>hostReady&&!ended);
   let steam:SteamRunningObservation = {availability:'unavailable'};
   const fanActions = createFanMirrorActions({
     owner:fanHostLifecycle,enabled:() => fanControlActive.value,currentPreset:getFanSelectedPreset,
     curve:getFanPresetCurve,save:saveFanCurve,updateActive:setFanControlActive,updateDuty:setFanNavigationDuty,
-    power:() => powerLifecycle.get(),featureAllowed:() => hostReady && !ended && FAN_IMPORT_ENABLED && !FAN_FORCE_PREVIEW,
+    power:signal => powerLifecycle.get(undefined,signal),featureAllowed:() => hostReady && !ended && FAN_IMPORT_ENABLED && !FAN_FORCE_PREVIEW,
     uiBusy:isFanMirrorUiBusy,display:observeFanMirrorDisplay,observeCapability:allowed => recordFanHandshake(allowed),
   });
   // This completion is still inside YMCC. Preserve commit truth even when the
   // accepted request has just acquired its own native startup protection. Only
   // the original native shortcut/input owner may apply or refuse the selection.
-  const finishInput=async(saved:boolean,context:import('./deckyMirrorRelay').RelayMutationContext)=>{
+  const finishInput=async(saved:boolean,context:RelayMutationContext)=>{
     let acknowledged=false;
     try{
       context.checkpoint();
-      const power=await powerLifecycle.get();context.checkpoint();
+      const power=await readMutationPower(context);context.checkpoint();
       if(hostReady && !ended && power.phase==='ready' && power.hardwareWritesAllowed && power.generation===context.generation && gameMirrorIdentity(getPolicyGame())===(context.gameIdentity??'')){
         const result=await invoke<{ok?:boolean;startProtection?:NonNullable<VirtualOutputRuntimeState['startProtection']>}|boolean>('input.shortcutRuntime.clear',{observeProtection:true});
         if(!ended&&typeof result==='object'&&result?.startProtection){
@@ -118,19 +120,19 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
     return {saved,applied:false,pending:true,notice:(saved?'已保存输入选择':'已提交当前手柄选择')+(acknowledged?'；等待 YMCC 原输入服务确认':'；运行确认未完成，请查看手柄状态，不自动重试')};
   };
   const gameLabel = (game: NonNullable<ReturnType<typeof getPolicyGame>>) => detectedGameName(game) || game.name || gamePolicyKey(game) || '当前游戏';
-  const speedActions = createSpeedMirrorActions({featureAllowed:gameTargetReady,game:getPolicyGame,power:() => powerLifecycle.get(),acquire:tryAcquireQuickAction,presets:SPEED_PRESETS,blocked:isMinecraftTarget,state:getGameSpeedState,nativeState:()=>invoke<SpeedMirrorNativeState>('deckySidebar.mirrorAttach',{}, {timeoutMs:1500}),apply:(game,factor,admission) => applyGameSpeed(game.pid,factor,game,'user-factor',admission),clear:(game,admission) => clearGameSpeed(game.pid,'user-reset',admission)});
+  const speedActions = createSpeedMirrorActions({featureAllowed:gameTargetReady,game:getPolicyGame,power:readMutationPower,acquire:tryAcquireQuickAction,presets:SPEED_PRESETS,blocked:isMinecraftTarget,state:getGameSpeedState,nativeState:()=>invoke<SpeedMirrorNativeState>('deckySidebar.mirrorAttach',{}, {timeoutMs:1500}),apply:(game,factor,admission) => applyGameSpeed(game.pid,factor,game,'user-factor',admission),clear:(game,admission) => clearGameSpeed(game.pid,'user-reset',admission)});
   const trainerActions = createTrainerMirrorActions({allowed:gameTargetReady,game:getPolicyGame,label:gameLabel,
-    ready:(name,path)=>getReadyGameTrainer(name,path,getPolicyGame()??undefined),power:()=>powerLifecycle.get(),busy:isQuickActionBusy,invalidate:()=>relay.invalidate(),
+    ready:(name,path)=>getReadyGameTrainer(name,path,getPolicyGame()??undefined),power:readMutationPower,busy:isQuickActionBusy,invalidate:()=>relay.invalidate(),
     launch:(game,isTargetCurrent)=>launchReadyGameTrainer(gameLabel(game),game.path,{isTargetCurrent,processTarget:game,interactiveShell:true})});
   const readGlobal=async(cachedSchedule?:PerformanceScheduleConfig,inputRead=()=>readSettingsSection('input'))=>{
     return globalMirrorRead(cachedSchedule??await loadPerformanceSchedule(),await inputRead() as any);
   };
-  const globalActions=createGlobalMirrorActions({allowed:()=>hostReady&&!ended,game:getPolicyGame,locked:controllerLocked,
+  const globalActions=createGlobalMirrorActions({allowed:gameTargetReady,game:getPolicyGame,locked:controllerLocked,
     contextCurrent:context=>gameMirrorIdentity(getPolicyGame())===(context.gameIdentity??''),
-    side:()=>powerSourceMode.value,read:readGlobal,power:()=>powerLifecycle.get(),acquire:tryAcquireQuickAction,cas:compareAndSwapInputSettings,closeJoyxoff:closeJoyxoffIfRunning,finishInput,clearShortcut:()=>invoke('input.shortcutRuntime.clear',{observeProtection:true})});
+    side:()=>powerSourceMode.value,read:readGlobal,power:readMutationPower,acquire:tryAcquireQuickAction,cas:compareAndSwapInputSettings,closeJoyxoff:closeJoyxoffIfRunning,finishInput,clearShortcut:()=>invoke('input.shortcutRuntime.clear',{observeProtection:true})});
   let performanceSource='',performanceRevision=0,profileSource='',profileRevision=0;
-  const profileActions=createProfileMirrorActions({allowed:gameTargetReady,game:getPolicyGame,label:gameLabel,settingsGeneration:getSettingsGeneration,power:()=>powerLifecycle.get(),acquire:tryAcquireQuickAction,load:loadGameCustomConfig,schedule:loadPerformanceSchedule,currentSchedule:()=>schedule,snapshot:()=>getContinuousPerformanceSnapshot(),import:importGameCustomProfile,remove:removeGameCustomProfile,restore:()=>restorePerformanceScheduleIfConfigured()});
-  const performanceActions=createPerformanceMirrorActions({allowed:gameTargetReady,read:()=>getContinuousPerformanceSnapshot(),update:updateContinuousPerformanceControls,power:()=>powerLifecycle.get(),acquire:tryAcquireQuickAction,
+  const profileActions=createProfileMirrorActions({allowed:gameTargetReady,game:getPolicyGame,label:gameLabel,settingsGeneration:getSettingsGeneration,power:readMutationPower,acquire:tryAcquireQuickAction,load:loadGameCustomConfig,schedule:loadPerformanceSchedule,currentSchedule:()=>schedule,snapshot:()=>getContinuousPerformanceSnapshot(),import:importGameCustomProfile,remove:removeGameCustomProfile,restore:ownsPowerRequest=>restorePerformanceScheduleIfConfigured(undefined,{ownsPowerRequest})});
+  const performanceActions=createPerformanceMirrorActions({allowed:gameTargetReady,read:()=>getContinuousPerformanceSnapshot(),update:updateContinuousPerformanceControls,power:readMutationPower,acquire:tryAcquireQuickAction,
     reportTdpSettled:detail=>invoke<boolean>('deckySidebar.mirrorDiagnostic',{event:'tdp-owner-settled',...detail},{timeoutMs:1000})});
   // Only this display can supply its captured profile. Ordinary action reads
   // keep fresh=true and ignore display data, including a supplied fourth arg.
@@ -151,12 +153,17 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
     const state=await screenTouchpadsGet(screenTouchpadProfile(persona));
     return {persona,virtualEnabled,state,source:touchpadMirrorSource(persona,virtualEnabled,state),fields:touchpadMirrorFields(persona,virtualEnabled,state)};
   };
-  const frameActions=createFrameMirrorActions({allowed:gameTargetReady,game:getPolicyGame,side:()=>powerSourceMode.value,power:()=>powerLifecycle.get(),
+  const frameActions=createFrameMirrorActions({allowed:gameTargetReady,game:getPolicyGame,side:()=>powerSourceMode.value,power:readMutationPower,
     acquire:tryAcquireQuickAction,read:()=>readFrames(),key:gamePolicyKey,label:gameLabel,gyro:readGameMirrorGyroDefaults,
     save:saveGameCustomConfig,saveGlobal:saveGlobalFrameRate,apply:applyIndependentFrameRates});
-  const touchpadActions=createTouchpadMirrorActions({allowed:()=>hostReady&&!ended,read:readTouchpads,power:()=>powerLifecycle.get(),set:screenTouchpadsSet});
-  const monitorActions = createMonitorMirrorActions({allowed:()=>hostReady&&!ended,power:()=>powerLifecycle.get(),
-    read:readMonitorOutputPreferences,save:enabled=>saveSettingsSection('rtss',{monitorOutput:{enabled}}),apply:prefs=>monitorOutputCoordinator.apply(prefs)});
+  const touchpadActions=createTouchpadMirrorActions({allowed:()=>hostReady&&!ended,read:readTouchpads,power:readMutationPower,set:screenTouchpadsSet});
+  const monitorActions = createMonitorMirrorActions({allowed:()=>hostReady&&!ended,power:readMutationPower,
+    read:readMonitorOutputPreferences,save:enabled=>saveSettingsSection('rtss',{monitorOutput:{enabled}}),
+    scope:(snapshot=getSharedPowerLifecycle()??undefined)=>snapshot&&!snapshot.scopeReadbackPending&&isSharedPowerLifecycleAdmitted(snapshot)?JSON.stringify([
+      snapshot.generation,snapshot.suspendSerial,snapshot.observedNotificationSequence]):null,
+    observePower:listener=>onSharedPowerLifecycle(listener,{observeSuspendSerial:true,observeNotificationSequence:true}),
+    observePreferences:onMonitorOutputPreferencesChanged,
+    apply:(prefs,current)=>monitorOutputCoordinator.applyExplicit(prefs,current)});
   const losslessDiagnostic:DeckyLosslessDiagnostic=(event,detail)=>{void invoke<boolean>('deckySidebar.mirrorDiagnostic',{event,...detail},{timeoutMs:1000}).catch(()=>{});};
   // Game LS configuration can change admission; the program lamp cannot.
   type SnapshotReadLease={audioPending:boolean;powerSource:string|null;powerObservation:string|null};
@@ -168,7 +175,28 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
   // Controller recovery after power commit does not change sidebar admission.
   // Its visible state is refreshed separately by gamepad.state.
   const powerSnapshotSource=(value:SharedPowerLifecycleSnapshot)=>
-    JSON.stringify([value.generation,value.suspendSerial,value.phase,value.known!==false,value.hardwareWritesAllowed,value.notificationPending===true]);
+    JSON.stringify([value.generation,value.suspendSerial,value.observedNotificationSequence,value.phase,value.known!==false,
+      value.hardwareWritesAllowed,value.notificationPending===true,value.scopeReadbackPending===true]);
+  const publicPowerAhead=(current:SharedPowerLifecycleSnapshot,receipt:PowerLifecycleState)=>current.scopeReadbackPending||
+    current.generation>receipt.generation||(current.suspendSerial??-1)>(receipt.suspendSerial??-1)||
+    (current.observedNotificationSequence??-1)>(receipt.observedNotificationSequence??-1)||
+    (receipt.publicationRevision!==undefined&&(current.publicationRevision??-1)>receipt.publicationRevision);
+  const readObservedPower=async(load:()=>Promise<PowerLifecycleState>)=>{
+    const accept=beginSharedPowerLifecycleReadback();
+    const receipt=await load();
+    accept(receipt);
+    return receipt;
+  };
+  const readSnapshotPower=async()=>{
+    // A direct receipt cannot settle the shared source's newer readback scope.
+    const before=getSharedPowerLifecycle();
+    if(before?.scopeReadbackPending)return before;
+    const receipt=await readObservedPower(()=>powerLifecycle.get());
+    const current=getSharedPowerLifecycle();
+    if(current&&(publicPowerAhead(current,receipt)||receipt.observedNotificationSequence!==undefined&&
+      mirrorPowerScope(current)===mirrorPowerScope(receipt)&&!isSharedPowerLifecycleAdmitted(current)))return current;
+    return receipt;
+  };
   const losslessObserved=()=>{if(snapshotReadLease===null)relay.invalidate();};
   const losslessObservation=new DeckyLosslessObservation<LsDocument>(losslessObserved,losslessDiagnostic);
   type LosslessProgram=Awaited<ReturnType<typeof readLosslessProgram>>;
@@ -253,6 +281,12 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
       canToggle:FAN_IMPORT_ENABLED&&!FAN_FORCE_PREVIEW&&!isFanMirrorUiBusy(),choices:structuredClone(fan)};
   };
   const relay = new ReadOnlyMirrorRelay({
+    async readMutationPower(load){
+      const receipt=await readObservedPower(load),current=getSharedPowerLifecycle();
+      if(!isSharedPowerLifecycleAdmitted(receipt)||current&&(publicPowerAhead(current,receipt)||
+        receipt.observedNotificationSequence!==undefined&&!isSharedPowerLifecycleAdmitted(current)))throw Error('MIRROR_POWER_SCOPE_CHANGED');
+      return receipt;
+    },
     diagnostic:(event,detail)=>{void invoke<boolean>('deckySidebar.mirrorDiagnostic',{event,...detail},{timeoutMs:1000}).catch(()=>{});},
     snapshotDemand(){
       audioObservation=null;
@@ -280,7 +314,7 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
       const readCurrent=()=>!ended&&snapshotReadLease===readLease&&(!trace||trace.isCurrent());
       try {
       // Power is one on-demand native read. Game/fan data is already held by the resident YMCC owner.
-      const power=await measure('power',()=>powerLifecycle.get());
+      const power=await measure('power',readSnapshotPower);
       if(!readCurrent())throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');
       readLease.powerSource=powerSnapshotSource(power);
       // A shared fact received during native IO is consumed by this read only
@@ -357,13 +391,13 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
         // This fault path crosses independent awaits. Recheck the same native
         // fact before offering any unaffected owner's current admission.
         if(!current())throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');
-        const after=await powerLifecycle.get();
+        const after=await readSnapshotPower();
         if(!current()||powerSnapshotSource(after)!==readLease.powerSource||powerSourceMode.value!==side)
           throw Error('MIRROR_SNAPSHOT_SOURCE_CHANGED');
         const monitor=monitorRead.status==='fulfilled'?monitorRead.value:null;
         const touchpads=touchpadRead.status==='fulfilled'?touchpadRead.value:null;
         const audioOptimization=audio.ok?audio.value:undefined,fan=readFanView();
-        const view:RelayReadSnapshot={generation:power.generation,ready:true,provenance,steam:structuredClone(steam),
+        const view:RelayReadSnapshot={generation:power.generation,ready:true,powerAdmission:mirrorPowerScope(power),provenance,steam:structuredClone(steam),
           game:game?{label:gameLabel(game),identity,fields:{}}:null,powerSource:side,
           controlAdmission:{audioOptimization:audioOptimization?JSON.stringify(audioOptimization):undefined,
             monitor:monitor?JSON.stringify(monitor):undefined,touchpads:touchpads?.source},
@@ -468,13 +502,13 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
       const fanView=readFanView();
       const gameSteam=optionalGameSteam(game,power.generation)?.value;
       const view:RelayReadSnapshot={ gameAdmission:game ? {...makeGameMirrorAdmission(entry,schedule!,lossless?.xml),speed:JSON.stringify(speedState),profile:freshProfileSource,profileSource:performance?gameProfileImportSource(performance):undefined} : undefined,steam:structuredClone(steam),gameSteam,generation:power.generation,ready:power.phase === 'ready' && power.hardwareWritesAllowed === true,
-        controlAdmission:{audioOptimization:JSON.stringify(audioOptimization),performance:performance?freshPerformanceSource:undefined,trainer:trainerMirrorSource(readyTrainer),frames:frames?.source,touchpads:touchpads?.source,global:global?.source,monitor:monitor?JSON.stringify(monitor):undefined},
+        powerAdmission:mirrorPowerScope(power),controlAdmission:{audioOptimization:JSON.stringify(audioOptimization),performance:performance?freshPerformanceSource:undefined,trainer:trainerMirrorSource(readyTrainer),frames:frames?.source,touchpads:touchpads?.source,global:global?.source,monitor:monitor?JSON.stringify(monitor):undefined},
         audioOptimization,losslessProgram,trainer,performance:performanceView,virtualController,
         monitor:monitor?{enabled:monitor.enabled}:undefined,
         global:global?{fields:global.fields}:undefined,
         frames:frames?{pair:frames.pair,dedicated:frames.dedicated}:undefined,
         touchpads:touchpads?{persona:touchpads.persona,fields:touchpads.fields}:undefined,
-        actions:{audioOptimization:audioOptimization.known&&audioOptimization.installed,performance:isGameStatusCurrent()&&!!performanceView?.enabled,monitor:!!monitor,global:!!global&&!controllerView.locked,frames:isGameStatusCurrent()&&!!frames&&powerSourceMode.value!==null,touchpads:!!touchpads&&touchpads.state.ok&&touchpads.state.available,fan:FAN_IMPORT_ENABLED && !FAN_FORCE_PREVIEW && !isFanMirrorUiBusy(),game:isGameStatusCurrent()&&!!game && !!gamePolicyKey(game)},
+        actions:{audioOptimization:audioOptimization.known&&audioOptimization.installed,performance:isGameStatusCurrent()&&!!performanceView?.enabled,monitor:!!monitor,global:!game&&gameTargetReady()&&!!global&&!controllerView.locked,frames:isGameStatusCurrent()&&!!frames&&powerSourceMode.value!==null,touchpads:!!touchpads&&touchpads.state.ok&&touchpads.state.available,fan:FAN_IMPORT_ENABLED && !FAN_FORCE_PREVIEW && !isFanMirrorUiBusy(),game:isGameStatusCurrent()&&!!game && !!gamePolicyKey(game)},
         game:game ? {label:entry?.displayName || gameLabel(game),
           identity:gameMirrorIdentity(game),fields} : null,
         provenance, powerSource:powerSourceMode.value,
@@ -614,8 +648,8 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
           const next = trainerSource();
           if(next !== observedTrainer){observedTrainer = next;invalidate('trainer');}
         }));
-        // One reconciliation at sidebar entry; the resident game owner pushes later changes.
-        void refreshPolicyGameStrict().catch(() => {});
+        // Share pending discovery with the resident game owner, which pushes later changes.
+        void refreshPolicyGameStrict('observe').catch(() => {});
         refreshGameTrainerRecovery();
         let observedGame=gameMirrorIdentity(getPolicyGame());
         stops.push(subscribePolicyGameStatus(()=>{
@@ -645,6 +679,7 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
           if(!observing||ended)return;
           const next=powerSnapshotSource(snapshot);
           if(next===observedPower)return;
+          if(observedPower!=='')relay.revokeMutationPowerRead();
           const suspendChanged=observedPower!==''&&observedSuspendSerial!==snapshot.suspendSerial;
           observedPower=next;
           observedSuspendSerial=snapshot.suspendSerial;
@@ -662,7 +697,7 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
           // after our direct read. It needs no second complete control batch.
           if(next===observedPowerSource)return;
           relay.advancePowerScope();
-        },{observeSuspendSerial:true}));
+        },{observeSuspendSerial:true,observeNotificationSequence:true}));
         stops.push(on('fan.resume-ready',refreshFan));
         stops.push(onFanMirrorUiGate(refreshFan));
         stops.push(onFanMirrorDisplay(refreshFan));
@@ -670,8 +705,8 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
       return () => { snapshotReadLease=null;stopObservers(); };
     },
     execute(command,args,context) {
-      // Game policy actions recheck target freshness after awaits. Global input
-      // does not acquire a game target, including legacy game-addressed controls.
+      // Global input checks readiness in its own action owner, including
+      // legacy game-addressed controls.
       const globalInput=command==='global.setField'||command==='game.setField'&&['padPersona','gyroEnabled','gyroPreset'].includes(String(args.field));
       if(!globalInput&&(command==='game.setField'||command==='performance.setControls'||command==='frame.setField')){
         const checkpoint=context.checkpoint;
@@ -683,7 +718,7 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
       if(command === 'audioOptimization.setEnabled')return (async()=>{
         if(Object.keys(args).length!==1||typeof args.enabled!=='boolean')throw Error('FXSOUND_INVALID_REQUEST');
         context.checkpoint();if(!hostReady||ended)throw Error('FXSOUND_NOT_READY');
-        const power=await powerLifecycle.get();context.checkpoint();
+        const power=await readMutationPower(context);context.checkpoint();
         if(power.phase!=='ready'||!power.hardwareWritesAllowed||power.generation!==context.generation)throw Error('FXSOUND_POWER_NOT_READY');
         const current=await fxSound.read();context.checkpoint();
         if(JSON.stringify(current)!==context.controlAdmission?.audioOptimization)throw Error('FXSOUND_SOURCE_CHANGED');
@@ -742,6 +777,6 @@ export function startDeckyMirrorHost(): { startupPhase: (phase: DeckyStartupPhas
   return {
     startupPhase,
     ready() {if(ended)return;if(!hostReady){startupPhase('ready');hostReady=true;updaterHost.ready();relay.invalidateFresh(true);}attach();},
-    stop() { ended = true;gameSteamDisplayVisible=false;retireGameSteamDisplay(); updaterHost.stop(); trainerActions.stop(); losslessObservation.dispose(); losslessProgramObservation.dispose(); fanActions.stop(); stopRequests(); stopPeers(); relay.dispose(); },
+    stop() { ended = true;gameSteamDisplayVisible=false;retireGameSteamDisplay(); updaterHost.stop(); trainerActions.stop(); losslessObservation.dispose(); losslessProgramObservation.dispose(); fanActions.stop(); monitorActions.stop(); stopRequests(); stopPeers(); relay.dispose(); },
   };
 }

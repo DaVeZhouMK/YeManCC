@@ -80,7 +80,7 @@ async function writeSessionDocument(path: string, value: Record<string, unknown>
 }
 
 const freshDraft = (): GameValueDraft => ({ firstValue: '', nextValue: '', desiredValue: '99999' });
-interface Session { root: string; token: string; target: LockedGameTarget; generation: number; lifecycleEpoch: number; powerGeneration: number; stopLifecycle: () => void; dispatched: boolean; terminalReason: string | null; state: GameValueState | null; draft: GameValueDraft; lastSeen: number; pollBusy: boolean; leasing?: Promise<void>; timer: ReturnType<typeof setInterval> | null; queue: Promise<unknown> }
+interface Session { root: string; token: string; target: LockedGameTarget; generation: number; lifecycleEpoch: number; powerGeneration: number; stopLifecycle: () => void; dispatched: boolean; pendingCommands: number; terminalReason: string | null; state: GameValueState | null; draft: GameValueDraft; lastSeen: number; pollBusy: boolean; leasing?: Promise<void>; timer: ReturnType<typeof setInterval> | null; queue: Promise<unknown> }
 let current: Session | null = null;
 let starting: { target: LockedGameTarget; generation: number; epoch: number; restart: boolean; promise: Promise<GameValueState> } | null = null;
 let startEpoch = 0;
@@ -93,7 +93,7 @@ function sameTarget(a: Pick<LockedGameTarget, 'pid' | 'processCreated' | 'path'>
 function copy(state: GameValueState | null): GameValueState | null { return state ? { ...state, rows: state.rows.map(row => ({ ...row })) } : null; }
 function notify(session: Session): void { if (session !== current) return; for (const listener of [...listeners]) { try { listener(copy(session.state)); } catch { /* Observers cannot interrupt the helper. */ } } }
 function assertSession(session: Session): void {
-  if (session !== current || session.lifecycleEpoch !== getTrainerLifecycleEpoch() || session.generation !== getSettingsGeneration() || !sameTarget(getLockedGameTarget(), session.target) || getLockedGameTarget()?.lockGeneration !== session.target.lockGeneration) throw new Error('YMCC锁定游戏已改变，请重新打开数值搜索');
+  if (session !== current || session.lifecycleEpoch !== getTrainerLifecycleEpoch() || session.generation !== getSettingsGeneration()) throw new Error('YMCC锁定游戏已改变，请重新打开数值搜索');
 }
 function assertOpenSession(session: Session): void {
   assertSession(session);
@@ -145,9 +145,12 @@ async function poll(session: Session): Promise<void> {
   } finally { session.pollBusy = false; }
 }
 export function getGameValueState(): GameValueState | null { return copy(current?.state || null); }
+export function getGameValueSessionTarget(): LockedGameTarget | null {
+  return current && current.terminalReason === null && current.state?.stage !== 'closed' ? { ...current.target } : null;
+}
 function draftSession(target: LockedGameTarget): Session | null {
-  return current && sameTarget(target, current.target) && sameTarget(getLockedGameTarget(), current.target)
-    && target.lockGeneration === current.target.lockGeneration && getLockedGameTarget()?.lockGeneration === target.lockGeneration
+  return current && sameTarget(target, current.target)
+    && target.lockGeneration === current.target.lockGeneration
     && current.generation === getSettingsGeneration() && current.lifecycleEpoch === getTrainerLifecycleEpoch() && current.terminalReason === null && current.state?.stage !== 'closed' ? current : null;
 }
 export function getGameValueDraft(target: LockedGameTarget): GameValueDraft {
@@ -266,13 +269,20 @@ export function startGameValueSession(target: LockedGameTarget, options: { resta
   const restart = options.restart === true;
   if (!validTarget(target)) return Promise.reject(new Error('锁定游戏身份无效'));
   target = { ...target };
+  const existing = current;
+  const active = existing && existing.terminalReason === null && existing.state && existing.state.stage !== 'closed';
+  if (active && (existing.pendingCommands > 0 || existing.state!.lastWriteCount === 0) && (!sameTarget(target, existing.target) || target.lockGeneration !== existing.target.lockGeneration)) {
+    return Promise.reject(new Error('数值修改已锁定原游戏进程，请先完成修改或取消，再选择其他游戏'));
+  }
+  const resumePinnedSession = !!(active && sameTarget(target, existing.target) && target.lockGeneration === existing.target.lockGeneration && !restart);
+  let targetConfirmed = resumePinnedSession;
   const generation = getSettingsGeneration(), epoch = startEpoch, lifecycleEpoch = getTrainerLifecycleEpoch();
   if (starting && starting.restart === restart && starting.epoch === epoch && starting.generation === generation && sameTarget(target, starting.target) && target.lockGeneration === starting.target.lockGeneration) return starting.promise;
   if (starting) return Promise.reject(new Error('旧数值会话正在结束，请关闭后重新打开'));
   let transferred = false, phase = 'admission';
   const stopLifecycle = subscribeTrainerLifecycle(() => { void stopGameValueSession().catch(() => {}); });
   const check = () => {
-    if (epoch !== startEpoch || lifecycleEpoch !== getTrainerLifecycleEpoch() || generation !== getSettingsGeneration() || !sameTarget(getLockedGameTarget(), target) || getLockedGameTarget()?.lockGeneration !== target.lockGeneration) throw new Error('锁定游戏或页面已改变，本次数值会话已取消');
+    if (epoch !== startEpoch || lifecycleEpoch !== getTrainerLifecycleEpoch() || generation !== getSettingsGeneration() || (!resumePinnedSession && (!sameTarget(getLockedGameTarget(), target) || getLockedGameTarget()?.lockGeneration !== target.lockGeneration))) throw new Error('锁定游戏或页面已改变，本次数值会话已取消');
   };
   const action = (async () => {
     check();
@@ -282,9 +292,13 @@ export function startGameValueSession(target: LockedGameTarget, options: { resta
     check();
     if (!availability.available) throw new Error(availability.message);
     phase = 'target';
-    const observed = await sessionIO(validateLockedGameTarget());
-    check();
-    if (!sameTarget(observed, target) || observed?.lockGeneration !== target.lockGeneration) throw new Error('锁定游戏已退出或改变，请重新获取游戏');
+    if (resumePinnedSession) { assertOpenSession(existing!); return copy(existing!.state)!; }
+    if (!targetConfirmed) {
+      const observed = await sessionIO(validateLockedGameTarget());
+      check();
+      if (!sameTarget(observed, target) || observed?.lockGeneration !== target.lockGeneration) throw new Error('锁定游戏已退出或改变，请重新获取游戏');
+      targetConfirmed = true;
+    }
     if (!restart && current && sameTarget(target, current.target) && current.target.lockGeneration === target.lockGeneration && current.generation === getSettingsGeneration() && current.state && current.state.stage !== 'closed') return copy(current.state)!;
     phase = 'previous-session';
     try { await retireCurrentSession(); }
@@ -294,7 +308,7 @@ export function startGameValueSession(target: LockedGameTarget, options: { resta
     if (!Number.isSafeInteger(ownerId) || ownerId <= 4 || !ownerDirectory) throw new Error('无法核验YMCC会话身份');
     const program = directory.replace(/[\\/]+$/, '') + '\\MemoryScan\\MemoryScanHost.exe';
     if (!(await sessionIO(fs.exists(program, SESSION_IO_MS)))) throw new Error('缺少数值搜索组件，请安装完整更新');
-    const session: Session = { root: data.replace(/[\\/]+$/, '') + '\\memory-scan\\' + randomHex(16), token: randomHex(32), target: { ...target }, generation, lifecycleEpoch, powerGeneration, stopLifecycle, dispatched: false, terminalReason: null, state: null, draft: freshDraft(), lastSeen: Date.now(), timer: null, pollBusy: false, queue: Promise.resolve() };
+    const session: Session = { root: data.replace(/[\\/]+$/, '') + '\\memory-scan\\' + randomHex(16), token: randomHex(32), target: { ...target }, generation, lifecycleEpoch, powerGeneration, stopLifecycle, dispatched: false, pendingCommands: 0, terminalReason: null, state: null, draft: freshDraft(), lastSeen: Date.now(), timer: null, pollBusy: false, queue: Promise.resolve() };
     check();
     current = session;
     transferred = true;
@@ -333,13 +347,16 @@ export function startGameValueSession(target: LockedGameTarget, options: { resta
 export function gameValueCommand(action: 'first'|'next'|'list'|'select'|'write'|'writeAll'|'freeze'|'unfreeze', values: { value?: string; dataType?: GameValueType; address?: string; offset?: number } = {}): Promise<GameValueState> {
   const session = current;
   if (!session) return Promise.reject(new Error('请先锁定游戏并打开数值搜索'));
+  ++session.pendingCommands;
   const operation = session.queue.catch(() => {}).then(async () => {
     assertOpenSession(session);
     try { await assertTrainerPowerReady(session.lifecycleEpoch, session.powerGeneration); }
     catch (error) { if (current === session) await stopGameValueSession().catch(() => {}); throw error; }
     assertOpenSession(session);
-    const target = await sessionIO(validateLockedGameTarget());
-    assertOpenSession(session); if (!sameTarget(target, session.target)) throw new Error('游戏进程已退出或重开，请重新搜索');
+    // Do not elect/validate a foreground PID between scan rounds. The adapter
+    // rechecks its exact held PID/birth/path before accepting every operation.
+    // accept() below also rejects any response for another target.
+    assertOpenSession(session);
     if (!session.state || session.state.stage === 'closed') throw new Error('数值会话未激活，请重新打开');
     if (!['first','next','writeAll'].includes(action) || typeof values.value !== 'string' || !/^[+-]?\d{1,11}$/.test(values.value) || !Number.isInteger(Number(values.value)) || Number(values.value) < -2147483648 || Number(values.value) > 2147483647 || (values.dataType !== undefined && values.dataType !== 'int32') || values.address !== undefined || values.offset !== undefined) throw new Error('数值请求未授权或格式无效');
     await lease(session);
@@ -373,10 +390,11 @@ export function gameValueCommand(action: 'first'|'next'|'list'|'select'|'write'|
       }
       await stopGameValueSession(); throw new Error('未收到操作确认，会话已停止，请先核对游戏内数值');
     } finally { if (confirmed) { await sessionIO(fs.remove(resultPath)).catch(() => {}); await sessionIO(fs.remove(pendingPath)).catch(() => {}); } }
-  });
+  }).finally(() => { --session.pendingCommands; });
   session.queue = operation; return operation;
 }
 export async function cancelGameValueScan(): Promise<void> {
   const session = current; if (!session) return;
   await sessionIO(fs.writeTextFileAtomic(session.root + '\\cancel', 'cancel', SESSION_IO_MS));
+  await stopGameValueSession();
 }

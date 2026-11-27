@@ -1,12 +1,6 @@
-﻿{
-    "version":  "0.0.43",
-    "notes":  "0.0.43：更新 Steam 主题和动态壁纸、手柄与设备兼容性，加固升级，并修正快速导出取到旧版本的问题。",
-    "sha256":  "5EC5A6D0BAE4BC8ADFCC475C3BEB5DD2C55BF4F1629653E1EFD0C534C965444B",
-    "publishedAt":  "2026-11-24",
-    "buildId":  "1cd2c3bf8dad4ceb4595e5c2836f7d02bef369bd0c0c3aae0c39bc965de91556",
-    "nativeSha256":  "20654e3ae9472db5ffa67bde99865974529d473818063d47d489b591785a2c4b",
-    "pluginSha256":  "b4070c7eb4337e30e7551762137d6256b535535d2bc28a42d9b1aceaa197ff88",
-    "package":  "Packages/YeManCC.zip",
-    "releaseMode":  "fast",
-    "fixtureValidation":  "NOT_RUN"
+{
+  "version": "0.0.44",
+  "notes": "0.0.44：改进升级失败处理与日志、风扇唤醒及设备识别、Steam 快捷方式和手柄链路。",
+  "sha256": "",
+  "publishedAt": ""
 }

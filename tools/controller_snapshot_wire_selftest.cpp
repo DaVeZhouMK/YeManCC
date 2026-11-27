@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 #include "json.hpp"
+#include "sleep_power_state.h"
 using json=nlohmann::json;
 static thread_local bool trackAlloc=false;
 static thread_local uint64_t allocationRequests=0,allocationBytes=0;
@@ -140,9 +141,39 @@ static void rvalueParity(){
 #undef CHECK_RVALUE
  }
 }
+#ifdef YMCC_GENERIC_EVENT_WIRE_REUSE
+static void powerHintReadbackScope(){
+ using candidate::PowerLifecycle;
+ const auto deliver=[](const char* event,unsigned generation,PowerLifecycle phase,bool readable){
+  candidate::reset(1,false);
+  candidate::fixtureReadbackPower.generation=readable?17u:0u;
+  candidate::fixtureReadbackPower.phase=static_cast<uint32_t>(phase);
+  candidate::fixtureReadbackPower.flags=ymcc::sleeppower::kKnown;
+  candidate::fixtureReadbackPower.suspendSerial=4;
+  candidate::fixtureReadbackPower.observedNotificationSequence=22;
+  candidate::ipc_emit(event,json{{"generation",generation}});
+  return json::parse(candidate::posts.at(0).second).at("data");
+ };
+ const json expected{{"suspendSerial",4},{"notificationSequence",22}};
+ for(const auto& [event,phase]:std::array{
+   std::pair{"power.suspending",PowerLifecycle::Suspending},std::pair{"power.suspending",PowerLifecycle::Suspended},
+   std::pair{"power.resuming",PowerLifecycle::Resuming},std::pair{"power.resumed",PowerLifecycle::Ready}}){
+  const auto hint=deliver(event,17,phase,true);
+  check(hint.value("readbackScope",json{})==expected&&!hint.contains("hardwareWritesAllowed")&&!hint.contains("known"),"matching compatibility phase carries readback scope only");
+  check(!deliver(event,16,phase,true).contains("readbackScope"),"retired generation has no readback scope");
+  check(!deliver(event,17,phase,false).contains("readbackScope"),"unreadable power has no readback scope");
+ }
+ check(!deliver("power.suspending",17,PowerLifecycle::Ready,true).contains("readbackScope"),"retired compatibility phase has no readback scope");
+ check(!deliver("power.sourceChanged",17,PowerLifecycle::Ready,true).contains("readbackScope"),"unrelated power event has no readback scope");
+ candidate::reset(1,false);
+}
+#endif
 int main(int argc,char** argv){
  if(argc<2)return 2;bool correctnessOnly=false,negative=false,negativeConversion=false;for(int i=2;i<argc;++i){controllerCopyElisionOnly|=std::string(argv[i])=="--copy-elision-only";correctnessOnly|=std::string(argv[i])=="--correctness-only";negative|=std::string(argv[i])=="--expect-negative";negativeConversion|=std::string(argv[i])=="--expect-conversion-negative";}
  rvalueParity();
+#ifdef YMCC_GENERIC_EVENT_WIRE_REUSE
+ powerHintReadbackScope();
+#endif
  std::vector<json> inputs{payload(false),payload(true),json::object(),nullptr,42,json::array({1,2}),json{{"invalid",std::string("\xC0\x80",2)}},json{{"float",std::numeric_limits<double>::infinity()}}};
  for(const auto& ev:{"gamepad.state","gyro.telemetry","other.snapshot","power.suspending","power.resumed","power.sourceChanged","gamepad.brightness","gamepad.mouse-toggle"})
   for(const auto& j:inputs)for(int targets:{0,1,2,4})for(bool log:{false,true})for(bool dead:{false,true})compare(ev,j,targets,log,dead);

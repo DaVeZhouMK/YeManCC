@@ -14,19 +14,25 @@ class FixtureEvent extends Event{detail:unknown;constructor(type:string,init:{de
 Object.assign(globalThis,{document:Object.assign(new EventTarget(),{visibilityState:'visible',createElement:()=>({content:{}})})});
 let rejectActivity=false;
 let pending:any=null,native:any={phase:'idle',downloadActive:false},gate=false;
+const powerSequenceOnly=process.argv.includes('--power-sequence');
+const powerCacheResumeOnly=process.argv.includes('--power-cache-resume');
+const initialPower={phase:'ready',generation:1,known:true,hardwareWritesAllowed:true};
+let power={...initialPower,publicationRevision:1,suspendSerial:1,observedNotificationSequence:1};
+let holdState=false;const heldState:((value:any)=>void)[]=[];
+const heldCache:{result(value:unknown):void;error(text:string):void}[]=[];
 const policy={enabled:true,bootId:'fixture-boot',lastNotifiedBoot:'',failureCount:0,nextCheckAt:0};
 const win=new EventTarget() as any;win.chrome={webview:{addEventListener(_name:string,fn:typeof receive){receive=fn;},postMessage(req:any){if(typeof req.id!=='number')return;calls.push(req);queueMicrotask(()=>{
  const result=(value:any)=>receive({data:{id:req.id,result:value}}),error=(text:string)=>receive({data:{id:req.id,error:text}});
- if(req.cmd==='power.lifecycle')result({phase:'ready',generation:1,known:true,hardwareWritesAllowed:true});
+ if(req.cmd==='power.lifecycle')result(powerSequenceOnly||powerCacheResumeOnly?power:initialPower);
  else if(req.cmd==='app.updatePredownloadActivity'){gate=!rejectActivity&&req.args.known&&req.args.idle;result(!rejectActivity);}
  else if(req.cmd==='app.updatePredownloadSet'){policy.enabled=req.args.enabled;result({...policy});}
  else if(req.cmd==='app.updatePredownloadRead')result({...policy});
  else if(req.cmd==='app.updatePredownloadSchedule'){Object.assign(policy,req.args);result(true);}
- else if(req.cmd==='app.updateState')result({...native});
+ else if(req.cmd==='app.updateState'){if(holdState)heldState.push(result);else result({...native});}
  else if(req.cmd==='app.checkUpdate'){assert.ok(gate&&game.known&&!game.game,'game must admit manifest IO');result(manifest);}
  else if(req.cmd==='app.downloadUpdate'){
   assert.ok(gate&&game.known&&!game.game,'game must admit package IO');
-  if(req.args.cacheOnly){error('Verified cached update package is unavailable');return;}
+  if(req.args.cacheOnly){if(powerCacheResumeOnly)heldCache.push({result,error});else error('Verified cached update package is unavailable');return;}
   pending=req;native={...req.args,phase:'downloading',stage:'download',downloadActive:true,activeDownloadOperation:req.args.operationId};
  }else if(req.cmd==='app.cancelUpdateDownload'){
   result(true);if(pending){const old=pending;pending=null;native={...native,phase:'failed',downloadActive:false,activeDownloadOperation:''};receive({data:{id:old.id,error:'Background download paused'}});}
@@ -40,7 +46,67 @@ try{
  const {startUpdatePredownload}=await import('../src/bridge/updatePredownloadService');
  const {updatePredownloadState}=await import('../src/bridge/updatePredownload');
  const idleTimersOnly=process.argv.includes('--idle-timers');
- if(!idleTimersOnly){
+ if(powerCacheResumeOnly){
+  const suspend=process.argv.includes('--suspend'),miss=process.argv.includes('--cache-miss');
+  game.known=true;policy.enabled=false;policy.lastNotifiedBoot=policy.bootId;
+  native={...native,...manifest,phase:'interrupted',stage:'download'};
+  const service=startUpdatePredownload();await flush();
+  try{
+   await advance(1000);
+   check('interrupted package starts one cache-only probe with predownload disabled',()=>assert.equal(heldCache.length,1));
+   power={...power,observedNotificationSequence:2,...(suspend?{phase:'suspended',hardwareWritesAllowed:false,suspendSerial:2}:{})};
+   receive({data:{event:'power.lifecycleChanged',data:power}});await flush();
+   check('public scope change preserves the old probe owner until the Native terminal',()=>assert.equal(heldCache.length,1));
+   heldCache.shift()!.error('Background download paused for power transition');await flush();
+   if(suspend){
+    await advance(1000);
+    check('the suspended scope never restarts the cache-only probe',()=>assert.equal(heldCache.length,0));
+    power={...power,phase:'ready',generation:2,hardwareWritesAllowed:true,observedNotificationSequence:3};
+    receive({data:{event:'power.lifecycleChanged',data:power}});await flush();
+   }
+   await advance(1000);
+   check('the current public scope resumes the retired cache-only probe',()=>assert.equal(heldCache.length,1));
+   const reply=heldCache.shift()!;
+   if(miss)reply.error('Verified cached update package is unavailable');else reply.result(true);
+   await flush();
+   const {updateSnapshot}=await import('../src/bridge/updateManager');
+   if(miss){
+    await advance(60000);
+    check('a current cache miss finishes the retry without leaving a timer',()=>{assert.equal(updateSnapshot.phase,'failed');assert.equal(timers.size,0);});
+   }else check('the verified cache is available',()=>assert.equal(updateSnapshot.phase,'downloaded'));
+   check('no manifest, full package transfer or schedule write was required',()=>{
+    assert.equal(calls.filter(c=>c.cmd==='app.downloadUpdate').length,2);
+    assert.ok(calls.filter(c=>c.cmd==='app.downloadUpdate').every(c=>c.args.cacheOnly===true));
+    assert.ok(!calls.some(c=>c.cmd==='app.checkUpdate'||c.cmd==='app.updatePredownloadSchedule'));
+   });
+  }finally{service.stop();await flush();}
+ }else if(powerSequenceOnly){
+  observe(true,true);policy.enabled=false;
+  const service=startUpdatePredownload();
+  await flush();
+  try{
+   const {updateSnapshot}=await import('../src/bridge/updateManager');
+   const installer={operationId:'installer-observed',phase:'installing',stage:'install',installerActive:true};
+   const complete={...installer,phase:'completed',installerActive:false,repairAuthorized:false};
+   const publish=(observedNotificationSequence:number)=>{
+    power={...power,publicationRevision:power.publicationRevision+1,observedNotificationSequence};
+    receive({data:{event:'power.lifecycleChanged',data:power}});
+   };
+   Object.assign(updateSnapshot,installer);await flush();holdState=true;
+   await advance(60000);
+   check('original installer probe holds one native state read',()=>assert.equal(heldState.length,1));
+   publish(2);await flush();
+   heldState.shift()!(complete);await flush();
+   check('a new public notification sequence rejects the old installer completion',()=>assert.equal(updateSnapshot.installerActive,true));
+   await advance(0);
+   check('the retired observation makes exactly one immediate successor probe',()=>assert.equal(heldState.length,1));
+   heldState.shift()!(complete);await flush();
+   check('the current probe accepts the original operation completion',()=>assert.equal(updateSnapshot.phase,'completed'));
+   const reads=calls.filter(c=>c.cmd==='app.updateState').length;
+   publish(3);await flush();await advance(1000);
+   check('an idle notification sequence change schedules no read or timer',()=>{assert.equal(calls.filter(c=>c.cmd==='app.updateState').length,reads);assert.equal(timers.size,0);});
+  }finally{service.stop();await flush();}
+ }else if(!idleTimersOnly){
  const service=startUpdatePredownload();await flush();await advance(15000);
  check('real lifecycle starts paused until game detection is initialized',()=>{assert.equal(calls.filter(x=>x.cmd==='app.checkUpdate').length,0);assert.equal(updatePredownloadState.phase,'paused');});
  observe(true,true);await flush();await advance(1000);
@@ -64,9 +130,6 @@ try{
   const unknown=startUpdatePredownload();await flush();await advance(15000);
   check('unknown game admission has no repeated service or scheduler timer',()=>{assert.equal(timers.size,0);assert.equal(gate,false);});
   unknown.stop();await flush();
-  // The real shared policy source immediately notifies initialized subscribers.
-  // Model that boundary without replacing the service/scheduler/provider/IPC.
-  listeners.add=function(fn:()=>void){Set.prototype.add.call(this,fn);if(game.known)fn();return this;};
   game.known=true;game.game=null;policy.enabled=false;manifest={version:APP_VERSION,sha256:sha};
   const activities=calls.filter(c=>c.cmd==='app.updatePredownloadActivity').length;
   const service=startUpdatePredownload();await flush();await advance(15000);

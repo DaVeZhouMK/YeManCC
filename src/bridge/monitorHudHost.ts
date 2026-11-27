@@ -29,9 +29,10 @@ export function startMonitorHudHost() {
   // one-shot browser timeout is a fallback, never a healthy polling loop.
   const retryDelays=[1000,3000] as const,maxAttempts=3;
   let retryTimer:number|null=null,retryAt=0,retryLease:(()=>void)|null=null,retrySerial=0;
-  let settingsPending=false,settingsReading=false,settingsAttempts=0,restoreAttempts=0;
+  let settingsPending=false,settingsAttempts=0,restoreAttempts=0;
+  let settingsPowerRevision=0,settingsReadRevision:number|null=null;
   let requestRevision=0,lastApplyOk=false,powerHeld=true,powerGeneration=-1,committedPowerGeneration=-1;
-  let powerNotificationSequence:number|undefined,powerSuspendSerial:number|undefined;
+  let powerNotificationSequence:number|undefined,powerSuspendSerial:number|undefined,committedSuspendSerial:number|undefined;
   let availabilityScope=new AbortController();
   let readyTask:Promise<void>|null=null,preferenceDraft:MonitorOutputPreferences|null=null;
   let diagnosticRows=0,visibilityLease:(()=>void)|null=null;
@@ -106,24 +107,31 @@ export function startMonitorHudHost() {
     clock.setFrameTime(prefs.output==='ymcc'&&prefs.enabled&&prefs.ymcc.fields.frametimeGraph===true);
   }
   async function loadStartupPreferences(){
-    if(ended||settingsReading)return;
-    settingsReading=true;const preferenceAt=preferenceRevision,intentAt=latestIntent;
+    if(ended||settingsReadRevision!==null||(powerHeld&&powerGeneration!==-1))return;
+    const powerAt=settingsReadRevision=settingsPowerRevision;
+    const preferenceAt=preferenceRevision,intentAt=latestIntent;
     try{
-      ++settingsAttempts;const prefs=await readMonitorOutputPreferences();if(ended)return;
+      ++settingsAttempts;const prefs=await readMonitorOutputPreferences();
+      if(ended||powerAt!==settingsPowerRevision)return;
       // An already-published intent owns startup, even if its apply was waiting
       // for this host. A later ordinary save supplies the current startup bank.
       if(latestIntent===intentAt&&intentAt===0)activePreferences=preferenceAt===preferenceRevision?prefs:preferenceDraft??prefs;
       settingsPending=false;settingsAttempts=0;
     }catch{
-      if(ended)return;
+      if(ended||powerAt!==settingsPowerRevision)return;
       if(latestIntent===0&&preferenceRevision===preferenceAt){settingsPending=true;note('settings-read-failed');}
       else{if(latestIntent===0&&preferenceDraft)activePreferences=preferenceDraft;settingsPending=false;}
     }finally{
-      settingsReading=false;
+      settingsReadRevision=null;
       if(!ended){
         if(activePreferences){configureSource(activePreferences);noticeHost.ready(activePreferences);}
         const first=!ready;ready=true;if(first)relay.preferencesReady();note('preferences-loaded');
-        if(settingsPending)scheduleRetry();else invalidate();
+        // The repository may share or repair the document. Revalidate only
+        // after that read settles; only a new Ready boundary resets attempts.
+        if(settingsPending){
+          if(!powerHeld&&settingsAttempts===0)await loadStartupPreferences();
+          else scheduleRetry();
+        }else invalidate();
       }
     }
   }
@@ -221,24 +229,37 @@ export function startMonitorHudHost() {
     const scopeChanged=snapshot.observedNotificationSequence!==powerNotificationSequence||suspendChanged;
     if(ended||held===powerHeld&&!newGeneration&&!scopeChanged)return;
     const readyAfterBoundary=!held&&(powerHeld||newGeneration||suspendChanged);
-    const retainedReadyAdvance=!held&&!powerHeld&&!newGeneration&&scopeChanged;
+    const newCommittedGeneration=snapshot.generation!==committedPowerGeneration;
+    const newCommittedBoundary=!held&&(newCommittedGeneration||(snapshot.suspendSerial!==undefined&&
+      committedSuspendSerial!==undefined&&snapshot.suspendSerial>committedSuspendSerial));
+    const retainedReadyAdvance=!held&&!powerHeld&&!newCommittedBoundary&&scopeChanged;
+    if(held||(powerGeneration!==-1&&(newGeneration||scopeChanged)))++settingsPowerRevision;
     ++requestRevision;powerHeld=held;powerGeneration=snapshot.generation;
     powerNotificationSequence=snapshot.observedNotificationSequence;powerSuspendSerial=snapshot.suspendSerial;
     availabilityScope.abort();availabilityScope=new AbortController();
-    // A new public scope retires old requests without refunding the same
-    // generation's attempts or shortening its existing retry delay.
+    // Notification-only advances retire old requests but keep the current
+    // suspend boundary's attempts and retry delay.
     if(!retainedReadyAdvance)cancelRetry();
     syncVisibilityLease();
     desktop.reconcileVisibilityAfterPowerChange(readyAfterBoundary);
     if(readyAfterBoundary)clock.reconcileAfterWake();
     if(!held){
-      if(snapshot.generation!==committedPowerGeneration){committedPowerGeneration=snapshot.generation;restoreAttempts=0;}
-      if(settingsPending&&settingsAttempts<maxAttempts)void loadStartupPreferences();else invalidate();
+      committedPowerGeneration=snapshot.generation;
+      if(newCommittedGeneration||snapshot.suspendSerial!==undefined)committedSuspendSerial=snapshot.suspendSerial;
+      if(newCommittedBoundary){
+        restoreAttempts=0;
+        if(settingsPending)settingsAttempts=settingsReadRevision===settingsPowerRevision?1:0;
+      }
+      if(settingsPending){
+        if(!retainedReadyAdvance&&settingsAttempts<maxAttempts)void loadStartupPreferences();
+      }else invalidate();
     }
   },{observeNotificationSequence:true,observeSuspendSerial:true});
   return {
     async ready(){
-      if(ended)return;if(!readyTask)readyTask=loadStartupPreferences();await readyTask;
+      if(ended)return;
+      if(!readyTask){if(!activePreferences&&latestIntent===0)settingsPending=true;readyTask=loadStartupPreferences();}
+      await readyTask;
     },
     stop(){if(ended)return;ended=true;++requestRevision;availabilityScope.abort();cancelRetry();syncVisibilityLease();offPower();noticeHost.stop();ready=false;publishMonitorHudAvailability(false);offApplied();offApplying();offPreferences();offExtension();offSteamPresence();
       relay.dispose();void desktop.dispose().finally(()=>{offClock();clock.dispose();});offAdapter();},

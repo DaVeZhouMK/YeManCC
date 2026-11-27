@@ -6,11 +6,10 @@ using System.Reflection;
 
 using System.Text;
 using System.Web.Script.Serialization;
-using Microsoft.Win32;
 
 namespace YeMan.Setup {
  public sealed class RuntimeRestartRequiredException : IOException {public RuntimeRestartRequiredException(string message):base(message){}}
- public sealed class RuntimeObservation {public string name;public bool? ready;public string error;}
+ public sealed class RuntimeObservation {public string name;public bool? ready;public string error,badge;}
  public sealed class SystemObservation {public bool Allowed;public string Label,Error;public int Major,Minor,Build;public ushort Architecture;public byte ProductType;}
  public static class Runtimes {
   public static RuntimeObservation Observe(string name,Func<bool> probe) {
@@ -28,7 +27,7 @@ namespace YeMan.Setup {
    foreach(string path in Directory.GetDirectories(root)){Version version;if(Version.TryParse(Path.GetFileName(path),out version)&&(major<0||version.Major==major)&&(minor<0||version.Minor==minor)&&version>best)best=version;}
    return best;
   }
-  static bool Image(string path,ushort machine=0,Version minimum=null,bool managed=false) {
+  static bool Image(string path,ushort machine=0,bool managed=false) {
    if(!File.Exists(path))return false;
    try {
     using(var stream=File.OpenRead(path))using(var reader=new BinaryReader(stream)) {
@@ -37,7 +36,6 @@ namespace YeMan.Setup {
      ushort actual=reader.ReadUInt16();if(machine!=0?actual!=machine:actual!=0x8664&&actual!=0x14c)return false;
     }
     if(managed){var identity=AssemblyName.GetAssemblyName(path);if(!string.Equals(identity.Name,Path.GetFileNameWithoutExtension(path),StringComparison.Ordinal)||identity.ProcessorArchitecture!=ProcessorArchitecture.MSIL&&identity.ProcessorArchitecture!=ProcessorArchitecture.Amd64)return false;}
-    if(minimum!=null){var file=FileVersionInfo.GetVersionInfo(path);if(new Version(file.FileMajorPart,file.FileMinorPart,file.FileBuildPart,file.FilePrivatePart)<minimum)return false;}
     return true;
    }catch(BadImageFormatException){return false;}catch(IOException){return false;}catch(UnauthorizedAccessException){return false;}
   }
@@ -59,24 +57,23 @@ namespace YeMan.Setup {
    if(host<required||!Image(Path.Combine(hostRoot,host.ToString(),"hostfxr.dll"),0x8664)||!Image(Path.Combine(dotnet,"dotnet.exe"),0x8664))return missing;
    return version;
   }
-  static Version RegisteredVcVersion(string arch) {
-   Version best=new Version(0,0);
-   foreach(var view in new[]{RegistryView.Registry32,RegistryView.Registry64})using(var root=RegistryKey.OpenBaseKey(RegistryHive.LocalMachine,view))using(var key=root.OpenSubKey(@"SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\"+arch)) {
-    int installed;Version version;if(key!=null&&int.TryParse(Convert.ToString(key.GetValue("Installed",0)),out installed)&&installed==1&&Version.TryParse(Convert.ToString(key.GetValue("Version","")).TrimStart('v','V'),out version)&&version>best)best=version;
-   }return best;
-  }
   public static bool VC(string arch) {
+   return VC(arch,Environment.GetFolderPath(Environment.SpecialFolder.Windows));
+  }
+  internal static bool VC(string arch,string windows) {
    if(arch!="x64"&&arch!="x86")throw new IOException("不支持的 VC++ 架构");
-   string folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),arch=="x64"?"System32":"SysWOW64");ushort machine=(ushort)(arch=="x64"?0x8664:0x14c);Version minimum=new Version(14,51,36247,0);
-   foreach(string name in arch=="x64"?new[]{"msvcp140.dll","vcruntime140.dll","vcruntime140_1.dll"}:new[]{"msvcp140.dll","vcruntime140.dll"})if(!Image(Path.Combine(folder,name),machine,minimum))return false;
-   return true;
+   string folder=Path.Combine(windows,arch=="x64"?"System32":"SysWOW64");
+   // Presence check only; the two architectures must not satisfy each other.
+   return File.Exists(Path.Combine(folder,"msvcp140.dll"))&&File.Exists(Path.Combine(folder,"vcruntime140.dll"));
   }
   internal static string InstallArguments(Version installed,Version bundled,string component) {
    if(installed>bundled)throw new IOException(component+" 的较新版本 "+installed+" 文件不完整，请修复该版本后重试；包内 "+bundled+" 不会覆盖较新版本");
    return (installed==bundled?"/repair":"/install")+" /quiet /norestart";
   }
-  public static string Summary() {return (WebView()?"WebView2 已就绪":"WebView2 需联网补齐")+"\r\n.NET 10 桌面运行时 "+(DesktopVersion()>=new Version(10,0,12)?"已就绪":"将从包内补齐")+" · VC++ "+(VC("x64")&&VC("x86")?"已就绪":"将从包内补齐");}
-  public static bool Ready(){return WebView()&&VC("x64")&&VC("x86")&&DesktopVersion()>=new Version(10,0,12);}
+  public static readonly Version BundledDesktopVersion=new Version(BuildInfo.DesktopRuntimeVersion);
+  public static bool DesktopReady(){return DesktopVersion()>=BundledDesktopVersion;}
+  public static string Summary() {return (WebView()?"WebView2 已就绪":"WebView2 需联网补齐")+"\r\n.NET 10 桌面运行时 "+(DesktopReady()?"已就绪":"将从包内补齐")+" · VC++ "+(VC("x64")&&VC("x86")?"已就绪":"将从包内补齐");}
+  public static bool Ready(){return WebView()&&VC("x64")&&VC("x86")&&DesktopReady();}
   public static SystemObservation AssessSystem(int major,int minor,int build,ushort architecture,byte productType) {
    var result=new SystemObservation{Major=major,Minor=minor,Build=build,Architecture=architecture,ProductType=productType};
    result.Label="Windows "+(major==10&&build>=22000?"11":major==10?"10":major+"."+minor)+" · "+(architecture==9?"x64":architecture==12?"ARM64":architecture==0?"x86":"未知架构")+" · "+build;
@@ -109,15 +106,24 @@ namespace YeMan.Setup {
     if(code!=0&&code!=3010&&code!=1641)throw new IOException(Path.GetFileName(path)+" 安装返回 "+code);return code==3010||code==1641;
    }
   }
-  public static bool Prepare(string resource,string cache,Action<string> log,Action<bool> reboot) {
-   if(DesktopVersion()<new Version(10,0,12)){string arguments=InstallArguments(HighestVersion(Path.Combine(DotnetRoot,@"shared\Microsoft.WindowsDesktop.App"),10),new Version(10,0,12),".NET 10 桌面运行时")+" /log "+Native.Quote(Path.Combine(cache,"runtime-desktop.log"));log("正在补齐或修复 .NET 10 桌面运行时");reboot(Run(Path.Combine(resource,"desktop.exe"),arguments,()=>DesktopVersion()>=new Version(10,0,12),log));}else log(".NET 10 已符合要求，复用现有环境");
-   foreach(string arch in new[]{"x64","x86"}){if(!VC(arch)){string arguments=InstallArguments(RegisteredVcVersion(arch),new Version(14,51,36247,0),"VC++ "+arch)+" /log "+Native.Quote(Path.Combine(cache,"runtime-vc-"+arch+".log"));log("正在补齐或修复 VC++ "+arch);reboot(Run(Path.Combine(resource,"vc-"+arch+".exe"),arguments,()=>VC(arch),log));}else log("VC++ "+arch+" 已符合要求，跳过安装");}
-   if(!WebView()) {
-    log("WebView2 需要补齐，正在通过微软引导程序联网安装");string p=Path.Combine(resource,WebViewBootstrapper);
-    reboot(Run(p,"/silent /install",WebView,log));
-    if(!WebView())throw new IOException("WebView2 安装后仍未检测到。请重启后重新补齐");
-   }else log("WebView2 已安装，复用现有环境");
-   return WebView()&&VC("x64")&&VC("x86")&&DesktopVersion()>=new Version(10,0,12);
+  static void PrepareOne(string label,string installer,Func<string> arguments,Func<bool> ready,Action<string> log,Action<bool> reboot,Action<string> warn) {
+   log("检查 "+label);
+   try {
+    if(ready())return;
+    if(arguments==null){warn(label+" 未就绪，可联网后补装。");return;}
+    reboot(Run(installer,arguments(),ready));
+   }catch(Exception e){
+    if(!(e is IOException||e is UnauthorizedAccessException||e is System.ComponentModel.Win32Exception||e is System.Security.SecurityException||e is InvalidOperationException))throw;
+    bool restart=e is RuntimeRestartRequiredException;reboot(restart);
+    warn(label+(restart?" 重启后再检查。":" 未能补齐，可能影响运行。"));
+    log(label+" 未完成："+e.Message);
+   }
+  }
+  public static void Prepare(string resource,string cache,bool webOnline,Action<string> log,Action<bool> reboot,Action<string> warn) {
+   const string desktop=".NET 10 桌面运行时";
+   PrepareOne(desktop,Path.Combine(resource,"desktop.exe"),()=>InstallArguments(HighestVersion(Path.Combine(DotnetRoot,@"shared\Microsoft.WindowsDesktop.App"),10),BundledDesktopVersion,desktop)+" /log "+Native.Quote(Path.Combine(cache,"runtime-desktop.log")),DesktopReady,log,reboot,warn);
+   foreach(string arch in new[]{"x64","x86"})PrepareOne("VC++ "+arch,Path.Combine(resource,"vc-"+arch+".exe"),()=>"/install /quiet /norestart /log "+Native.Quote(Path.Combine(cache,"runtime-vc-"+arch+".log")),()=>VC(arch),log,reboot,warn);
+   PrepareOne("WebView2",Path.Combine(resource,WebViewBootstrapper),webOnline?(Func<string>)(()=>"/silent /install"):null,WebView,log,reboot,warn);
   }
  }
 }

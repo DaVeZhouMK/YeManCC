@@ -8,6 +8,7 @@
 #include <cctype>
 #include <iostream>
 #include <mutex>
+#include <functional>
 #include <sstream>
 #include <stdexcept>
 #include "json.hpp"
@@ -43,8 +44,9 @@ static void sgRecordFact(const char* kind, const json& data = json::object()) { 
 struct SgSleepTarget { bool markerOwned=false; unsigned long long powerGeneration=0; };
 struct SgResumeResult { int count=0; };
 static bool sgReadSleepTarget(SgSleepTarget&) { return false; }
-static bool sgResumeSleepTargetUnlocked(unsigned long long, bool) { throw std::runtime_error("unexpected memory target resume"); }
 enum class SgDirectoryResumePurpose { ExitCleanup };
+static SgResumeResult sgResumeSleepTargetUnlocked(unsigned long long, bool, unsigned long long,
+ const std::function<bool()>&, std::string*, SgDirectoryResumePurpose) { throw std::runtime_error("unexpected memory target resume"); }
 static SgResumeResult sgResumeTrackedAllUnlocked(SgDirectoryResumePurpose purpose) { if(purpose!=SgDirectoryResumePurpose::ExitCleanup) throw std::runtime_error("unexpected resume purpose"); businessFacts.push_back({{"kind","memory-empty-resume"}}); return {}; }
 static void sgCancelWakeGameRecoveryUnlocked(const char* reason) { ++cancelCalls; businessFacts.push_back({{"kind","memory-wake-cancel"},{"reason",reason}}); }
 // EXACT_CURRENT_FULL_DEFINITIONS

@@ -20,6 +20,8 @@ node tools/ymcc_sim/global/revalidation-plan/cli.mjs --receipt C:/evidence/full/
 
 认领仅用于避免重复安排，不证明任务或进程还活跃，不会从 `needsRerun` 删除该项。重复认领与未知测试拒绝。负责人仍要提交原运行回执，再通过正式审计核验。
 
+仅因登记准备条件不可用、而没有独立变更或原失败的已有回执，列入 `needsPrerequisites`，不加入 `needsRerun` 或批次，也不算可复用。保留缺少原因与认领方。补齐原条件后重新用原回执生成计划，只有精确身份仍一致才可引用；真实差异、失败和未执行项仍保留原重验义务。
+
 API：`createRevalidationPlan(receiptFiles, {repoRoot, adapters, profile, domains, tests, assignments, maxBatchSize})` 返回 `{plan,audit}`。`adapters` 使用主协调者当时的审查清单。`reusableAtAudit` 只表示该次审计有效；源码、候选、登记或证据改变后再次审计。最终候选范围完整性、实际 ABI、安装与物理设备验收沿用原门。
 
 ```powershell

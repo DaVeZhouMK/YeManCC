@@ -950,8 +950,10 @@ int wmain(int argc,wchar_t** argv) {
             const auto response=json::parse(bytes(data/L"account-receipt-worker.json"));
             std::string selectedAccount="1001";for(int i=1;i+1<argc;++i)if(std::wstring(argv[i])==L"--account")selectedAccount=toUtf8(argv[i+1]);
             const bool multi=response.contains("completionsByAccount");
+            const bool ownedSingleProjection=!multi&&selectedAccount=="1001"&&response.value("commitProjectionPort",false)&&
+                samePath(output,data/L"state"/L"steam-add-plan.json");
             check(normalizedPathKey(data).starts_with(normalizedPathKey(evidence)+L"\\")&&
-                ((!multi&&samePath(output,data/L"state"/L"steam-add-plan-1001.json"))||(multi&&(selectedAccount=="1001"||selectedAccount=="1002")&&response["completionsByAccount"].contains(selectedAccount)&&samePath(output,data/L"state"/toWide("steam-add-plan-"+selectedAccount+".json")))),"Account commit port escaped owned evidence");
+                (ownedSingleProjection||(!multi&&samePath(output,data/L"state"/L"steam-add-plan-1001.json"))||(multi&&(selectedAccount=="1001"||selectedAccount=="1002")&&response["completionsByAccount"].contains(selectedAccount)&&samePath(output,data/L"state"/toWide("steam-add-plan-"+selectedAccount+".json")))),"Account commit port escaped owned evidence");
             const auto result=multi?response["completionsByAccount"].at(selectedAccount):response.at("commitResult");
             text(data/(L"account-commit-call-"+std::to_wstring(GetCurrentProcessId())+L".json"),result.dump());
             const auto fault=response.value("faultAccount",std::string{})==selectedAccount?response.value("faultKind",std::string{}):std::string{};
@@ -976,6 +978,22 @@ int wmain(int argc,wchar_t** argv) {
             fs::path output;std::string account;json args=json::array();for(int i=1;i<argc;++i){args.push_back(toUtf8(argv[i]));if(i+1<argc&&std::wstring(argv[i])==L"--output")output=fs::absolute(argv[i+1]);if(i+1<argc&&std::wstring(argv[i])==L"--account")account=toUtf8(argv[i+1]);}
 
             const auto response=json::parse(bytes(data/L"account-receipt-worker.json"));
+            if(response.contains("refreshResultsByAccount")){
+                check(std::wstring_view(argv[1])==L"--commit-refresh-steam-artwork"&&
+                    (account=="1001"||account=="1002"||account=="1003")&&
+                    samePath(output,data/L"state"/toWide("steam-artwork-refresh-"+account+".json")),"Refresh port escaped owned account");
+                const auto callsPath=data/L"refresh-ordered-calls.json";
+                auto state=readJson(callsPath,json::object());auto calls=jsonArrayOr(state,"accounts");
+                calls.push_back(account);state["accounts"]=calls;writeJsonWithLocalBackup(callsPath,state,false);
+                const auto& result=response.at("refreshResultsByAccount").at(account);
+                if(jsonStringOr(response,"faultAccount")==account&&jsonStringOr(response,"faultKind")=="nonzero"){
+                    std::cerr<<"owned account repair rejected";return 37;
+                }
+                writeJsonWithLocalBackup(output,result,false);
+                if(jsonStringOr(response,"faultAccount")!=account)
+                    std::cout<<"STEAM_REFRESH_RESULT_RECEIPT: sha256-v1:"<<custom_steam_library::plan_receipt::addCompletionDigest(result)<<"\n";
+                return 0;
+            }
             if(response.value("deleteResumePort",false)){
                 const bool planOnly=std::wstring(argv[1])==L"--plan-delete-library-from-steam";
                 check((account=="1001"||account=="1002")&&samePath(output,data/L"state"/toWide("steam-delete-plan-"+account+".json"))&&std::wstring(argv[1])!=L"--commit-refresh-steam-artwork","Resume delete port escaped owned account");
@@ -1906,7 +1924,10 @@ int wmain(int argc,wchar_t** argv) {
         test("discovercfg-account-write-errors-retain-discovery-cause",[&](const fs::path& p){
             wchar_t variant[64]{};const auto size=GetEnvironmentVariableW(L"YMCC_HOST_SNAPSHOT_ACCOUNT_VARIANT",variant,64);
 
-            if(size&&size<64&&std::wstring(variant)==L"add-partial-completion"){
+            const bool blockedProjection=size&&size<64&&std::wstring_view(variant)==L"refresh-blocked-preimage";
+            const bool incompleteProjection=size&&size<64&&std::wstring_view(variant)==L"refresh-incomplete-projection";
+            const bool refreshProjection=blockedProjection||incompleteProjection||(size&&size<64&&std::wstring_view(variant)==L"refresh-projection");
+            if(refreshProjection||(size&&size<64&&std::wstring_view(variant)==L"refresh-partial-completion")){
                 const auto savedTarget=steamTargetSnapshot();const auto savedData=g_dataRoot,savedLab=g_labRoot,savedWorker=g_worker;
                 const auto allowed=manualEnrichmentFixtureWorker;wchar_t env[32768]{};const auto n=GetEnvironmentVariableW(L"YMCC_ACCOUNT_RECEIPT_FIXTURE_ROOT",env,32768);
                 struct Restore{json target;fs::path data,lab,worker;std::wstring allowed,env;~Restore(){
@@ -1915,6 +1936,173 @@ int wmain(int argc,wchar_t** argv) {
                 }} restore{savedTarget,savedData,savedLab,savedWorker,allowed,n&&n<32768?env:L""};
                 g_worker=selfExecutable();manualEnrichmentFixtureWorker=g_worker.wstring();initializeWorkerProcessJob();ownedAddPartialSteamFacts=true;
                 json rows=json::array();bool safe=true;size_t index=0;
+                const std::vector<const char*> labels=blockedProjection
+                    ? std::vector<const char*>{"blocked-portrait-with-hero", "blocked-only"}
+                    : incompleteProjection
+                    ? std::vector<const char*>{"unusable-cover-with-hero", "ambiguous-card-on-active-account"}
+                    : refreshProjection
+                    ? std::vector<const char*>{"plan-ready","plan-failed","plan-failed-partial","nothing-to-repair","hero-missing"}
+                    : std::vector<const char*>{"older-account-lost-receipt","older-account-write-failure","first-account-failure","all-confirmed"};
+                for(const auto* label:labels){
+                    const std::string kind=label;const auto f=snapshotCacheFixture(p/std::to_wstring(index++),1);
+                    SetEnvironmentVariableW(L"YMCC_ACCOUNT_RECEIPT_FIXTURE_ROOT",g_dataRoot.c_str());
+                    activeAccountFixture=true;activeAccountUser=1002;activeAccountRoot=(f.root/L"Steam").wstring();
+                    json accounts=json::array(),results=json::object();
+                    for(const auto* id:{"1001","1002","1003"}){
+                        auto result=f.cache;result["accountId"]=id;result["shortcutsVdf"]=toUtf8((fs::path(activeAccountRoot)/L"userdata"/toWide(id)/L"config"/L"shortcuts.vdf").wstring());
+                        accounts.push_back({{"accountId",id},{"shortcutsVdf",result["shortcutsVdf"]},{"steamRoot",toUtf8(activeAccountRoot)},{"readError",nullptr}});
+                        result["mode"]="steam-artwork-refresh";result["committed"]=true;result["artworkFilesActivated"]=std::string_view(id)=="1002"&&kind!="nothing-to-repair"&&kind!="blocked-only"?(blockedProjection?1:2):0;
+                        if(kind=="hero-missing"&&std::string_view(id)=="1002")
+                            result["items"][0]["unresolvedRequiredArtworkSlots"]=json::array({"wallpaper"});
+                        if(blockedProjection&&std::string_view(id)=="1002") {
+                            result["items"][0]["blockedArtworkSlots"]=json::array({"cover"});
+                            result["items"][0]["unresolvedRequiredArtworkSlots"]=json::array({"cover"});
+                            result["items"][0]["status"]=kind=="blocked-only"?"missing-artwork":"ready-to-refresh";
+                        }
+                        if(incompleteProjection) {
+                            const std::string_view account=id;
+                            const bool unusable=kind=="unusable-cover-with-hero";
+                            result["artworkFilesActivated"]=account==(unusable?"1002":"1001")?1:0;
+                            if(account=="1002") {
+                                result["items"][0]["status"]=unusable?"ready-to-refresh":"ambiguous-card";
+                                if(unusable) result["items"][0]["unusableArtworkSlots"]=json::array({"cover"});
+                            }
+                        }
+                        results[id]=result;
+                    }
+                    const json report={{"schemaVersion",1},{"steamStatus","ready"},{"accounts",accounts}};
+                    json port={{"stdout","STEAM_ACCOUNTS_STATUS: current\nACCOUNTS_WRITE_CONFIRMED: true\nSTEAM_ACCOUNTS_JSON: "+report.dump()+"\n"},
+                        {"refreshResultsByAccount",results}};
+                    if(refreshProjection){
+                        auto plan=f.cache;plan["accountId"]="1002";plan["shortcutsVdf"]=results["1002"]["shortcutsVdf"];
+                        port["planResult"]=std::move(plan);
+                        if(kind.starts_with("plan-failed")){port["planExit"]=23;port["skipPlanWrite"]=true;port["planReceiptText"]="owned post-repair read failed\n";}
+                        if(kind=="plan-failed-partial"){port["faultAccount"]="1001";port["faultKind"]="no-receipt";}
+                    }else if(kind!="all-confirmed"){
+                        port["faultAccount"]=kind=="first-account-failure"?"1002":kind=="older-account-write-failure"?"1003":"1001";
+                        port["faultKind"]=kind=="older-account-lost-receipt"?"no-receipt":"nonzero";
+                    }
+                    text(g_dataRoot/L"account-receipt-worker.json",port.dump());
+                    const json request={{"selectionMode","all-steam-accounts"},{"selectedGameDirectories",json::array({f.cache["items"][0]["gameDirectory"]})}};
+                    const auto all=g_dataRoot/L"state"/L"last-steam-artwork-refresh-all-accounts.json";
+                    json got;std::string error;try{got=refreshProjection?executeWorkspaceCommand("refreshSteamArtwork",request):refreshArtworkForAllSteamAccounts(request);}catch(const std::exception& e){error=e.what();}
+                    const auto calls=jsonArrayOr(readJson(g_dataRoot/L"refresh-ordered-calls.json",json::object()),"accounts");
+                    const auto onDisk=readJson(all,json::object());const auto confirmed=jsonArrayOr(got,"accountResults");
+                    const bool first=(kind=="first-account-failure"), allConfirmed=(kind=="all-confirmed");
+                    const bool lost=(kind=="older-account-lost-receipt");
+                    bool passed;
+                    if(refreshProjection){
+                        const bool stale=kind.starts_with("plan-failed"), partial=kind=="plan-failed-partial", zero=kind=="nothing-to-repair";
+                        const auto warning=jsonStringOr(got,"steamAccountWriteWarning");
+                        passed=error.empty()&&calls==(partial?json::array({"1002","1001"}):json::array({"1002","1001","1003"}))&&
+                            jsonBoolOr(got,"steamArtworkPartial")==partial&&jsonIntegerOr(got,"steamArtworkFilesRepaired",-1)==(zero||kind=="blocked-only"?0:(blockedProjection||incompleteProjection)?1:2)&&
+                            jsonBoolOr(got,"steamArtworkViewStale")==stale&&got.contains("steamPlanError")&&
+                            (stale?got["steamPlanError"].is_string()&&warning.find("勿重复修复")!=std::string::npos:got["steamPlanError"].is_null())&&
+                            (partial==(warning.find("另有 1 个账户")!=std::string::npos))&&
+                            (zero==(warning.find("没有可修复")!=std::string::npos))&&
+                            ((kind=="hero-missing"||blockedProjection||incompleteProjection)==jsonBoolOr(got,"steamArtworkCoverageIncomplete"))&&
+                            ((kind=="hero-missing")== (warning.find("未确认有可用详情背景")!=std::string::npos))&&
+                            (blockedProjection==(warning.find("旧素材暂时无法读取")!=std::string::npos))&&
+                            ((kind=="unusable-cover-with-hero")== (warning.find("素材缺失或无法读取")!=std::string::npos))&&
+                            ((kind=="ambiguous-card-on-active-account")== (warning.find("旧卡无法唯一匹配")!=std::string::npos))&&
+                            (!blockedProjection||warning.find("未确认有可用竖版封面")==std::string::npos)&&
+                            jsonArrayOr(onDisk,"accountResults").size()==(partial?1:3);
+                    }else if(first)passed=!error.empty()&&calls==json::array({"1002"})&&!fs::exists(all);
+                    else if(allConfirmed)passed=error.empty()&&calls==json::array({"1002","1001","1003"})&&
+                        confirmed==json::array({results["1002"],results["1001"],results["1003"]})&&onDisk==got;
+                    else passed=error.empty()&&calls==(lost?json::array({"1002","1001"}):json::array({"1002","1001","1003"}))&&
+                        confirmed==(lost?json::array({results["1002"]}):json::array({results["1002"],results["1001"]}))&&onDisk==got&&
+                        !jsonBoolOr(got,"committed",true)&&jsonBoolOr(got,"partialSteamAccounts",false)&&!jsonStringOr(got,"accountCommitWarning").empty()&&
+                        jsonStringOr(jsonObjectOr(got,"unconfirmedAccount"),"accountId")==jsonStringOr(port,"faultAccount")&&
+                        got.value("skippedAccountCount",-1)==(lost?1:0);
+                    rows.push_back({{"variant",kind},{"passed",passed},{"result",got},{"error",error},{"calls",calls}});safe=safe&&passed;
+                }
+                writeJsonWithLocalBackup(p/(refreshProjection?L"refresh-projection-observed.json":L"refresh-partial-completion-observed.json"),{{"rows",rows}},false);
+                check(safe,"Steam artwork repair lost verified account results or advanced after uncertainty");
+                check(admissionProcesses==0&&admissionNetwork==0&&admissionShell==0,"Partial refresh escaped owned ports");return;
+            }
+
+            const bool commitView=size&&size<64&&std::wstring_view(variant)==L"commit-view-projection";
+            if(commitView||(size&&size<64&&std::wstring(variant)==L"add-partial-completion")){
+                const auto savedTarget=steamTargetSnapshot();const auto savedData=g_dataRoot,savedLab=g_labRoot,savedWorker=g_worker;
+                const auto allowed=manualEnrichmentFixtureWorker;wchar_t env[32768]{};const auto n=GetEnvironmentVariableW(L"YMCC_ACCOUNT_RECEIPT_FIXTURE_ROOT",env,32768);
+                struct Restore{json target;fs::path data,lab,worker;std::wstring allowed,env;~Restore(){
+                    ownedAddPartialSteamFacts=false;activeAccountFixture=false;activeAccountRoot.clear();setSteamTarget(target);g_dataRoot=data;g_labRoot=lab;
+                    g_worker=worker;manualEnrichmentFixtureWorker=allowed;SetEnvironmentVariableW(L"YMCC_ACCOUNT_RECEIPT_FIXTURE_ROOT",env.empty()?nullptr:env.c_str());
+                }} restore{savedTarget,savedData,savedLab,savedWorker,allowed,n&&n<32768?env:L""};
+                g_worker=selfExecutable();manualEnrichmentFixtureWorker=g_worker.wstring();initializeWorkerProcessJob();ownedAddPartialSteamFacts=true;
+                json rows=json::array();bool safe=true;size_t index=0;
+                if(commitView){
+                    for(const std::string kind:{"single-account-fallback","all-accounts-confirmed","current-account-unconfirmed"}){
+                        const auto f=snapshotCacheFixture(p/std::to_wstring(index++),1);
+                        const bool single=kind=="single-account-fallback",uncertain=kind=="current-account-unconfirmed";
+                        const auto steam=f.root/L"Steam";
+                        SetEnvironmentVariableW(L"YMCC_ACCOUNT_RECEIPT_FIXTURE_ROOT",g_dataRoot.c_str());
+                        activeAccountFixture=true;activeAccountUser=uncertain?1002:1001;activeAccountRoot=steam.wstring();
+                        const auto libPath=g_dataRoot/L"state"/L"library-scan.json";
+                        auto library=readJson(libPath,json::object());
+                        const auto native=f.root/L"Native";
+                        library["games"].push_back({{"gameDirectory",toUtf8(native.wstring())},{"directoryName","Owned Native"},
+                            {"primaryExecutable",""},{"status","ready"},{"steamNative",true},{"nativeSteamAppId",620}});
+                        writeJsonWithLocalBackup(libPath,library,false);
+                        auto overrides=readJson(g_dataRoot/L"config"/L"manual-overrides.json",json::object());
+                        const auto exe=normalizedPathKey(fs::path(toWide(jsonStringOr(f.cache["items"][0],"primaryExecutable"))));
+                        overrides["items"][toUtf8(exe)]["steamId"]=999;
+                        writeJsonWithLocalBackup(g_dataRoot/L"config"/L"manual-overrides.json",overrides,false);
+                        json accounts=json::array(),plans=json::object(),receipts=json::object();
+                        for(const auto* account:{"1001","1002"}){
+                            auto plan=f.cache;
+                            const auto config=steam/L"userdata"/toWide(account)/L"config",grid=config/L"grid";
+                            const auto shorts=config/L"shortcuts.vdf";
+                            const auto cover=grid/L"4000000000p.png";
+                            text(cover,bytes(f.png));
+                            plan["accountId"]=account;plan["shortcutsVdf"]=toUtf8(shorts.wstring());
+                            accounts.push_back({{"accountId",account},{"steamRoot",toUtf8(steam.wstring())},
+                                {"shortcutsVdf",plan["shortcutsVdf"]},{"readError",nullptr}});
+                            auto& item=plan["items"][0];item.erase("artworkManifest");item["status"]="ready-to-add";
+                            item["shortAppId"]="4000000000";item["steamStoreAppId"]=618;
+                            item["gridDirectory"]=toUtf8(grid.wstring());
+                            plans[account]=plan;plan["mode"]="steam-library-add-commit";plan["committed"]=true;
+                            plan["items"][0]["status"]="added-to-steam";receipts[account]=plan;
+                        }
+                        const json accountReport={{"schemaVersion",1},{"steamStatus","ready"},{"accounts",accounts}};
+                        json port={{"stdout","STEAM_ACCOUNTS_STATUS: current\nACCOUNTS_WRITE_CONFIRMED: true\nSTEAM_ACCOUNTS_JSON: "+accountReport.dump()+"\n"}};
+                        json request={{"selectedGameDirectories",json::array({f.cache["items"][0]["gameDirectory"]})}};
+                        if(single){
+                            port["commitProjectionPort"]=true;port["commitResult"]=receipts["1001"];
+                            request.update({{"accountId","1001"},{"steamRoot",toUtf8(steam.wstring())}});
+                        }else{
+                            request["selectionMode"]="all-steam-accounts";
+                            port["plansByAccount"]=plans;port["completionsByAccount"]=receipts;
+                            if(uncertain){port["faultAccount"]="1002";port["faultKind"]="missing-receipt";}
+                        }
+                        text(g_dataRoot/L"account-receipt-worker.json",port.dump());
+                        json result;std::string error;
+                        try{result=executeWorkspaceCommand("commit",request);}catch(const std::exception& e){error=e.what();}
+                        const auto display=jsonObjectOr(result,"steamPlan");
+                        const auto shown=jsonArrayOr(display,"items");
+                        const auto joined=std::find_if(shown.begin(),shown.end(),[](const auto& row){return jsonStringOr(row,"status")=="added-to-steam";});
+                        const auto raw=jsonObjectOr(result,"steamAddCompletion");
+                        const auto rawRows=jsonArrayOr(raw,"accountResults");
+                        const bool accountSafe=uncertain?jsonStringOr(display,"accountId")!="1001"&&
+                            rawRows==json::array({receipts["1001"]})&&!jsonBoolOr(raw,"displayAccountCompletionConfirmed",true):
+                            jsonStringOr(display,"accountId")=="1001"&&
+                            (single?raw==receipts["1001"]:rawRows==json::array({receipts["1001"],receipts["1002"]}));
+                        const bool nativeVisible=std::any_of(shown.begin(),shown.end(),[](const auto& row){return jsonIntegerOr(row,"nativeSteamAppId",0)==620;});
+                        const auto artwork=joined!=shown.end()?jsonObjectOr(*joined,"artworkPreview"):json::object();
+                        const bool gridVisible=jsonStringOr(jsonObjectOr(artwork,"tall"),"provider")=="steam-grid-existing";
+                        const bool identitySafe=joined!=shown.end()&&jsonStringOr(*joined,"shortAppId")=="4000000000"&&
+                            jsonIntegerOr(*joined,"steamStoreAppId",0)!=618;
+                        const bool passed=error.empty()&&accountSafe&&nativeVisible&&(uncertain?!gridVisible:gridVisible&&identitySafe);
+                        rows.push_back({{"variant",kind},{"passed",passed},{"rawAccountSafe",accountSafe},{"nativeVisible",nativeVisible},
+                            {"gridVisible",gridVisible},{"identitySafe",identitySafe},{"error",error},{"result",result}});
+                        safe=safe&&passed;
+                    }
+                    writeJsonWithLocalBackup(p/L"commit-view-observed.json",{{"rows",rows}},false);
+                    check(safe,"Verified add completion did not preserve current display projection or raw account receipt");
+                    check(admissionProcesses==0&&admissionNetwork==0&&admissionShell==0,"Commit view escaped owned ports");
+                    return;
+                }
                 for(const auto* label:{"single-current-confirmed","batch-current-unconfirmed","readback-unconfirmed","first-commit-failed","preflight-failed","all-confirmed"}){
                     const std::string kind=label;const auto f=snapshotCacheFixture(p/std::to_wstring(index++),2);const auto steam=f.root/L"Steam";
                     SetEnvironmentVariableW(L"YMCC_ACCOUNT_RECEIPT_FIXTURE_ROOT",g_dataRoot.c_str());

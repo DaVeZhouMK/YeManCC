@@ -1,5 +1,6 @@
 import type { GamepadMotionPlaneTelemetryV1, GyroMotionConfigV1 } from './inputContracts';
 import type { MotionFrame } from './virtualReportAssembler';
+import { isSteamControlledGyro } from './gyroPresetModel';
 import {
   applyCustomSensitivity,
   createDefaultMotionSensitivityArray,
@@ -92,7 +93,7 @@ export function mapGyroSample(context: MotionContext, config: GyroMotionConfigV1
   // `enabled` is a persisted admission bit, not merely a UI hint. Keep
   // disabled motion at a zero contribution while preserving the physical
   // controller frame for the caller.
-  if (config.enabled === false) {
+  if (config.enabled === false || isSteamControlledGyro(config)) {
     if (gate) gate.accumulatedDisplacement = { x: 0, y: 0 };
     return { ok: true, frame: zeroFrame(context, sample) };
   }

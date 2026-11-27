@@ -546,7 +546,7 @@ class TrackerOwner final {
         ProcessGroupSeed seed;seed.appid=group.appid;seed.selectedPid=group.selectedPid;seed.fullGameId=group.fullGameId;
         seed.sourceRevision=group.sourceRevision;seed.consoleRevision=consoleRevision;
         for(const auto& member:group.members)seed.members.push_back({member.pid,member.path,member.at,member.sourceLine});
-        auto captured=processOwner().acquireGroup(selected,seed);
+        auto captured=processOwner().acquireGroup(selected,seed,native->second.pid);
         if(!tracker_detail::ownerCurrent(current)||!selected->processCurrent()){
             if(captured.lease)captured.lease->cancel();captured.lease.reset();
             captured.rejection=ProcessGroupRejection::ContextChanged;

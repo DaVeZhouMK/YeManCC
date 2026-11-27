@@ -9,6 +9,25 @@ import { app, fs, shell, steamInformation, proc, optiClient, losslessRuntime, ty
 import { syncOptiClientGame, flushOptiClientGames } from './optiscalerClientSync';
 import { parseLsProfiles, matchLsProfile, normalizeLsPath, lsExeKey, type LsProfile } from './losslessProfiles';
 import {readLosslessRuntime, invalidateLosslessRuntime, losslessRuntimeRevision, subscribeLosslessRuntime} from './losslessRuntimeState';
+import {getSharedPowerLifecycle, onSharedPowerLifecycle, sharedPowerWriteScope, type SharedPowerWriteScope} from './powerLifecycleState';
+
+type LosslessCheckpoint = (() => void) & { signal?: AbortSignal };
+
+// Only read-only waits can retire early. A submitted write or control keeps
+// the queue slot until the original call settles.
+async function waitForLosslessRead<T>(checkpoint: LosslessCheckpoint, read: () => Promise<T>): Promise<T> {
+  checkpoint();
+  const signal = checkpoint.signal;
+  if (!signal) return read();
+  let retire!: () => void;
+  const retired = new Promise<never>((_, reject) => { retire = () => reject(signal.reason); });
+  signal.addEventListener('abort', retire, { once: true });
+  try {
+    const value = await Promise.race([retired, Promise.resolve().then(() => { checkpoint(); return read(); })]);
+    checkpoint();
+    return value;
+  } finally { signal.removeEventListener('abort', retire); }
+}
 
 export const LS_PRIMARY = 'C:\\SOFT\\Lossless.Scaling\\LosslessScaling.exe';
 const LS_APPID = 993090;
@@ -232,16 +251,16 @@ async function readLsSettingsText(file: string): Promise<string> {
   const xml = await fs.readTextFile(file, lsSettingsMaxBytes, {bounded:true});
   validateLsSettingsText(xml); return xml;
 }
-async function writeLsSettingsTransaction(file: string, original: string, next: string, checkpoint: () => void): Promise<void> {
+async function writeLsSettingsTransaction(file: string, original: string, next: string, checkpoint: LosslessCheckpoint): Promise<void> {
   validateLsSettingsText(next);
   const backup = file + '.ymccbak';
-  if (await fs.exists(backup)) await readLsSettingsText(backup);
+  await waitForLosslessRead(checkpoint, async () => { if (await fs.exists(backup)) await readLsSettingsText(backup); });
   checkpoint(); await fs.writeTextFileAtomic(backup, original); checkpoint();
-  if (await readLsSettingsText(backup) !== original) throw new Error('小黄鸭配置备份回读不一致，未覆盖原文件');
+  if (await waitForLosslessRead(checkpoint, () => readLsSettingsText(backup)) !== original) throw new Error('小黄鸭配置备份回读不一致，未覆盖原文件');
   checkpoint();
-  if (await readLsSettingsText(file) !== original) throw new Error('小黄鸭配置已变化，未覆盖；请重试');
+  if (await waitForLosslessRead(checkpoint, () => readLsSettingsText(file)) !== original) throw new Error('小黄鸭配置已变化，未覆盖；请重试');
   checkpoint(); await fs.writeTextFileAtomic(file, next); checkpoint();
-  if (await readLsSettingsText(file) !== next) throw new Error('小黄鸭配置写入后的回读不一致，未宣称保存成功');
+  if (await waitForLosslessRead(checkpoint, () => readLsSettingsText(file)) !== next) throw new Error('小黄鸭配置写入后的回读不一致，未宣称保存成功');
 }
 
 // 用户提供的 LS 优质模板（LSFG3 / 1.5x / FIXED 等），精确缩进对齐 LS 原生 Settings.xml
@@ -297,39 +316,47 @@ function buildProfileXml(title: string, path: string): string {
 
 // 确保 Settings.xml 中存在该游戏的 Profile（字符串插入，保留原始格式/命名空间/缩进）
 let lsSettingsQueue: Promise<void> = Promise.resolve();
-export function ensureLsProfile(gamePath: string, checkpoint: () => void = () => {}): Promise<void> {
+export function ensureLsProfile(gamePath: string, checkpoint: LosslessCheckpoint = () => {}): Promise<void> {
   return withLsSettingsLock(async () => {
     checkpoint();
     // Validate first; a malformed document is never a reason to close LS.
-    const file = await getLsSettingsPath(); checkpoint();
-    if (!await fs.exists(file)) throw new Error('未找到 Lossless Scaling 配置文件，请先手动启动一次小黄鸭');
-    const before = await readLsSettingsText(file); checkpoint();
+    const before = await waitForLosslessRead(checkpoint, async () => {
+      const file = await getLsSettingsPath();
+      if (!await fs.exists(file)) throw new Error('未找到 Lossless Scaling 配置文件，请先手动启动一次小黄鸭');
+      return readLsSettingsText(file);
+    });
     parseLsProfiles(before);
-    const ls = await resolveLs(); checkpoint();
-    const running = ls.source !== 'none' ? await proc.findExact(ls.exe) : {found:false,pid:0}; checkpoint();
+    const ls = await waitForLosslessRead(checkpoint, resolveLs);
+    const running = ls.source !== 'none' ? await waitForLosslessRead(checkpoint, () => proc.findExact(ls.exe)) : {found:false,pid:0}; checkpoint();
     // LS retains Settings.xml in memory (and may hold the file). Close it
     // normally before taking the fresh document, so its later save cannot
     // discard an import or make atomic replacement fail.
+    let closedByUs = false;
     try {
-      if (running.found) await closeOriginalLossless(ls.exe, running.pid, checkpoint);
+      if (running.found) {
+        await closeOriginalLossless(ls.exe, running.pid, checkpoint);
+        closedByUs = true;
+      }
       await ensureLsProfileUnlocked(gamePath, 0, checkpoint);
     }
     finally {
-      if (running.found && !(await proc.findExact(ls.exe)).found) await launchOriginalLossless(ls.exe, () => {});
-      notifyLosslessScalingChanged();
+      try {
+        if (closedByUs && !checkpoint.signal?.aborted &&
+            !(await waitForLosslessRead(checkpoint, () => proc.findExact(ls.exe))).found) await launchOriginalLossless(ls.exe, checkpoint);
+      } finally { notifyLosslessScalingChanged(); }
     }
   });
 }
-async function ensureLsProfileUnlocked(gamePath: string, attempt = 0, checkpoint: () => void = () => {}): Promise<void> {
+async function ensureLsProfileUnlocked(gamePath: string, attempt = 0, checkpoint: LosslessCheckpoint = () => {}): Promise<void> {
   checkpoint();
-  const localAppData = await getLocalAppData();
+  const localAppData = await waitForLosslessRead(checkpoint, getLocalAppData);
   const settingsPath = joinPath(
     localAppData,
     'Lossless Scaling',
     'Settings.xml'
   );
 
-  if (!(await fs.exists(settingsPath))) {
+  if (!(await waitForLosslessRead(checkpoint, () => fs.exists(settingsPath)))) {
     throw new Error(
       '未找到 Lossless Scaling 配置文件（' +
         settingsPath +
@@ -337,7 +364,7 @@ async function ensureLsProfileUnlocked(gamePath: string, attempt = 0, checkpoint
     );
   }
 
-  const original = await readLsSettingsText(settingsPath); checkpoint();
+  const original = await waitForLosslessRead(checkpoint, () => readLsSettingsText(settingsPath)); checkpoint();
   parseLsProfiles(original);
 
   if (!original.includes('</Settings>') || !original.includes('</GameProfiles>'))
@@ -369,7 +396,7 @@ async function ensureLsProfileUnlocked(gamePath: string, attempt = 0, checkpoint
   if (xml === original) return;
   // LS itself may have saved while we prepared the profile. Retry from its
   // newer document instead of intentionally overwriting an observed change.
-  if (await readLsSettingsText(settingsPath) !== original) {
+  if (await waitForLosslessRead(checkpoint, () => readLsSettingsText(settingsPath)) !== original) {
     if (attempt >= 2) throw new Error('Lossless Scaling 配置正在变化，请稍后重试');
     return ensureLsProfileUnlocked(gamePath, attempt + 1, checkpoint);
   }
@@ -397,11 +424,12 @@ export async function hasLsProfile(gamePath: string): Promise<boolean> {
 
 export async function oneClickFrameGen(
   gamePath: string,
-  checkpoint: () => void = () => {},
+  checkpoint: LosslessCheckpoint = () => {},
   gameTarget?: LosslessReturnTarget,
 ): Promise<LsResolve> {
   const deadline=Date.now()+40000;
-  const check=()=>{checkpoint();if(Date.now()>=deadline)throw new Error('小黄鸭自愈总预算已到，未追加重试');};
+  const check:LosslessCheckpoint=()=>{checkpoint();if(Date.now()>=deadline)throw new Error('小黄鸭自愈总预算已到，未追加重试');};
+  check.signal=checkpoint.signal;
   let result=await oneClickFrameGenAttempt(gamePath,check,gameTarget,0);check();
   // Exactly one recovery retry, only after exit of the failed exact instance.
   if(result.activation?.ok!==true&&result.activation?.scalingTimedOut===true&&result.activation.failureResetClosed){
@@ -411,20 +439,22 @@ export async function oneClickFrameGen(
   return result;
 }
 async function oneClickFrameGenAttempt(
-  gamePath:string,checkpoint:()=>void,gameTarget:LosslessReturnTarget|undefined,retryAttempt:number,
+  gamePath:string,checkpoint:LosslessCheckpoint,gameTarget:LosslessReturnTarget|undefined,retryAttempt:number,
 ):Promise<LsResolve> {
   checkpoint();
   // 1. 已有 Profile 则跳过写入，直接最小化启动
   let already = false;
   try {
-    const file = await getLsSettingsPath();
-    already = await fs.exists(file) && matchLsProfile(parseLsProfiles(await readLsSettingsText(file)), gamePath)?.enabled === true;
-    checkpoint();
+    already = await waitForLosslessRead(checkpoint, async () => {
+      const file = await getLsSettingsPath();
+      return await fs.exists(file) && matchLsProfile(parseLsProfiles(await readLsSettingsText(file)), gamePath)?.enabled === true;
+    });
   } catch {
     /* 检测失败视为不存在，正常写入 */
   }
+  checkpoint();
   if (!already) {
-    const runtime=await readLosslessRuntime();checkpoint();
+    const runtime=await waitForLosslessRead(checkpoint, readLosslessRuntime);checkpoint();
     if(!runtime.known)throw new Error('小黄鸭运行实例未确认，未写配置');
     if(runtime.running){
       const off=['Scale','缩放','開始縮放','开始缩放'].includes(runtime.button);
@@ -434,7 +464,7 @@ async function oneClickFrameGenAttempt(
         losslessSession.processCreated===runtime.processCreated&&losslessSession.exe===normalizeLsPath(runtime.path);
       if(!runtime.readable&&!owned)throw new Error('小黄鸭状态不可读，未关闭其它游戏或写配置');
       if(runtime.readable&&!off){
-        const current=await getLosslessGameState(gamePath);checkpoint();
+        const current=await waitForLosslessRead(checkpoint, () => getLosslessGameState(gamePath));checkpoint();
         if(current.enabled!==true)throw new Error('小黄鸭正在处理另一 EXE 或倒计时未归属，未关闭其它游戏');
       }
     }
@@ -442,7 +472,7 @@ async function oneClickFrameGenAttempt(
   }
 
   // 2. 解析 LS 路径（主路径 → Steam 回退）
-  const ls = await resolveLs(); checkpoint();
+  const ls = await waitForLosslessRead(checkpoint, resolveLs); checkpoint();
   if (ls.source === 'none') {
     const settingsPath = joinPath(
       await getLocalAppData(),
@@ -462,7 +492,7 @@ async function oneClickFrameGenAttempt(
 
   // 3. Reuse or quietly start once. An unknown runtime never repeats launch.
   const launchReceipt=await launchOriginalLossless(ls.exe, checkpoint);
-  let found = await proc.findExact(ls.exe); checkpoint();
+  let found = await waitForLosslessRead(checkpoint, () => proc.findExact(ls.exe)); checkpoint();
   if (!found.found) {
     const waitScript = `$ErrorActionPreference='Stop'
 for($attempt=0;$attempt -lt 20;$attempt++){
@@ -471,19 +501,19 @@ for($attempt=0;$attempt -lt 20;$attempt++){
  Start-Sleep -Milliseconds 100
 }
 throw '小黄鸭进程尚未就绪，原开启动作不重发'`;
-    const ready = await shell.run('powershell', ['-NoProfile','-NonInteractive','-EncodedCommand',encodeLosslessScript(waitScript)], 3500); checkpoint();
+    const ready = await waitForLosslessRead(checkpoint, () => shell.run('powershell', ['-NoProfile','-NonInteractive','-EncodedCommand',encodeLosslessScript(waitScript)], 3500)); checkpoint();
     if (ready.exitCode !== 0) throw new Error('小黄鸭启动结果未确认，不自动重发');
-    found = await proc.findExact(ls.exe); checkpoint();
+    found = await waitForLosslessRead(checkpoint, () => proc.findExact(ls.exe)); checkpoint();
   }
   let activation:LosslessActivation|undefined;
   if (found.found) {
-    const identity = await proc.identity(found.pid); checkpoint();
+    const identity = await waitForLosslessRead(checkpoint, () => proc.identity(found.pid)); checkpoint();
     if (identity.valid && identity.processCreated && normalizeLsPath(identity.path || '') === normalizeLsPath(ls.exe)) {
       const session={gamePath:normalizeLsPath(gamePath),exe:normalizeLsPath(ls.exe),pid:found.pid,processCreated:identity.processCreated};
       const createdHere=launchReceipt.started&&launchReceipt.pid===found.pid&&launchReceipt.processCreated===identity.processCreated;
       // Reusing an unreadable external process does not transfer its ownership.
       if(createdHere)losslessSession=session;
-      const configured=parseLsProfiles(await fs.readTextFile(await getLsSettingsPath(),2*1024*1024)); checkpoint();
+      const configured=parseLsProfiles(await waitForLosslessRead(checkpoint, async () => fs.readTextFile(await getLsSettingsPath(),2*1024*1024))); checkpoint();
       const target=matchLsProfile(configured,gamePath);
       // The original profile remains the owner. Duplicate profile titles cannot
       // prove which active profile a native receipt belongs to, so do not toggle.
@@ -510,8 +540,8 @@ throw '小黄鸭进程尚未就绪，原开启动作不重发'`;
             }
           }
           if(activation.failureResetClosed&&losslessSession?.pid===session.pid&&losslessSession.processCreated===session.processCreated)losslessSession=null;
-          if(activation.ok&&activation.enabled===true)losslessSession=session;
           checkpoint();
+          if(activation.ok&&activation.enabled===true)losslessSession=session;
         }else activation={ok:false,enabled:null,invoked:false,pending:false,cancelled:false,reason:'game-identity-unavailable'};
       }
     }
@@ -826,8 +856,8 @@ async function launchOriginalLossless(executable: string, checkpoint: () => void
     (result.win32Error ? '（Windows ' + result.win32Error + '）' : '') + '；未自动重发');
   return result;
 }
-async function closeOriginalLossless(executable: string, pid: number, checkpoint: () => void): Promise<void> {
-  const identity = await proc.identity(pid); checkpoint();
+async function closeOriginalLossless(executable: string, pid: number, checkpoint: LosslessCheckpoint): Promise<void> {
+  const identity = await waitForLosslessRead(checkpoint, () => proc.identity(pid)); checkpoint();
   if (!identity.valid || !identity.processCreated || normalizeLsPath(identity.path || '') !== normalizeLsPath(executable)) throw new Error('小黄鸭进程身份已变化，未关闭');
   // One asynchronous WM_CLOSE to the exact WPF main window, including hidden
   // and taskbar-less windows. Never show/activate it or force-kill the process.
@@ -887,7 +917,7 @@ public static class YmccLosslessClose {
 
   const result = await shell.run('powershell', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encodeLosslessScript(script)], 5000); checkpoint();
   if (result.exitCode !== 0) throw new Error((result.stderr || result.stdout || '小黄鸭正常退出失败').trim().slice(0, 600));
-  const remaining = await proc.identity(pid); checkpoint();
+  const remaining = await waitForLosslessRead(checkpoint, () => proc.identity(pid)); checkpoint();
   if (remaining.valid && remaining.processCreated === identity.processCreated) throw new Error('小黄鸭进程未退出，未写配置');
 }
 // Explicit ownership of a command sent by this YMCC process, bound to the
@@ -949,25 +979,25 @@ async function readLosslessGameState(gamePath:string,waitForEnabled?:boolean):Pr
     return {...base,enabled:null,running:true,reason:'当前游戏配置已读取；实际插帧状态暂不可读'};
   }
 }
-export async function stopLosslessScaling(gamePath: string, checkpoint: () => void = () => {}): Promise<void> {
+export async function stopLosslessScaling(gamePath: string, checkpoint: LosslessCheckpoint = () => {}): Promise<void> {
   return changeLosslessGameProfile(gamePath, false, checkpoint);
 }
 // Removing a game means removing its LS Profile/EXE association only. No game
 // executable or LS program file is deleted. Stop the exact owned session before
 // taking fresh XML, so LS cannot save its old in-memory association back later.
-async function changeLosslessGameProfile(gamePath:string,remove:boolean,checkpoint:()=>void):Promise<void> {
+async function changeLosslessGameProfile(gamePath:string,remove:boolean,checkpoint:LosslessCheckpoint):Promise<void> {
   return withLsSettingsLock(async () => {
-    const state = await getLosslessGameState(gamePath); checkpoint();
+    const state = await waitForLosslessRead(checkpoint, () => getLosslessGameState(gamePath)); checkpoint();
     // Already absent means this game's toggle is off. Never close another
     // game's LS process just because it shares the same global settings file.
     const hasOwnedIntent = losslessSession?.gamePath === normalizeLsPath(gamePath);
     if(!remove&&state.profile?.enabled===false&&state.enabled!==true&&!hasOwnedIntent)return;
     if (!state.profile && (!state.running || !hasOwnedIntent)) return;
     if (state.running) {
-      const ls = await resolveLs(); checkpoint();
-      const found = await proc.findExact(ls.exe); checkpoint();
+      const ls = await waitForLosslessRead(checkpoint, resolveLs); checkpoint();
+      const found = await waitForLosslessRead(checkpoint, () => proc.findExact(ls.exe)); checkpoint();
       if (found.found) {
-        const identity = await proc.identity(found.pid); checkpoint();
+        const identity = await waitForLosslessRead(checkpoint, () => proc.identity(found.pid)); checkpoint();
         const owned = losslessSession && losslessSession.gamePath === normalizeLsPath(gamePath) &&
           losslessSession.exe === normalizeLsPath(ls.exe) && losslessSession.pid === found.pid &&
           losslessSession.processCreated === identity.processCreated;
@@ -979,7 +1009,7 @@ async function changeLosslessGameProfile(gamePath:string,remove:boolean,checkpoi
     }
     // LS has finished its last in-memory save. Take the fresh document and
     // disable AutoScale (preserving parameters), or remove only this EXE profile.
-    const original = await readLsSettingsText(state.settingsPath); checkpoint();
+    const original = await waitForLosslessRead(checkpoint, () => readLsSettingsText(state.settingsPath)); checkpoint();
     const profile = matchLsProfile(parseLsProfiles(original), gamePath);
     if (!profile) { losslessSession = null; notifyLosslessScalingChanged(); return; }
     const disabled=remove?'':profile.block.replace(/(<AutoScale>\s*)true(\s*<\/AutoScale>)/,'$1false$2');
@@ -996,7 +1026,10 @@ export interface LosslessToggleResult { confirmed:boolean; runtimeConfirmed:bool
 let losslessActionSerial=0;
 let losslessActionQueue:Promise<unknown>=Promise.resolve();
 type LosslessAction = 'on'|'off'|'remove';
-let losslessAction:{key:string;action:LosslessAction;task:Promise<LosslessToggleResult>}|null=null;
+let losslessAction:{key:string;action:LosslessAction;signal:AbortSignal;task:Promise<LosslessToggleResult>}|null=null;
+function matchesLosslessScope(expected:SharedPowerWriteScope,current:SharedPowerWriteScope|null):boolean{
+  return !!current&&expected.every((value,index)=>value===current[index]);
+}
 export function setLosslessScalingEnabled(gamePath:string,enabled:boolean,checkpoint:()=>void=()=>{},gameTarget?:LosslessReturnTarget):Promise<LosslessToggleResult>{
   return queueLosslessAction(gamePath,enabled?'on':'off',checkpoint,gameTarget,
     check=>applyLosslessScalingEnabled(gamePath,enabled,check,gameTarget));
@@ -1004,29 +1037,42 @@ export function setLosslessScalingEnabled(gamePath:string,enabled:boolean,checkp
 export function removeLosslessGameProfile(gamePath:string,checkpoint:()=>void=()=>{},gameTarget?:LosslessReturnTarget):Promise<LosslessToggleResult>{
   return queueLosslessAction(gamePath,'remove',checkpoint,gameTarget,async check=>{
     await changeLosslessGameProfile(gamePath,true,check);check();
-    const state=await getLosslessGameState(gamePath);check();
+    const state=await waitForLosslessRead(check,()=>getLosslessGameState(gamePath));check();
     const confirmed=state.profile===null;
     return {confirmed,runtimeConfirmed:!state.running?false:null,notice:confirmed?'已解除此游戏的小黄鸭 EXE 绑定':'解除此游戏结果待确认，未自动重发',pending:false};
   });
 }
 function queueLosslessAction(gamePath:string,action:LosslessAction,checkpoint:()=>void,gameTarget:LosslessReturnTarget|undefined,
-    run:(check:()=>void)=>Promise<LosslessToggleResult>):Promise<LosslessToggleResult>{
-  const key=JSON.stringify([normalizeLsPath(gamePath),action,gameTarget?.pid,gameTarget?.processCreated]);
-  if(losslessAction?.key===key)return losslessAction.task;
+    run:(check:LosslessCheckpoint)=>Promise<LosslessToggleResult>):Promise<LosslessToggleResult>{
+  const scope=sharedPowerWriteScope(getSharedPowerLifecycle());
+  if(!scope)return Promise.reject(new Error('系统电源状态尚未就绪，请在恢复后重试小黄鸭操作'));
+  const key=JSON.stringify([normalizeLsPath(gamePath),action,gameTarget?.pid,gameTarget?.processCreated,...scope]);
+  if(losslessAction?.key===key&&!losslessAction.signal.aborted)return losslessAction.task;
   const serial=++losslessActionSerial;
-  const check=()=>{if(serial!==losslessActionSerial)throw new Error('小黄鸭操作已被较新的开关请求替代');checkpoint();};
+  const owner=new AbortController();
+  const revoke=()=>owner.abort(new Error('电源状态已变化，小黄鸭操作已结束，请重试'));
+  const stop=onSharedPowerLifecycle(state=>{
+    if(!matchesLosslessScope(scope,sharedPowerWriteScope(state)))revoke();
+  },{observeSuspendSerial:true,observeNotificationSequence:true});
+  const check:LosslessCheckpoint=()=>{
+    if(!matchesLosslessScope(scope,sharedPowerWriteScope(getSharedPowerLifecycle())))revoke();
+    owner.signal.throwIfAborted();
+    if(serial!==losslessActionSerial)throw new Error('小黄鸭操作已被较新的开关请求替代');
+    checkpoint();
+  };
+  check.signal=owner.signal;
   const task=losslessActionQueue.catch(()=>{}).then(()=>{check();notifyLosslessScalingChanged();return run(check);});
-  losslessAction={key,action,task};losslessActionQueue=task;
-  void task.finally(()=>{if(losslessAction?.task===task){losslessAction=null;notifyLosslessScalingChanged();}}).catch(()=>{});
+  losslessAction={key,action,signal:owner.signal,task};losslessActionQueue=task;
+  void task.finally(()=>{stop();if(losslessAction?.task===task){losslessAction=null;notifyLosslessScalingChanged();}}).catch(()=>{});
   return task;
 }
 async function applyLosslessScalingEnabled(gamePath: string, enabled: boolean,
-    checkpoint: () => void = () => {}, gameTarget?: LosslessReturnTarget): Promise<LosslessToggleResult> {
+    checkpoint: LosslessCheckpoint = () => {}, gameTarget?: LosslessReturnTarget): Promise<LosslessToggleResult> {
   const launched = enabled ? await oneClickFrameGen(gamePath, checkpoint, gameTarget) : undefined;
   if (!enabled) await stopLosslessScaling(gamePath, checkpoint);
   // Normal operation observes once. Xbox fullscreen may hide UIAutomation;
   // Confirmation requires actual current-profile receipt; never infer FPS.
-  const state = await getLosslessGameState(gamePath); checkpoint();
+  const state = await waitForLosslessRead(checkpoint, () => getLosslessGameState(gamePath)); checkpoint();
   const confirmed = enabled ? launched?.activation?.ok===true&&launched.activation.enabled===true&&launched.activation.windowRefreshed===true&&state.running&&state.configuredEnabled&&state.enabled!==false : !state.configuredEnabled&&(!state.running||state.enabled===false||!state.profile);
   const runtimeConfirmed = enabled ? confirmed?true:!state.running||state.enabled===false?false:null : confirmed && !state.running ? false : null;
   // One explicit click may refresh the exact original game window once.

@@ -103,7 +103,7 @@ static bool repairPowerCurrent(const Ticket& t) noexcept {
 static std::string gate(const Ticket& t,const Leases& now,bool confirmed,bool tokenKnown) {
     auto refusal=repairGate(confirmed,g_aiFanMockSession.isolated,g_exitRequested.load(),
         g_powerLifecycle.load()==PowerLifecycle::Ready,hardwareWriteAllowed(),sgSleepRetryActive(),
-        g_sgWakeRecoveryPending.load(),tokenKnown,t.issued,GetTickCount64(),t.generation,currentPowerGeneration(),sameLeases(now,t));
+        sgWakeGameRecoveryHasWork(),tokenKnown,t.issued,GetTickCount64(),t.generation,currentPowerGeneration(),sameLeases(now,t));
     if(refusal.empty()&&!repairPowerCurrent(t))return "power-admission-revoked";
     return refusal;
 }
@@ -121,7 +121,7 @@ static json inspect(const json& a) {
         std::lock_guard<std::mutex> op(g_sgOpMtx);leases=readLeases();t.entries=leases.entries;
         state={{"leaseCount",leases.count},{"ownerPresent",leases.owner},{"markerLimit",leases.blocked},
             {"inSuspend",g_sgInSuspend.load()},{"gameSuspended",g_sgGameActuallySuspended.load()},
-            {"recoveryPending",g_sgWakeRecoveryPending.load()}};
+            {"recoveryPending",sgWakeGameRecoveryHasWork()}};
         input=inputSnapshot();t.inputEpoch=number(input,"epoch");t.inputAllowed=inputAllowed(input,t.generation,t.inputEpoch);
         t.stale=!leases.count&&!leases.owner&&(flag(state,"inSuspend")||flag(state,"gameSuspended"));
     }

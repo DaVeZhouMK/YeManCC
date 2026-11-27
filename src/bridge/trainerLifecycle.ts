@@ -1,4 +1,4 @@
-import { getSharedPowerLifecycle, onSharedPowerLifecycle, requestSharedPowerLifecycleReconcile, requestSharedPowerLifecycleReadyConfirmation, isSharedPowerLifecycleAdmitted } from './powerLifecycleState';
+import { beginSharedPowerLifecycleReadback, getSharedPowerLifecycle, onSharedPowerLifecycle, requestSharedPowerLifecycleReconcile, requestSharedPowerLifecycleReadyConfirmation, isSharedPowerLifecycleAdmitted } from './powerLifecycleState';
 import { powerLifecycle } from './api';
 
 // Shared cancellation for trainer preparation, launch and owned CE sessions.
@@ -11,14 +11,21 @@ let lastPowerSuspendSerial: number | undefined;
 let stopPower: (() => void) | null = null;
 const observers = new Set<(event: string) => void>();
 const readyObservers = new Map<(event: string) => void, () => void>();
+const pendingPowerReads = new Set<() => void>();
 const events = ['ipc:webview.recovering', 'pagehide'];
 let recoveryPending = false, recoveryRevision = 0;
 let stopConfirmation: (() => void) | null = null;
-function notifyInvalidated(type: string): void {
-  ++epoch;
+function notifyInvalidated(type: string): boolean {
+  const owner = ++epoch, revision = recoveryRevision;
+  for (const retire of pendingPowerReads) retire();
+  pendingPowerReads.clear();
+  const current = () => owner === epoch && revision === recoveryRevision;
   for (const observer of [...observers]) {
+    if (!current()) break;
+    if (!observers.has(observer)) continue;
     try { observer(type); } catch { /* One owner cannot block another's cancellation. */ }
   }
+  return current();
 }
 function invalidate(event: Event): void {
   const revision = ++recoveryRevision;
@@ -31,7 +38,11 @@ function invalidate(event: Event): void {
   });
 }
 function notifyReady(): void {
-  for (const ready of [...readyObservers.values()]) {
+  const owner = epoch, revision = recoveryRevision;
+  for (const [observer, ready] of [...readyObservers]) {
+    if (owner !== epoch || revision !== recoveryRevision ||
+        !isSharedPowerLifecycleAdmitted(getSharedPowerLifecycle())) break;
+    if (readyObservers.get(observer) !== ready) continue;
     try { ready(); } catch { /* One owner cannot block another's recovery. */ }
   }
 }
@@ -52,8 +63,9 @@ export function subscribeTrainerLifecycle(observer: (event: string) => void, onC
       lastPowerSuspendSerial = snapshot.suspendSerial;
       if (admitted) {
         if (recoveryPending) return; // Only this recovery's fresh read may resume trainer work.
-        // A newer observation retires old work without inventing an OS wake.
-        if ((changed || scopeChanged) && !initial) notifyInvalidated(changed ? 'ipc:power.resumed' : 'ipc:power.observationChanged');
+        // A nested native fact can retire this Ready while cancellation is fanning out.
+        if ((changed || scopeChanged) && !initial &&
+            !notifyInvalidated(changed ? 'ipc:power.resumed' : 'ipc:power.observationChanged')) return;
         notifyReady();
       } else if (changed || scopeChanged) notifyInvalidated(snapshot.phase === 'ready' ? 'ipc:power.pending' : 'ipc:power.' + snapshot.phase);
     }, { observeNotificationSequence: true, observeSuspendSerial: true });
@@ -83,13 +95,30 @@ export class TrainerPowerChangedError extends Error {
 export async function assertTrainerPowerReady(expectedEpoch: number, expectedGeneration?: number): Promise<number> {
   if (expectedEpoch !== epoch) throw new TrainerPowerChangedError('电源或页面状态已改变，本次修改器操作已取消，请重新打开');
   const scope = getSharedPowerLifecycle();
-  const state = await powerLifecycle.get(3000);
-  if (expectedEpoch !== epoch || !isSharedPowerLifecycleAdmitted(state) ||
-    !Number.isSafeInteger(state.generation) || state.generation <= 0 ||
+  const denied = () => new TrainerPowerChangedError('电源状态未就绪或已改变，本次修改器操作已取消，请恢复完成后重新打开');
+  // A direct read can validate a public scope, but only the shared confirmation can release WebView recovery.
+  if (recoveryPending || (scope && !isSharedPowerLifecycleAdmitted(scope))) throw denied();
+  // A retired read must not hold the worker queue. Keep its late result
+  // attached to the original IPC promise, without granting it a new scope.
+  let retire!: () => void;
+  const retired = new Promise<never>((_, reject) => { retire = () => reject(denied()); });
+  pendingPowerReads.add(retire);
+  const acceptReadback = beginSharedPowerLifecycleReadback({ confirmReady: true });
+  const read = async () => powerLifecycle.get(3000);
+  const state = await Promise.race([retired, read()]).finally(() => pendingPowerReads.delete(retire));
+  if (expectedEpoch !== epoch || recoveryPending) throw denied();
+  // A preflight can discover a missed boundary; current Ready still belongs to the shared read.
+  acceptReadback(state);
+  if (expectedEpoch !== epoch || recoveryPending || !isSharedPowerLifecycleAdmitted(state)) throw denied();
+  const current = getSharedPowerLifecycle();
+  const matches = (observed: typeof scope) => !observed || (
+    isSharedPowerLifecycleAdmitted(observed) && observed.generation === state.generation &&
+    (observed.observedNotificationSequence === undefined || state.observedNotificationSequence === observed.observedNotificationSequence) &&
+    (observed.suspendSerial === undefined || state.suspendSerial === observed.suspendSerial));
+  if (!Number.isSafeInteger(state.generation) || state.generation <= 0 ||
     expectedGeneration !== undefined && expectedGeneration !== state.generation ||
-    scope?.observedNotificationSequence !== undefined && state.observedNotificationSequence !== scope.observedNotificationSequence ||
-    scope?.suspendSerial !== undefined && state.suspendSerial !== scope.suspendSerial) {
-    throw new TrainerPowerChangedError('电源状态未就绪或已改变，本次修改器操作已取消，请恢复完成后重新打开');
+    (scope && !current) || !matches(scope) || !matches(current)) {
+    throw denied();
   }
   return state.generation;
 }

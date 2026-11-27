@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import {computed,onMounted,ref,watch,nextTick} from 'vue';
+import {computed,ref,watch,nextTick} from 'vue';
 import Slider from './Slider.vue';
-import {undervoltState as uv,undervoltAvailable,refreshUndervoltRuntime,setUndervoltEnabled,applyUndervoltOffset,cancelUndervoltTrial,resetUndervoltDefaults} from '@/bridge/undervoltRuntime';
+import {undervoltState as uv,undervoltAvailable,useUndervoltPresentation,setUndervoltEnabled,applyUndervoltOffset,cancelUndervoltTrial,resetUndervoltDefaults} from '@/bridge/undervoltRuntime';
 const draft=ref(0);
 watch(()=>uv.value,value=>draft.value=value,{immediate:true});
-onMounted(()=>{void refreshUndervoltRuntime();});
+useUndervoltPresentation();
 const capability=computed(()=>uv.capability);
 const unit=computed(()=>capability.value?.unit==='mv'?'mV':'CO 步进');
 const supported=computed(()=>undervoltAvailable.value);

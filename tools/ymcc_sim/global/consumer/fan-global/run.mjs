@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { execFile } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { classifyBundledInput, lockBundledNodeTools, verifyBundledToolScope } from '../../bundled-node-tool-authority.mjs';
 const ownRoot = path.dirname(fileURLToPath(import.meta.url));
 const defaultRepo = path.resolve(ownRoot, '../../../../..');
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
@@ -53,25 +54,24 @@ export function auditFanTestResult(row) {
   require(row.sourceStable === true, 'SOURCE_CHANGED_DURING_TEST', 'consumer');
   return findings;
 }
-async function existingOwners(repoRoot) {
-  const { getAdapters } = await import(pathToFileURL(path.join(repoRoot, 'tools/ymcc_sim/global/adapters.mjs')));
-  const { getExtraAdapters } = await import(pathToFileURL(path.join(repoRoot, 'tools/ymcc_sim/global/extra-adapters.mjs')));
-  const adapters = [...getAdapters(repoRoot), ...getExtraAdapters()];
-  return { reviewedBaseAndExtraCount: adapters.length, registrations: FAN_GLOBAL_TESTS.map(test => ({ source: test.source,
-    directExecutionOwners: adapters.filter(adapter => adapter.path === test.source || adapter.args?.includes(test.source)).map(adapter => adapter.id) })),
-    note: 'Evidence-input references and package scripts alone do not count as execution;this wrapper is not its own duplicate.' };
-}
-async function runCase({ repoRoot, caseRoot, test, timeoutMs, compiler }) {
+async function runCase({ repoRoot, caseRoot, test, timeoutMs, compiler, authority }) {
   fs.mkdirSync(caseRoot, { recursive: false });
   const scratch = path.join(caseRoot, 'tmp'); fs.mkdirSync(scratch);
   const row = { id: test.id, source: test.source, scope: test.scope, status: 'FAIL', diagnostics: [], bundleInputs: [],
-    staticSourceInputs: [], sourceStable: false, originalReport: null, runtimeBoundary: null, boundary: { ...boundary } };
+    staticSourceInputs: [], runtimeReadInputs: [], sourceStable: false, originalReport: null, runtimeBoundary: null, boundary: { ...boundary } };
   const compiledInputs = new Map();
   const controlFiles = ['package.json', 'tsconfig.json', 'tools/ymcc_sim/global/consumer/fan-global/run.mjs', 'tools/ymcc_sim/global/consumer/fan-global/runtime-guard.mjs'];
   let controls = [];
   try {
     controls = controlFiles.map(relative => ({ path: relative, sha256: hashFile(path.join(repoRoot, relative)) }));
     row.staticSourceInputs = (test.id === 'lifecycle' ? staticReadInputs : []).map(relative => ({ path: relative, sha256: hashFile(path.join(repoRoot, relative)), execution: 'original static assertion/read input;not runtime execution' }));
+    // The original lifecycle AST assertions load TypeScript via createRequire.
+    if (test.id === 'lifecycle') {
+      const absolutePath = fs.realpathSync(createRequire(path.join(repoRoot, 'package.json')).resolve('typescript'));
+      const {role,row:bound}=classifyBundledInput(repoRoot,absolutePath,fs.readFileSync(absolutePath),authority);
+      if (role !== 'tool') throw Error('FAN_TYPESCRIPT_PARSER_NOT_BOUND');
+      row.runtimeReadInputs.push({ ...bound, absolutePath, role });
+    }
     if (!fs.existsSync(path.join(repoRoot, test.source))) { row.diagnostics.push(failure('ORIGINAL_TEST_SOURCE_MISSING', 'input', test.id)); return row; }
     const bundleFile = path.join(caseRoot, 'test.mjs');
     const loader = file => /\.[cm]?tsx?$/.test(file) ? 'ts' : /\.jsx$/.test(file) ? 'jsx' : /\.json$/.test(file) ? 'json' : 'js';
@@ -80,7 +80,8 @@ async function runCase({ repoRoot, caseRoot, test, timeoutMs, compiler }) {
       plugins: [{ name: 'capture-exact-compiler-inputs-without-rewriting', setup(api) {
         api.onLoad({ filter: /\.(?:[cm]?[jt]sx?|json)$/ }, args => {
           const absolute = fs.realpathSync(args.path); const bytes = fs.readFileSync(absolute);
-          compiledInputs.set(absolute, { absolutePath: absolute, path: path.relative(repoRoot, absolute).replaceAll('\\', '/'), sha256: digest(bytes), hashCapturedFromActualLoad: true });
+          const {role,row:bound}=classifyBundledInput(repoRoot, args.path, bytes, authority);
+          compiledInputs.set(absolute, { absolutePath: absolute, path: bound.path, sha256: bound.sha256, role, hashCapturedFromActualLoad: true });
           return { contents: bytes, loader: loader(args.path), resolveDir: path.dirname(args.path) };
         });
       } }],
@@ -97,7 +98,7 @@ async function runCase({ repoRoot, caseRoot, test, timeoutMs, compiler }) {
     const guardReceipt = path.join(caseRoot, 'runtime-boundary.json');
     const configuration = path.join(caseRoot, 'boundary-configuration.json');
     fs.writeFileSync(configuration, JSON.stringify({ caseRoot, receiptPath: guardReceipt,
-      readFiles: [...row.bundleInputs.map(item => item.absolutePath), ...row.staticSourceInputs.map(item => path.join(repoRoot, item.path)), ...controls.map(item => path.join(repoRoot, item.path))] }));
+      readFiles: [...row.bundleInputs.map(item => item.absolutePath), ...row.runtimeReadInputs.map(item => item.absolutePath), ...row.staticSourceInputs.map(item => path.join(repoRoot, item.path)), ...controls.map(item => path.join(repoRoot, item.path))] }));
     const environment = { ...process.env, TEMP: scratch, TMP: scratch, TMPDIR: scratch, LOCALAPPDATA: path.join(caseRoot, 'local-appdata'),
       APPDATA: path.join(caseRoot, 'appdata'), YMCC_FAN_GLOBAL_BOUNDARY: configuration };
     delete environment.NODE_OPTIONS; delete environment.NODE_PATH;
@@ -115,10 +116,12 @@ async function runCase({ repoRoot, caseRoot, test, timeoutMs, compiler }) {
       signal: processResult.error?.signal ?? null, naturalExit: !processResult.error, nodeVersion: process.version };
     row.originalReport = readOriginalReport(processResult.stdout);
     if (fs.existsSync(guardReceipt)) row.runtimeBoundary = JSON.parse(fs.readFileSync(guardReceipt, 'utf8'));
-    row.sourceStable = [...row.bundleInputs, ...row.staticSourceInputs, ...controls].every(item => {
+    row.sourceStable = [...row.bundleInputs, ...row.runtimeReadInputs, ...row.staticSourceInputs, ...controls].every(item => {
       try { return hashFile(item.absolutePath ?? path.join(repoRoot, item.path)) === item.sha256; } catch { return false; }
     });
     row.diagnostics.push(...auditFanTestResult(row));
+    if (row.runtimeReadInputs.some(item => !row.runtimeBoundary?.sourceReads?.includes(path.resolve(item.absolutePath).toLowerCase())))
+      row.diagnostics.push(failure('RUNTIME_TOOL_READ_NOT_OBSERVED','consumer',test.id));
     row.status = row.diagnostics.length ? 'FAIL' : 'PASS';
   } catch (error) {
     row.diagnostics.push(failure(error.message === 'BUNDLE_INPUT_HASH_NOT_CAPTURED' ? error.message : error.code === 'ENOENT' ? 'REQUIRED_SOURCE_OR_DEPENDENCY_MISSING' : 'BUNDLE_OR_EXECUTION_FAILED', 'consumer', test.id));
@@ -129,7 +132,7 @@ async function runCase({ repoRoot, caseRoot, test, timeoutMs, compiler }) {
   }
   return row;
 }
-export async function runFanGlobalRegressions({ repoRoot = defaultRepo, evidenceRoot, output, timeoutMs = 60000, tests = FAN_GLOBAL_TESTS.map(test => test.id) } = {}) {
+export async function runFanGlobalRegressions({ repoRoot = defaultRepo, evidenceRoot, output, timeoutMs = 60000, tests = FAN_GLOBAL_TESTS.map(test => test.id), expectedToolGraph } = {}) {
   const root = fs.realpathSync(repoRoot);
   if (typeof evidenceRoot !== 'string' || !path.isAbsolute(evidenceRoot)) throw new Error('EXPLICIT_ABSOLUTE_FRESH_EVIDENCE_ROOT_REQUIRED');
   const evidence = path.resolve(evidenceRoot);
@@ -142,28 +145,34 @@ export async function runFanGlobalRegressions({ repoRoot = defaultRepo, evidence
     remainingGaps: ['physical-hardware-not-exercised', 'rendered-FanView-not-exercised', 'HC-or-Host-Main-not-loaded'] };
   let compiler;
   try {
-    result.duplicationReview = await existingOwners(root);
+    const authority=lockBundledNodeTools(root);
+    if(expectedToolGraph!==undefined && authority.graphSha256!==expectedToolGraph)throw Error('FAN_REGISTERED_TOOL_GRAPH_CHANGED');
+    result.toolGraph={sha256:authority.graphSha256,registeredSha256:expectedToolGraph??null,artifactCount:authority.tools.length,verifiedAfter:false};
+    result.duplicationReview = { status: 'NOT_RUN_SEPARATE_REGISTRATION_AUDIT', executionEvidence: false };
     compiler = createRequire(path.join(root, 'package.json'))('esbuild');
+    if(compiler.version!==authority.compilerVersion)throw Error('FAN_COMPILER_VERSION_CHANGED');
     for (const test of FAN_GLOBAL_TESTS.filter(test => tests.includes(test.id)))
-      result.cases.push(await runCase({ repoRoot: root, caseRoot: path.join(evidence, test.id), test, timeoutMs, compiler }));
+      result.cases.push(await runCase({ repoRoot: root, caseRoot: path.join(evidence, test.id), test, timeoutMs, compiler, authority }));
+    verifyBundledToolScope(authority,root);
+    result.toolGraph.verifiedAfter=true;
     result.status = result.cases.length === tests.length && result.cases.every(row => row.status === 'PASS') ? 'PASS' : 'FAIL';
-  } catch (error) { result.failure = error.code === 'MODULE_NOT_FOUND' ? 'EXISTING_COMPILER_DEPENDENCY_MISSING' : 'FAN_GLOBAL_ENTRY_FAILED'; }
+  } catch (error) { result.failure = error.code === 'MODULE_NOT_FOUND' ? 'EXISTING_COMPILER_DEPENDENCY_MISSING' : String(error.message).startsWith('FAN_') || String(error.message).startsWith('BUNDLED_NODE_') ? error.message : 'FAN_GLOBAL_ENTRY_FAILED'; }
   finally { compiler?.stop(); }
   const sourceMap = new Map();
   result.diagnostics = [];
-  for (const row of result.cases) for (const input of [...row.bundleInputs, ...row.staticSourceInputs, ...(row.controlSourceInputs ?? [])]) {
+  for (const row of result.cases) for (const input of [...row.bundleInputs, ...row.runtimeReadInputs, ...row.staticSourceInputs, ...(row.controlSourceInputs ?? [])]) {
     const absolute = input.absolutePath ?? path.join(root, input.path);
     const key = path.relative(root, absolute).replaceAll('\\', '/');
     const prior = sourceMap.get(key);
     if (prior && prior.sha256 !== input.sha256) result.diagnostics.push(failure('MIXED_SOURCE_VERSIONS_ACROSS_TESTS', 'consumer', row.id));
-    sourceMap.set(key, { path: key, sha256: input.sha256, absolute });
+    sourceMap.set(key, { path: key, sha256: input.sha256, absolute, role: input.role });
   }
   for (const row of sourceMap.values()) {
     try { if (hashFile(row.absolute) !== row.sha256) result.diagnostics.push(failure('SOURCE_CHANGED_BEFORE_FINAL_RESULT', 'consumer')); }
     catch { result.diagnostics.push(failure('SOURCE_MISSING_BEFORE_FINAL_RESULT', 'consumer')); }
   }
-  result.sourceHashes = [...sourceMap.values()].filter(row => row.path !== '..' && !row.path.startsWith('../') && !path.isAbsolute(row.path)).map(({ path, sha256 }) => ({ path, sha256 }));
-  result.externalDependencyInputs = [...sourceMap.values()].filter(row => row.path === '..' || row.path.startsWith('../')).map(({ absolute, sha256 }) => ({ path: absolute, sha256 }));
+  result.sourceHashes = [...sourceMap.values()].filter(row => row.role !== 'tool').map(({ path, sha256 }) => ({ path, sha256 }));
+  result.externalDependencyInputs = [...sourceMap.values()].filter(row => row.role === 'tool').map(({ absolute, sha256 }) => ({ path: absolute, sha256 }));
   if (result.diagnostics.length) result.status = 'FAIL';
   result.summary = { requested: tests.length, executed: result.cases.filter(row => row.process).length, passed: result.cases.filter(row => row.status === 'PASS').length,
     failed: tests.length - result.cases.filter(row => row.status === 'PASS').length, originalChecks: result.cases.reduce((count, row) => count + (row.originalReport?.checks ?? 0), 0),
@@ -176,7 +185,7 @@ export async function runFanGlobalRegressions({ repoRoot = defaultRepo, evidence
 }
 export async function main(args = process.argv.slice(2)) {
   const options = {};
-  const keys = new Map([['--repo-root', 'repoRoot'], ['--evidence-root', 'evidenceRoot'], ['--output', 'output'], ['--test', 'tests']]);
+  const keys = new Map([['--repo-root', 'repoRoot'], ['--evidence-root', 'evidenceRoot'], ['--output', 'output'], ['--test', 'tests'], ['--expected-tool-graph', 'expectedToolGraph']]);
   for (let i = 0; i < args.length; i++) {
     if (!keys.has(args[i]) || typeof args[i + 1] !== 'string') throw new Error('EXPLICIT_REVIEWED_ARGUMENTS_REQUIRED');
     const key = keys.get(args[i]); options[key] = key === 'tests' ? args[++i].split(',') : args[++i];

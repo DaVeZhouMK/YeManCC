@@ -412,6 +412,43 @@ static void busyCommandRecoveryCase(){
     need(resumed.timeout(retryAt)>0,"successful slot selection clears the due retry");
  }
  std::cout<<"BUSY_PAGE_SLOT_OK retryMs="<<interval<<" realSteamActions=0\n";
+ // B10: reopening Big Picture did not recover the backend. QAM can still
+ // request a read, but a temporary gap must not restore the fast timer.
+ Window exhausted;qualifyRebuild(exhausted);
+ unsigned spent=0;
+ const auto claim=[&](Action step){
+    need(step==(spent?Action::reopen:Action::rebuild),"exhaustion control page order");
+    ++spent;return true;
+ };
+ need(exhausted.observe(at,missing,claim)==Action::rebuild,"exhaustion control reaches rebuild");
+ exhausted.failed(Action::rebuild,at+1);
+ need(exhausted.observe(at+1,missing,claim)==Action::reopen,"exhaustion control reaches reopen");
+ exhausted.started(Action::reopen,at+2);
+ const auto quietAt=at+2+Window::settleGraceMs;
+ const auto idle=Window::intervalMs;
+ need(exhausted.observe(quietAt,missing,claim)==Action::exhausted&&spent==2,"unhealthy after reopen uses the existing observation ceiling");
+ auto gap=pending;gap.required=false;gap.identity.clear();
+ gap.pausedReadDue=quietAt+1000;
+ need(exhausted.observe(quietAt+1,gap,claim)==Action::none,"identity gap is read only");
+ const auto firstDue=exhausted.timeout(quietAt+1);
+ std::cout<<"EXHAUSTED_OBSERVATION_BACKSTOP firstRemainingMs="<<firstDue<<" expectedMs="<<idle-1<<std::endl;
+ need(firstDue==idle-1,"paused evidence must not speed up exhausted recovery");
+ for(unsigned i=2;i<1002;++i){
+    const auto& observed=i%2?gap:missing;
+    need(exhausted.observe(quietAt+i,observed,claim)==Action::none&&exhausted.timeout(quietAt+i)==idle-i,
+        "duplicate QAM/publication hints cannot move exhausted backstop or reserve a command");
+ }
+ need(exhausted.observe(quietAt+idle,gap,claim)==Action::none&&exhausted.timeout(quietAt+idle)==idle&&spent==2,
+      "persistent paused proof gets one normal backstop, no page retry");
+ auto newScope=pending;newScope.identity=successor.identity;newScope.pausedReadDue=0;
+ auto superseded=exhausted;
+ need(superseded.observe(quietAt+idle+1,newScope,claim)==Action::none&&superseded.timeout(quietAt+idle+1)==interval&&
+      superseded.observe(quietAt+idle+2,successor,claim)==Action::reconnect,"a new scope is not throttled by an old exhausted episode");
+ auto stopped=exhausted;
+ need(stopped.observe(quietAt+idle+1,{false,false,"off"},claim)==Action::stopped,"OFF terminates the exhausted episode");
+ need(exhausted.observe(quietAt+idle+1,healthy,claim)==Action::recovered&&spent==2,
+      "known healthy delivery still settles immediately without waiting for the backstop");
+ std::cout<<"EXHAUSTED_OBSERVATION_BACKSTOP_PASS storm=1000 pageClaims="<<spent<<" realSteamActions=0\n";
 }
 static void pageAttemptCooldownCase(){
  using namespace ymcc::deckyrepair;
@@ -546,6 +583,34 @@ if(argc==1){
  row=waiting;row["reason"]="decky-repair-wait";traceCheck("different-reason",row,false);
  context.phase=Phase::Started;traceCheck("nonterminal",waiting,false);
  context.phase=Phase::Finished;context.operation=Operation::Binding;traceCheck("different-operation",waiting,false);
+ const Json returnFacts={{"replyReceived",false},{"ownerReturned",false},{"readerReturned",true},
+  {"ownerHandles",3u},{"ownerPendingIo",1u},{"jobActiveProcesses",1u},{"ownerStopError",1460u}};
+ const Json teardown={{"ok",false},{"mutated",false},{"uncertain",true},
+  {"reason","decky-cleanup-worker-cleanup-incomplete"},{"cleanupWorkerReturn",returnFacts}};
+ const auto returnCheck=[&](const char* label,const Json& detail,bool want){
+  const auto logged=ymcc::deckydiag::failureRecord(detail,context);
+  const bool pass=logged.value("cleanupWorkerReturn",Json{})==(want?returnFacts:Json{})&&
+   logged.value("reason",Json{})==detail.at("reason");
+  if(!pass)++failed;
+  std::cout<<"RECOVERY_CLEANUP_RETURN_DIAGNOSTIC "<<label<<" "<<(pass?"PASS":"FAIL")<<"\n";
+ };
+ context.operation=Operation::ReopenBigPicture;
+ returnCheck("big-picture-parent-return",teardown,true);
+ context.operation=Operation::RebuildDocument;
+ row=teardown;row["cleanupWorkerReturn"]["rawPipeData"]="must-not-log";
+ returnCheck("rebuild-parent-allowlist",row,true);
+ row=teardown;row["cleanupWorkerReturn"]["readerReturned"]=1;
+ returnCheck("malformed-boolean",row,false);
+ row=teardown;row["cleanupWorkerReturn"]["ownerPendingIo"]=0x100000000ull;
+ returnCheck("out-of-range-counter",row,false);
+ row=teardown;row["cleanupWorkerReturn"].erase("ownerStopError");
+ returnCheck("no-partial-return-facts",row,false);
+ row=teardown;row["reason"]="decky-cleanup-worker-read-failed";
+ returnCheck("non-return-failure",row,false);
+ row=teardown;row["uncertain"]=false;
+ returnCheck("not-uncertain",row,false);
+ context.phase=Phase::Started;returnCheck("nonterminal-return",teardown,false);
+ context.phase=Phase::Finished;context.operation=Operation::Binding;returnCheck("unrelated-operation",teardown,false);
  if(failed)return 1;
 }
 // Same original cases; the extra memory argument never selects the default parent.
@@ -670,7 +735,61 @@ if(argc==2&&std::string(argv[1])=="--health-observation-timer"){try{return healt
  healthObservationFaultCase();
  std::cout<<"Decky outage recovery PASS: capped retry, coalescing, cancel, health reset; no real process IO\n";
 }
+static void rebuildModePreflightCases(){
+ using namespace ymcc::deckyrepair;
+ using Phase=ymcc::steamfailure::Phase;
+ using Operation=ymcc::steamfailure::Operation;
+ const Json good={{"ok",true},{"mode","bigpicture"}};
+ const Json busy={{"ok",false},{"mutated",false},{"reason","live-busy"}};
+ for(unsigned variant=0;variant<12;++variant){
+   auto first=busy,second=good;
+   ULONGLONG now=100;
+   DWORD firstCost=171, extraWait=0;
+   bool live=true, waitReturns=true, retireDuringWait=false, retireBeforeWait=false, retried=false;
+   switch(variant){
+   case 0:first=good;break;
+   case 2:second=busy;break;
+   case 3:first["reason"]="steam-account-changed";break;
+   case 4:first["reason"]="steam-session-changed";break;
+   case 5:first["uncertain"]=true;break;
+   case 6:first["mutated"]=true;break;
+   case 7:firstCost=3500;break;
+   case 8:retireDuringWait=true;break;
+   case 9:retireBeforeWait=true;break;
+   case 10:extraWait=3500;break;
+   case 11:waitReturns=false;break;
+   }
+   unsigned waits=0;std::vector<DWORD> limits;
+   const auto result=readModeBeforeRebuild([&](DWORD limit){
+       limits.push_back(limit);
+       if(limits.size()==1){now+=firstCost;live=!retireBeforeWait;return first;}
+       return second;
+   },[&]{return live;},[&]{return now;},[&](DWORD wait){
+       ++waits;assert(wait==500);now+=wait+extraWait;live=!retireDuringWait;return waitReturns;
+   },retried);
+   const bool retry=variant==1||variant==2;
+   const bool waited=retry||variant==8||variant==10||variant==11;
+   assert(waits==static_cast<unsigned>(waited)&&retried==retry);
+   assert(limits== (retry?std::vector<DWORD>{4000,3329}:std::vector<DWORD>{4000}));
+   assert(result==(retry?second:first));
+ }
+ auto trace=Json{{"ok",false},{"mutated",false},{"uncertain",false},{"reason","decky-cleanup-account-unconfirmed"},
+   {"sessionCheck","child-mode-read"},{"cleanupModeReadReason","live-busy"},{"cleanupModeReadRetried",true}};
+ ymcc::steamfailure::FailureContext context;context.phase=Phase::Finished;context.operation=Operation::RebuildDocument;
+ auto logged=ymcc::deckydiag::failureRecord(trace,context);
+ assert(logged.at("cleanupModeReadRetried")==true&&logged.at("cleanupModeReadReason")=="live-busy");
+ context.operation=Operation::ReopenBigPicture;
+ assert(!ymcc::deckydiag::failureRecord(trace,context).contains("cleanupModeReadRetried"));
+ context.operation=Operation::RebuildDocument;context.phase=Phase::Started;
+ logged=ymcc::deckydiag::failureRecord(trace,context);
+ assert(!logged.contains("cleanupModeReadRetried")&&!logged.contains("cleanupModeReadReason"));
+ context.phase=Phase::Finished;trace["cleanupModeReadReason"]="private-payload";trace["cleanupModeReadRetried"]=1;
+ logged=ymcc::deckydiag::failureRecord(trace,context);
+ assert(!logged.contains("cleanupModeReadRetried")&&!logged.contains("cleanupModeReadReason"));
+ std::cout<<"REBUILD_MODE_PREFLIGHT_PASS cases=12 logControls=4 realSteamActions=0\n";
+}
 static void bigPictureRecoveryCases(){
+ rebuildModePreflightCases();
  using Json=nlohmann::json;ymcc::steamsession::Session session;session.pid=77;session.created=88;session.root=L"C:\\inert";session.account=99;
  const auto ready=[](Json& mode){
    for(const auto* name:{"deckyBackendConnected","deckyHooksInstalled","deckyClientConnected","deckyClientVerified"})mode[name]=true;
@@ -693,6 +812,12 @@ static void bigPictureRecoveryCases(){
      if(skip||(scenario=="ready-after-close"&&!sent.empty())||scenario=="missing-verified-reply"||scenario=="invalid-verified-reply")ready(result);
      if(scenario=="missing-verified-reply")result.erase("deckyClientVerified");
      if(scenario=="invalid-verified-reply")result["deckyClientVerified"]=1;
+     result["modeEpoch"]=sent.size()==2&&scenario=="ready-after-close"?"private-document-2:0":
+       sent.size()==2&&scenario=="invalid-verified-reply"?"private-document-1:02":sent.empty()?"private-document-1:1":"private-document-1:2";
+     if(sent.size()==2){
+       result["deckyBackendState"]=scenario=="success"?"socket-closed":scenario=="ready-after-close"?"socket-open":"private-socket";
+       result["deckyFrontendLoaded"]=scenario=="invalid-verified-reply"?Json(1):Json(scenario=="success");
+     }
      return result;
    };
    const auto result=ymcc::deckyrepair::bigpicture::run(session,[&]{return current;},read,[&](const std::string& mode){
@@ -716,8 +841,34 @@ static void bigPictureRecoveryCases(){
    assert(logged.at("launchStage")==result.at("launchStage"));
    assert(logged.at("launchMode")==result.at("launchMode"));
    assert(logged.at("elapsedMs")==tick-100&&!logged.contains("token"));
+   ymcc::steamfailure::FailureContext traceContext;
+   traceContext.phase=ymcc::steamfailure::Phase::Finished;
+   traceContext.operation=ymcc::steamfailure::Operation::ReopenBigPicture;
+   auto trace=ymcc::deckydiag::failureRecord(detail,traceContext);
+   const auto document=scenario=="ready-after-close"?Json("changed"):
+     scenario=="success"||scenario=="missing-verified-reply"?Json("retained"):Json();
+   const auto backend=scenario=="success"?Json("socket-closed"):scenario=="ready-after-close"?Json("socket-open"):Json();
+   const auto loaded=success&&scenario!="invalid-verified-reply"?Json(scenario=="success"):Json();
+   for(const auto* row:{&detail,&trace}){
+     assert(row->value("reopenDocument",Json())==document&&row->value("reopenBackendState",Json())==backend&&
+            row->value("reopenFrontendLoaded",Json())==loaded);
+     assert(row->dump().find("private-")==std::string::npos);
+   }
+   if(scenario=="success"){
+     const auto noReadback=[](const Json& row){return !row.contains("reopenDocument")&&!row.contains("reopenBackendState")&&!row.contains("reopenFrontendLoaded");};
+     auto invalid=detail;invalid["reopenDocument"]="private-document";invalid["reopenBackendState"]="private-socket";invalid["reopenFrontendLoaded"]="false";
+     assert(noReadback(ymcc::deckydiag::failureRecord(invalid,traceContext)));
+     invalid=detail;invalid["uncertain"]=true;
+     assert(noReadback(ymcc::deckydiag::failureRecord(invalid,traceContext)));
+     traceContext.phase=ymcc::steamfailure::Phase::Started;
+     assert(noReadback(ymcc::deckydiag::failureRecord(detail,traceContext)));
+     traceContext.phase=ymcc::steamfailure::Phase::Finished;
+     traceContext.operation=ymcc::steamfailure::Operation::RebuildDocument;
+     assert(noReadback(ymcc::deckydiag::failureRecord(detail,traceContext)));
+   }
    if(skip)assert(logged.at("reason")=="decky-bigpicture-already-healthy"&&!result.value("uncertain",true));
-   std::cout<<"BigPicture diagnostic "<<scenario<<" "<<expectedStage<<" "<<expectedMode<<" reads="<<reads<<"\n";
+   std::cout<<"BigPicture diagnostic "<<scenario<<" "<<expectedStage<<" "<<expectedMode<<" reads="<<reads
+            <<" document="<<document.dump()<<" backend="<<backend.dump()<<" frontendLoaded="<<loaded.dump()<<"\n";
    if(skip||scenario=="identity-missing"){assert(sent.empty()&&!result.value("mutated",true));}
    else {assert(result.value("mutated",false));assert(result.value("uncertain",false)==!success);}
    if(success)assert(sent==std::vector<std::string>({"desktop","bigpicture"}));

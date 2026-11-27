@@ -100,7 +100,47 @@ static void checkOneXVendorCatalogConsumers(){
  for(const char* cls:{"HandheldCompanion.Devices.OneXPlayerX1","HandheldCompanion.Devices.OneXPlayerX2","HandheldCompanion.Devices.OneXPlayer3","HandheldCompanion.Devices.OneXPlayerApexFuture"})check(ymcc::capabilities::oem::onex::physicalKeyIds(cls,"orangelp")[0].empty(),"Apex physical identity grouping does not alter other OneX models");
 
 }
-int main(){try{
- checkAliasConsumers();checkFreshGatesAndReturn();checkOneXVendorCatalogConsumers();
+static void checkWinMax3(){
+ namespace gpd=ymcc::capabilities::oem::gpd;
+ check(gpd::winMax3.consumerClass==max3FanIdentity[0]&&gpd::winMax3.deviceId==max3FanIdentity[1]&&
+       gpd::matchesWinMax3(max3FanIdentity[2],max3FanIdentity[3]),"MAX3 buttons and fan share the same chassis identity");
+ check(!gpd::matchesWinMax3("NOT GPD","G1638-01")&&!gpd::matchesWinMax3("GPD","G1638-01-PRO")&&
+       !gpd::matchesWinMax3("GPD","Ryzen AI Max+ 388"),"MAX3 does not admit vendor substrings, board variants or CPU-only input");
+ check(gpd::winMax3HidMatches(0x2f24,0x137,0xff00,1,11)&&!gpd::winMax3HidMatches(0x2f24,0x135,0xff00,1,64)&&
+       !gpd::winMax3HidMatches(0x2f24,0x137,0xff00,2,64)&&!gpd::winMax3HidMatches(0x2f24,0x137,0xff00,1,10),
+       "MAX3 only admits the qualified V2 input collection");
+ for(const auto& [manufacturer,board,cpu]:std::array<std::array<const char*,3>,3>{{
+       {"NOT GPD","G1638-01","AMD Ryzen AI Max+ 388"},
+       {"GPD","G1638-01-PRO","AMD Ryzen AI Max+ 388"},
+       {"GPD","","AMD Ryzen AI Max+ 388"}}}){
+  MachineIdentity other{manufacturer,board,"G1638-01",cpu};ymccResolveFamily(other);
+  check(!other.resolved&&other.deviceClass.empty(),"actual resolver rejects invalid chassis even with a matching CPU and system product");
+ }
+ MachineIdentity actual{ymccDmiNormalize("gpd"),ymccDmiNormalize("g1638-01"),"G1638-01","AMD Ryzen AI Max+ 388"};
+ ymccResolveFamily(actual);g_machineIdentity=actual;
+ check(actual.resolved&&actual.family==YmccFamily::Gpd&&actual.deviceClass==max3FanIdentity[0]&&
+       actual.gyroMatrixId.empty()&&actual.accelMatrixId.empty(),"actual resolver admits the MAX3 DMI without borrowing Win5 motion");
+ oemBackMappingRefreshGate(false,"disabled",false);
+ check(g_oemBackProfileId.load()==int(OemChordProfileId::GpdWin5)&&g_oemHooksWanted.load(),
+       "MAX3 consumes the Win5 chord profile without virtual back mapping");
+ const auto max3=actualOemKeysGet();
+ check(max3.at("deviceId")==max3FanIdentity[1]&&max3.at("keys").size()==5,"MAX3 query exposes the shared model and five trial keys");
+ g_gpdBackIfaceReady.store(true);
+ const auto& profile=oemChordProfileFor(g_oemBackProfileId.load());
+ for(int i=0;i<profile.count;++i){
+  g_oemKbDown=profile.rules[i].keys;oemBackHookRecompute();
+  check(g_oemKeyMask.load()==profile.rules[i].bit&&gamepadOemPressedKeys(profile.rules[i].bit).size()==1,
+        "MAX3 shortcut consumers preserve independent keyboard and rear keys");
+  clearKeys();check(g_oemKeyMask.load()==0,"MAX3 keyboard release clears the semantic key");
+ }
+ setIdentity(YmccFamily::Gpd,"HandheldCompanion.Devices.GPDWin5");
+ const auto win5=actualOemKeysGet().at("keys");
+ check(win5.size()==6&&win5.back().at("keyId")==ymcc::win5Menu::keyId,"Win5 keeps its own Menu route");
+ for(size_t i=0;i<max3.at("keys").size();++i)
+  check(win5[i]==max3.at("keys")[i],"MAX3 reuses the five Win5 trial key declarations unchanged");
+}
+int main(int argc,char** argv){try{
+ if(argc==2&&std::string_view(argv[1])=="--winmax3-only")checkWinMax3();
+ else{checkAliasConsumers();checkFreshGatesAndReturn();checkOneXVendorCatalogConsumers();checkWinMax3();}
  std::cout<<json{{"status","PASS"},{"checks",checks},{"selections",selections},{"pressReleaseCycles",pressCycles},{"completeProductionGate",true},{"productionQuery",true},{"productionHook",true},{"hardwareIo",false}}.dump()<<'\n';return 0;
 }catch(const std::exception& error){std::cout<<json{{"status","FAIL"},{"checks",checks},{"error",error.what()}}.dump()<<'\n';return 1;}}

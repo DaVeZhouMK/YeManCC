@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
-import {createPerformanceMemoryFixture,models,frames} from './fixtures/performance_memory_fixture.mjs';
+import {createPerformanceMemoryFixture,evaluatePerformanceModule,models,frames} from './fixtures/performance_memory_fixture.mjs';
 import {compileSettingsConsumer,createSettingsFixture} from './fixtures/settings_baseline.mjs';
 const require=createRequire(path.resolve('package.json'));
 const ts=require('typescript');
@@ -137,15 +137,30 @@ await check('dedicatedOnly在无专属时不接管全局',async()=>{
 });
 await check('启动/唤醒/方案变动/ACDC和常驻游戏恢复均显式限制自动模式',async()=>{
   const counts={};
+  const assertAutomaticOnly=(node,ast,file)=>{
+    const options=node.arguments[1];assert(options&&ts.isObjectLiteralExpression(options),file+' missing passive options');
+    assert(options.properties.some(p=>ts.isPropertyAssignment(p)&&p.name.getText(ast)==='automaticOnly'&&p.initializer.kind===ts.SyntaxKind.TrueKeyword),file+' missing automaticOnly:true');
+  };
+  let wakeCalls=0;
   for(const file of ['src/App.vue','src/bridge/gamePolicyRuntime.ts']){
     const text=source(file),body=file.endsWith('.vue')?/<script\b[^>]*>([\s\S]*?)<\/script>/.exec(text)[1]:text;
     const ast=ts.createSourceFile(file+'.ts',body,ts.ScriptTarget.Latest,true);let count=0;
-    function visit(node){if(ts.isCallExpression(node)&&node.expression.getText(ast)==='restorePerformanceScheduleIfConfigured'){
-      count++;const options=node.arguments[1];assert(options&&ts.isObjectLiteralExpression(options),file+' missing passive options');
-      assert(options.properties.some(p=>ts.isPropertyAssignment(p)&&p.name.getText(ast)==='automaticOnly'&&p.initializer.kind===ts.SyntaxKind.TrueKeyword),file+' missing automaticOnly:true');
+    function visit(node){if(ts.isCallExpression(node)){
+      const callee=node.expression.getText(ast);
+      if(callee==='restorePerformanceScheduleIfConfigured'){count++;assertAutomaticOnly(node,ast,file);}
+      if(callee==='restorePerformanceScheduleAfterWake'){assert.equal(file,'src/App.vue');count++;wakeCalls++;}
     }ts.forEachChild(node,visit)}visit(ast);counts[file]=count;
   }
   assert.equal(counts['src/App.vue'],4);assert.equal(counts['src/bridge/gamePolicyRuntime.ts'],1);
+  assert.equal(wakeCalls,1);
+  const file='src/bridge/performanceSchedule.ts',ast=ts.createSourceFile(file,source(file),ts.ScriptTarget.Latest,true);
+  const wake=ast.statements.filter(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='restorePerformanceScheduleAfterWake'&&node.body);
+  assert.equal(wake.length,1);
+  let forwarded=0;
+  function visitWake(node){if(ts.isCallExpression(node)&&node.expression.getText(ast)==='restorePerformanceScheduleUnsafe'){
+    forwarded++;assertAutomaticOnly(node,ast,file);
+  }ts.forEachChild(node,visitWake)}visitWake(wake[0].body);
+  assert.equal(forwarded,1);
 });
 for(const dedicated of [false,true])await check((dedicated?'dedicated':'global')+' resident restores remembered manual policy once per side event; idle retries do not replay',async()=>{
  const f=fixture({dedicated}),flush=async()=>{for(let i=0;i<1500;i++)await Promise.resolve();for(const run of f.tasks.values())await run();for(let i=0;i<1500;i++)await Promise.resolve()};
@@ -156,6 +171,344 @@ for(const dedicated of [false,true])await check((dedicated?'dedicated':'global')
 });
 
 const flushRuntime=async f=>{for(let i=0;i<1000;i++)await Promise.resolve();for(let attempt=0;attempt<2;attempt++){for(const run of f.tasks.values())await run();for(let i=0;i<200;i++)await Promise.resolve()}};
+for(const boundary of ['new ready','new denial','stale receipt','same scope','retired read'])await check('resident direct power receipt: '+boundary,async()=>{
+ const turn=()=>new Promise(resolve=>setImmediate(resolve));
+ const initial={known:true,phase:'ready',hardwareWritesAllowed:true,notificationPending:false,generation:2,suspendSerial:2,observedNotificationSequence:2,publicationRevision:2};
+ const next={...initial,generation:3,suspendSerial:3,observedNotificationSequence:3,publicationRevision:3};
+ let busy=true,started=0,release,scheduled;
+ const reply=new Promise(resolve=>{release=resolve});
+ const configScopes=[];
+ const ports={lifecycle:initial,isQuickActionBusy:()=>busy,
+  beforeRuntimePowerRead:()=>{if(++started===1&&boundary==='retired read')return reply},
+  beforeCustomRead:()=>configScopes.push(f.readRuntimePower()?.observedNotificationSequence)};
+ const f=fixture({dedicated:true,ports});const stopObservation=f.observePower();
+ try{
+  f.runtime.startGamePolicyRuntime();await turn();
+  assert.equal(f.readRuntimePower()?.observedNotificationSequence,2);
+  const run=f.tasks.get('game-policy-runtime-retry');assert.equal(typeof run,'function');
+  ports.lifecycle=boundary==='new denial'?{...next,phase:'resuming',hardwareWritesAllowed:false}:
+   boundary==='stale receipt'?{...initial,observedNotificationSequence:1}:boundary==='same scope'?{...initial,publicationRevision:3}:next;
+  busy=false;
+  scheduled=run();await turn();
+  if(boundary==='retired read'){
+   assert.equal(started,1);f.runtime.stopGamePolicyRuntime();release();await scheduled;await turn();
+   assert.equal(f.readRuntimePower()?.observedNotificationSequence,2,'a retired task cannot contribute a receipt');
+   assert.deepEqual(configScopes,[]);assert.deepEqual(f.hardwareWrites,[]);
+  }else{
+   await scheduled;
+   if(boundary==='new denial'||boundary==='stale receipt'){
+    const expected=boundary==='new denial'?3:2;
+    assert.deepEqual({sequence:f.readRuntimePower()?.observedNotificationSequence,configScopes,writes:f.hardwareWrites},
+     {sequence:expected,configScopes:[],writes:[]},'a denied or outdated receipt cannot proceed under cached Ready');
+    if(boundary==='new denial')assert.equal(f.tasks.size,0,'hold the resident until current Ready');
+    f.publishRuntimePower(boundary==='new denial'?{...next,publicationRevision:4}:initial);
+   }
+   await flushRuntime(f);
+   const expected=boundary==='new ready'||boundary==='new denial'?3:2;
+   assert(configScopes.length>0&&configScopes.every(sequence=>sequence===expected),`settings accessed under wrong power scope: ${configScopes}`);
+   assert.equal(f.readRuntimePower()?.observedNotificationSequence,expected);
+   assert.equal(f.hardwareWrites.filter(w=>w.kind==='cpu').length,1,'the current policy applies exactly once');
+  }
+ }finally{release();f.runtime.stopGamePolicyRuntime();stopObservation();await scheduled;await turn();}
+ assert.equal(f.tasks.size,0);assert.equal(f.runtimePowerListenerCount(),0);
+});
+for(const boundary of ['new ready','stale receipt','same scope'])await check('resident TDP direct power receipt: '+boundary,async()=>{
+ const turn=()=>new Promise(resolve=>setImmediate(resolve));
+ const initial={known:true,phase:'ready',hardwareWritesAllowed:true,notificationPending:false,generation:2,suspendSerial:2,observedNotificationSequence:2,publicationRevision:2};
+ const next={...initial,generation:3,suspendSerial:3,observedNotificationSequence:3,publicationRevision:3};
+ const ports={lifecycle:initial};
+ const f=fixture({mode:'auto',ports});const stopObservation=f.observePower();
+ try{
+  await turn();assert.equal(f.readRuntimePower()?.observedNotificationSequence,2);
+  ports.lifecycle=boundary==='new ready'?next:boundary==='stale receipt'?{...initial,observedNotificationSequence:1}:initial;
+  const attempt=await f.schedule.reconcilePerformanceScheduleTdp(()=>f.readRuntimePower()?.observedNotificationSequence===2);
+  const expected=boundary==='new ready'?3:2;
+  assert.deepEqual({sequence:f.readRuntimePower()?.observedNotificationSequence,attempt,kinds:f.hardwareWrites.map(write=>write.kind)},
+   {sequence:expected,attempt:boundary==='same scope',kinds:boundary==='same scope'?['tdp']:[]});
+  if(boundary==='stale receipt')f.publishRuntimePower(initial);
+  if(boundary!=='same scope')assert.equal(await f.schedule.reconcilePerformanceScheduleTdp(()=>f.readRuntimePower()?.observedNotificationSequence===expected),true);
+  assert.deepEqual(f.hardwareWrites.map(write=>write.kind),['tdp'],'exactly one write from the current TDP attempt');
+ }finally{stopObservation();}
+ assert.equal(f.runtimePowerListenerCount(),0);
+});
+for(const boundary of ['timer after wake','new receipt','old receipt','wake during core write','same scope'])await check('delayed core refresh power scope: '+boundary,async()=>{
+ const turn=()=>new Promise(resolve=>setImmediate(resolve));
+ const ready={known:true,phase:'ready',hardwareWritesAllowed:true,notificationPending:false,generation:2,suspendSerial:2,observedNotificationSequence:2,publicationRevision:2};
+ const next={...ready,generation:3,suspendSerial:3,observedNotificationSequence:3,publicationRevision:3};
+ const scopes=[];
+ const ports={lifecycle:ready,onScopedCoreWrite:scope=>scopes.push(clone(scope)),onScopedActivation:scope=>scopes.push(clone(scope))};
+ const f=fixture({mode:'auto',ports});const stop=f.observePower();
+ try{
+  await turn();assert.equal(f.readRuntimePower()?.generation,2);
+  if(boundary==='timer after wake')f.publishRuntimePower(next);
+  if(boundary==='new receipt')ports.lifecycle=next;
+  if(boundary==='old receipt')ports.lifecycle={...ready,observedNotificationSequence:1};
+  if(boundary==='wake during core write'){
+   const write=f.powerTerminals.setCoreModeAc;
+   f.powerTerminals.setCoreModeAc=async mode=>{await write(mode);f.publishRuntimePower(next)};
+  }
+  const accepted=await f.schedule.refreshPerformanceScheduleCoreMode([2,2,2]);
+  const expected=boundary==='same scope'?['core','active-scheme']:boundary==='wake during core write'?['core']:[];
+  assert.deepEqual({accepted,kinds:f.hardwareWrites.map(row=>row.kind),generation:f.readRuntimePower()?.generation},
+   {accepted:boundary==='same scope',kinds:expected,generation:['same scope','old receipt'].includes(boundary)?2:3});
+  assert.deepEqual(scopes,expected.map(()=>[2,2,2]),'both native requests carry the original power scope');
+ }finally{stop();}
+ assert.equal(f.runtimePowerListenerCount(),0);
+});
+for(const boundary of ['new ready before push','old read after suspend','same scope'])await check('App AC/DC restore direct receipt: '+boundary,async()=>{
+ const turn=()=>new Promise(resolve=>setImmediate(resolve));
+ const ready={known:true,phase:'ready',hardwareWritesAllowed:true,notificationPending:false,generation:2,suspendSerial:2,observedNotificationSequence:2,publicationRevision:2};
+ const next={...ready,generation:3,suspendSerial:3,observedNotificationSequence:3,publicationRevision:3};
+ const ports={lifecycle:ready},f=fixture({mode:'auto',ports}),timers=new Map(),restores=[];
+ let id=0,resolveRead;
+ const raw=source('src/App.vue'),script=/<script setup[^>]*>([\s\S]*?)<\/script>/.exec(raw)[1];
+ const ast=ts.createSourceFile('App.vue.ts',script,ts.ScriptTarget.Latest,true);
+ const variables=['POWER_CHANGE_RETRY_DELAYS_MS','powerChangeRestore','powerChangeRestoreScope','powerChangeRestoreTimer'];
+ const functions=['clearPowerChangeRestoreTimer','samePowerChangeRestoreScope','continuePowerChangePerformanceRestore','observePowerChangePerformanceRestore','schedulePowerChangePerformanceRestore'];
+ const nodes=ast.statements.filter(node=>ts.isFunctionDeclaration(node)?functions.includes(node.name?.text):
+  ts.isVariableStatement(node)&&node.declarationList.declarations.some(item=>variables.includes(item.name.getText(ast))));
+ assert.equal(nodes.length,variables.length+functions.length);
+ const power=evaluatePerformanceModule(nodes.map(node=>node.getText(ast)).join('\n')+'\nexport {observePowerChangePerformanceRestore,schedulePowerChangePerformanceRestore};',{}, {
+  window:{setTimeout:(run,ms)=>{timers.set(++id,{run,ms});return id},clearTimeout:key=>timers.delete(key)},
+  getSharedPowerLifecycle:f.readRuntimePower,beginSharedPowerLifecycleReadback:f.beginPowerReadback,
+  isSharedPowerLifecycleAdmitted:f.isPowerAdmitted,
+  powerLifecycle:{get:async()=>boundary==='old read after suspend'&&!resolveRead?await new Promise(resolve=>{resolveRead=resolve}):ports.lifecycle},
+  detectPowerModeReliable:async()=> 'dc',reconcileRememberedPowerScheme:async current=>{assert(current());return 'auto'},
+  restorePerformanceScheduleIfConfigured:async (side,options)=>{assert(options.ownsPowerRequest());restores.push({side,generation:f.readRuntimePower().generation})},
+ });
+ const stop=f.observePower(power.observePowerChangePerformanceRestore,{observeNotificationSequence:true,observeSuspendSerial:true});
+ const tick=async()=>{const entry=timers.entries().next().value;assert(entry,'missing original restore timer');timers.delete(entry[0]);entry[1].run();await turn()};
+ try{
+  await turn();assert.equal(f.readRuntimePower()?.generation,2);
+  power.schedulePowerChangePerformanceRestore('dc');
+  if(boundary==='new ready before push')ports.lifecycle=next;
+  await tick();
+  if(boundary==='new ready before push'){
+   assert.deepEqual({generation:f.readRuntimePower()?.generation,restores}, {generation:3,restores:[]});
+   assert.equal(timers.size,1);await tick();
+  }
+  if(boundary==='old read after suspend'){
+   assert.equal(typeof resolveRead,'function');f.publishRuntimePower({...next,phase:'resuming',hardwareWritesAllowed:false});
+   resolveRead(ready);await turn();assert.equal(timers.size,0);assert.deepEqual(restores,[]);
+   f.publishRuntimePower({...next,publicationRevision:4});await tick();
+  }
+  assert.deepEqual(restores,[{side:'dc',generation:boundary==='same scope'?2:3}]);assert.equal(timers.size,0);
+ }finally{resolveRead?.(ready);stop();}
+ assert.equal(f.runtimePowerListenerCount(),0);
+});
+for(const boundary of ['notification','coalesced ready','stop','reentrant ready'])await check('resident policy power read releases scheduler on '+boundary,async()=>{
+ const settle=async()=>{for(let i=0;i<1000;i++)await Promise.resolve()};
+ let busy=true,started=0,aborts=0,done=false,release;
+ const reply=new Promise(resolve=>{release=resolve});
+ const ports={isQuickActionBusy:()=>busy,lifecycle:{known:true,phase:'ready',generation:1,hardwareWritesAllowed:true,notificationPending:false,observedNotificationSequence:1,suspendSerial:1,publicationRevision:1},
+  beforeRuntimePowerRead:signal=>{
+   if(++started!==1)return;
+   return new Promise((resolve,reject)=>{
+    const abort=()=>{
+     aborts++;
+     if(boundary==='reentrant ready')f.publishRuntimePower({phase:'ready',hardwareWritesAllowed:true,notificationPending:false,publicationRevision:4,observedNotificationSequence:3});
+     reject(Error('fixture IPC read retired'));
+    };
+    signal?.addEventListener('abort',abort,{once:true});
+    void reply.then(()=>{signal?.removeEventListener('abort',abort);resolve()});
+   });
+  }};
+ const f=fixture({dedicated:true,ports});let scheduled;
+ try{
+  f.runtime.startGamePolicyRuntime();await settle();
+  assert(f.runtimePowerListenerCount()>0,'fixture delivers through the public subscription');
+  const run=f.tasks.get('game-policy-runtime-retry');assert.equal(typeof run,'function');
+  busy=false;scheduled=run().then(()=>{done=true});await settle();
+  assert.equal(started,1);assert.equal(done,false);assert.equal(f.hardwareWrites.length,0);
+  f.publishRuntimePower({publicationRevision:2});await settle();
+  assert.equal(started,1);assert.equal(aborts,0);assert.equal(done,false);
+  if(boundary==='stop')f.runtime.stopGamePolicyRuntime();
+  else if(boundary==='reentrant ready')f.publishRuntimePower({phase:'suspending',hardwareWritesAllowed:false,notificationPending:true,publicationRevision:3,observedNotificationSequence:2,suspendSerial:2});
+  else f.publishRuntimePower({publicationRevision:3,observedNotificationSequence:2,...(boundary==='coalesced ready'?{generation:2,suspendSerial:2}:{})});
+  await settle();
+  assert.equal(done,true,'scheduled reconcile must settle before old power IPC replies');
+  assert.equal(aborts,1);
+  const writes=clone(f.hardwareWrites);
+  assert.equal(writes.filter(w=>w.kind==='cpu').length,boundary==='stop'?0:1,'the current policy must apply once after Ready');
+  release();await scheduled;await settle();assert.deepEqual(f.hardwareWrites,writes);
+ }finally{release();f.runtime.stopGamePolicyRuntime();await scheduled;await settle();}
+ assert.equal(f.tasks.size,0);assert.equal(f.runtimePowerListenerCount(),0);
+});
+for(const boundary of ['notification','coalesced ready','stop','settings transaction'])await check('resident frame template read releases scheduler on '+boundary,async()=>{
+ const turn=()=>new Promise(resolve=>setImmediate(resolve));
+ let busy=true,reads=0,done=false,release;
+ const oldReply=new Promise(resolve=>{release=resolve});
+ const ports={isQuickActionBusy:()=>busy,lifecycle:{known:true,phase:'ready',generation:1,hardwareWritesAllowed:true,observedNotificationSequence:1,suspendSerial:1,publicationRevision:1},runtimeFrameReads:true,
+  runtimeFrameTemplate:async()=>{if(++reads===1&&boundary!=='settings transaction'){await oldReply;return 'desktop';}return 'portable';},
+  beforeSettingsRead:async key=>{if(key==='rtss'&&boundary==='settings transaction')await oldReply;}};
+ const f=fixture({dedicated:true,ports});let scheduled;
+ f.settings.rtss.templateDefaults=true;
+ try{
+  f.runtime.startGamePolicyRuntime();await turn();
+  const run=f.tasks.get('game-policy-runtime-retry');assert.equal(typeof run,'function');
+  busy=false;scheduled=run().then(()=>{done=true});await turn();
+  const beforeReads=boundary==='settings transaction'?0:1;
+  assert.equal(reads,beforeReads);assert.equal(done,false);assert.equal(f.hardwareWrites.length,0);
+  f.publishRuntimePower({publicationRevision:2});await turn();
+  assert.equal(reads,beforeReads);assert.equal(done,false,'diagnostic publication must not cancel the current read');
+  if(boundary==='stop'||boundary==='settings transaction')f.runtime.stopGamePolicyRuntime();
+  else f.publishRuntimePower({publicationRevision:3,observedNotificationSequence:2,...(boundary==='coalesced ready'?{generation:2,suspendSerial:2}:{})});
+  await turn();
+  if(boundary==='settings transaction'){
+   assert.equal(done,false,'the settings transaction must retain its original wait');
+   release();await scheduled;await turn();
+   assert.equal(reads,0,'retired settings must not enter a new template probe');
+   assert.deepEqual(f.hardwareWrites,[]);return;
+  }
+  assert.equal(done,true,'scheduled reconcile must return before retired frame settings reply');
+  assert.equal(reads,boundary==='stop'?1:2);
+  const writes=clone(f.hardwareWrites),core=clone(f.corePolicyCalls);
+  assert.equal(writes.filter(w=>w.kind==='cpu').length,boundary==='stop'?0:1);
+  release();await scheduled;await turn();
+  assert.deepEqual(f.hardwareWrites,writes);assert.deepEqual(f.corePolicyCalls,core);
+ }finally{release();f.runtime.stopGamePolicyRuntime();await scheduled;await turn();}
+ assert.equal(f.tasks.size,0);assert.equal(f.runtimePowerListenerCount(),0);
+});
+for(const boundary of ['notification','coalesced ready'])await check('resident restore preparation releases schedule on '+boundary,async()=>{
+ const turn=()=>new Promise(resolve=>setImmediate(resolve));
+ let busy=true,probes=0,aborts=0,done=false,release;
+ const reply=new Promise(resolve=>{release=resolve});
+ const ports={isQuickActionBusy:()=>busy,
+  lifecycle:{known:true,phase:'ready',generation:1,hardwareWritesAllowed:true,notificationPending:false,observedNotificationSequence:1,suspendSerial:1,publicationRevision:1},
+  beforeRestoreCoreRead:async signal=>{
+   if(++probes!==1)return;
+   const abort=()=>{aborts++};
+   signal?.addEventListener('abort',abort,{once:true});
+   try { await reply; }
+   finally { signal?.removeEventListener('abort',abort); }
+  }};
+ const f=fixture({dedicated:true,ports});let scheduled;
+ try{
+  f.runtime.startGamePolicyRuntime();await turn();
+  const run=f.tasks.get('game-policy-runtime-retry');assert.equal(typeof run,'function');
+  busy=false;scheduled=run().then(()=>{done=true});await turn();
+  assert.equal(probes,1);assert.equal(done,false);assert(f.schedule.isPerformanceScheduleBusy());assert.equal(f.hardwareWrites.length,0);
+  f.publishRuntimePower({publicationRevision:2});await turn();
+  assert.equal(probes,1);assert.equal(aborts,0);assert.equal(done,false);
+  f.publishRuntimePower({publicationRevision:3,observedNotificationSequence:2,...(boundary==='coalesced ready'?{generation:2,suspendSerial:2}:{})});
+  await turn();
+  assert.equal(done,true,'the original scheduled restore is still waiting on retired topology');
+  assert.equal(aborts,1);assert(!f.schedule.isPerformanceScheduleBusy());assert.equal(f.hardwareWrites.length,0);
+  await flushRuntime(f);
+  const writes=clone(f.hardwareWrites);assert.equal(writes.filter(w=>w.kind==='cpu').length,1);
+  release();await scheduled;await turn();assert.deepEqual(f.hardwareWrites,writes);
+ }finally{release();f.runtime.stopGamePolicyRuntime();await scheduled;await turn();}
+ assert.equal(f.tasks.size,0);assert.equal(f.runtimePowerListenerCount(),0);
+});
+await check('resident policy power read cancellation preserves an already dispatched CPU write',async()=>{
+ const settle=async()=>{for(let i=0;i<1000;i++)await Promise.resolve()};
+ let busy=true,release,done=false;
+ const receipt=new Promise(resolve=>{release=resolve});
+ const ports={isQuickActionBusy:()=>busy,afterCpuWrite:()=>receipt,
+  lifecycle:{known:true,phase:'ready',generation:1,hardwareWritesAllowed:true,notificationPending:false,observedNotificationSequence:1,suspendSerial:1,publicationRevision:1}};
+ const f=fixture({dedicated:true,ports});let scheduled;
+ try{
+  f.runtime.startGamePolicyRuntime();await settle();
+  const run=f.tasks.get('game-policy-runtime-retry');assert.equal(typeof run,'function');
+  busy=false;scheduled=run().then(()=>{done=true});await settle();
+  const writes=clone(f.hardwareWrites);assert.equal(writes.filter(w=>w.kind==='cpu').length,1);
+  f.publishRuntimePower({generation:2,suspendSerial:2,observedNotificationSequence:2,publicationRevision:2});
+  await settle();assert.equal(done,false);assert.deepEqual(f.hardwareWrites,writes);
+  release();await scheduled;
+ }finally{release();f.runtime.stopGamePolicyRuntime();await scheduled;await settle();}
+ assert.equal(f.tasks.size,0);assert.equal(f.runtimePowerListenerCount(),0);
+});
+for(const boundary of ['notification','coalesced ready','stop'])await check('resident policy core read releases scheduler on '+boundary,async()=>{
+ const turn=()=>new Promise(resolve=>setImmediate(resolve));
+ let busy=true,probes=0,aborts=0,done=false,release;
+ const reply=new Promise(resolve=>{release=resolve});
+ const ports={smtAvailable:true,isQuickActionBusy:()=>busy,
+  lifecycle:{known:true,phase:'ready',generation:1,hardwareWritesAllowed:true,notificationPending:false,observedNotificationSequence:1,suspendSerial:1,publicationRevision:1},
+  beforeRuntimeCoreRead:signal=>{
+   if(++probes!==1)return;
+   return new Promise((resolve,reject)=>{
+    const abort=()=>{aborts++;reject(Error('fixture IPC core read retired'))};
+    signal?.addEventListener('abort',abort,{once:true});
+    void reply.then(()=>{signal?.removeEventListener('abort',abort);resolve()});
+   });
+  }};
+ const f=fixture({gameActive:true,configured:false,ports});
+ const target={...f.game,source:'whitelist'};
+ f.setGame(target);f.settings.performanceSchedule.hyperThreadPolicy='off';
+ let scheduled;
+ try{
+  f.runtime.startGamePolicyRuntime();await turn();
+  const run=f.tasks.get('game-policy-runtime-retry');assert.equal(typeof run,'function');
+  busy=false;scheduled=run().then(()=>{done=true});await turn();
+  assert.equal(probes,1);assert.equal(done,false);assert.deepEqual(f.corePolicyCalls,[]);
+  f.publishRuntimePower({publicationRevision:2});await turn();
+  assert.equal(probes,1);assert.equal(aborts,0);assert.equal(done,false);
+  if(boundary==='stop')f.runtime.stopGamePolicyRuntime();
+  else f.publishRuntimePower({publicationRevision:3,observedNotificationSequence:2,...(boundary==='coalesced ready'?{generation:2,suspendSerial:2}:{})});
+  await turn();
+  assert.equal(done,true,'scheduled reconcile must settle before old core IPC replies');
+  assert.equal(aborts,1);
+  const expected=boundary==='stop'?[]:[{kind:'apply',args:[target,'default','off',boundary==='coalesced ready'?[2,2,2]:[1,1,2]]}];
+  assert.deepEqual(f.corePolicyCalls,expected);
+  release();await scheduled;await turn();assert.deepEqual(f.corePolicyCalls,expected);
+ }finally{release();f.runtime.stopGamePolicyRuntime();await scheduled;await turn();}
+ assert.equal(f.tasks.size,0);assert.equal(f.runtimePowerListenerCount(),0);
+});
+await check('SMT manual save crossing sleep hands the saved preference to the resident owner',async()=>{
+ const turn=()=>new Promise(resolve=>setImmediate(resolve));
+ const ports={smtAvailable:true,lifecycle:{known:true,phase:'ready',generation:1,hardwareWritesAllowed:true,observedNotificationSequence:1,suspendSerial:1,publicationRevision:1}};
+ const f=fixture({gameActive:true,configured:false,ports});
+ const off=f.observePower();await turn();
+ const shown=await f.schedule.getContinuousPerformanceSnapshot('global');
+ ports.beforeSettingsCommit=()=>{f.publishRuntimePower({phase:'suspending',hardwareWritesAllowed:false,observedNotificationSequence:2,suspendSerial:2,publicationRevision:2});
+   f.publishRuntimePower({phase:'ready',hardwareWritesAllowed:true,generation:2,observedNotificationSequence:3,publicationRevision:3});};
+ try{
+  await assert.rejects(f.schedule.updateContinuousPerformanceControls(shown.identity,{hyperThreadMode:'off'}));
+  assert.equal(f.settings.performanceSchedule.hyperThreadPolicy,'off');assert.deepEqual(f.corePolicyCalls,[]);
+  ports.beforeSettingsCommit=undefined;f.runtime.startGamePolicyRuntime();await flushRuntime(f);
+  assert.equal(f.corePolicyCalls.filter(c=>c.kind==='apply').length,1);
+  assert.deepEqual(f.corePolicyCalls.find(c=>c.kind==='apply').args[3],[2,2,3]);
+ }finally{f.runtime.stopGamePolicyRuntime();off();}
+});
+await check('SMT manual receipt loss is not replayed by the resident owner',async()=>{
+ const turn=()=>new Promise(resolve=>setImmediate(resolve));
+ const ports={smtAvailable:true,onCorePolicyTransport:options=>assert.deepEqual(clone(options),{timeoutMs:10000}),onCorePolicyCall:async()=>{throw Error('manual receipt lost');}};
+ const f=fixture({gameActive:true,configured:false,ports});
+ const off=f.observePower();await turn();
+ try{
+  const shown=await f.schedule.getContinuousPerformanceSnapshot('global');
+  await assert.rejects(f.schedule.updateContinuousPerformanceControls(shown.identity,{hyperThreadMode:'off'}),/manual receipt lost/);
+  assert.equal(f.settings.performanceSchedule.hyperThreadPolicy,'off');assert.equal(f.corePolicyCalls.length,1);
+  ports.onCorePolicyCall=undefined;f.runtime.startGamePolicyRuntime();await flushRuntime(f);
+  assert.equal(f.corePolicyCalls.length,1);
+  f.setGame({...f.game,pid:101,processCreated:'born101'});await flushRuntime(f);
+  assert.equal(f.corePolicyCalls.length,2);assert.equal(f.corePolicyCalls[1].args[0].pid,101);
+ }finally{f.runtime.stopGamePolicyRuntime();off();}
+});
+for(const outcome of ['accepted','refused','receipt lost'])await check('resident affinity write across Ready: '+outcome,async()=>{
+ const turn=()=>new Promise(resolve=>setImmediate(resolve));
+ let settle,attempt=0;
+ const terminal=new Promise(resolve=>{settle=resolve});
+ const ports={smtAvailable:true,lifecycle:{known:true,phase:'ready',generation:1,hardwareWritesAllowed:true,observedNotificationSequence:1,suspendSerial:1,publicationRevision:1},
+  onCorePolicyCall:async()=>{if(++attempt!==1)return true;await terminal;if(outcome==='receipt lost')throw Error('receipt lost');return outcome==='accepted';}};
+ const f=fixture({gameActive:true,configured:false,ports});
+ f.settings.performanceSchedule.hyperThreadPolicy='off';
+ let scheduled;
+ try{
+  f.runtime.startGamePolicyRuntime();await turn();
+  scheduled=f.tasks.get('game-policy-runtime-retry')();await turn();
+  assert.equal(attempt,1);assert.deepEqual(f.corePolicyCalls[0].args[3],[1,1,1]);
+  f.publishRuntimePower({generation:2,suspendSerial:2,observedNotificationSequence:3,publicationRevision:2});await turn();
+  assert.equal(attempt,1,'a submitted write must retain its original receipt');
+  settle();await turn();await flushRuntime(f);
+  assert.equal(attempt,outcome==='refused'?2:1);
+  if(outcome==='refused')assert.deepEqual(f.corePolicyCalls[1].args[3],[2,2,3]);
+  if(outcome==='receipt lost'){
+   f.setGame({...f.game,pid:101,processCreated:'born101'});await flushRuntime(f);
+   assert.equal(attempt,2,'a different process can still be reconciled');
+  }
+ }finally{settle();f.runtime.stopGamePolicyRuntime();await scheduled;}
+});
 await check('TDP invalid slow: bad source flag still restores displayed120 using cached owner without full settings reads',async()=>{
  const controls=models.normalizeContinuousControls(undefined);controls.ac.tdp=120;controls.ac.tdpCeiling=120;controls.ac.tdpValid=false;controls.ac.cpuValid=false;
  const ports={now:100000,initialSettings:{performanceSchedule:{version:2,configured:true,enabled:true,controls},rtss:{frameRates:frames.frameRatePair({})}}},f=fixture({ports});
@@ -236,12 +589,15 @@ await check('TDP fresh: first120W write failure retries only TDP and settles wit
 });
 await check('TDP fresh: startup and wake settle checks keep the desktop120 target without replaying CPU',async()=>{
  const settings=await initialRepositorySettings(),ports={initialSettings:settings,template:'desktop',now:100000},f=fixture({ports});
+ try{
  f.runtime.startGamePolicyRuntime();await flushRuntime(f);ports.now+=4000;await flushRuntime(f);ports.now+=8000;await flushRuntime(f);
  assert.equal(f.tasks.size,0);assert.equal(f.hardwareWrites.filter(w=>w.kind==='cpu').length,1);
  assert.deepEqual(f.hardwareWrites.filter(w=>w.kind==='tdp').map(w=>w.watts),[120,120,120]);
- f.hardwareWrites.length=0;f.runtime.requestGamePolicyTdpReconciliation(2);await flushRuntime(f);ports.now+=4000;await flushRuntime(f);ports.now+=8000;await flushRuntime(f);
+ f.hardwareWrites.length=0;f.publishRuntimePower({known:true,generation:2,suspendSerial:1,observedNotificationSequence:1,publicationRevision:1});
+ await flushRuntime(f);ports.now+=4000;await flushRuntime(f);ports.now+=8000;await flushRuntime(f);
  assert.deepEqual(f.hardwareWrites.filter(w=>w.kind==='tdp').map(w=>w.watts),[120,120,120]);assert.equal(f.hardwareWrites.filter(w=>w.kind==='cpu').length,0);
- assert.equal(f.tasks.size,0);f.runtime.stopGamePolicyRuntime();
+ assert.equal(f.tasks.size,0);
+ }finally{f.runtime.stopGamePolicyRuntime();}
 });
 await check('自动专属的唤醒归属独立于全局手动/未配置状态',async()=>{
  for(const configured of [false,true]){const f=fixture({mode:'auto',dedicated:true,configured});f.settings.performanceSchedule.enabled=false;f.settings.performanceSchedule.controls.ac.mode='manual';assert.equal(await f.schedule.getPerformanceScheduleOwnership(),'auto')}
@@ -308,6 +664,7 @@ for (const mode of ['auto','manual']) await check('SMT '+mode+' 同构ROG/无游
 });
 await check('SMT专属独立于全局，开启恢复默认；主性能页只显示全局偏好',async()=>{
  const f=fixture({mode:'manual',dedicated:true,ports:{smtAvailable:true,heterogeneous:false}});
+ const off=f.observePower();await new Promise(resolve=>setImmediate(resolve));
  let global=await f.schedule.getContinuousPerformanceSnapshot('global');await f.schedule.updateContinuousPerformanceControls(global.identity,{hyperThreadMode:'off'});
  assert.equal(f.corePolicyCalls.length,0,'Global editor cannot override an enabled dedicated profile');
  assert.equal((await f.schedule.getContinuousPerformanceSnapshot('effective')).hyperThreadMode,'off');
@@ -321,7 +678,7 @@ await check('SMT专属独立于全局，开启恢复默认；主性能页只显�
  assert(f.corePolicyCalls.some(c=>c.kind==='apply'&&c.args[2]==='off'));
  f.setGame(null);await flushRuntime(f);assert.equal(f.settings.performanceSchedule.hyperThreadPolicy,'off');
  f.setGame({pid:33,processCreated:'born33',name:'other.exe',path:'C:/other.exe'});await flushRuntime(f);
- assert(f.corePolicyCalls.some(c=>c.kind==='apply'&&c.args[0].pid===33&&c.args[2]==='off'));f.runtime.stopGamePolicyRuntime();
+ assert(f.corePolicyCalls.some(c=>c.kind==='apply'&&c.args[0].pid===33&&c.args[2]==='off'));f.runtime.stopGamePolicyRuntime();off();
 });
 await check('旧EXE独立记录不再反向改变全局开关；默认开启不施加线程限制',async()=>{
  const f=fixture({mode:'manual',configured:false,gameActive:true,ports:{smtAvailable:true}});
@@ -482,14 +839,18 @@ await check('TDP safety: unknown game readiness with empty dedicated bank still 
  const dedicated=fixture({dedicated:true,mode:'auto',ports:{gameReady:false}});assert.equal(await dedicated.schedule.reconcilePerformanceScheduleTdp(),false);assert.deepEqual(dedicated.hardwareWrites,[]);
 });
 await check('TDP safety: wake and late OEM override recover without FPS/GPU or valid CPU',async()=>{
- const ports={now:100000},f=fixture({mode:'auto',ports});f.settings.performanceSchedule.controls.ac.cpuValid=false;f.runtime.startGamePolicyRuntime();await flushRuntime(f);
+ const ports={now:100000},f=fixture({mode:'auto',ports});f.settings.performanceSchedule.controls.ac.cpuValid=false;
+ try{
+ f.runtime.startGamePolicyRuntime();await flushRuntime(f);
  ports.now+=12000;await flushRuntime(f);ports.now+=4000;await flushRuntime(f);f.hardwareWrites.length=0;
- f.runtime.requestGamePolicyTdpReconciliation(2);await flushRuntime(f);assert.equal(f.hardwareWrites.at(-1)?.watts,55);
+ f.publishRuntimePower({known:true,generation:2,suspendSerial:1,observedNotificationSequence:1,publicationRevision:1});
+ await flushRuntime(f);assert.equal(f.hardwareWrites.at(-1)?.watts,55);
  ports.now+=4000;await flushRuntime(f);ports.now+=8000;await flushRuntime(f);assert.equal(f.hardwareWrites.length,3);
  f.hardwareWrites.length=0;
  for(let n=0;n<5;n++){ports.now+=3000;f.publishMonitor({hwDown:false,top:{tdpW:70,cpuPowerValid:true,ts:ports.now},fps:{hardwareObservedAt:ports.now}});await flushRuntime(f);}
  assert.equal(f.hardwareWrites.length,1);assert.equal(f.hardwareWrites[0].watts,55);assert.equal(f.hardwareWrites[0].kind,'tdp');
- f.runtime.stopGamePolicyRuntime();assert.equal(f.tasks.size,0);ports.now+=30000;f.publishMonitor({top:{tdpW:70,cpuPowerValid:true,ts:ports.now}});assert.equal(f.tasks.size,0);
+ }finally{f.runtime.stopGamePolicyRuntime();}
+ assert.equal(f.tasks.size,0);ports.now+=30000;f.publishMonitor({top:{tdpW:70,cpuPowerValid:true,ts:ports.now}});assert.equal(f.tasks.size,0);
 });
 await check('TDP safety: invalid targets, explicit OFF, unknown source and superseded cached owner cannot dispatch',async()=>{
  for(const state of ['invalid','off','source','power']){const ports={},f=fixture({mode:'auto',ports});if(state==='invalid')f.settings.performanceSchedule.controls.ac.tdpValid=false;if(state==='off')f.settings.performanceSchedule.suspended=true;if(state==='source')f.sourceMode.value=null;if(state==='power')ports.lifecycle={phase:'resuming',hardwareWritesAllowed:false,generation:2};assert.equal(await f.schedule.reconcilePerformanceScheduleTdp(),false);assert.equal(f.hardwareWrites.length,0,state);}
@@ -513,11 +874,17 @@ await check('TDP safety: partial TDP failure retries only TDP, never replays an 
  ports.beforeTdpWrite=undefined;ports.now+=30000;await flushRuntime(f);assert.equal(f.hardwareWrites.filter(w=>w.kind==='tdp').at(-1)?.watts,55);assert.equal(f.hardwareWrites.filter(w=>w.kind==='cpu').length,1);f.runtime.stopGamePolicyRuntime();
 });
 await check('TDP safety: duplicate wake, OFF and a source change cancel delayed corrections of the previous owner',async()=>{
- const ports={now:100000},f=fixture({mode:'manual',ports});f.runtime.startGamePolicyRuntime();await flushRuntime(f);f.hardwareWrites.length=0;
- f.runtime.requestGamePolicyTdpReconciliation(2);await flushRuntime(f);assert.equal(f.hardwareWrites.length,1);
- for(let n=0;n<10;n++)f.runtime.requestGamePolicyTdpReconciliation(2);await flushRuntime(f);assert.equal(f.hardwareWrites.length,1);
+ const ports={now:100000},f=fixture({mode:'manual',ports});
+ try{
+ f.runtime.startGamePolicyRuntime();await flushRuntime(f);f.hardwareWrites.length=0;
+ assert.equal(f.runtime.requestGamePolicyTdpReconciliation(2),false,'a future generation without public Ready cannot start recovery');
+ f.publishRuntimePower({known:true,generation:2,suspendSerial:1,observedNotificationSequence:1,publicationRevision:1});
+ await flushRuntime(f);assert.equal(f.hardwareWrites.length,1);
+ for(let n=0;n<10;n++)assert.equal(f.runtime.requestGamePolicyTdpReconciliation(2),false);
+ await flushRuntime(f);assert.equal(f.hardwareWrites.length,1);
  f.sourceMode.value='dc';for(const cb of f.powerListeners)cb();await flushRuntime(f);f.hardwareWrites.length=0;ports.now+=4000;await flushRuntime(f);assert.ok(f.hardwareWrites.every(w=>w.kind==='tdp'&&w.side==='dc'&&w.watts===30));
- await f.schedule.stopPerformanceScheduleAndUseWindowsBalanced();await flushRuntime(f);f.hardwareWrites.length=0;ports.now+=30000;await flushRuntime(f);assert.equal(f.hardwareWrites.length,0);f.runtime.stopGamePolicyRuntime();
+ await f.schedule.stopPerformanceScheduleAndUseWindowsBalanced();await flushRuntime(f);f.hardwareWrites.length=0;ports.now+=30000;await flushRuntime(f);assert.equal(f.hardwareWrites.length,0);
+ }finally{f.runtime.stopGamePolicyRuntime();}
 });
 await check('TDP safety: queued manual slider edit has priority over a background correction',async()=>{
  const f=fixture({mode:'manual'}),snapshot=await f.schedule.getContinuousPerformanceSnapshot();
@@ -594,7 +961,7 @@ await check('TDP safety: shell starts its sole resident writer before optional f
  assert(app.includes('requestGamePolicyTdpReconciliation(targetGeneration)'),'committed wake must schedule TDP-only settle checks');
 });
 assert(results.length>0,'No selected performance ownership case');
-const report={pass:results.every(x=>x.pass),count:results.length,failed:results.filter(x=>!x.pass).length,cases:results,selection:filter??'all',notRun,hardwareCalls:0,scope:'Actual performanceSchedule.ts with in-memory external boundaries; AST checks passive callsite wiring. No YMCC process, OS power, service or device execution.',sources:Object.fromEntries(['src/bridge/performanceSchedule.ts','src/bridge/performanceControls.ts','src/bridge/gamePolicyRuntime.ts','src/App.vue','src/bridge/bootModeGlobalPreferences.ts','src/bridge/inputConfigHash.ts','src/bridge/settingsBaseline.ts','PowerControl/settings-baseline.json','tools/fixtures/performance_memory_fixture.mjs','tools/performance_manual_idle_selftest.mjs'].map(file=>[file,crypto.createHash('sha256').update(source(file)).digest('hex')]))};
+const report={pass:results.every(x=>x.pass),count:results.length,failed:results.filter(x=>!x.pass).length,cases:results,selection:filter??'all',notRun,hardwareCalls:0,scope:'Actual performanceSchedule.ts, gamePolicyRuntime.ts, gameCorePolicy.ts and powerLifecycleState.ts with in-memory external boundaries; frame template cases also execute frameRateLimits.ts. AST checks passive callsite wiring. No YMCC process, OS power, service or device execution.',sources:Object.fromEntries(['src/bridge/performanceSchedule.ts','src/bridge/performanceControls.ts','src/bridge/gamePolicyRuntime.ts','src/bridge/gameCorePolicy.ts','src/bridge/powerLifecycleState.ts','src/bridge/frameRateLimits.ts','src/App.vue','src/bridge/bootModeGlobalPreferences.ts','src/bridge/inputConfigHash.ts','src/bridge/settingsBaseline.ts','PowerControl/settings-baseline.json','tools/fixtures/performance_memory_fixture.mjs','tools/performance_manual_idle_selftest.mjs'].map(file=>[file,crypto.createHash('sha256').update(source(file)).digest('hex')]))};
 if(freshSettingsCompilation)report.repositoryCompilation=freshSettingsCompilation;
 const out=process.argv[2]&&!process.argv[2].startsWith('--')?process.argv[2]:null;
 if(out)fs.mkdirSync(out,{recursive:true});

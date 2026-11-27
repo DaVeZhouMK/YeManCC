@@ -28,6 +28,20 @@ const std::string A="HID\\VID_1234&PID_5678\\OWNED-A",C="HID\\VID_1234&PID_5678\
 std::wstring outputRoot;J cases=J::array(),failures=J::array();unsigned assertions=0,caseSequence=0;std::string active;
 void check(bool value,const char* assertion){++assertions;if(!value)failures.push_back({{"case",active},{"assertion",assertion}});}
 void need(bool value,const char* reason){if(!value)throw std::runtime_error(reason);}
+#ifdef YMCC_FIXTURE_CLI_READBACK
+unsigned readbackCalls=0;
+bool exactDevList=false;
+DWORD readbackError=ERROR_SUCCESS;
+bool hidHideRun(const wchar_t* command,std::string* raw,DWORD* code){
+    ++readbackCalls;
+    exactDevList=command&&std::wstring(command)==L"--dev-list";
+    need(raw&&code,"production readback must request output and exit status");
+    raw->clear();
+    *code=readbackError=ERROR_FILE_NOT_FOUND;
+    return false;
+}
+#include "cold-readback.inc"
+#endif
 std::string read(const std::wstring& path){std::ifstream in(std::filesystem::path(path),std::ios::binary);need(bool(in),"read only own private file");return {std::istreambuf_iterator<char>(in),{}};}
 void raw(const std::wstring& path,const std::string& bytes){std::ofstream out(std::filesystem::path(path),std::ios::binary);out.write(bytes.data(),std::streamsize(bytes.size()));need(bool(out),"write private test file");}
 std::string encoded(const tr::Record& r){std::string bytes;need(tr::encode(r,bytes),"encode actual durable record");return bytes;}
@@ -38,6 +52,9 @@ enum class Fact {Proven,Alive,Unknown};
 struct Environment {
     std::wstring directory,file;std::string binding;std::unique_ptr<tr::Session> session;
     bool active=true,ancestry=true,visibilityKnown=true,apply=true,ack=true,throwVisibility=false;
+#ifdef YMCC_FIXTURE_CLI_READBACK
+    bool missingReadbackCli=false;
+#endif
     Fact native=Fact::Proven,host=Fact::Proven,cli=Fact::Proven,target=Fact::Proven;
     unsigned failVisibilityFrom=0,visibilityCalls=0,targetCalls=0,proofCalls=0,unhideCalls=0,consumePaths=0,consumeOrigins=0,ioCount=0,expireAfter=0,lateWrites=0,failPathAt=0,failOriginAt=0,currentCalls=0,recordCalls=0;
     std::vector<std::string> hidden={A,B};J events=J::array(),mutations=J::array(),census=J::array(),storeFailures=J::array();
@@ -56,7 +73,11 @@ struct Environment {
     bool hostDead(const tr::ProcessIdentity& p){const bool ok=host==Fact::Proven;finish("hostDead",false,{{"pid",p.pid},{"birth",p.creationTime},{"proven",ok}});return ok;}
     bool writersQuiet(){const bool ok=cli==Fact::Proven;finish("writersQuiet",false,{{"proven",ok}});return ok;}
     bool targetAbsent(const std::vector<std::string>& known){++targetCalls;census.push_back(known);const bool ok=target==Fact::Proven;finish("targetAbsent",false,{{"knownIds",known},{"completeAbsence",ok}});return ok;}
-    bool visibility(std::vector<std::string>& out){++visibilityCalls;if(throwVisibility){finish("visibility");throw std::runtime_error("controlled readback exception");}const bool ok=visibilityKnown&&(!failVisibilityFrom||visibilityCalls<failVisibilityFrom);if(ok)out=hidden;finish("visibility",false,{{"known",ok},{"hidden",hidden}});return ok;}
+    bool visibility(std::vector<std::string>& out){++visibilityCalls;if(throwVisibility){finish("visibility");throw std::runtime_error("controlled readback exception");}
+#ifdef YMCC_FIXTURE_CLI_READBACK
+        if(missingReadbackCli){const bool ok=inputHostTargetReturnColdHidden(out);finish("visibility",false,{{"known",ok},{"hidden",hidden},{"readbackError",readbackError}});return ok;}
+#endif
+        const bool ok=visibilityKnown&&(!failVisibilityFrom||visibilityCalls<failVisibilityFrom);if(ok)out=hidden;finish("visibility",false,{{"known",ok},{"hidden",hidden}});return ok;}
     bool pathProven(const std::string& physical,const std::string& path){++proofCalls;const bool ok=ancestry&&physical==root&&(tr::detail::fold(path)==tr::detail::fold(A)||tr::detail::fold(path)==tr::detail::fold(C));finish("pathProven",false,{{"root",physical},{"path",path},{"proven",ok}});return ok;}
     bool unhide(const std::string& path){++unhideCalls;mutations.push_back({{"operation","unhide"},{"path",path},{"current",active},{"ack",ack},{"applied",apply}});if(apply)hidden.erase(std::remove_if(hidden.begin(),hidden.end(),[&](const auto& p){return tr::detail::fold(p)==tr::detail::fold(path);}),hidden.end());finish("unhide",true,{{"path",path}});return ack;}
     bool consumePath(const tr::Origin& o,const std::string& path){
@@ -72,7 +93,28 @@ struct Environment {
 };
 J observation;
 void runCase(const std::string& name,const std::function<void()>& body){active=name;observation=J::object();const auto old=assertions;const auto count=failures.size();try{body();}catch(const std::exception& e){check(false,(std::string("fixture-exception:")+e.what()).c_str());}observation["name"]=name;observation["assertions"]=assertions-old;observation["failures"]=failures.size()-count;cases.push_back(observation);}
-void normalCase(const std::string& name,const std::function<void(Environment&)>& setup,cold::Reason reason,bool clean,unsigned unhide=0,bool preserve=false){runCase(name,[&]{Environment env;const auto o=origin();env.addPath(o);setup(env);const auto before=encoded(*env.session->record()),disk=read(env.file);const auto result=cold::run(env);check(result.reason==reason,"actual reason matches proof/settlement outcome");check(result.clean()==clean,"actual clean state matches committed duties");check(env.unhideCalls==unhide,"only bounded exact owned unhide attempted");if(preserve){check(encoded(*env.session->record())==before,"rejected proof leaves actual Session record unchanged");check(read(env.file)==disk,"rejected proof leaves actual file unchanged");}env.verifySafety();observation=env.observe(result);});}
+void normalCase(const std::string& name,const std::function<void(Environment&)>& setup,cold::Reason reason,bool clean,unsigned unhide=0,bool preserve=false,const std::function<void(const Environment&)>& verify={}){runCase(name,[&]{Environment env;const auto o=origin();env.addPath(o);setup(env);const auto before=encoded(*env.session->record()),disk=read(env.file);const auto result=cold::run(env);check(result.reason==reason,"actual reason matches proof/settlement outcome");check(result.clean()==clean,"actual clean state matches committed duties");check(env.unhideCalls==unhide,"only bounded exact owned unhide attempted");if(preserve){check(encoded(*env.session->record())==before,"rejected proof leaves actual Session record unchanged");check(read(env.file)==disk,"rejected proof leaves actual file unchanged");}env.verifySafety();observation=env.observe(result);if(verify)verify(env);});}
+constexpr char visibilityUnknownName[]="guard/visibility-unknown";
+void visibilityUnknownCase(bool selected=false){
+    normalCase(visibilityUnknownName,[selected](Environment& env){
+#ifdef YMCC_FIXTURE_CLI_READBACK
+        if(selected){env.missingReadbackCli=true;return;}
+#else
+        (void)selected;
+#endif
+        env.visibilityKnown=false;
+    },cold::Reason::VisibilityUnproven,false,0,true
+#ifdef YMCC_FIXTURE_CLI_READBACK
+    ,[selected](const Environment& env){
+        if(!selected)return;
+        check(env.visibilityCalls==1&&readbackCalls==1,"production visibility probes CLI exactly once");
+        check(exactDevList&&readbackError==ERROR_FILE_NOT_FOUND,"production requests --dev-list and receives controlled missing CLI");
+        check(env.consumePaths==0&&env.consumeOrigins==0,"missing CLI never consumes path or origin duty");
+        observation["missingCliReadback"]={{"calls",readbackCalls},{"exactDevList",exactDevList},{"win32Error",readbackError},{"unhideCalls",env.unhideCalls},{"consumePaths",env.consumePaths},{"consumeOrigins",env.consumeOrigins}};
+    }
+#endif
+    );
+}
 void parserTests(){
     const std::vector<std::pair<std::string,std::string>> good={{"empty",""},{"whitespace"," \t\r\n\n"},{"one","--dev-hide \""+A+"\"\r\n"},{"two","--dev-hide \""+A+"\"\n--dev-hide \""+B+"\""},{"trim"," \t--dev-hide \""+A+"\" \r\n"}};
     for(const auto& [name,input]:good)runCase("parse/positive-"+name,[&]{std::vector<std::string> out={"preserve"};check(cold::parseHidden(input,out),"valid complete list accepted");check(out.size()==(name=="empty"||name=="whitespace"?0:name=="two"?2:1),"entire valid list parsed");});
@@ -97,7 +139,7 @@ void algorithmTests(){
     normalCase("guard/CLI-unknown",[](auto& e){e.cli=Fact::Unknown;},cold::Reason::CliWriterUnproven,false,0,true);
     normalCase("guard/target-present",[](auto& e){e.target=Fact::Alive;},cold::Reason::TargetAbsenceUnproven,false,0,true);
     normalCase("guard/target-unknown",[](auto& e){e.target=Fact::Unknown;},cold::Reason::TargetAbsenceUnproven,false,0,true);
-    normalCase("guard/visibility-unknown",[](auto& e){e.visibilityKnown=false;},cold::Reason::VisibilityUnproven,false,0,true);
+    visibilityUnknownCase();
     normalCase("guard/ancestry-unproven",[](auto& e){e.ancestry=false;},cold::Reason::PhysicalAncestryUnproven,false,0,true);
     normalCase("owned/exact-A-foreign-B",[](auto&){},cold::Reason::Complete,true,1);
     normalCase("owned/ACK-lost-readback-removed",[](auto& e){e.ack=false;},cold::Reason::Complete,true,1);
@@ -117,4 +159,13 @@ void expiryMatrix(){
     for(unsigned index=1;index<=trace.size();++index){const auto operation=trace[index-1]["operation"].get<std::string>();runCase("context/expire-after-"+std::to_string(index)+"-"+operation,[&,index]{Environment env;const auto exact=origin("matrix130");env.addPath(exact);env.addTarget(exact);env.expireAfter=index;const auto result=cold::run(env);check(!env.active&&env.ioCount>=index,"controlled original context expires at selected real IO return");env.verifySafety();check(env.lateWrites==0,"expiry after any IO forbids later unhide or Session consumption");observation=env.observe(result);observation["expiredAfter"]=index;observation["referenceOperation"]=trace[index-1]["operation"];});}
 }
 }
-int wmain(int argc,wchar_t** argv){if(argc!=3)return 2;outputRoot=argv[1];parserTests();algorithmTests();expiryMatrix();J result={{"pass",failures.empty()},{"caseCount",cases.size()},{"assertions",assertions},{"failures",failures},{"cases",cases},{"actualConsumer","native coldExecution::run(Environment&)"},{"actualSessionAndStore",true},{"realPrivateFileIo",true},{"controlledOSAndDriverPorts",true},{"ordinaryCliOrHostRuns",0},{"realDeviceCalls",0},{"currentAdmissionApiAvailable",false}};raw(argv[2],result.dump(2)+"\n");std::cout<<J({{"pass",failures.empty()},{"cases",cases.size()},{"assertions",assertions},{"failures",failures}}).dump()<<"\n";return failures.empty()?0:1;}
+int wmain(int argc,wchar_t** argv){
+    bool selected=false;
+#ifdef YMCC_FIXTURE_CLI_READBACK
+    selected=argc==4&&std::wstring(argv[3])==L"guard/visibility-unknown";
+#endif
+    if(argc!=3&&!selected)return 2;
+    outputRoot=argv[1];
+    if(selected)visibilityUnknownCase(true);else{parserTests();algorithmTests();expiryMatrix();}
+    J result={{"pass",failures.empty()},{"caseCount",cases.size()},{"assertions",assertions},{"failures",failures},{"cases",cases},{"actualConsumer","native coldExecution::run(Environment&)"},{"actualSessionAndStore",true},{"realPrivateFileIo",true},{"controlledOSAndDriverPorts",true},{"ordinaryCliOrHostRuns",0},{"realDeviceCalls",0},{"currentAdmissionApiAvailable",false}};raw(argv[2],result.dump(2)+"\n");std::cout<<J({{"pass",failures.empty()},{"cases",cases.size()},{"assertions",assertions},{"failures",failures}}).dump()<<"\n";return failures.empty()?0:1;
+}

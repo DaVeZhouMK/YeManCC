@@ -73,7 +73,7 @@ internal static class HidMaestroPackagePreparation
         string SignatureVerification = "not-performed", bool WritesIssued = false,
         string ArtifactRole = "raw-driver", bool CatalogRequiredHere = false);
     internal sealed record MaintenanceFacts(bool Admin, bool InstallMutexHeld, bool StartupOwnerValid,
-        bool OwnDevices, bool BlockingClients);
+        bool? OwnDevices, bool BlockingClients);
     internal sealed record Maintenance(string Status, MaintenanceFacts Observed,
         bool LifecycleExclusive = false, bool OperationDeadlineProven = false,
         bool AutomaticWritesEnabled = false);
@@ -396,11 +396,18 @@ internal static class HidMaestroPackagePreparation
             ? "DRIVER_MAINTENANCE_DEFERRED" : decision;
         return new(status,decision,review,null,null,false,"not-observed");
     }
-    internal static PreparationResult Execute(bool prepare, SdkContract sdk, Observation initial, IPreparationRuntime runtime)
+    internal static PreparationResult Execute(bool prepare, SdkContract sdk, Observation initial, IPreparationRuntime runtime,
+        bool initialInventoryReused = false)
     {
+        PreparationResult RestartWithFreshInitial(string reason) {
+            runtime.Record("reuse-initial-fallback",new {reason});
+            return Execute(prepare,sdk,runtime.Observe("initial"),runtime);
+        }
         var before=Inspect(prepare,sdk,initial.Drivers,initial.Facts);
         string decision=Decision(prepare,initial,before);
         runtime.Record("decision",new {decision,prepare,review=before});
+        if(initialInventoryReused && decision!="PREPARE_OFFICIAL")
+            return RestartWithFreshInitial("initial-decision-changed");
         if(decision is not ("INSTALL_FRESH" or "PREPARE_OFFICIAL"))
             return WithoutOfficialCall(decision,before);
         // The second observation narrows obvious owner/client changes; SDK's own
@@ -409,6 +416,17 @@ internal static class HidMaestroPackagePreparation
         var recheck=Inspect(true,sdk,last.Drivers,last.Facts);
         decision=Decision(true,last,recheck);
         runtime.Record("preflight-recheck",new {decision,last,review=recheck});
+        // A changed but independently verified pair can seed a fresh attempt.
+        // That attempt must still take its own preflight before the SDK call.
+        if(initialInventoryReused) {
+            if(decision!="PREPARE_OFFICIAL" || Program.ExactCurrentPair(initial.Drivers) is not { } borrowed ||
+                Program.ExactCurrentPair(last.Drivers) is not { } fresh)
+                return RestartWithFreshInitial("fresh-preflight-did-not-confirm-pair");
+            if(!fresh.All(borrowed.Contains)) {
+                runtime.Record("reuse-initial-fallback",new {reason="fresh-verified-pair-replaces-borrowed-initial"});
+                return Execute(prepare,sdk,last,runtime);
+            }
+        }
         if(decision is not ("INSTALL_FRESH" or "PREPARE_OFFICIAL"))
             return WithoutOfficialCall(decision,recheck);
         OfficialCall call;
@@ -430,8 +448,10 @@ internal static class HidMaestroPackagePreparation
                     !afterObservation.Facts.InstallMutexHeld || !after.StoreReady ||
                     (call.Outcome==OfficialOutcome.KeptNewer && !after.Inventory.NewerPresent))
                 return new("INSTALL_POSTCONDITION_UNPROVEN",decision,recheck,after,call,true,"not-proven");
-            bool live=last.Facts.OwnDevices || afterObservation.Facts.OwnDevices || afterObservation.Facts.BlockingClients;
-            string binding=live ? "existing-or-in-flight-owner-may-retain-old-driver;installed-versus-added-path-not-observed;binding-unproven" :
+            bool live=last.Facts.OwnDevices != false || afterObservation.Facts.OwnDevices != false || afterObservation.Facts.BlockingClients;
+            string binding=call.Outcome==OfficialOutcome.AlreadyCurrent && afterObservation.Facts.OwnDevices is null ?
+                "post-call-device-census-not-performed;existing-binding-unverified" :
+                live ? "existing-or-in-flight-owner-may-retain-old-driver;installed-versus-added-path-not-observed;binding-unproven" :
                 "no-owned-device-observed;physical-binding-and-game-input-unverified";
             string status=call.Outcome==OfficialOutcome.KeptNewer ? "DRIVER_NEWER_PRESERVED_DEVICE_UNVERIFIED" :
                 call.Outcome==OfficialOutcome.AlreadyCurrent ? after.Status :

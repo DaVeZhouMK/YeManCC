@@ -61,7 +61,7 @@ static DWORD windowPid=42;
 static bool exited=false, openFails=false, responds=true, manualMarker=false, sleepMarker=false;
 static bool inWorker=false, queueAccepts=true, postsSucceed=true, queueThrows=false, timersSucceed=true, logThrows=false;
 static int probes=0, activations=0, timers=0, closes=0, posts=0;
-static std::function<void()> onProbe, onPos;
+static std::function<void()> onFindWindow, onProbe, onPos;
 static std::deque<std::function<void()>> jobs;
 static std::vector<json> logs;
 static HWND gameWindow=(HWND)2;
@@ -150,7 +150,7 @@ namespace fspath {
  static bool exists(const std::wstring& p,std::error_code& ec){ec.clear();return exists(p);}
 }
 static ULONGLONG nativeProcessCreatedFromHandle(HANDLE){return created;}
-static HWND focusFindWindowForPid(DWORD){return gameWindow;}
+static HWND focusFindWindowForPid(DWORD){if(onFindWindow)onFindWindow();return gameWindow;}
 static bool focusQueryProcessIdentity(DWORD,std::wstring*,ULONGLONG* value){*value=created;return !exited;}
 static void appendNativeLifecycleLog(const char* event,json value){if(logThrows)throw std::runtime_error("fixture log failure");value["event"]=event;logs.push_back(value);}
 template<class...T>static void traceLog(const char*,T...){}
@@ -162,7 +162,8 @@ begin=source.index('static std::mutex g_resumeFocusMailboxMx;')
 end=source.index('static bool captureResumeFocusPower(',begin)
 globals=source[begin:end]
 names=['focusPidIsManuallyPaused','focusGameControlBlocked','captureResumeFocusPower','focusResumeGate','focusResumeLog',
-       'focusResumeTargetPaused','focusResumeGameWorker','focusResumeRetryOnUiThread','focusResumeFocusTimerTickOnUiThread',
+       'focusResumeTargetPaused','focusResumePost','focusResumeBeforeProbe','focusResumeGameWorker',
+       'focusResumeRetryOnUiThread','focusResumeFocusTimerTickOnUiThread',
        'focusResumedGameOnUiThread','focusResumeContinueOnWindowMessage','focusQueueResumedGame','focusSingleResumedGame','wakeFocusNudgeRunOnUiThread']
 constants='\n'.join(next(line for line in source.splitlines() if line.startswith(prefix)) for prefix in (
     'static constexpr UINT WM_FAN_KERNEL_POWER_FACT ', 'static constexpr UINT kSharedPowerStateMessage='))
@@ -174,7 +175,7 @@ static int passed=0;
 static void pass(const char* s){++passed;std::cout<<"PASS "<<s<<"\n";}
 static void reset(){
  now=10000;created=123;windowPid=42;exited=openFails=manualMarker=sleepMarker=inWorker=false;
- responds=queueAccepts=postsSucceed=timersSucceed=true;queueThrows=logThrows=false;probes=activations=timers=closes=posts=0;onProbe={};onPos={};jobs.clear();logs.clear();
+ responds=queueAccepts=postsSucceed=timersSucceed=true;queueThrows=logThrows=false;probes=activations=timers=closes=posts=0;onFindWindow={};onProbe={};onPos={};jobs.clear();logs.clear();
  gameWindow=(HWND)2;g_hwnd=(HWND)3;g_webviewReady=selfForeground=true;g_exitRequested=false;g_inputReady=true;g_manualPausedPid=0;
  g_powerLifecycle=PowerLifecycle::Ready;generation=1;g_resumeFocusMailbox={};g_resumeFocusPending={};
  g_resumeFocusPostDeferred=false;g_resumeFocusRetryOnMessageAt=0;
@@ -225,6 +226,54 @@ int main(){
  now+=250;g_inputReady=true;focusResumeFocusTimerTickOnUiThread();run();
  assert(probes==1&&activations==1&&!g_resumeFocusPending.ticket&&posts==1);
  pass("confirmed thaw follows late same-wake notices under its original ticket and deadline");
+ const auto submitThaw=[] {
+  focusSingleResumedGame({42},123,powerOrigin(),sleepBoundary);
+  const auto admitted=g_resumeFocusMailbox;
+  assert(admitted.ticket&&admitted.deadline==now+8000);
+  focusResumedGameOnUiThread();now+=1000;focusResumeFocusTimerTickOnUiThread();
+  assert(jobs.size()==1);
+  return admitted;
+ };
+ reset();g_wakeFocusNudgeTarget={true,42,123};
+ const auto queuedThaw=submitThaw();++notification;run();
+ now+=4000;wakeFocusNudgeRunOnUiThread();
+ assert(probes==1&&activations==1&&closes==1&&posts==1);
+ assert(g_resumeFocusLatestTicket==queuedThaw.ticket&&!g_resumeFocusPending.ticket&&!g_resumeFocusMailbox.ticket);
+ pass("a late notice between UI dispatch and worker start retains the confirmed thaw focus");
+ reset();submitThaw();onFindWindow=[] {++notification;};run();
+ assert(probes==1&&activations==1&&closes==1&&posts==1);
+ pass("confirmed thaw binds the latest same-wake notice before probing a discovered window");
+ reset();const auto returningThaw=submitThaw();postsSucceed=false;
+ onFindWindow=[] {++notification;g_powerLifecycle=PowerLifecycle::Resuming;g_inputReady=false;};run();
+ assert(probes==0&&activations==0&&closes==1&&posts==2&&g_resumeFocusPostDeferred);
+ assert(g_resumeFocusMailbox.ticket==returningThaw.ticket&&g_resumeFocusMailbox.deadline==returningThaw.deadline);
+ fixtureWindowMessage(WM_NULL);assert(jobs.empty()&&g_resumeFocusPending.ticket==returningThaw.ticket);
+ assert(g_resumeFocusPending.notBefore==returningThaw.notBefore&&g_resumeFocusPending.deadline==returningThaw.deadline);
+ onFindWindow={};now+=250;++notification;g_powerLifecycle=PowerLifecycle::Ready;g_inputReady=true;
+ focusResumeFocusTimerTickOnUiThread();run();focusResumedGameOnUiThread();
+ assert(probes==1&&activations==1&&closes==2&&jobs.empty()&&g_resumeFocusLatestTicket==returningThaw.ticket);
+ pass("zero-probe worker releases its process and returns the same ticket through the existing UI fallback");
+ for(int kind=0;kind<3;++kind){
+  reset();const auto admitted=submitThaw();++notification;g_inputReady=false;run();
+  assert(probes==0&&closes==0&&g_resumeFocusMailbox.ticket==admitted.ticket);
+  if(kind==0)now=admitted.deadline;else if(kind==1)++sleepBoundary;else g_exitRequested=true;
+  focusResumedGameOnUiThread();g_inputReady=true;focusResumeFocusTimerTickOnUiThread();
+  assert(jobs.empty()&&probes==0&&activations==0&&!g_resumeFocusPending.ticket&&!g_resumeFocusMailbox.ticket);
+  assert(status(kind==0?"deadline-expired":kind==1?"stale-power-generation":"exiting"));
+ }pass("returned thaw focus cannot survive its deadline, a new sleep edge or exit");
+ for(int kind=0;kind<4;++kind){
+  reset();submitThaw();++notification;
+  if(kind==0)notificationPending=true;else if(kind==1)++suspendSerial;else if(kind==2)manualMarker=true;else created=456;
+  run();assert(probes==0&&activations==0&&posts==1&&!g_resumeFocusMailbox.ticket);
+ }pass("late-notice continuation never probes across pending suspend, new serial, manual pause or reused PID");
+ reset();const auto olderThaw=submitThaw();
+ onFindWindow=[] {
+  ++notification;g_inputReady=false;
+  assert(focusQueueResumedGame(42,123,powerOrigin(),0)==ResumeFocusDelivery::Posted);
+ };run();
+ assert(status("superseded")&&probes==0&&g_resumeFocusMailbox.ticket>olderThaw.ticket&&posts==2);
+ onFindWindow={};g_inputReady=true;focusResumedGameOnUiThread();run();assert(probes==1&&activations==1);
+ pass("a newer request arriving during discovery keeps the mailbox and exclusively probes");
  for(int kind=0;kind<4;++kind){
   reset();const auto origin=powerOrigin();
   if(kind==0)++sleepBoundary;else if(kind==1)notificationPending=true;else if(kind==2)++suspendSerial;else ++generation;

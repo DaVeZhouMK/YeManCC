@@ -296,4 +296,23 @@ test('core owner layout: real capture and node binding enter only the current co
  const receiptDirectory=path.join(build,'authority'),token=beginCurrentCompileBatch({layout,actualToolFiles,receiptDirectory});assert.equal(token.kind,'CURRENT_CAPTURE_COMPILE_ONLY_IN_PROCESS_CAPABILITY');assert.equal(requireCurrentCompileBatch(token,{sourceRoot:f.snapshot,output:path.join(build,'not-built')}).managedInputContract,LEGACY_MANAGED_CONTRACT);
  const result=finishCurrentCompileBatch(token);assert.equal(result.status,'AUTHORITY_STABLE');assert.equal(result.fullSourceVerificationCalls,2);assert.equal(result.sourceApprovalGranted,false);assert.equal(result.currentConsumerAccepted,false);assert.equal(result.memberAdmissions,0);assert.equal(result.nodeTools.packageCodeExecuted,false);assert.equal(result.source.snapshotIntegrityVerified,true);assert.equal(result.source.creationStatus,'PASS');assert.equal(result.nodeTools.graphSha256,binding.graphAfterSha256);assert.throws(()=>requireCurrentCompileBatch(token),/LIVE_BRANDED_BATCH/);
  assert(!fs.existsSync(path.join(build,'not-built')));assert(fs.readFileSync(f.manifest).equals(f.manifestBytes));assert.equal(read(path.join(receiptDirectory,'authority-before.json')).sourceApprovalGranted,false);assert.equal(read(path.join(receiptDirectory,'authority-after.json')).currentConsumerAccepted,false);
+
+ const strict=(name)=>beginCurrentCompileBatch({layout,actualToolFiles,receiptDirectory:path.join(build,name),requireCurrentSource:true});
+ const current=finishCurrentCompileBatch(strict('strict-current'));
+ assert.equal(current.status,'AUTHORITY_STABLE');assert.equal(current.source.isCurrent,true);assert.equal(current.fullSourceVerificationCalls,2);
+ const openBeforeDrift=strict('strict-drift-at-close');
+ f.write('src/contract.txt','changed after successful capture and authority admission');
+ assert.throws(()=>strict('strict-drift-at-open'),/CURRENT_COMPILE_BATCH_PRIMARY_DRIFT_BEFORE_COMPILE/);
+ const rejectedOpen=read(path.join(build,'strict-drift-at-open','authority-before.json'));
+ assert.equal(rejectedOpen.status,'CURRENT_SOURCE_DRIFT_BEFORE_COMPILE');assert.equal(rejectedOpen.source.isCurrent,false);
+ assert.deepEqual(rejectedOpen.source.sourceDiff.changed.map(row=>row.path),['src/contract.txt']);
+ assert(!fs.existsSync(path.join(build,'strict-drift-at-open','authority-after.json')));
+ assert.throws(()=>finishCurrentCompileBatch(openBeforeDrift),/CURRENT_COMPILE_BATCH_PRIMARY_DRIFT_AFTER_COMPILE/);
+ const rejectedClose=read(path.join(build,'strict-drift-at-close','authority-after.json'));
+ assert.equal(rejectedClose.status,'CURRENT_SOURCE_DRIFT_AFTER_COMPILE');assert.equal(rejectedClose.currentConsumerAccepted,false);
+ assert.deepEqual(rejectedClose.source.sourceDiff.changed.map(row=>row.path),['src/contract.txt']);
+ assert.throws(()=>requireCurrentCompileBatch(openBeforeDrift),/LIVE_BRANDED_BATCH/);
+ const frozen=finishCurrentCompileBatch(beginCurrentCompileBatch({layout,actualToolFiles,receiptDirectory:path.join(build,'frozen-authority')}));
+ assert.equal(frozen.status,'AUTHORITY_STABLE');assert.equal(frozen.source.isCurrent,false);assert.equal(frozen.currentConsumerAccepted,false);
+ assert(fs.readFileSync(f.manifest).equals(f.manifestBytes));
 });

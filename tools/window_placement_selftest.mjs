@@ -176,12 +176,12 @@ await check('stable viewport stops its frame checks early and never rewrites equ
 });
 await check('native summon/maximize paths resample and cancel bounded taskbar checks', () => {
  const show = block(native, 'static void showWindowAnimated(HWND hwnd, int showCmd, bool activate) {');
- const showing = show.indexOf('if (showCmd == SW_MINIMIZE || showCmd == SW_MAXIMIZE');
- assert(show.indexOf('focusReflowMainWindow();') < showing, 'missing pre-show sample');
+ const showing = show.indexOf('ShowWindow(hwnd, showCmd);');
+ assert(showing >= 0 && show.indexOf('focusReflowMainWindow();') >= 0 && show.indexOf('focusReflowMainWindow();') < showing, 'missing pre-show sample');
  assert(show.indexOf('focusReflowMainWindow();', showing) > showing, 'missing post-show sample');
  assert(show.includes('scheduleTaskbarLayoutRecheck();'));
  assert(block(native, 'static void bringToFront(HWND hwnd, bool maximizeWindow = false) {').includes('showWindowAnimated(hwnd,'));
- assert(block(native, 'static void hideWindowAnimated(HWND hwnd) {').includes('stopTaskbarLayoutObserver();'));
+ assert(block(native, 'static void hideWindowAnimated(HWND hwnd, bool preserveRestoreIntent) {').includes('stopTaskbarLayoutObserver();'));
  const wnd = block(native, 'static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {');
  assert(wnd.includes('if (w == TASKBAR_LAYOUT_RECHECK_TIMER_ID)'));
  assert(wnd.includes('case WM_SYSCOMMAND:') && wnd.includes('scheduleTaskbarLayoutRecheck();'));
@@ -203,6 +203,8 @@ if(process.argv.includes('--native')){
  const vcvars='C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat';assert(fs.existsSync(vcvars),'MSVC x64 tools missing');
  const helper=block(native,'static bool windowPlacementIsLeft() {');
  const layoutWindow=block(native,'static HWND gameOverlayLayoutWindow(){');
+ const scaledWidth=block(native,'static int controllerEditorScaledWidth(');
+ const layoutOn=block(native,'static bool applyFullHeightLayoutOn(');
  const layout=block(native,'static bool applyFullHeightLayout(');
  const editorWidth=read('native/controller_editor_width.h').replace('#include <windows.h>','');
  const covers=block(native,'static bool focusWindowCoversMonitor(HWND hwnd, RECT monitorRect) {');
@@ -235,7 +237,7 @@ using DWORD=unsigned long;using UINT=unsigned int;using LPARAM=long long;
 constexpr DWORD ABM_GETSTATE=4,ABS_AUTOHIDE=1,ABM_GETAUTOHIDEBAREX=11;constexpr UINT ABE_LEFT=0,ABE_TOP=1,ABE_RIGHT=2,ABE_BOTTOM=3;
 struct APPBARDATA{DWORD cbSize;HWND hWnd;UINT uCallbackMessage;UINT uEdge;RECT rc;LPARAM lParam;};
 HWND g_hwnd=reinterpret_cast<HWND>(1);bool g_frameless=true,mainVisible=true,g_fullHeight=true,zoomed=false,iconic=false,monitorOk=true,rectOk=true,posOk=true,settingsOk=true;
-HWND g_gameOverlaySurface=nullptr;bool g_gameOverlaySurfaceAttached=false;
+HWND g_gameOverlaySurface=nullptr;bool g_gameOverlaySurfaceAttached=false,g_resizing=false;
 bool trayExists=false,trayVisible=true,trayGeometryOk=true,enumOk=true,secondaryExists=false,secondaryVisible=true;
 RECT trayRect{0,1040,1920,1080},secondaryRect{0,1040,1920,1080};
 HMONITOR trayMonitor=reinterpret_cast<HMONITOR>(1),secondaryMonitor=reinterpret_cast<HMONITOR>(2);
@@ -308,7 +310,10 @@ BOOL KillTimer(HWND,UINT_PTR){++timerKills;return TRUE;}
 ${covers}
 ${looksFullscreen}
 ${layoutWindow}
+${scaledWidth}
+${layoutOn}
 ${layout}
+static bool applyControllerEditorWidth(HMONITOR){throw std::logic_error("unexpected editor ownership in window placement fixture");}
 ${reflow}
 ${cancel}
 static void focusScheduleDisplayReflow();

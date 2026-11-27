@@ -16,7 +16,12 @@ Optional `--repo-root` identifies the current checkout; the default is this cont
 | wake-progress | tools/fan_wake_open_progress_selftest.ts | Actual wake → Open/OpenEvents progression, supersession and write admission using the existing NoIoHost |
 | display-evidence | tools/fan_control_display_evidence_selftest.ts | Actual bridge generation-resolution/display publication with an inert subscriber, including stale reads and failed delivery |
 
-Current getAdapters/getExtraAdapters contain no direct execution owner for these five original entries. Other fan adapters invoke their own regressions, rather than these complete original suites. A package script or an evidence-input association alone is not execution and is not treated as duplicate behavioral coverage. The runner emits this review as `duplicationReview`; the parent adds only one aggregate adapter.
+The parent registers one aggregate adapter. Direct ownership is audited separately when a registry or suite entry changes; an evidence-input reference or package script alone is not a direct execution owner. Routine fan execution does not materialize unrelated factories and reports `duplicationReview.status=NOT_RUN_SEPARATE_REGISTRATION_AUDIT`, not a passed audit. The separate audit uses the original base and extra factories and checks for both a duplicate aggregate and direct owners of any of the five original suites. It launches no business test and needs no existing result or work directory:
+
+```powershell
+$env:YMCC_FAN_GLOBAL_AUDIT_OWNERS = '1'
+node --test --test-name-pattern 'registration ownership audit' tools/ymcc_sim/global/consumer/fan-global/runner.test.mjs
+```
 
 The lifecycle deployment-record section creates fake manifests under os.tmpdir and injects its own runInstaller function. It does not invoke an installer. The child TEMP/TMP/TMPDIR values are redirected to that case's private tmp directory, keeping the original code intact. Literal HC runtime IDs there are fixture strings; no HC assembly or installed payload is read or loaded.
 

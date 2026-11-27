@@ -3,7 +3,7 @@
   "id": "steam.appearance-draft-consumer",
   "producer": "tools/steam_appearance_draft_selftest.mjs",
   "productSource": "src/bridge/steamAppearanceDraft.ts",
-  "producerSha256": "6ffc7937de3a25f83d5c307188ab7ad38a24b2cc695cb8bd5434ab739a40fda3",
+  "producerSha256": "26b57fbda8aebf05d25630e2030026e552496aa04ebe962876610474e2c6a7a2",
   "caseNames": [
     "view initialization only reads and never replays startup/apply",
     "one click changes the draft immediately without waiting or locking",
@@ -31,6 +31,7 @@
     "ordinary global preference failure stays visible after the theme owner saved without replay",
     "same saved choice repairs only the ordinary preference with no duplicate theme application",
     "an unrelated successful preference cannot erase a failed choice; explicit retry repairs without another theme write",
+    "a click during preference-only repair keeps its own three-second deadline",
     "ordinary preference retry cannot replay a former theme value over a newer external change",
     "corrupt or unknown journal values never replay an operation",
     "reset waits for an in-flight writer and temporarily locks only reset",

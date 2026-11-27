@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {pathToFileURL,fileURLToPath} from 'node:url';
+import {fileURLToPath} from 'node:url';
 import {prepareOwnedReturnSources} from './prepare_base.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url)),sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const pin=file=>{const bytes=fs.readFileSync(file);return {path:path.resolve(file),bytes:bytes.length,sha256:sha(bytes)};};
@@ -14,13 +14,10 @@ export async function prepareRealStoreSources({repo,output,profile='Checked',run
  const {run,snapshot,frozen,ranges,extract,endBrace}=original;
 const crashRelative='native/msi_crash_recovery_runtime.h',crashBytes=fs.readFileSync(path.join(repo,crashRelative));frozen.set(crashRelative,crashBytes);
 fs.copyFileSync(path.join(repo,crashRelative),path.join(snapshot,crashRelative),fs.constants.COPYFILE_EXCL);
-const {extractFunction}=await import(pathToFileURL(path.join(repo,'tools/ymcc_sim/global/controller-startup-return/extend-fixture.mjs')).href);
 function writerFunction(name){
- const raw=frozen.get(name==='msiCrashReadOwnedRecord'?crashRelative:'native/main.cpp').toString('utf8');
- if(name!=='sgWriteFileAtomicFlags')return extractFunction(raw,name);
- const match=/^bool sgWriteFileAtomicFlags\(/m.exec(raw);assert(match);
- const row=extractFunction(raw.slice(0,match.index)+'static '+raw.slice(match.index),name),code=row.code.slice(7);
- assert.equal(raw.slice(match.index,match.index+code.length),code,'ORIGINAL_NONSTATIC_WRITER_EXACT_BYTES');return {...row,code,sha256:sha(code),nonstaticTokenOnlyForExtraction:true};
+ const owner=name==='msiCrashReadOwnedRecord'?crashRelative:'native/main.cpp';
+ const code=extract(name==='sgWriteFileAtomicFlags'?'external-bool-function':'function',name,owner);
+ return {...ranges.at(-1),code};
 }
 const writerFunctions=['sgWriteFileAtomicFlags','sgWriteFileAtomic','msiCrashReadOwnedRecord'].map(writerFunction);
 const writerInclude=path.join(snapshot,'tools/actual-store-writer.inc');save(writerInclude,writerFunctions.map(row=>row.code).join('\n\n')+'\n');
@@ -78,7 +75,17 @@ const post=`
         storeEvidence={{"parameter",deny?"sharing-denial":"success"},{"beforeRecord",msiRecovery::encodeRecord(expected)},{"afterRecord",afterBytes},{"beforeIo",beforeIo},{"afterIo",afterIo},{"durableDischarges",g_count.durableDischarges},{"syntheticCanonicalCache",true},{"logicalOnAccepted",false},{"physicalReaderAccepted",false}};
 `;
 const closing=selectedCase.lastIndexOf('}');selectedCase=selectedCase.slice(0,closing)+post+selectedCase.slice(closing);
-const mainStart=cpp.indexOf('int main() {');assert(mainStart>=0);const mainEnd=endBrace(cpp,cpp.indexOf('{',mainStart));
+const [ordinaryEntry,...extraEntries]=[...cpp.matchAll(/^int main\(\) \{/gm)];
+assert(ordinaryEntry&&extraEntries.length===0,'EXACT_ORIGINAL_DEFAULT_ENTRY_REQUIRED');
+const alternate=/^int main\(int argc,char\*\* argv\) \{\r?\n#else\r?\nint main\(\) \{\r?\n#endif(?=\r?$)/m.exec(cpp);
+let mainStart=ordinaryEntry.index,entryPrefix='';
+if(alternate){
+ const helper=/^#ifdef YMCC_MSI_RUNTIME_HANDOFF_CASES\r?\nstatic void runtimeHandoff\(Checks& c\) \{/m.exec(cpp);
+ assert(helper&&helper.index<alternate.index&&alternate.index<mainStart,'EXACT_RUNTIME_HANDOFF_ENTRY_REQUIRED');
+ assert.equal(cpp.slice(endBrace(cpp,helper.index+helper[0].length-1),alternate.index).trim(),'','HANDOFF_HELPER_MUST_END_BEFORE_ENTRY');
+ mainStart=alternate.index;entryPrefix='#endif\n';
+}else assert(!/^int main\(int argc,char\*\* argv\)/m.test(cpp),'ORIGINAL_ALTERNATE_ENTRY_LAYOUT_DRIFT');
+const mainEnd=endBrace(cpp,ordinaryEntry.index+ordinaryEntry[0].length-1);
 const newMain=`int wmain(int argc,wchar_t** argv) {
  if(argc!=3)return 2;const std::wstring parameter=argv[2];if(parameter!=L"success"&&parameter!=L"sharing-denial")return 2;
  const bool deny=parameter==L"sharing-denial";unsigned long error=0;g_realStoreRoot=argv[1];if(!msiStoreFixture::initialize(g_realStoreRoot,error))return 3;
@@ -91,7 +98,7 @@ ${selectedCase}
  const json report={{"passed",c.failures.empty()},{"tests",c.cases.size()},{"assertions",c.assertions},{"failures",c.failures},{"cases",c.cases},{"storeEvidence",storeEvidence},{"finalIo",finalIo},{"realFileTransaction",true},{"originalCase",${JSON.stringify(caseName)}},{"noInputHost",true},{"noSdkDeviceIo",true},{"logicalOnAccepted",false},{"physicalReaderAccepted",false},{"legacyOtherCases","NOT_RUN"}};
  std::cout<<report.dump(2)<<'\\n';return c.failures.empty()?0:1;
 }`;
-change(cpp.slice(mainStart,mainEnd),newMain,'only-original-selected-case-and-two-file-parameters');
+change(cpp.slice(mainStart,mainEnd),entryPrefix+newMain,'only-original-selected-case-and-two-file-parameters');
 let inverse=cpp;for(const edit of [...edits].reverse()){const before=Buffer.from(edit.beforeBase64,'base64').toString('utf8'),after=Buffer.from(edit.afterBase64,'base64').toString('utf8');assert.equal(inverse.split(after).length,2);inverse=inverse.replace(after,()=>before);}assert.equal(inverse,originalCpp,'EXACT_CONSUMER_DELTA_INVERSE');
 const consumer=path.join(snapshot,'tools/msi_owned_return_real_store_selftest.cpp');save(consumer,cpp);
 

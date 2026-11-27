@@ -34,9 +34,18 @@ export function generateOemConsumers({repo,out,sourcePath=path.join(repo,'native
  for(const m of source.matchAll(/^static const OemKeyDef \w+\[\] = \{/gm))definitions.push(block(m[0]));
  definitions.push('template<size_t N>\n'+fn('oemCatalogOf'),fn('oemCatalogForFamily'));
  definitions.push(...oemInputBindingFunctions.map(fn),fn('oemKeyCaptureImplemented'),fn('nativeKeyboardShortcutMaskBit'));
+ for(const name of ['ymccDmiNormalize','ymccResolveFamily','ayaOemKeyboardEvidenceBindingFor','nativeInputShortcutDesktopKey','nativeOemKeyboardContributions']) {
+  if(name==='ymccResolveFamily')definitions.push(block('struct MachineIdentity {'));
+  definitions.push(fn(name));
+ }
  for(const name of ['g_oemBackProfileId','g_oemShortcutEdgeEpoch','g_oemKbDown','g_oemKbDownRaw','g_oemMouseLeft','g_oemKeyHooksActive','g_oemKeyMask','g_oemBackStateKb','g_gpdBackIfaceGen','g_gpdBackIfaceReady','g_gpdChordSnapPhysical','g_gpdChordSnapBaseKey','g_gpdChordSnapPrefix','g_gpdChordPubGen','g_oemRawPathActive','g_oemRawVkAllowed','g_oemRawAdmitDev','g_oemHooksWanted','g_oemBackMappingEnabled','g_oemGateTargetEnabled','g_oemGatePersona','g_oemGateBackMapping'])definitions.push(global(name));
  definitions.push(String.raw`
-struct {YmccFamily family=YmccFamily::Unknown;std::string deviceClass;bool resolved=true;} g_machineIdentity;
+static MachineIdentity g_machineIdentity;
+static std::atomic<uint64_t> g_ayaOemKeyboardEvidenceBinding{0};
+static std::atomic<uint32_t> g_desktopFunctionCaptureMask{0};
+static std::atomic<bool> g_desktopChordWanted{false},g_oemRawPathWanted{false};
+static void modelAdaptationChord(int,uint32_t,uint64_t,bool,int) noexcept {}
+static void oemVirtualPublishKeyboard(uint64_t,int,int,uint32_t) noexcept {}
 struct {bool hasControl=false,hasStableInput=false;std::wstring controlPath,inputPath;} g_rog;
 static bool testContainerReady=false,testUsbReady=false,testLogs=true;
 static unsigned testHookBoundaryCalls=0,testIdentityCalls=0;
@@ -49,7 +58,7 @@ static void writeLog(const char*,const std::string&){}
 static void appendNativeLifecycleLog(const char* event,json row){if(testLogs){row["event"]=event;testLogRows.push_back(std::move(row));}}
 static bool domainLogEnabled(const char*){return testLogs;}
 // Terminal hook installation is an in-memory boundary; no Windows hook is installed.
-static void oemBackMappingSetEnabled(bool enable){++testHookBoundaryCalls;g_oemHooksWanted.store(enable);}
+static void oemBackMappingSetEnabled(bool enable){++testHookBoundaryCalls;g_oemHooksWanted.store(enable);g_oemRawPathActive.store(g_oemRawPathWanted.load());}
 `);
  definitions.push(fn('ymccIsRogFamily'),fn('oemBackHookRecompute'),fn('oemRawPathReset'),fn('oemBackMappingRefreshGate'),fn('ymccFamilyName'),fn('gamepadOemPressedKeys'));
  const ipc=source.indexOf('ipc_on("oem.keys.get",'),start=source.indexOf('[]',ipc),open=source.indexOf('{',start),end=closeBrace(source,open)+1;
@@ -60,11 +69,18 @@ static void oemBackMappingSetEnabled(bool enable){++testHookBoundaryCalls;g_oemH
  const cases=catalog.devices.flatMap(d=>d.aliases.map(alias=>({alias,canonical:d.consumerClass})));
  const familyBlock=definitions[0],familyNames=familyBlock.slice(familyBlock.indexOf('{')+1,familyBlock.lastIndexOf('}')).replace(/\/\/[^\n]*/g,'').split(',').map(s=>s.trim().split('=')[0].trim()).filter(Boolean);
  const harness=path.join(repo,'tools/fixtures/unified_oem_input/harness.cpp'),harnessBytes=fs.readFileSync(harness);
+ const menuPolicy=path.join(repo,'native/win5_menu_shortcut_policy.h'),menuPolicyBytes=fs.readFileSync(menuPolicy);
+ fs.writeFileSync(path.join(out,'win5_menu_shortcut_policy.h'),menuPolicyBytes);
+ const fanCatalog=path.join(repo,'capabilities/PinnedFanSourceCatalog.cs'),fanCatalogBytes=fs.readFileSync(fanCatalog);
+ const max3Fan=fanCatalogBytes.toString('utf8').match(/new\("(YeManCC\.SourceDevices\.GPDWinMax3)","([^"]+)"[^;]*?new\[\]\{"([^"]+)"\},new\[\]\{"([^"]+)"\}/);
+ if(!max3Fan)throw Error('MAX3_FAN_IDENTITY_MISSING');
+ definitions.push('static constexpr const char* max3FanIdentity[]={'+max3Fan.slice(1).map(JSON.stringify).join(',')+'};');
  const jsonHeader=path.join(repo,'deps/json/json.hpp'),jsonBytes=fs.readFileSync(jsonHeader),jsonCopy=path.join(out,'json.hpp');fs.writeFileSync(jsonCopy,jsonBytes);
  const cpp=headers.preamble+'#define WIN32_LEAN_AND_MEAN\n#define NOMINMAX\n#include <windows.h>\n#include <xinput.h>\n#include <algorithm>\n#include <atomic>\n#include <cstring>\n#include <cstdint>\n#include <iostream>\n#include <string>\n#include <vector>\n#include <stdexcept>\n#include "json.hpp"\nusing json=nlohmann::json;\n'+definitions.join('\n')+'\nstruct AliasCase{const char* alias;const char* canonical;};\nstatic const AliasCase aliases[]={\n'+cases.map(r=>'{'+JSON.stringify(r.alias)+','+JSON.stringify(r.canonical)+'}').join(',\n')+'\n};\nstatic const YmccFamily families[]={'+familyNames.map(n=>'YmccFamily::'+n).join(',')+'};\n'+harnessBytes.toString('utf8');
- fs.writeFileSync(path.join(out,'actual-oem-consumers.cpp'),cpp);fs.writeFileSync(path.join(out,'main.snapshot.cpp'),bytes);
+ fs.writeFileSync(path.join(out,'actual-oem-consumers.cpp'),'#include "win5_menu_shortcut_policy.h"\n'+cpp);fs.writeFileSync(path.join(out,'main.snapshot.cpp'),bytes);
  const inputs=[{file:'native/main.cpp',path:sourcePath,sha256:sha(bytes)},{file:'capabilities/hc-device-catalog.json',path:catalogPath,sha256:sha(catalogBytes)},{file:'tools/fixtures/unified_oem_input/harness.cpp',path:harness,sha256:sha(harnessBytes)},{file:'deps/json/json.hpp',path:jsonHeader,sha256:sha(jsonBytes)},...headers.inputs.map(r=>({file:r.file,path:r.original,sha256:r.sha256}))];
  for(const file of ['tools/fixtures/unified_oem_input/generate.mjs','tools/hc_oem_input_consumer_selftest.mjs','tools/lib/hc_oem_input_fixture.mjs','tools/fixtures/hc_remaining_model_capabilities/expectations.mjs','tools/fixtures/hc_reviewed_calibration/toolchain.mjs']){const original=path.join(repo,file);inputs.push({file,path:original,sha256:sha(fs.readFileSync(original))});}
- const result={inputs,fragments,selections:cases.length*familyNames.length,generatedCppSha256:sha(cpp),hardwareIo:false,scope:'actual complete gate, query, pressed-key enumeration, hook recompute and raw-path reset; hook install/device identity/log sinks are memory boundaries'};
+ for(const [original,input] of [[menuPolicy,menuPolicyBytes],[fanCatalog,fanCatalogBytes]])inputs.push({file:path.relative(repo,original),path:original,sha256:sha(input)});
+ const result={inputs,fragments,selections:cases.length*familyNames.length,generatedCppSha256:sha(fs.readFileSync(path.join(out,'actual-oem-consumers.cpp'))),hardwareIo:false,scope:'actual complete gate, query, pressed-key enumeration, hook recompute and raw-path reset; hook install/device identity/log sinks are memory boundaries'};
  fs.writeFileSync(path.join(out,'source-binding.json'),JSON.stringify(result,null,2)+'\n');return result;
 }

@@ -13,6 +13,7 @@ const tracked=[
  'src/bridge/performanceControls.ts','src/bridge/frameRateModel.ts','src/bridge/controllerPersona.ts','src/bridge/settingsSnapshot.ts',
  'src/bridge/performanceSchedule.ts','src/bridge/gamePolicyRuntime.ts','src/bridge/deckyPerformanceActions.ts','decky-plugin/src/performanceModel.ts',
  'src/App.vue','src/bridge/yeman.ts','src/bridge/quickActionLock.ts','src/bridge/bootModes.ts','src/bridge/bootModeModel.ts','src/bridge/bootModeSharedShortcuts.ts','src/bridge/screenTouchpadDefaults.ts',
+ 'src/bridge/powerLifecycleState.ts','src/bridge/inputConfigHash.ts','src/bridge/inputApplicationReceipt.ts','src/bridge/settingsBaseline.ts','PowerControl/settings-baseline.json',
 ];
 const hash=file=>({path:path.resolve(file),bytes:fs.statSync(file).size,sha256:createHash('sha256').update(fs.readFileSync(file)).digest('hex')});
 const identity=()=>tracked.map(hash);
@@ -36,14 +37,20 @@ function bootModel(){
  const snapshot=evaluate(read('src/bridge/settingsSnapshot.ts'),{'vue':require('vue')});
  const shortcuts=evaluate(read('src/bridge/bootModeSharedShortcuts.ts'),{'./settingsSnapshot':snapshot});
  const touch=evaluate(read('src/bridge/screenTouchpadDefaults.ts'));
- return evaluate(read('src/bridge/bootModeModel.ts'),{'./bootModeSharedShortcuts':shortcuts,'./screenTouchpadDefaults':touch});
+ const receipt=evaluate(read('src/bridge/inputApplicationReceipt.ts'),{
+  './controllerPersona':evaluate(read('src/bridge/controllerPersona.ts')),'./inputConfigHash':evaluate(read('src/bridge/inputConfigHash.ts'))});
+ const baseline=evaluate(read('src/bridge/settingsBaseline.ts'),{'../../PowerControl/settings-baseline.json':JSON.parse(read('PowerControl/settings-baseline.json'))});
+ return evaluate(read('src/bridge/bootModeModel.ts'),{'./bootModeSharedShortcuts':shortcuts,'./screenTouchpadDefaults':touch,'./inputApplicationReceipt':receipt,'./settingsBaseline':baseline});
 }
 function bootConsumer(f,extractions){
  const file='src/bridge/bootModes.ts',source=read(file),ast=ts.createSourceFile(file,source,ts.ScriptTarget.Latest,true);
- const fn=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='applyRuntimeModule');assert(fn,'actual Boot applyRuntimeModule');
- const text=fn.getText(ast),start=fn.getStart(ast),end=fn.end;
- extractions.push({file,function:'applyRuntimeModule',start,end,sha256:createHash('sha256').update(text).digest('hex'),selection:'Complete original function; only id=performance invoked. All other module branches NOT_RUN.'});
- return evaluate(text+'\nexport {applyRuntimeModule};',{}, {
+ const nodes=['recordModule','requireBootActionOwner','ownedBootAction','bootPreferenceWrite','startupOwners','applyRuntimeModule'].map(name=>{
+  const node=ast.statements.find(n=>ts.isFunctionDeclaration(n)?n.name?.text===name:ts.isVariableStatement(n)&&n.declarationList.declarations.some(d=>d.name.getText(ast)===name));
+  assert(node,'actual Boot runtime entry '+name);return extractedNode(file,ast,node,extractions,name);
+ });
+ const boot=bootModel();
+ return evaluate(nodes.join('\n')+'\nexport {applyRuntimeModule};',{}, {
+  cloneBootValue:boot.cloneBootValue,normalizeBootConfig:boot.normalizeBootConfig,
   normalizeControlPowerSchemes:models.normalizeControlPowerSchemes,normalizeContinuousControls:models.normalizeContinuousControls,frameRatePair:frames.frameRatePair,
   applyPerformanceConfiguration:f.schedule.applyPerformanceConfiguration,LABELS:{performance:'performance'},
  }).applyRuntimeModule;
@@ -57,21 +64,24 @@ function extractedNode(file,ast,node,extractions,label,offset=0){
 function actualPowerReconcile(f,ports,extractions){
  const file='src/bridge/yeman.ts',ast=ts.createSourceFile(file,read(file),ts.ScriptTarget.Latest,true);
  const variables=['PW','SCHEMES','powerSchemeEnsureQueue','schemeProtectionSuspendUntil','schemeProtectionSuspendMode'];
- const names=['isGuid','readRememberedPowerScheme','rememberYemanScheme','rememberManualScheme','ensureRememberedYemanSchemeActive','reconcileRememberedPowerScheme'];
+ const names=['isGuid','readRememberedPowerScheme','rememberYemanScheme','rememberManualScheme','assertPowerSchemeSelectionCurrent','ensureRememberedYemanSchemeActive','reconcileRememberedPowerScheme','queueRememberedPowerScheme','captureStaticWakeAdmission'];
  const selected=[...variables,...names].map(name=>{const node=ast.statements.find(node=>ts.isFunctionDeclaration(node)?node.name?.text===name:ts.isVariableStatement(node)&&node.declarationList.declarations.some(d=>d.name.getText(ast)===name));assert(node,'actual power declaration '+name);return extractedNode(file,ast,node,extractions,name)});
  const terminal=f.powerTerminals;let actual;
  const realActive=()=>f.activeScheme==='test-yeman'?actual.PW.YEMAN:['test-bal','test-besteff','test-bestperf'].includes(f.activeScheme)?actual.PW.WIN_BAL:f.activeScheme;
  actual=evaluate(selected.join('\n')+'\nexport {readRememberedPowerScheme,rememberManualScheme};',{}, {
   readSettingsSection:f.settingsRepository.readSettingsSection,saveSettingsSection:f.settingsRepository.saveSettingsSection,
-  ensureYemanScheme:async()=>{f.effects.push('ensure-yeman-base')},getActiveScheme:async()=>realActive(),
+  ensureYemanScheme:async()=>{f.effects.push('ensure-yeman-base')},getActiveScheme:async()=>{await ports.beforeSchemeActiveRead?.();return realActive();},
   setActiveScheme:async guid=>terminal.setActiveScheme(guid===actual.PW.YEMAN?'test-yeman':guid===actual.PW.WIN_BAL?'test-bal':guid),
+  setActiveSchemeForPowerScope:async(guid,scope)=>terminal.setActiveSchemeForPowerScope(guid===actual.PW.YEMAN?'test-yeman':guid===actual.PW.WIN_BAL?'test-bal':guid,scope),
+  captureSleepPowerWrite:options=>options,
+  getSharedPowerLifecycle:f.readRuntimePower,isSharedPowerLifecycleAdmitted:f.isPowerAdmitted,
   setOverlay:async key=>{f.effects.push('overlay-'+key)},
  });
  terminal.ensureRememberedYemanSchemeActive=actual.ensureRememberedYemanSchemeActive;
  ports.onSelectedScheme=async key=>key==='yeman'?actual.rememberYemanScheme('yeman'):actual.rememberManualScheme(key,actual.PW.WIN_BAL);
  return actual;
 }
-function appStartupConsumer(f,{restoreBoot,onStage,powerGate=async()=>true},extractions){
+function appStartupConsumer(f,{restoreBoot,onStage,beginReadback=f.beginPowerReadback,readNativePower=async()=>f.readRuntimePower(),refreshCore=async()=>{throw Error('timer NOT_RUN')}},extractions){
  const file='src/App.vue',raw=read(file),match=/<script setup[^>]*>([\s\S]*?)<\/script>/.exec(raw);assert(match,'actual App setup script');
  const offset=raw.indexOf(match[1]),ast=ts.createSourceFile(file,match[1],ts.ScriptTarget.Latest,true);
  const hasCall=(node,name)=>{let found=false;const visit=n=>{if(ts.isCallExpression(n)&&n.expression.getText(ast)===name)found=true;ts.forEachChild(n,visit)};visit(node);return found};
@@ -89,17 +99,22 @@ function appStartupConsumer(f,{restoreBoot,onStage,powerGate=async()=>true},extr
  assert(unmount,'actual App unmount fallback');const cleanup=unmount.expression.arguments.find(ts.isArrowFunction).body.statements.filter(node=>node.getText(ast).startsWith('stopStartupPerformanceWatch'));
  assert.equal(cleanup.length,2,'actual unmount unsubscribe and clear');
  const extract=(node,label)=>extractedNode(file,ast,node,extractions,label,offset);
+ const helpers=['matchesOrdinaryPowerScope','powerLifecycleReadyForWrites','runOrdinaryPowerRestore'].map(name=>{
+  const node=ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text===name);assert(node,'actual App scope helper '+name);return extract(node,name);
+ }).join('\n');
  const roots=rootNodes.map(node=>extract(node,'App.root-lifecycle-variable')).join('\n'),receipts=receiptNodes.map(node=>extract(node,'App.startup-receipt-listener')).join('\n'),dispose=cleanup.map(node=>extract(node,'App.unmount-receipt-cleanup')).join('\n');
  const nodes=[start,boot,subscribe,fallback].map((node,index)=>extract(node,['App.runtime-start','App.boot-call','App.scheme-subscribe','App.startup-fallback'][index]));
  const events=new Map(),timers=[],warnings=[],restores=[],fallbacks=[],reconciles=[],watch={subscribed:0,disposed:0,active:0,notifications:0,invalidations:0};
- const module=evaluate(`${roots}\nexport async function run(){${receipts}\n${nodes[0]}\nawait onStage('runtime-started');\n${nodes[1]}\nawait onStage('boot-returned');\n${nodes[2]}\nawait onStage('before-app-fallback');\n${nodes[3]}\nawait onStage('app-fallback-returned');}\nexport function advanceResumeGeneration(){latestResumeGeneration++;}\nexport function unmountWatch(){${dispose}}\nexport function stop(){stopSchemeWatch?.();${dispose}}`,{}, {
+ const module=evaluate(`${roots}\n${helpers}\nexport async function run(){${receipts}\n${nodes[0]}\nawait onStage('runtime-started');\n${nodes[1]}\nawait onStage('boot-returned');\n${nodes[2]}\nawait onStage('before-app-fallback');\n${nodes[3]}\nawait onStage('app-fallback-returned');}\nexport function advanceResumeGeneration(){latestResumeGeneration++;}\nexport function unmountWatch(){${dispose}}\nexport function stop(){stopSchemeWatch?.();${dispose}}`,{}, {
   startGamePolicyRuntime:f.runtime.startGamePolicyRuntime,restoreSelectedBootMode:restoreBoot,onStage,
   onContinuousPerformanceApplied:(callback,onInvalidated)=>{watch.subscribed++;watch.active++;const stop=f.schedule.onContinuousPerformanceApplied(key=>{watch.notifications++;callback(key)},()=>{watch.invalidations++;onInvalidated?.()});let active=true;return()=>{if(active){active=false;watch.active--;watch.disposed++;stop()}}},
-  aiFanMockActive:false,aiCpuIsolated:false,powerLifecycleReadyForWrites:powerGate,
+  aiFanMockActive:false,aiCpuIsolated:false,AbortController,powerLifecycle:{get:readNativePower},
+  beginSharedPowerLifecycleReadback:beginReadback,onSharedPowerLifecycle:f.observePower,
   on:(name,callback)=>{events.set(name,callback);return()=>events.delete(name)},scheduleSleepPowerPlanOptimization(){},globalRefreshKey:{value:0},
-  reconcileRememberedPowerScheme:async()=>{const owner=await f.actualReconcile.reconcileRememberedPowerScheme();reconciles.push(owner);return owner},
+  reconcileRememberedPowerScheme:async (current,scope)=>{const owner=await f.actualReconcile.reconcileRememberedPowerScheme(current,scope);reconciles.push(owner);return owner},
   restorePerformanceScheduleIfConfigured:async(...args)=>{const entry={options:Object.fromEntries(Object.entries(args[1]??{}).map(([key,value])=>[key,typeof value==='function'?'[live callback]':clone(value)])),intentAtCall:args[1]?.completedStartupIntent?.()??null};restores.push(entry);try{const result=await f.schedule.restorePerformanceScheduleIfConfigured(...args);entry.result=result;return result}catch(error){entry.error=String(error);throw error}},
-  window:{setTimeout:(run,ms)=>{timers.push({run,ms});return timers.length}},refreshPerformanceScheduleCoreMode:async()=>{throw Error('timer NOT_RUN')},
+  window:{setTimeout:(run,ms)=>{timers.push({run,ms});return timers.length}},refreshPerformanceScheduleCoreMode:refreshCore,
+  getSharedPowerLifecycle:f.readRuntimePower,sharedPowerWriteScope:f.powerWriteScope,resumeLifecycleActive:true,
   applyProgramControls:async()=>{fallbacks.push('legacy-no-owner-fallback')},console:{warn:(...args)=>warnings.push(args.map(String)),log:console.log},
  });
  return {...module,events,timers,warnings,restores,fallbacks,reconciles,watch};
@@ -340,6 +355,52 @@ export async function verifyPowerSchemes({output}={}){
  });
 
 
+ await check('app-startup/delayed-core-stays-in-original-scope',async()=>{
+  const initial={known:true,phase:'ready',hardwareWritesAllowed:true,generation:2,suspendSerial:2,observedNotificationSequence:2,publicationRevision:2};
+  const ports={lifecycle:initial},f=fixture({mode:'auto',ports}),called=[];
+  f.actualReconcile=actualPowerReconcile(f,ports,extractions);
+  await f.actualReconcile.rememberYemanScheme('auto');
+  const app=appStartupConsumer(f,{restoreBoot:async()=>{},onStage:async()=>settle(f,true),refreshCore:async scope=>{
+   called.push({scope:clone(scope),result:await f.schedule.refreshPerformanceScheduleCoreMode(scope)});
+  }},extractions);
+  try{
+   await app.run();assert.equal(app.timers.length,1);assert.equal(app.timers[0].ms,3000);
+   f.publishRuntimePower({generation:3,suspendSerial:3,observedNotificationSequence:3,publicationRevision:3});
+   await settle(f,true);clear(f);app.timers[0].run();await settle(f,true);
+   assert.deepEqual(called,[{scope:[2,2,2],result:false}]);assert.deepEqual(f.hardwareWrites,[]);
+  }finally{app.stop();f.runtime.stopGamePolicyRuntime()}
+ });
+
+ for(const boundary of ['native-read','scheme-read'])await check('actual-app/scheme-change/reject-superseded-'+boundary,async()=>{
+  const initial={known:true,phase:'ready',hardwareWritesAllowed:true,generation:2,suspendSerial:2,observedNotificationSequence:2,publicationRevision:2};
+  const ports={lifecycle:initial},f=fixture({mode:'auto',ports});
+  f.actualReconcile=actualPowerReconcile(f,ports,extractions);
+  await f.actualReconcile.rememberYemanScheme('auto');
+  const advance=()=>f.publishRuntimePower({generation:3,suspendSerial:3,observedNotificationSequence:3,publicationRevision:3});
+  let triggered=false;
+  const app=appStartupConsumer(f,{restoreBoot:async()=>{},onStage:async()=>settle(f,true),readNativePower:async()=>{
+   const reading=f.readRuntimePower();
+   if(triggered&&boundary==='native-read'){triggered=false;advance();}
+   return reading;
+  }},extractions);
+  try{
+   await app.run();
+   f.runtime.stopGamePolicyRuntime();
+   const off=f.observePower();
+   try{
+    await settle(f,true);clear(f);
+    if(boundary==='scheme-read')ports.beforeSchemeActiveRead=async()=>{ports.beforeSchemeActiveRead=undefined;advance();};
+    triggered=true;
+    const previous=app.restores.length;
+    await app.events.get('power.schemeChanged')();
+    assert.equal(app.restores.length,previous,'old scheme notification must not restore performance on the newer Ready');
+    await app.events.get('power.schemeChanged')();
+    assert.equal(app.restores.length,previous+1,'a current scheme notification can restore once');
+    assert.equal(app.restores.at(-1).result,'auto');
+   }finally{off();}
+  }finally{app.stop();f.runtime.stopGamePolicyRuntime();}
+ });
+
  for(const dedicated of [false,true])await check('startup-receipt/exact-auto-no-reconsume/'+(dedicated?'dedicated':'global'),async()=>{
   const f=fixture({dedicated,mode:'auto'}),completed=[],stop=f.schedule.onContinuousPerformanceApplied(key=>completed.push(key));
   try{
@@ -384,9 +445,12 @@ export async function verifyPowerSchemes({output}={}){
  for(const ending of ['normal','gate-closed','fallback-throws','unmount-before-fallback'])await check('actual-app/startup/listener-disposed/'+ending,async()=>{
   const ports={},f=fixture({mode:'auto',ports}),completed=[];f.actualReconcile=actualPowerReconcile(f,ports,extractions);
   let app;
-  app=appStartupConsumer(f,{restoreBoot:async()=>{},powerGate:async()=>{
-   if(app&&app.phasesBeforeFallback){if(ending==='gate-closed')return false;if(ending==='fallback-throws')throw Error('injected final startup gate failure')}
-   return true;
+  app=appStartupConsumer(f,{restoreBoot:async()=>{},readNativePower:async()=>{
+   if(app?.phasesBeforeFallback&&ending==='gate-closed')return null;
+   return f.readRuntimePower();
+  },beginReadback:()=>{
+   if(app?.phasesBeforeFallback&&ending==='fallback-throws')throw Error('injected final startup gate failure');
+   return f.beginPowerReadback();
   },onStage:async stage=>{
    if(stage==='runtime-started')await settle(f,true);
    if(stage==='before-app-fallback'){app.phasesBeforeFallback=true;if(ending==='unmount-before-fallback'){app.unmountWatch();assert.equal(app.watch.active,0);assert.equal(app.watch.disposed,1)}}
@@ -421,12 +485,13 @@ export async function verifyPowerSchemes({output}={}){
 
  const sourceAfter=identity(),drift=sourceBefore.filter((v,i)=>v.sha256!==sourceAfter[i].sha256).map(v=>v.path);
  if(drift.length)cases.push({id:'identity/source-stable',pass:false,executedThisRun:true,error:'Source changed during selected regression: '+drift.join(',')});
- const dependencies=[...new Set([process.execPath,require.resolve('@esbuild/win32-x64/esbuild.exe'),...Object.keys(require.cache)])].filter(file=>fs.existsSync(file)).map(hash);
+ const esbuildRequire=createRequire(require.resolve('esbuild'));
+ const dependencies=[...new Set([process.execPath,esbuildRequire.resolve('@esbuild/win32-x64/esbuild.exe'),...Object.keys(require.cache)])].filter(file=>fs.existsSync(file)).map(hash);
  const report={schema:1,pass:cases.every(c=>c.pass),count:cases.length,failed:cases.filter(c=>!c.pass).length,executedThisRun:cases.length,startedAt:new Date(Date.now()-(performance.now()-started)).toISOString(),finishedAt:new Date().toISOString(),elapsedMs:performance.now()-started,
   canonicalEntry:'tools/performance_entry_parity_selftest.mjs --power-schemes-only',module:'performance',parentGate:'NOT_RUN; explicit selected extension only; no registration/minimum expansion',
   reuseSearch:['Existing performance_entry_parity_selftest covers actual Decky/backend parity; extended by an explicit branch.','Existing performance_memory_fixture keeps actual schedule/runtime; only terminal ports added.','No existing performance_power_schemes verifier or registered four-choice regression found.'],
   scope:'Actual performanceSchedule, gamePolicyRuntime observers, Decky adapter/model, Boot normalize/resolve and AST-extracted complete applyRuntimeModule performance branch; actual App startup performance AST nodes and real yeman reconcile/remember helper AST with memory terminals. Terminal filesystem/settings/IPC/power/TDP/CPU/RTSS are memory only.',
-  notRun:['Real hardware and installed app','Actual yeman helper implementation/hardware semantics (peer owned)','Decky TSX renderer and Vue UI','Other Boot module branches and native launch pipeline; Boot once-per-Windows-boot claim uses a controlled test adapter','Whole App mount, power.schemeChanged delivery and 3-second core timer are NOT_RUN','Default suite, parent/release gates, whole-system lifecycle'],realHardwareCalls:0,
+  notRun:['Real hardware and installed app','Actual yeman helper implementation/hardware semantics (peer owned)','Decky TSX renderer and Vue UI','Other Boot module branches and native launch pipeline; Boot once-per-Windows-boot claim uses a controlled test adapter','Whole App mount, live power.schemeChanged delivery and real-time timer duration are NOT_RUN','Default suite, parent/release gates, whole-system lifecycle'],realHardwareCalls:0,
   cases,observations,sourceBefore,sourceAfter,drift,dependencies,extractions:[...new Map(extractions.map(e=>[e.sha256,e])).values()],command:{executable:process.execPath,argv:process.argv,cwd:process.cwd()}};
  if(output){fs.mkdirSync(output,{recursive:true});fs.writeFileSync(path.join(output,'performance-power-schemes.json'),JSON.stringify(report,null,2)+'\n');
   fs.writeFileSync(path.join(output,'REPORT.md'),`# Selected backend power schemes regression\n\n${report.pass?'PASS':'FAIL'}: ${report.count-report.failed}/${report.count} actual selected cases; ${report.elapsedMs.toFixed(2)} ms.\n\n${report.scope}\n\nReal hardware calls: 0. Final source pins are supplied by the coordinating user; this report binds its own sourceBefore/sourceAfter hashes.\n\nNot run: ${report.notRun.join('; ')}.\n\nFailures:\n\n${cases.filter(c=>!c.pass).map(c=>'- '+c.id+'\n\n```\n'+c.error+'\n```').join('\n')}\n\nObservations:\n\n\`\`\`json\n${JSON.stringify(observations,null,2)}\n\`\`\`\n`);

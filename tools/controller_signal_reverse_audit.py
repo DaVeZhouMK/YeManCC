@@ -14,8 +14,10 @@ import struct
 import pathlib
 import re
 import zipfile
+from ai_log_reader import COMMON_FRAME_COPIES_MARKER, common_frame_copies_projection, evidence_json_loads
 
-FILES = re.compile(r"^(?:native-(?:lifecycle|detail)|virtual-gamepad|input-host-signal)\.log(?:\.(?:\d+|prev))?$", re.I)
+FILES = re.compile(r"^(?:virtual-gamepad|input-host-signal)\.log(?:\.(?:\d+|prev))?$", re.I)
+NATIVE_FILES = re.compile(r"^native-(?:lifecycle|detail)(?:\.log(?:\.(?:\d+|prev|previous))?|\.(?:\d+|prev|previous)\.log)$", re.I)
 FOCUS_FILES = re.compile(r"^focus-trace\.log(?:\.(?:\d+|prev))?$", re.I)
 EVENTS = {
     "input-native-signal-window", "input-host-signal",
@@ -40,7 +42,10 @@ def token(value):
     return isinstance(value, str) and bool(value.strip()) and len(value) <= 256
 
 def location(record):
-    return {"file": record["file"], "line": record["line"], "time": record["data"].get("time")}
+    result = {"file": record["file"], "line": record["line"], "time": record["data"].get("time")}
+    if "archiveEntryOccurrence" in record:
+        result["archiveEntryOccurrence"] = record["archiveEntryOccurrence"]
+    return result
 
 def native_foreground_observation(row):
     value = object_value(row.get("foregroundObservation"))
@@ -78,6 +83,13 @@ def frame_check(row):
     proof = object_value(row.get("frameProof"))
     ack = object_value(proof.get("hostReceipt"))
     source = object_value(row.get("source"))
+    copies = common_frame_copies_projection(row)
+    if copies is not None and copies['state'] == 'restorable':
+        restored = copies['restoredFields']
+        if 'source' in restored:
+            source = {**source, **restored['source']}
+        if 'frameProof' in restored:
+            ack = {**ack, **restored['frameProof']['hostReceipt']}
     issues = []
     if type(row.get("formatVersion")) is not int or row.get("formatVersion") != 2:
         issues.append("unsupported-frame-schema")
@@ -539,11 +551,14 @@ def read_archive(archive):
     drains = {"focusRows": 0, "virtualRows": 0, "otherRows": 0, "unboundRows": 0, "crossFileDuplicates": 0}
     coverage["activityDrains"] = drains
     seen = collections.defaultdict(collections.Counter)
+    member_counts = collections.Counter()
     with zipfile.ZipFile(archive) as bundle:
         for info in sorted(bundle.infolist(), key=lambda x: x.filename):
+            occurrence = member_counts[info.filename]
+            member_counts[info.filename] += 1
             base = info.filename.replace("\\", "/").rsplit("/", 1)[-1]
             focus = FOCUS_FILES.fullmatch(base) is not None
-            if not focus and not FILES.fullmatch(base):
+            if not focus and not FILES.fullmatch(base) and not NATIVE_FILES.fullmatch(base):
                 continue
             if info.file_size > MAX_FILE_BYTES:
                 coverage["skippedFiles"].append(info.filename)
@@ -557,7 +572,11 @@ def read_archive(archive):
                     if not line.strip():
                         continue
                     try:
-                        row = json.loads(line.decode("utf-8-sig"))
+                        text = line.decode("utf-8-sig")
+                        row = json.loads(text)
+                        if (isinstance(row, dict) and row.get('event') == 'input-host-frame-evidence'
+                                and COMMON_FRAME_COPIES_MARKER in row):
+                            row = evidence_json_loads(text)
                     except (ValueError, UnicodeError):
                         coverage["malformedRows"] += 1
                         if not line.endswith(b"\n"): coverage["truncatedTailRows"] += 1
@@ -586,7 +605,8 @@ def read_archive(archive):
                                 drains["crossFileDuplicates"] += 1
                             continue
                     counts[row["event"]] += 1
-                    records.append({"file": info.filename, "line": line_number, "data": row})
+                    records.append({"file": info.filename, "archiveEntryOccurrence": occurrence,
+                                    "line": line_number, "data": row})
     return records, counts, coverage
 
 def analyze_records(records):
@@ -615,9 +635,12 @@ def analyze_records(records):
                     summary["boundAckWithCurrentReadWindowRows"] += 1
             for reason in check["localAckIssues"] + check["sourceReadIssues"]:
                 summary[reason] += 1
-            if check["localAckBound"]:
-                key = (row.get("pid"), row.get("powerGeneration"), check["tuple"]["epoch"], check["tuple"]["sampleSequence"])
-                frames_by_partial_key[key].append(item)
+            if check["localAckBound"] and check["source"] == "msi-dinput":
+                writer = native_signal_writer(row)
+                power = row.get("powerGeneration")
+                if writer is not None and integer(power, 1):
+                    key = (writer["pid"], power, check["tuple"]["epoch"], check["tuple"]["sampleSequence"])
+                    frames_by_partial_key[key].append((writer, item))
         elif event in ["wake-input-chain-first-frame", "wake-input-chain-sustained"]:
             summary["boundAggregateAckRows" if chain_ack_check(row) else "unboundOrLegacyAggregateAckRows"] += 1
         elif event == "input-idle-window":
@@ -653,19 +676,39 @@ def analyze_records(records):
             continue
         if not integer(row.get("frameBackButtons"), 1):
             continue
+        writer = native_signal_writer(row)
         key = (row.get("pid"), row.get("powerGeneration"), row.get("epoch"), row.get("frameSequence"))
-        key_valid = all(integer(value, 1) for value in key) and row.get("source") == "msi-dinput"
-        candidates = [item for item in frames_by_partial_key.get(key, []) if item.get("source") == "msi-dinput"] if key_valid else []
-        identities = {(c["tuple"]["runId"], c["tuple"]["hostInstanceId"], c["tuple"]["commandSequence"]) for c in candidates}
-        item = {**location(record), "frameSequence": row.get("frameSequence"), "sourceGeneration": row.get("sourceGeneration"),
+        link_power = row.get("linkPowerGeneration", key[1])
+        key_valid = (writer is not None and all(integer(value, 1) for value in key) and
+                     integer(link_power, 1) and link_power == key[1] and row.get("source") == "msi-dinput")
+        candidates = {}
+        unresolved = other_lifetime = 0
+        if key_valid:
+            for ack_writer, ack_item in frames_by_partial_key.get(key, ()):
+                if writer["processCreation100ns"] is None or ack_writer["processCreation100ns"] is None:
+                    unresolved += 1
+                elif ack_writer != writer:
+                    other_lifetime += 1
+                else:
+                    ack = ack_item["tuple"]
+                    identity = (ack["runId"], ack["hostInstanceId"], ack["commandSequence"], ack["persona"])
+                    candidates.setdefault(identity, ack_item)
+        join = ("unique-partial-native-frame-key" if len(candidates) == 1 else "ambiguous" if candidates else
+                "invalid-native-frame-key" if not key_valid else
+                "same-frame-key-writer-identity-unresolved" if unresolved else
+                "same-frame-key-other-writer-lifetime" if other_lifetime else "no-same-frame-receipt-in-export")
+        item = {**location(record), "nativeWriter": writer, "frameSequence": row.get("frameSequence"),
+                "sourceGeneration": row.get("sourceGeneration"),
                 "frameBackButtons": row.get("frameBackButtons"), "submitOutcome": row.get("submitOutcome"),
-                "dropReason": row.get("dropReason"), "candidateHostReceipts": len(identities),
-                "join": "unique-partial-native-frame-key" if len(identities) == 1 else "ambiguous" if identities else "no-same-frame-receipt-in-export",
+                "dropReason": row.get("dropReason"), "candidateHostReceipts": len(candidates), "join": join,
+                "writerUnresolvedAckRows": unresolved, "otherWriterLifetimeAckRows": other_lifetime,
                 "fullSourceToHostBindingProven": False,
-                "reason": "native rear link lacks runId/hostInstanceId and per-edge sample token; timestamps are not causal joins",
+                "reason": "same reported Native writer and frame key can identify an ACK candidate; the rear link does not carry a Host request or per-edge sample token",
                 "encodedBytesVerified": False, "steamConsumptionProven": False}
-        if candidates and len(identities) == 1:
-            item["candidateReceipt"] = {**{k: candidates[0][k] for k in ["file", "line", "time"]}, "tuple": candidates[0]["tuple"]}
+        if len(candidates) == 1:
+            candidate = next(iter(candidates.values()))
+            item["candidateReceipt"] = {k: candidate[k] for k in ("file", "line", "time", "archiveEntryOccurrence", "tuple") if k in candidate}
+            item["candidateReceipt"]["nativeWriter"] = writer
         links.append(item)
     for frame in frame_rows:
         if frame["localAckIssues"] or frame["sourceReadIssues"]:
