@@ -112,7 +112,8 @@ if ($action -cnotmatch '(?m)^\s+node tools/fan_manual_wake_ipc_selftest\.mjs .* 
     $action -cnotmatch '(?m)^\s+node tools/fan_manual_wake_ipc_selftest\.mjs .* --background-ready-only[ \t\r]*$' -or
     !$action.Contains('committed wake retains a curve across delayed native permission:', [StringComparison]::Ordinal) -or
     !$action.Contains('committed wake survives an unavailable Native write fact:', [StringComparison]::Ordinal) -or
-    !$action.Contains('first manual curve waits for a changing Native write fact', [StringComparison]::Ordinal)) {
+    !$action.Contains("'native-owner real HTTP first manual curve waits during native unavailable'", [StringComparison]::Ordinal) -or
+    !$action.Contains("'native-owner real HTTP first manual curve waits during public pending'", [StringComparison]::Ordinal)) {
   throw 'FAN_RELEASE_WAKE_REGRESSION_REQUIRED: restore the release checks for delayed permission, unavailable Native state, one-shot background wake and first manual control.'
 }
 foreach ($boundary in @('resume', 'read', 'off', 'new-sleep', 'pending', 'stale')) {

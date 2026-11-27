@@ -236,11 +236,17 @@ runs:
         $_.ok -eq $true -and $_.name -clike 'native-owner real HTTP committed wake survives an unavailable Native write fact: *'
       })
       $passedNames = @($wakeIpc.results | Where-Object { $_.ok -eq $true } | ForEach-Object { $_.name })
+      $handoffBoundaries = @('ready', 'off', 'new-sleep', 'unpublished-physical', 'unpublished-without-pair')
+      $unavailableBoundaries = @('ready', 'off', 'new-sleep', 'expired')
+      $manualWaitCases = @(
+        'native-owner real HTTP first manual curve waits during native unavailable',
+        'native-owner real HTTP first manual curve waits during public pending'
+      )
       if ($wakeIpc.ok -ne $true -or $wakeIpc.hardwareCalls -ne 0 -or
-          @($handoffs.facts.boundary | Sort-Object -Unique).Count -ne 3 -or
-          @($unavailable.facts.boundary | Sort-Object -Unique).Count -ne 3 -or
+          @($handoffBoundaries | Where-Object { $handoffs.facts.boundary -cnotcontains $_ }).Count -ne 0 -or
+          @($unavailableBoundaries | Where-Object { $unavailable.facts.boundary -cnotcontains $_ }).Count -ne 0 -or
           $passedNames -cnotcontains 'native-owner real HTTP delayed native permission preserves the newest explicit curve' -or
-          $passedNames -cnotcontains 'native-owner real HTTP first manual curve waits for a changing Native write fact') {
+          @($manualWaitCases | Where-Object { $passedNames -cnotcontains $_ }).Count -ne 0) {
         throw 'Fan release check did not exercise Native permission handoff, OFF, newer sleep and explicit control.'
       }
       $backgroundWakeEvidence = Join-Path $env:RUNNER_TEMP 'fan-release-background-wake-ipc'
