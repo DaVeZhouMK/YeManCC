@@ -8,6 +8,51 @@ test('changed source produces a precise dirty list; latest partial run preserves
 test('blocked latest result cannot fall back to historical pass',t=>{const f=fixture(t);const r=auditReceipts([f.write('one',[passed('a')]),f.write('two',[{id:'a',status:'BLOCKED'}])],{repoRoot:f.repo});assert.equal(r.summary.currentPass,0);assert.equal(r.summary.blocked,1);});
 test('empty, invalid, traversal and inventory receipts cannot certify anything',t=>{const f=fixture(t);assert.equal(auditReceipts([],{repoRoot:f.repo}).status,'BLOCKED');assert.equal(auditReceipts([f.write('one',[{...passed('a'),id:'../outside'}])],{repoRoot:f.repo}).status,'BLOCKED');const invalid=f.write('two',[]);assert.equal(auditReceipts([invalid],{repoRoot:f.repo}).status,'BLOCKED');});
 test('nested JSON cannot escape its own case and contradicting pass is a failure',t=>{const f=fixture(t);const r=auditReceipts([f.write('one',[{...passed('a'),structuredEvidence:[{path:path.join(f.root,'settings.json')}]},{...passed('b'),exitCode:2}])],{repoRoot:f.repo});assert.equal(r.cases[0].status,'BLOCKED');assert.equal(r.cases[1].status,'FAIL');});
+test('the same candidate bytes are read once but each case must match its own hash',t=>{
+ const f=fixture(t),file=path.join(f.root,'candidate.bin');
+ fs.writeFileSync(file,'fixture artifact');
+ const row=(id,expected)=>({...passed(id),candidateArtifacts:[{path:file,sha256:sha(expected)}]});
+ const run=f.write('shared',[row('a','fixture artifact'),row('b','fixture artifact'),row('c','other expected bytes')]);
+ const result=auditReceipts([run],{repoRoot:f.repo});
+ assert.deepEqual(result.candidateArtifactAudit,{hashed:1,reused:2});
+ assert.deepEqual(result.cases.map(item=>item.status),['PASS','PASS','STALE_SOURCE']);
+ assert.equal(result.cases[2].sourceMismatches[0].actual,sha('fixture artifact'));
+ assert.equal(result.executedTests,0);
+});
+
+test('a candidate replaced between cases is rehashed, including same-size replacement',t=>{
+ const f=fixture(t),file=path.join(f.root,'candidate.bin'),replacement=path.join(f.root,'replacement.bin');
+ fs.writeFileSync(file,'old');fs.writeFileSync(replacement,'new');
+ const row=id=>({...passed(id),candidateArtifacts:[{path:file,sha256:sha('old')}]});
+ const run=f.write('replace',[row('a'),row('b')]);
+ const read=fs.readFileSync;let sourceReads=0;
+ t.mock.method(fs,'readFileSync',function(filePath,...args){
+  if(filePath===path.join(f.repo,'a.ts')&&++sourceReads===2)fs.renameSync(replacement,file);
+  return read.call(this,filePath,...args);
+ });
+ const result=auditReceipts([run],{repoRoot:f.repo});
+ assert.deepEqual(result.candidateArtifactAudit,{hashed:2,reused:0});
+ assert.deepEqual(result.cases.map(item=>item.status),['PASS','STALE_SOURCE']);
+ assert.equal(result.cases[1].sourceMismatches[0].actual,sha('new'));
+});
+
+test('a candidate changing during its read cannot supply a shared observation',t=>{
+ const f=fixture(t),file=path.join(f.root,'candidate.bin');
+ fs.writeFileSync(file,'old');
+ const row=(id,value)=>({...passed(id),candidateArtifacts:[{path:file,sha256:sha(value)}]});
+ const run=f.write('inflight',[row('a','old'),row('b','replacement')]);
+ const read=fs.readFileSync;let first=true;
+ t.mock.method(fs,'readFileSync',function(filePath,...args){
+  const bytes=read.call(this,filePath,...args);
+  if(filePath===file&&first){first=false;fs.writeFileSync(file,'replacement');}
+  return bytes;
+ });
+ const result=auditReceipts([run],{repoRoot:f.repo});
+ assert.deepEqual(result.candidateArtifactAudit,{hashed:2,reused:0});
+ assert.deepEqual(result.cases.map(item=>item.status),['STALE_SOURCE','PASS']);
+ assert.equal(result.cases[0].sourceMismatches[0].actual,null);
+});
+
 
 test('explicit Host binary identity is rechecked without pretending to rerun CLR compatibility',t=>{
  const f=fixture(t),payload=path.join(f.root,'payload');fs.mkdirSync(payload);
@@ -191,6 +236,40 @@ test('BOM JSON receipts retain exact byte budgeting and original-container ident
  const original=sha(fs.readFileSync(file)),bytes=fs.statSync(file).size,r=auditReceipts([file],{repoRoot:f.repo,maxTotalReceiptBytes:bytes});
  assert.equal(r.status,'CURRENT_RECEIPTS_VALID');assert.equal(r.receiptBytesRead,bytes);assert.equal(r.sourceRuns[0].sha256,original);assert.equal(sha(fs.readFileSync(file)),original);
  assert.equal(auditReceipts([file],{repoRoot:f.repo,maxTotalReceiptBytes:bytes-1}).status,'BLOCKED');
+});
+
+test('receipt SHA and parsed cases come from one byte read',t=>{
+ const f=fixture(t),file=f.write('single-read',[passed('a')]),original=fs.readFileSync(file);
+ const read=fs.readFileSync;let reads=0;
+ t.mock.method(fs,'readFileSync',function(filePath,...args){
+  if(filePath===file)reads++;
+  return read.call(this,filePath,...args);
+ });
+ const result=auditReceipts([file],{repoRoot:f.repo});
+ assert.equal(result.status,'CURRENT_RECEIPTS_VALID');
+ assert.equal(result.sourceRuns[0].sha256,sha(original));
+ assert.equal(result.receiptBytesRead,original.length);
+ assert.equal(reads,1);
+});
+
+test('same-size receipt replaced during its read cannot certify either revision',t=>{
+ const f=fixture(t),file=f.write('drifting',[passed('a')]);
+ const replacement=f.write('replace1',[passed('b')]);
+ const original=fs.readFileSync(file),next=fs.readFileSync(replacement);
+ assert.equal(original.length,next.length);
+ const read=fs.readFileSync;let changed=false;
+ t.mock.method(fs,'readFileSync',function(filePath,...args){
+  const bytes=read.call(this,filePath,...args);
+  if(filePath===file&&!changed){changed=true;fs.renameSync(replacement,file);}
+  return bytes;
+ });
+ const result=auditReceipts([file],{repoRoot:f.repo});
+ assert(changed);
+ assert.equal(result.status,'BLOCKED');
+ assert.equal(result.sourceRuns.length,0);
+ assert.equal(result.cases.length,0);
+ assert.equal(result.receiptBytesRead,original.length);
+ assert.deepEqual(result.diagnostics,[{code:'RUN_RECEIPT_CHANGED_DURING_READ',file}]);
 });
 
 test('all original1024 distinct compiler artifacts still check925 and1024 with the shared upper bound',t=>{

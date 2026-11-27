@@ -1,5 +1,7 @@
 // Read-only interpretation of original MSI fixture observations; never grants return authority.
 import assert from 'node:assert/strict';
+const requiredReturnPoints=['msiReturnBeforeTakeover','msiReturnAfterVerifiedReturn','msiReturnAtFixtureEnd'];
+const hasObservation=(row,point)=>Object.hasOwn(row,point)&&row[point]!=null;
 export function inspectMsiReturnObservation(value){
  const unknown={status:'UNKNOWN',logicalOffEligibility:null,startSeamActive:null,fullOwnershipReturnProven:false,durableDischargeProven:false};
  if(value===undefined||value===null)return unknown;
@@ -24,7 +26,7 @@ export function inspectMsiReturnCases(cases,{required=false}={}){
  const selected=cases.filter(row=>names.includes(row.name));if(required){assert.equal(selected.length,2,'MSI_RETURN_TWO_ORIGINAL_CASES_REQUIRED');assert.equal(new Set(selected.map(row=>row.name)).size,2,'MSI_RETURN_TWO_DISTINCT_ORIGINAL_CASES_REQUIRED');}
  let present=false;
  const rows=selected.map(row=>{
-  if(required)for(const point of ['msiReturnBeforeTakeover','msiReturnAfterVerifiedReturn','msiReturnAtFixtureEnd'])assert(Object.hasOwn(row,point),'MSI_RETURN_DECLARED_OBSERVATION_MISSING:'+point);
+  if(required)for(const point of requiredReturnPoints)assert(hasObservation(row,point),'MSI_RETURN_DECLARED_OBSERVATION_MISSING:'+point);
   const observations={};
   for(const point of points)if(Object.hasOwn(row,point)){present=true;observations[point]=inspectMsiReturnObservation(row[point]);}
   return {case:row.name,observations,fullOwnershipReturnProven:false};
@@ -112,8 +114,8 @@ export function inspectMsiCancellationCases(raw,{boundary,phase}={}){
    }
   }
   need(required.every(name=>assertions.includes(name)),'NECESSARY_ASSERTION_MISSING');
-  for(const point of ['msiReturnBeforeTakeover','msiReturnAfterVerifiedReturn','msiReturnAtFixtureEnd']){
-   need(Object.hasOwn(item,point),'ORIGINAL_OBSERVATION_MISSING');inspectMsiReturnObservation(item[point]);
+  for(const point of requiredReturnPoints){
+   need(hasObservation(item,point),'ORIGINAL_OBSERVATION_MISSING:'+point);inspectMsiReturnObservation(item[point]);
   }
   return {case:item.name,sourceOrdinal:item.sourceOrdinal,assertions:assertions.length,boundary,phase:phase??null,
    currentPathInputObserved:true,oldForwardPermissionRevoked:true,localCleanupObserved:true};

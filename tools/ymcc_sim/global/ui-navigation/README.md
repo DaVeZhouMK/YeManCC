@@ -24,6 +24,8 @@ Playwright复用现有Codex依赖，可通过YMCC_SIM_BROWSER_RUNTIME_ENTRY指�
 
 2026-10-22：lifecycle.ui-power-transport 复用正式 api.ts、ipc.ts、uiLifecycle.ts，只有 WebView 消息边界为内存端口。覆盖原生事件分发、恢复时 pending 被拒绝、实际 IPC 限时、旧 id 回复、跨代状态以及根卸载；禁止所有非 power.lifecycle 命令。与 UI 全页回归和 lifecycle.ui-power-recovery 配套，不替代物理 G3E 或实际游戏消费验收。
 
+`lifecycle.ui-power-transport` 的原生产器可定向执行 `node tools/ui_power_transport_selftest.mjs --scope monitor-notice-recovery --out-dir <新的核心测试证据子目录>`。该模式复用监控 WebView 内存端口，把真实 UI 电源监听和 `monitorNoticeHost` 放在一个 VM，检查实际 IPC 的跨代迟到回复、显式关闭、退出归还及省略停止调用的对照。它与默认六项互斥，不新增测试 ID、minimum 或发布门；结果不代签实际 Native 广播、手柄、风扇或实机恢复。
+
 2026-10-23：设置动态预览改为直接显示壁纸，无壁纸使用可暂停的轻量渐变动画。backgroundPreviewCases 在 720/800 执行正式 SettingsView、实际组件与完整 engine：拖动期间不落盘、松手保存、pointercancel 回退、手柄 A 进入/保存、四方向调节、B 取消、肩键不切走、居中与隐藏/切页资源释放。新增检查写入原 release gate。视频样本仅供明确选择的测试场景，加入既有只读 server 资源白名单与源码/载荷哈希。同步当前开机模式页的折叠通用设置入口，并复用正式 performanceSchedule 的纯转换函数；未把缺失 API 降级为空实现。此回归不替代安装版 GPU 或实物手柄验收。
 
 同轮全页验收发现当前开机模式页的独立通用设置 scope 可进入却无法返回上方模式卡。PowerView 显式共享页面 scope，并把 details summary 纳入既有手柄焦点；其他 SettingsSections 默认隔离不变。通用服务/工具状态继续做全页可达和可返回检查，入口改用正式 A 操作，不删失败或缩小受测范围。
@@ -33,7 +35,7 @@ Playwright复用现有Codex依赖，可通过YMCC_SIM_BROWSER_RUNTIME_ENTRY指�
 
 `Run-Ui.ps1 -EvidenceDir <新证据目录> -Scope trainer` 复用原 `controller.ui-navigation`，只执行正式顶部/修改器菜单在 720/800 的导航、B 返回和启动回执展示；不扩大默认 minimum 或完整验收范围。`-ToolManifest <清单>` 可显式绑定当前本机工具，仍执行完整声明目录、实际加载输入、源码及关闭回执核对，不放宽原预算。
 
-`Run-Ui.ps1 -EvidenceDir <新证据目录> -Scope virtual-click-start` 执行 720/800 两种视口的本机手柄 → Xbox 成功、保存后启动失败、已受理但设置未提交三种场景。实际界面点击和设置消费者走原代码；内存 IPC 注入后端回执与状态。逐项校验三个场景各出现两次，不执行其它页面或发布门。设置未提交仅在定向范围执行；原全 UI 范围的两个场景、测试 ID 和模块 minimum 不变。
+`Run-Ui.ps1 -EvidenceDir <新证据目录> -Scope virtual-click-start` 在 720/800 两种视口各执行四个场景：本机手柄 → Xbox 成功、保存后启动失败、已受理但设置未提交、Win5 首次 SteamDeck ON 已保存但到期未进入验证，显式 OFF 后第二次 ON 成功。最后一项还注入旧请求的到期回执，验证它不能提前解锁或覆盖当前成功，也不能触发重发。实际界面点击和设置消费者走原代码；内存 IPC 注入后端回执与状态，不实等原生期限。原全 UI 范围、测试 ID、模块 minimum 和发布门不变。
 
 ### 回放封存的原生启动失败回执
 
@@ -46,4 +48,4 @@ Playwright复用现有Codex依赖，可通过YMCC_SIM_BROWSER_RUNTIME_ENTRY指�
   -VirtualStartNativeReceiptSha256 '<原件的 64 位小写 SHA-256>'
 ```
 
-同一请求的失败 ACK 与 `verifying` / `failure` 分开交给真实 Vue 消费者，只重定位到期时间。720/800 各跑一次：失败不报开启、设置不改、验证中按钮保持锁定、不清快捷键、不重发。未传回放参数仍执行原定向 6 项。回放不执行原生写入或挂载，不代签现场根因、自愈、设备归还或完整 UI 验收。
+同一请求的失败 ACK 与 `verifying` / `failure` 分开交给真实 Vue 消费者，只重定位到期时间。720/800 各跑一次：失败不报开启、设置不改、验证中按钮保持锁定、不清快捷键、不重发。未传回放参数执行上面的定向 8 项。回放不执行原生写入或挂载，不代签现场根因、自愈、设备归还或完整 UI 验收。

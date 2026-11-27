@@ -460,7 +460,9 @@ static void failureResetNativeChecks(const std::filesystem::path& inert){
     {auto wrong=identity;++wrong.created;const auto r=terminateFailedLossless(wrong);require(!r.attempted&&!r.closed&&WaitForSingleObject(child.hProcess,0)==WAIT_TIMEOUT,"wrong birth rejects termination and preserves child");}
     {auto wrong=identity;wrong.path=(directory/L"elsewhere"/L"LosslessScaling.exe").wstring();const auto r=terminateFailedLossless(wrong);require(!r.attempted&&!r.closed&&WaitForSingleObject(child.hProcess,0)==WAIT_TIMEOUT,"wrong full path rejects termination and preserves child");}
     {auto wrong=identity;wrong.pid=GetCurrentProcessId();require(!terminateFailedLossless(wrong).attempted,"current YMCC/fixture PID is never a reset target");}
-    const auto foreground=GetForegroundWindow();const auto r=terminateFailedLossless(identity);
+    const auto denied=terminateFailedLossless(identity,[]{return false;});
+    require(!denied.attempted&&denied.reason=="failure-reset-context-changed"&&WaitForSingleObject(child.hProcess,0)==WAIT_TIMEOUT,"revoked power after exact identity check leaves the owned child running");
+    const auto foreground=GetForegroundWindow();const auto r=terminateFailedLossless(identity,[]{return true;});
     require(r.requested&&r.attempted&&r.terminated&&r.closed&&WaitForSingleObject(child.hProcess,0)==WAIT_OBJECT_0,"real TerminateProcess and bounded exit receipt consume only owned child");
     require(GetForegroundWindow()==foreground,"native failure reset never activates a window");
 }
@@ -490,6 +492,8 @@ int wmain(int argc, wchar_t** argv) {
         });
         require(ports.validate(),"native validate existing inert executable");
         const auto denied=ports.start();require(!denied.ok&&denied.error==ERROR_ACCESS_DENIED&&called==1,"real Win32 adapter error receipt");
+        NativePorts retired(argv[1],[]{return false;},[&](auto...){++called;return FALSE;});
+        require(retired.start().reason=="context-unavailable"&&called==1,"revoked power cannot reach the native process creator");
         std::cout<<"{\"pass\":true,\"checks\":"<<checks<<",\"repeatActions\":1000,\"realApplicationsStarted\":0}"<<std::endl;
         return 0;
     } catch(const std::exception& e) { std::cerr<<e.what()<<std::endl;return 1; }

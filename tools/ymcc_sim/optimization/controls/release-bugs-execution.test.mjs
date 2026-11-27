@@ -14,10 +14,10 @@ const repo=path.resolve(path.dirname(entry),'../../..');
 const ids=['steam.shared-mode-source','steam.contact-source'];
 // Complete original optimizer worker and actual release selector; only registry,
 // source identity and execution ports are inert. These are not business PASSes.
-for(const scenario of ['failed','timeout','cached-failure','identity-drift','all-pass','ordinary-diagnostic','rerun-preparation','rerun-preparation-stops','cache-lock-metadata','cache-lock-foreign','cache-lock-roundtrip']){
+for(const scenario of ['failed','timeout','cached-failure','identity-drift','all-pass','ordinary-diagnostic','rerun-preparation','rerun-preparation-stops','cache-lock-metadata','cache-lock-foreign','cache-lock-roundtrip','uncacheable-rerun','uncacheable-required-manifest']){
  test(`release bug execution ${scenario}`,async(t)=>{
   assert.equal(typeof vm.SourceTextModule,'function','Run with --experimental-vm-modules');
-  const evidence=fs.realpathSync(simulationCorePath('Evidence'));
+  const evidence=fs.realpathSync(simulationCorePath(process.env.YMCC_SIM_RELEASE_BUG_EXECUTION_TEST_ROOT?'Evidence':'Workspace'));
   const base=path.resolve(process.env.YMCC_SIM_RELEASE_BUG_EXECUTION_TEST_ROOT??path.join(evidence,'ReleaseBugExecutionControls'));
   const relative=path.relative(evidence,base);assert(relative!==''&&!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep));
   fs.mkdirSync(base,{recursive:true});const owner=fs.realpathSync(base);assert.equal(owner.toLowerCase(),base.toLowerCase());
@@ -34,7 +34,8 @@ for(const scenario of ['failed','timeout','cached-failure','identity-drift','all
    const firstLock=path.join(cacheRoot,ids[0]+'.json.lock'),foreignBytes='foreign lock owner sentinel';
    if(scenario==='cache-lock-foreign')fs.writeFileSync(firstLock,foreignBytes);
    if(scenario==='cached-failure')fs.writeFileSync(path.join(cacheRoot,ids[0]+'.json'),JSON.stringify({result:{path:path.join(root,'prior-failure.json'),sha256:'f'.repeat(64)}}));
-   const calls=[],locks=[],fingerprints=new Map(),fingerprintEvents=[],logs=[];
+   const calls=[],locks=[],fingerprints=new Map(),fingerprintEvents=[],logs=[],cacheOutputReads=[];
+   const uncacheable=scenario.startsWith('uncacheable-');
    let metadataFaults=0;
    const fakeConfiguration=JSON.stringify({aliases:{},modules:{}});
    const configuration=path.resolve(repo,'tools/ymcc_sim/optimization/modules.json');
@@ -50,21 +51,27 @@ for(const scenario of ['failed','timeout','cached-failure','identity-drift','all
     if(key==='writeFileSync')return function(file,...args){if(scenario==='cache-lock-metadata'&&heldLocks.has(file)&&metadataFaults===0){metadataFaults++;throw Object.assign(new Error('controlled cache lock metadata write failure'),{code:'ENOSPC'});}return target.writeFileSync(file,...args);};
     return target[key];
    }});
-   const hash=file=>crypto.createHash('sha256').update(controlledFs.readFileSync(file)).digest('hex');
+   const hash=file=>{if(['stdout.log','stderr.log','nested-proof.json'].includes(path.basename(file)))cacheOutputReads.push(file);return crypto.createHash('sha256').update(controlledFs.readFileSync(file)).digest('hex');};
    const adapters=ids.map((id,index)=>({id,domain:'steam',kind:'node',path:`inert-${index}.mjs`,args:[],profiles:['desktop'],scope:'source-contract',timeoutMs:1000,evidenceInputs:[]}));
+   if(scenario==='uncacheable-required-manifest')adapters[0].cacheOutputManifest='cache-graph.json';
    const executeAdapter=async(adapter)=>{
     calls.push(adapter.id);const first=adapter.id===ids[0];
     if(scenario==='cache-lock-roundtrip'){const metadata=JSON.parse(fs.readFileSync(firstLock,'utf8'));assert.equal(metadata.pid,process.pid);assert.equal(metadata.id,adapter.id);assert.equal(heldLocks.size,1);}
     const status=first&&['failed','ordinary-diagnostic','rerun-preparation-stops'].includes(scenario)?'FAIL':first&&scenario==='timeout'?'TIMEOUT':'PASS';
     const evidenceDir=path.join(runDir,'cases',adapter.id);fs.mkdirSync(evidenceDir,{recursive:true});
     for(const name of ['stdout.log','stderr.log'])fs.writeFileSync(path.join(evidenceDir,name),'inert executor output');
+    if(adapter.cacheOutputManifest){
+     const nested=path.join(evidenceDir,'nested-proof.json'),body='inert nested proof';fs.writeFileSync(nested,body);
+     fs.writeFileSync(path.join(evidenceDir,adapter.cacheOutputManifest),JSON.stringify({sourceHashes:[{path:nested,sha256:crypto.createHash('sha256').update(body).digest('hex')}]}));
+    }
     const result={id:adapter.id,status,pid:10000+calls.length,evidenceDir};fs.writeFileSync(path.join(evidenceDir,'result.json'),JSON.stringify(result));return result;
    };
    const fingerprintCase=({adapter})=>{
     const count=(fingerprints.get(adapter.id)??0)+1;fingerprints.set(adapter.id,count);
     fingerprintEvents.push({id:adapter.id,count,locked:fs.existsSync(path.join(cacheRoot,adapter.id+'.json.lock')),afterExecution:calls.includes(adapter.id)});
     const digest=scenario==='identity-drift'&&adapter.id===ids[0]&&calls.includes(adapter.id)?'2'.repeat(64):'1'.repeat(64);
-    return {adapterId:adapter.id,cacheable:true,identity:adapter.id+digest,reasons:[],manifest:{inputs:[{role:'source',path:adapter.path,sha256:digest}],tools:[],options:{}}};
+    const cacheable=!(uncacheable&&adapter.id===ids[0]);
+    return {adapterId:adapter.id,cacheable,identity:cacheable?adapter.id+digest:null,reasons:[],manifest:{inputs:[{role:'source',path:adapter.path,sha256:digest}],tools:[],options:{}}};
    };
    const inspectCachedResult=({identity})=>scenario==='cached-failure'&&identity.adapterId===ids[0]
     ?{reusable:true,status:'UNCHANGED_FAILURE_REFERENCE',previousStatus:'FAIL',reasons:[]}
@@ -84,14 +91,17 @@ for(const scenario of ['failed','timeout','cached-failure','identity-drift','all
     'node:fs':{default:controlledFs},'node:path':{default:path},'node:crypto':{default:crypto},'node:url':{fileURLToPath},
     '../global/adapters.mjs':{getAdapters:()=>adapters},'../global/sleep.mjs':{getSleepAdapters:()=>[]},
     '../global/runner.mjs':{executeAdapter,validateAdapters:()=>{},sha256File:hash,makeRunDirectory:unused},
-    '../global/candidate-options.mjs':{configureCandidateAdapters:a=>a,validateCommonHidSelection:()=>{}},
+    '../global/candidate-options.mjs':{configureCandidateAdapters:a=>a,validateCommonHidSelection:()=>{},validateInputResumeSelection:()=>{}},
+    '../global/input-resume-options.mjs':{INPUT_RESUME_ID:'controller.unselected-resume'},
     '../global/bundled-node-tool-authority.mjs':{BUNDLED_AUTHORITY_SOURCES:[],lockBundledNodeTools:unused},
     './identity-cache.mjs':{fingerprintCase,inspectCachedResult,deduplicateCases:a=>({canonical:a,deduplicated:[]})},
     '../global/release-host-environment.mjs':{simulationCorePath:()=>root},
     '../global/controller-lifecycle-pipe/wire-contract.mjs':{WIRE_ID:'controller.unselected-wire',wireDescriptorContract:unused},
     '../global/controller-foreground-latency/prehost-cache-contract.mjs':{PREHOST_ID:'controller.unselected-prehost',isPreHostCacheAdapter:()=>false,preHostDescriptorContract:unused,preHostDependencyPaths:()=>[],preHostEvidenceFiles:()=>[]},
+    '../global/controller-lifecycle-completion/host-cache-contract.mjs':{HOST_PROTOCOL_ID:'controller.unselected-protocol',HOST_PARENT_ID:'controller.unselected-parent',isHostLifecycleCacheAdapter:()=>false,hostLifecycleCacheAdapter:unused,hostLifecycleDescriptorContract:unused,hostLifecycleEvidenceFiles:()=>[],captureHostProtocolLookupGuards:unused},
     './release-bugs.mjs':{selectReleaseBugs,RELEASE_CANDIDATE_PATH_KEYS},
     './selection-policy.mjs':{validateSelectionPolicy:()=>({scope:'inert-explicit-original-ID-control'})},
+    './ui-power-cache-contract.mjs':{configureUiPowerCache:a=>a,uiPowerCacheStillQualified:()=>false,uiPowerResolutionMembership:unused,verifyUiPowerBuildReceipt:unused,verifyUiPowerParentReturn:unused},
     './execution-budget.mjs':{runWithWallBudget:unused,readBudgetWorker:()=>contextPort,validateWallBudget:n=>n,MAX_WALL_BUDGET_MS:1800000}
    };
    await module.link(specifier=>{assert(Object.hasOwn(bindings,specifier),'Unreviewed dependency '+specifier);const values=bindings[specifier];return new vm.SyntheticModule(Object.keys(values),function(){for(const[key,value]of Object.entries(values))this.setExport(key,value);},{context,identifier:specifier});});
@@ -123,7 +133,7 @@ for(const scenario of ['failed','timeout','cached-failure','identity-drift','all
     return;
    }
    const stop=['failed','timeout','cached-failure','identity-drift','rerun-preparation-stops'].includes(scenario);
-   assert.equal(exit,['all-pass','rerun-preparation'].includes(scenario)?0:scenario==='identity-drift'?10:2);
+   assert.equal(exit,uncacheable||['all-pass','rerun-preparation'].includes(scenario)?0:scenario==='identity-drift'?10:2);
    assert.equal(result.rows.length,2);assert.deepEqual(result.rows.map(r=>r.id),ids);
    const first=result.rows[0],second=result.rows[1];
    if(stop){
@@ -135,6 +145,15 @@ for(const scenario of ['failed','timeout','cached-failure','identity-drift','all
     assert.deepEqual(calls,ids);assert.equal(second.status,'PASS');assert.equal(second.actualPassedThisRun,true);
    }
    assert.equal(first.status,scenario==='failed'||ordinary||scenario==='rerun-preparation-stops'?'FAIL':scenario==='timeout'?'TIMEOUT':scenario==='cached-failure'?'UNCHANGED_FAILURE_REFERENCE':scenario==='identity-drift'?'INCOMPLETE_IDENTITY_DRIFT':'PASS');
+   if(uncacheable){
+    const outputs=id=>cacheOutputReads.filter(file=>path.dirname(file)===path.join(runDir,'cases',id)).map(file=>path.basename(file));
+    assert.deepEqual(outputs(ids[0]),scenario==='uncacheable-required-manifest'?['nested-proof.json','stdout.log','stderr.log','nested-proof.json']:[]);
+    assert.deepEqual(outputs(ids[1]),['stdout.log','stderr.log']);
+    assert.equal(fingerprints.get(ids[0]),2);
+    assert.equal(first.cacheable,false);assert.equal(first.actualPassedThisRun,true);
+    assert(!fs.existsSync(path.join(cacheRoot,ids[0]+'.json')));
+    assert(fs.existsSync(path.join(cacheRoot,ids[1]+'.json')));
+   }
    if(scenario==='cached-failure'){assert.equal(first.executedThisRun,false);assert.equal(first.actualPassedThisRun,false);}
    if(scenario.startsWith('rerun-preparation')){
     assert.equal(fingerprints.get(ids[0]),2,'Only locked before/after identity scans are needed for an explicit rerun');

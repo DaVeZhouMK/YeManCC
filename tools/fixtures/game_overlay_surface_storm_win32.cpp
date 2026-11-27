@@ -17,8 +17,10 @@ static BOOL fixtureDestroy(HWND h){if(destroyFailures){--destroyFailures;failedD
 #include "game_overlay_display_tree_lease.h"
 #include "shortcut_window_toggle.h"
 #include "window_taskbar_layout.h"
+#include "controller_editor_width.h"
 #include "sleep_power_dispatch.h"
 #include "sleep_power_observation.h"
+#include "fan_physical_wake.h"
 #undef RemoveWindowSubclass
 using json=nlohmann::json;
 static ymcc::gameoverlay::Carrier g_gameOverlay;
@@ -30,7 +32,7 @@ static ymcc::sleeppower::SharedPowerV1 sharedPower;
 static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* value,std::uint32_t bytes){if(!value||bytes<sizeof(*value))return 0;*value=sharedPower;return 1;}
 struct FocusSessionPort{bool active=false,lightNoGame=false,returning=false,lightForegroundAcquired=false;};static FocusSessionPort g_focusSession;
 static unsigned returnFailures=0,attachFailures=0,submitFailures=0,retargetCalls=0;
-struct ControllerPort {bool visible=false;HRESULT put_IsVisible(BOOL v){visible=v!=FALSE;return S_OK;}HRESULT put_Bounds(RECT){return submitFailures?(--submitFailures,E_FAIL):S_OK;}HRESULT NotifyParentWindowPositionChanged(){return S_OK;}};
+struct ControllerPort {bool visible=false;RECT bounds{};HRESULT put_IsVisible(BOOL v){visible=v!=FALSE;return S_OK;}HRESULT put_Bounds(RECT r){if(submitFailures){--submitFailures;return E_FAIL;}bounds=r;return S_OK;}HRESULT NotifyParentWindowPositionChanged(){return S_OK;}};
 struct ViewPort{HRESULT ExecuteScript(const wchar_t*,void*){return S_OK;}};
 static ControllerPort controller;static ViewPort view;static ControllerPort* g_ctrl=&controller;static ViewPort* g_view=&view;
 struct CompositionPort {
@@ -46,7 +48,10 @@ struct PanelPort {
  bool synchronize(){return attached;}bool ready()const{return attached;}bool retired()const{return false;}
 };static PanelPort g_gameOverlayPanel;
 static ymcc::gameoverlayinput::DisplayTreeLease g_gameOverlayDisplayTree;
-struct EditorPort{unsigned owner=0;bool enabled=false;bool active()const{return enabled;}};static EditorPort g_controllerEditorWidth;
+static ymcc::editorwidth::Session g_controllerEditorWidth;
+static int g_baseW=580,g_baseH=780;
+static bool windowPlacementIsLeft(){return false;}
+#include "editor-width-consumers.inc"
 struct ReturnPort{void invalidate(){}void begin(std::uint64_t,ULONGLONG){}void end(std::uint64_t,ULONGLONG){}};static ReturnPort g_gameOverlayReturn;
 static std::atomic<std::shared_ptr<const ymcc::gameoverlay::Binding>> g_gameOverlayReturning;
 struct FocusTargetSnapshot{HWND hwnd=nullptr;DWORD pid=0;bool valid=false;};
@@ -57,13 +62,13 @@ static bool g_mainWindowWasMaximized=false;
 static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& out);
 static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& expected);
 static void gameOverlaySurfaceRecord(const char*,const json& =json::object())noexcept{}
-static void endControllerEditorWidth(unsigned){g_controllerEditorWidth.enabled=false;}
 static bool radialHasInputOwner(){return false;}static bool customSteamLibraryInputSuppressed(){return false;}
 static bool focusTargetIdentityMatches(const FocusTargetSnapshot&,DWORD){return true;}
 static std::uint64_t currentPowerGeneration(){return 1;}
 static bool gameOverlayBindingCurrent(const ymcc::gameoverlay::Binding& b){return ymcc::presentationpower::current(&readSharedSystemPower,b.sharedPower,b.originalUiInput&&g_gameOverlay.inputReady());}
-static bool applyControllerEditorWidth(){return true;}static bool applyFullHeightLayout(HMONITOR){return true;}static bool windowPlacementIsLeft(){return false;}
-static void closeSplash(){}static void controllerIsolationOverlayRendererProbe(){}static void ipc_emit(const char*,const json&){}
+static void closeSplash(){}static void controllerIsolationOverlayRendererProbe(){}[[maybe_unused]] static void ipc_emit(const char*,const json&){}
+[[maybe_unused]] static bool ipc_emit_shared_power_fact(const json&,bool){return true;}
+[[maybe_unused]] static bool sleepPowerQueueProjection(HWND){throw std::logic_error("unselected WebView transport fallback");}
 static void gameOverlayStop(const char* reason){g_gameOverlay.end(reason);}
 static constexpr UINT SUMMON_FOCUS_TIMER_ID=1,RETURN_GAME_FOCUS_TIMER_ID=2;
 static LRESULT windowOverlayPrelude(HWND h,UINT m,WPARAM w,LPARAM l){
@@ -137,6 +142,16 @@ static std::uint64_t currentFanPowerGeneration(){return sharedPower.generation;}
 static FanReadyDelivery fanHostScheduleEmergencyResume(std::uint64_t){++otherPowerConsumers;return FanReadyDelivery::Settled;}
 static bool fanHostPhysicalWakeCurrent(){return false;}
 static FanReadyDelivery fanHostPublishPhysicalWake(std::uint64_t,bool){return FanReadyDelivery::Idle;}
+// This fixture owns no Fan Host and never admits a physical wake.
+static ymcc::fan_wake::Observation g_fanPhysicalWake;
+static std::atomic<unsigned long long> g_sgLatestSleepEntryFileTime{0};
+static ymcc::sleeppower::Dispatch g_sleepPowerDispatch;
+static bool fanStartupWakeCurrent(const ymcc::sleeppower::SharedPowerV1&,unsigned long long,unsigned long long){return false;}
+static bool fanManualActivityRevision(std::uint64_t&){return false;}
+static bool fanActivityIntentPresent(){return false;}
+static void fanHostQueueSuspend(const char*,unsigned long long){throw std::logic_error("unselected Fan Host suspend");}
+static void fanHostScheduleFanResume(unsigned long long,bool){throw std::logic_error("unselected Fan Host resume");}
+static void publishSharedFanWake(unsigned long long){throw std::logic_error("unselected Fan wake publication");}
 static void steamAppearancePublicReady(unsigned long long)noexcept{++otherPowerConsumers;}
 static bool nativeAyaLightingPublicReady(const ymcc::sleeppower::SharedPowerV1&){return true;}
 static bool projectPowerSourceRecovery(HWND,const ymcc::sleeppower::SharedPowerV1&){return true;}
@@ -151,7 +166,7 @@ static json sharedPowerLifecycleSnapshot(){return {{"known",ymcc::sleeppower::po
 static void publishPowerToActualProjector(){sharedPower.publicationRevision=++g_sharedPowerPublicationRevision;g_sharedPowerProjectionPending=true;projectSharedPowerLifecycle(g_hwnd);}
 static void need(bool value,const char* why){if(!value)throw std::runtime_error(why);}
 static ymcc::gameoverlay::Binding binding(){ymcc::gameoverlay::Binding b;b.globalProbe=true;b.originalUiInput=true;b.power=1;return b;}
-static void cleanup(){sharedPower={};sharedPower.generation=1;sharedPower.flags=ymcc::sleeppower::kKnown;removeFailures=destroyFailures=0;g_gameOverlay.end("fixture-cleanup");returnFailures=attachFailures=submitFailures=0;gameOverlaySurfaceRestore();if(failedDestroy&&IsWindow(failedDestroy))DestroyWindow(failedDestroy);failedDestroy=nullptr;g_mainWebViewComposition.enabled=true;g_ctrl=&controller;g_view=&view;}
+static void cleanup(){sharedPower={};sharedPower.generation=1;sharedPower.flags=ymcc::sleeppower::kKnown;removeFailures=destroyFailures=0;g_gameOverlay.end("fixture-cleanup");returnFailures=attachFailures=submitFailures=0;gameOverlaySurfaceRestore();if(g_controllerEditorWidth.active())endControllerEditorWidth(g_controllerEditorWidth.owner);if(failedDestroy&&IsWindow(failedDestroy))DestroyWindow(failedDestroy);failedDestroy=nullptr;g_mainWebViewComposition.enabled=true;g_ctrl=&controller;g_view=&view;}
 #include "game_overlay_surface_render_ready_cases.inc"
 int wmain(int argc,wchar_t** argv){
  if(argc!=2)return 2;json result={{"scope","actual surface and render-ready callback; real owned private-desktop HWNDs, Carrier and DisplayTreeLease; declared COM/panel attachment fault ports; no full renderer or physical input"}};json cases=json::array();bool ok=true;
@@ -161,6 +176,33 @@ int wmain(int argc,wchar_t** argv){
  child=CreateWindowExW(0,L"STATIC",L"",WS_CHILD,0,0,20,20,g_hwnd,nullptr,cls.hInstance,nullptr);g_mainWebViewComposition.parent=g_hwnd;
  auto test=[&](const char* name,auto action){try{cleanup();action();cases.push_back({{"case",name},{"pass",true}});}catch(const std::exception& e){ok=false;cases.push_back({{"case",name},{"pass",false},{"failure",e.what()}});}cleanup();};
  test("96-setup-show-hide-return-cycles",[]{for(unsigned i=0;i<96;++i){need(gameOverlaySurfaceShow({},binding(),false),"show");need(g_gameOverlay.active()&&GetParent(child)==g_gameOverlaySurface,"same controller child borrowed");g_gameOverlay.end("normal-close");need(!g_gameOverlaySurface&&!g_gameOverlaySurfaceAttached&&GetParent(child)==g_hwnd&&IsWindowEnabled(child),"full return");}});
+ test("detached-editor-keeps-width-across-target-loss-and-reopen",[]{
+  RECT before{},area{};
+  need(GetWindowRect(g_hwnd,&before)&&ymcc::windowlayout::safeMonitorArea(MonitorFromWindow(g_hwnd,MONITOR_DEFAULTTONEAREST),area),"read original main geometry");
+  const auto style=GetWindowLongPtrW(g_hwnd,GWL_STYLE);
+  const int base=before.right-before.left,work=area.right-area.left;
+  const auto width=[](HWND h){RECT r{};return GetWindowRect(h,&r)?r.right-r.left:0;};
+  need(gameOverlaySurfaceShow({},binding(),false),"open detached surface at normal width");
+  g_controllerEditorWidth.owner="mounted-editor";g_controllerEditorWidth.scale=1.5;
+  g_gameOverlay.displayChanged();
+  SendMessageW(g_gameOverlaySurface,ymcc::gameoverlay::Carrier::message,static_cast<WPARAM>(g_gameOverlay.snapshot()->session),0);
+  const int expected=ymcc::editorwidth::scaledWidth(base,work,1.5);
+  need(g_gameOverlay.active()&&width(g_gameOverlaySurface)==expected,"detached editor applies custom scale to its own normal layout");
+  g_gameOverlay.end("target-not-foreground");
+  need(!g_gameOverlaySurface&&GetParent(child)==g_hwnd&&!IsWindowVisible(g_hwnd),"return to the original hidden HWND without taking focus");
+  need(g_controllerEditorWidth.owner=="mounted-editor"&&width(g_hwnd)==expected,"target loss preserves editor ownership and reapplies width on main");
+  RECT client{};GetClientRect(g_hwnd,&client);
+  need(EqualRect(&controller.bounds,&client),"renderer bounds follow the main client after retarget");
+  need(!endControllerEditorWidth("old-editor"),"a late release cannot retire the current owner");
+  for(int i=0;i<3;++i){
+   need(gameOverlaySurfaceShow({},binding(),false)&&width(g_gameOverlaySurface)==expected,"repeat carrier switch never doubles already-wide bounds");
+   g_gameOverlay.end("target-not-foreground");
+   need(width(g_hwnd)==expected,"main remains at the chosen scale");
+  }
+  need(endControllerEditorWidth("mounted-editor"),"explicit close returns the width lease");
+  RECT after{};GetWindowRect(g_hwnd,&after);
+  need(EqualRect(&before,&after)&&GetWindowLongPtrW(g_hwnd,GWL_STYLE)==style&&!IsWindowVisible(g_hwnd),"original main rectangle and frame are restored");
+ });
  test("original-summon-handler-400-toggle-actions-keep-one-route",[]{const auto start=g_summonGeneration;const auto registrations=registrationCalls;for(unsigned i=0;i<400;++i){need(nativeYmccShortcutSummon({}),"actual original summon accepted");need(g_gameOverlay.active()==(i%2==0),"original toggle owns one presentation");need(!IsWindowVisible(g_hwnd),"floating route cannot show original main HWND");need(g_summonRegistrationGeneration.load()==g_summonGeneration,"hide invalidates late original registration generation too");}need(g_summonGeneration==start+400&&registrationCalls==registrations+200&&ordinaryShows==0,"one registration for each actual open, no ordinary route");});
  test("failed-floating-route-does-not-open-ordinary-window",[]{refuseRoute=true;const auto registrations=registrationCalls;const bool accepted=nativeYmccShortcutSummon({});refuseRoute=false;need(!accepted,"refused action must not report success");need(!g_gameOverlay.active()&&!IsWindowVisible(g_hwnd)&&registrationCalls==registrations&&ordinaryShows==0,"refusal cannot create duplicate presentation or registration");});
  test("minimized-main-retains-state-and-restores-maximized-surface",[]{

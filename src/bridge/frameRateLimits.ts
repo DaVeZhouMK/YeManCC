@@ -1,5 +1,5 @@
 import { powerLifecycle } from './api';
-import { isSharedPowerLifecycleAdmitted, onSharedPowerLifecycle, type SharedPowerLifecycleSnapshot } from './powerLifecycleState';
+import { beginSharedPowerLifecycleReadback, isSharedPowerLifecycleAdmitted, onSharedPowerLifecycle, type SharedPowerLifecycleSnapshot } from './powerLifecycleState';
 import { isGameStatusCurrent, isCurrentGameTarget, type DetectedGame } from './gamedetect';
 import { powerSourceMode } from './powerSource';
 import { readSettingsSection,saveSettingsSection,updateSettings,rememberOrdinaryPerformancePreferences,getSettingsGeneration,assertSettingsGeneration, type UnifiedSettings } from './settingsRepository';
@@ -17,10 +17,10 @@ const frameTargetCurrent=(target:DetectedGame|null)=>isGameStatusCurrent() && (t
 export function onFrameRatesChanged(listener:(pair:FrameRatePair)=>void):()=>void {listeners.add(listener);return ()=>listeners.delete(listener);}
 // A display transaction may supply its own current RTSS read. Ordinary callers
 // keep the original fresh reader; no resolved section is retained here.
-export async function loadGlobalFrameRates(readRtss:()=>Promise<UnifiedSettings['rtss']>=()=>readSettingsSection('rtss'),isCurrent:()=>boolean=()=>true):Promise<FrameRatePair> {
+export async function loadGlobalFrameRates(readRtss:()=>Promise<UnifiedSettings['rtss']>=()=>readSettingsSection('rtss'),isCurrent:()=>boolean=()=>true,readTemplate=detectPerformanceTemplate):Promise<FrameRatePair> {
   const current=await readRtss();
   if(current.frameRates && current.frameRates.ac && current.frameRates.dc){
-    if(current.templateDefaults===true && typeof detectPerformanceTemplate==='function')return frameRatePair(null,(await detectPerformanceTemplate())==='desktop'?200:120,60);
+    if(current.templateDefaults===true && typeof readTemplate==='function')return frameRatePair(null,(await readTemplate())==='desktop'?200:120,60);
     return frameRatePair(current.frameRates);
   }
   const generation=getSettingsGeneration();
@@ -66,12 +66,15 @@ export async function saveGlobalFrameRate(side:FrameRateSide,value:unknown):Prom
     for(const listener of [...listeners]){try{listener(frameRatePair(pair));}catch{/* observer failure cannot turn durable save into failure */}}return pair;
   });writeQueue=run.then(()=>{},()=>{});return run;
 }
-export async function effectiveFrameRates(isCurrent:()=>boolean=()=>true):Promise<{pair:FrameRatePair;identity:string;dedicated:boolean;target:DetectedGame|null}> {
+export async function effectiveFrameRates(isCurrent:()=>boolean=()=>true,access:'ensure'|'read-only'='ensure'):Promise<{pair:FrameRatePair;identity:string;dedicated:boolean;target:DetectedGame|null}> {
   const pair=await loadGlobalFrameRates(undefined,isCurrent);
   if(!isCurrent())return {pair,identity:'',dedicated:false,target:null};
   const game=getPolicyGame();
   if(!game)return {pair,identity:'',dedicated:false,target:null};
-  const custom=await loadGameCustomConfig();const key=gamePolicyKey(game),entry=custom.entries[key];
+  const custom=await (access==='read-only'
+    ? loadGameCustomConfig('read-only',{requireReady:true,displayCurrent:isCurrent})
+    : loadGameCustomConfig());
+  const key=gamePolicyKey(game),entry=custom.entries[key];
   const dedicated=!!entry && entry.enabled!==false && custom.rtss[key]?.enabled!==false;
   return {pair:dedicated?dedicatedFrameRatePair(custom.rtss[key],pair):pair,identity:`${game.pid}:${game.processCreated}`,dedicated,target:game};
 }
@@ -97,8 +100,12 @@ export function applyIndependentFrameRates(isCurrent:()=>boolean=()=>true):Promi
   const admitted=()=>!revoked && isCurrent() && frameTargetCurrent(targetAtStart);
   const run=applyQueue.then(async()=>{
     if(!isPolicyGameInitialized() || !admitted())return false;
+    const acceptReadback=beginSharedPowerLifecycleReadback();
     const lifecycle=await readCurrent(powerLifecycle.get().catch(()=>null));
-    if(!lifecycle || !isSharedPowerLifecycleAdmitted(lifecycle) || !admitted() || powerAtStart && !samePower(powerAtStart,lifecycle))return false;
+    if(!lifecycle || revoked)return false;
+    // Native may observe the next scope before its notification reaches the UI.
+    acceptReadback(lifecycle);
+    if(!isSharedPowerLifecycleAdmitted(lifecycle) || !admitted() || powerAtStart && !samePower(powerAtStart,lifecycle))return false;
     powerAtStart=lifecycle;
     const side=await readCurrent(detectPowerModeReliable());
     if(!side || !admitted())return false;
@@ -116,7 +123,7 @@ export function applyIndependentFrameRates(isCurrent:()=>boolean=()=>true):Promi
     if(actual===undefined || !current())return false;
     if(actual!==value.fps || rtssReloadPending){
       rtssReloadPending=true;
-      await setRtssLimit(value.fps,current);
+      await setRtssLimit(value.fps,current,retiredRead);
       if(!current())return false;
       rtssReloadPending=false;
     }

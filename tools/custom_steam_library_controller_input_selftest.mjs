@@ -52,7 +52,9 @@ const mock = `
       }
       if(request.command==='steamAccounts')result=structuredClone(window.fixtureSteamAccounts);
       if(request.command==='searchArtwork')result={candidates:[]};
+      if(window.fixtureLaunchReplies?.[request.command])result=structuredClone(window.fixtureLaunchReplies[request.command]);
       if(request.command==='steamState' || request.command==='steamCommitPreflight')result={steamRunning:window.fixtureSteamRunning,steamPath:''};
+      if(request.command==='steamCommitPreflight' && window.fixtureArtworkPreflight)result=structuredClone(window.fixtureArtworkPreflight);
       if(request.command==='closeSteam'){window.fixtureSteamRunning=false;result={steamRunning:false,steamPath:''};}
       if(window.fixtureFailures[request.command]) {
         setTimeout(()=>listeners.forEach(listener=>listener({data:{kind:'response',id:request.id,ok:false,error:window.fixtureFailures[request.command]}})),0);
@@ -64,6 +66,7 @@ const mock = `
       };
       if(request.command==='plan'&&window.fixtureHoldPlan){(window.fixturePlanReleases||=[]).push(complete);return;}
       if(request.command==='commit'&&window.fixtureHoldCommit){(window.fixtureCommitReleases||=[]).push(complete);return;}
+      if(request.command==='refreshSteamArtwork'&&window.fixtureHoldArtworkRepair){window.fixtureReleaseArtworkRepair=complete;return;}
       setTimeout(complete,request.command==='commit'?80:0);
     }
   };
@@ -134,6 +137,7 @@ try {
   await evaluate(`
     window.check=(value,text)=>{if(!value)throw new Error(text);};
     window.frames=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    window.waitFor=async(predicate)=>{for(let i=0;i<150;i++){if(predicate())return;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Fixture wait timed out');};
     window.keyboardCalls=()=>fixtureCalls.filter(call=>call.command==='keyboard');
     window.editorOpen=()=>!document.querySelector('#edit-modal').classList.contains('hidden');
     window.resetEditor=async(native=false)=>{
@@ -141,6 +145,60 @@ try {
       const game=structuredClone(fixtureGame);if(native)game.steamNative=true;
       openEdit(game);await frames();fixtureCalls.length=0;
     };
+  `);
+  await test('native-covers-without-primary-are-pointer-and-controller-editable', `
+    const previous=snapshot,previousFixtures=fixtureSnapshot,previousTab=activeTab;
+    const previousFocus=Object.getOwnPropertyDescriptor(document,'hasFocus');
+    const previousCalls=fixtureCalls.slice();
+    const native=(name,id,primaryExecutable=null)=>({gameDirectory:'G:/FixtureSteam/steamapps/common/'+name,directoryName:name,primaryExecutable,steamNative:true,nativeSteamAppId:id,candidates:[]});
+    const newer=[native('A1',4209920),native('Project Zomboid',108600)],old=native('Old native',620,'G:/FixtureSteam/steamapps/common/Old native/game.exe'),unknown=native('Unconfirmed',0);
+    const games=[...newer,old,unknown];
+    const calls=name=>fixtureCalls.filter(item=>item.command===name);
+    const nav=action=>{lastDirectionalActionAt=0;controllerBackLastAt=0;routeWorkspaceAction(action);};
+    const hidden=id=>$(id).classList.contains('hidden');
+    const preview=type=>$('#artwork-'+type+'-preview');
+    const image='G:/FixtureSteam/portrait.png';
+    fixtureSnapshot={...previousFixtures,library:{games},steamPlan:{items:games.map(row=>({...row,status:'already-in-steam'}))}};
+    window.fixtureLaunchReplies={pickArtwork:{path:image}};
+    try{
+      Object.defineProperty(document,'hasFocus',{configurable:true,value:()=>true});
+      snapshot=normalizeWorkspaceSnapshot(structuredClone(fixtureSnapshot),snapshot);
+      activeTab='native-steam';renderLibrary();
+      for(const row of newer){
+        const card=libraryCards().find(item=>item.dataset.directory===keyFor(row));
+        check(card,'Native fixture card missing');focusWorkspaceElement(card);nav('edit');await frames();
+        check(editorOpen()&&keyFor(selectedActionGame)===keyFor(row),'Controller did not open the intended editor');
+        check(preview('cover').tabIndex===0&&preview('long').tabIndex===0&&getComputedStyle(preview('cover')).cursor==='pointer','Unconfirmed EXE disabled the cover');
+        check($('#edit-save-content').disabled,'Unchanged native editor allowed saving');
+        check(document.activeElement===preview('cover'),'Expected initial cover focus, got '+document.activeElement?.outerHTML.slice(0,150)+'; modal='+activeWorkspaceModal()?.id+'; active='+libraryRenderAllowed()+'; visible='+visibleFocusables($('#edit-modal')).includes(preview('cover')));
+        nav('navigate-down');check(document.activeElement===preview('long'),'Horizontal cover unreachable');
+        nav('accept');await frames();check(!hidden('#artwork-action-modal')&&artworkActionType==='long','A did not open horizontal cover actions');
+        nav('accept');await waitFor(()=>calls('searchArtwork').some(item=>item.arguments.steamAppId===String(row.nativeSteamAppId)));
+        check(!hidden('#artwork-search-modal'),'A did not open the cover candidate selector');nav('back');await frames();
+        check(hidden('#artwork-search-modal')&&document.activeElement===preview('long'),'B did not return from candidates to the horizontal cover');
+        preview('cover').click();await frames();check(!hidden('#artwork-action-modal')&&artworkActionType==='cover','Mouse did not open vertical cover actions');
+        $('#artwork-action-replace').click();await waitFor(()=>artworkDraft.dirty.cover);check(!$('#edit-save-content').disabled,'Cover edit did not enable Save');
+        preview('long').click();await frames();$('#artwork-action-delete').click();
+        const id=String(row.nativeSteamAppId),before=calls('saveEditor').length;
+        fixtureSnapshot.manualOverrides={items:{},nativeCovers:{[id]:{cover:{file:image},artworkProtection:{cover:'manual',long:'deleted'}}}};
+        $('#edit-save-content').click();await waitFor(()=>calls('saveEditor').length===before+1&&!editSaveInFlight);
+        const batch=calls('saveEditor').at(-1).arguments,ops=batch.operations;
+        check(batch.refreshNativeArtwork&&ops.length===1&&ops[0].command==='saveArtworkOverride','Cover save changed unrelated settings');
+        const args=ops[0].arguments;
+        check(args.nativeSteamAppId===id&&keyFor(args)===keyFor(row)&&args.coverPath===image&&args.clearLong===true&&!('executable' in args)&&!('wallpaperPath' in args),'Cover save had incorrect identity or slots');
+        check(artworkDraft.cover.asset?.file===image&&artworkDraft.long.state==='deleted','Saved native covers did not project back into the editor');
+        nav('back');await frames();check(!editorOpen()&&libraryCards().some(item=>item===document.activeElement&&item.dataset.directory===keyFor(row)),'Back did not restore the native card');
+      }
+      openEdit(mergedGames().find(row=>keyFor(row)===keyFor(old)));await frames();
+      preview('cover').click();await frames();check(!hidden('#artwork-action-modal'),'Old native cover lost mouse access');
+      nav('back');await frames();check(document.activeElement===preview('cover'),'Old native cover lost B focus return');closeEdit();
+      openEdit(mergedGames().find(row=>keyFor(row)===keyFor(unknown)));await frames();
+      preview('cover').click();check(hidden('#artwork-action-modal')&&preview('cover').tabIndex<0,'No confirmed AppID granted cover access');
+    } finally {
+      if(editorOpen())closeEdit();fixtureSnapshot=previousFixtures;delete window.fixtureLaunchReplies;snapshot=previous;activeTab=previousTab;renderLibrary();
+      if(previousFocus)Object.defineProperty(document,'hasFocus',previousFocus);else delete document.hasFocus;
+      fixtureCalls.splice(0,fixtureCalls.length,...previousCalls);
+    }
   `);
   await test('startup-detects-account-despite-cached-no-account', `
     if(steamAccountRequest)await steamAccountRequest;
@@ -234,7 +292,6 @@ try {
     focusWorkspaceElement($('#identity-name'));routeWorkspaceAction('accept');
     check(!$('#identity-name').readOnly && keyboardCalls().length===1,'Native game name could not be edited');`);
   await evaluate(`
-    window.waitFor=async(predicate)=>{for(let i=0;i<150;i++){if(predicate())return;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Fixture wait timed out');};
     window.resetCommitFixture=async()=>{
       if(editorOpen())closeEdit();
       steamAddNotices.length=0;if(!$('#steam-add-notice-modal').classList.contains('hidden'))closeSteamAddNotice();
@@ -300,7 +357,8 @@ try {
     await command('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
     await test('single-card-action-row-and-controller-navigation-'+width+'x'+height, `
       await resetCommitFixture();
-      const buttons=[...document.querySelectorAll('.edit-actions button')];
+      check($('#edit-launch-open').classList.contains('hidden'),'Ordinary mode exposed the advanced VBS action');
+      const buttons=[...document.querySelectorAll('.edit-actions button')].filter(isVisuallyPresent);
       check(buttons.map(button=>button.id).join(',')==='edit-folder,edit-search-game,edit-save-content,edit-add-to-steam,edit-back-button','Incorrect action order');
       check(!$('#edit-add-to-steam').disabled,'Single-card action disabled');
       for(let i=0;i<buttons.length;i++){
@@ -366,6 +424,209 @@ try {
     await resetCommitFixture();selectedGameDirectories=new Set();const key=keyFor(selectedActionGame);await openSingleCommit();
     await waitFor(()=>steamCommitTasks.get(key)?.phase==='completed');
     check(JSON.stringify(commitCalls()[0].arguments.selectedGameDirectories)===JSON.stringify([key]),'Empty page selection replaced editor target');
+  `);
+  await test('ordinary-mode-save-separates-library-from-steam-update', `
+    await resetCommitFixture();const key=keyFor(selectedActionGame),exe=normalizedUiPath(selectedActionGame.primaryExecutable);closeEdit();
+    const row=fixtureSnapshot.steamPlan.items.find(game=>keyFor(game)===key);row.status='already-in-steam';row.steamMembershipSource='game-launch-script';
+    fixtureSnapshot.manualOverrides.items[exe]={launchConfiguration:{mode:'auto'}};
+    applyLibrarySnapshot(structuredClone(fixtureSnapshot));openEdit(mergedGames().find(game=>keyFor(game)===key));await frames();
+    check($('#edit-launch-mode').value==='auto','Existing VBS mode was not loaded');
+    changeEditLaunch({mode:'direct'});
+    await joinEditedGameToSteam();check(commitCalls().length===0,'Unsaved mode reached Steam');closeSteamAddNotice();
+    fixtureSnapshot.manualOverrides.items[exe]={launchConfiguration:{mode:'direct'}};
+    try {
+      check(await persistEditDraft(),'Library save failed');await frames();
+      const save=fixtureCalls.find(call=>call.command==='saveEditor');
+      check(save?.arguments.operations.some(op=>op.command==='saveLaunchConfiguration'&&op.arguments.configuration.mode==='direct'),'Ordinary mode was not saved');
+      check($('#edit-launch-mode').value==='direct'&&!editDraft.launchEdits&&commitCalls().length===0,'Save changed Steam or failed to rebase the mode');
+      const ready=$('#edit-add-to-steam');
+      check(ready.textContent.includes('更新 Steam 启动')&&!ready.disabled,'Explicit update action unavailable');
+      const feedback=$('#edit-launch-feedback').textContent;
+      fixtureSnapshot.steamAddCompletion={mode:'steam-library-add-commit',committed:true,items:[{...row,launchUpdated:true}]};
+      await openSingleCommit();await waitFor(()=>steamCommitTasks.get(key)?.phase==='completed');await frames();
+      check(commitCalls()[0].arguments.updateVbsLaunch===true,'Explicit update did not use the existing transaction');
+      check($('#steam-add-notice-message').textContent.includes('已更新原 Steam 卡片'),'Verified launch update was not reported');
+      check(feedback.includes('Steam 卡片未改写'),'Library save did not say that the Steam card was untouched');
+      check(!$('#edit-launch-feedback').textContent.includes('未改写'),'Verified update left stale save feedback in the editor');
+    } finally {
+      delete fixtureSnapshot.manualOverrides.items[exe];delete fixtureSnapshot.steamAddCompletion;
+    }
+  `);
+  await evaluate(`
+    window.openJoinedArtworkFixture=async()=>{
+      await resetCommitFixture();
+      const key=keyFor(selectedActionGame);closeEdit();
+      fixtureSnapshot.steamPlan.items.forEach(row=>{row.status='already-in-steam';});
+      snapshot=normalizeWorkspaceSnapshot(structuredClone(fixtureSnapshot),snapshot);
+      activeTab='in-steam';renderLibrary();
+      openEdit(mergedGames().find(row=>keyFor(row)===key));await frames();fixtureCalls.length=0;
+      return key;
+    };
+  `);
+  await test('joined-editor-repairs-only-its-original-card', `
+    const key=await openJoinedArtworkFixture(),initial=keyFor(selectedActionGame),dir=selectedActionGame.gameDirectory;
+    const button=$('#edit-repair-steam-artwork');check(button&&!button.classList.contains('hidden'),'Joined editor lacks a single-card Steam artwork action');
+    const checkAction=()=>fixtureCalls.filter(call=>call.command==='refreshSteamArtwork');
+    const fixtureExec=normalizedUiPath(selectedActionGame.primaryExecutable),source='G:/Fixture/new.png';
+    artworkDraft.cover={state:'set',asset:{path:source}};artworkDraft.dirty.cover=true;confirmArtworkDraft();
+    check(button.disabled&&checkAction().length===0,'Unsaved artwork can enter Steam repair');
+    fixtureSnapshot.manualOverrides.items[fixtureExec]={cover:{file:source},artworkProtection:{cover:'manual'}};
+    try {
+      check(await persistEditDraft(),'Library artwork save failed');await frames();
+      check(!button.disabled&&checkAction().length===0&&!fixtureCalls.some(call=>call.command==='commit'),'Saving artwork secretly wrote Steam or did not re-enable repair');
+      selectedSteamDirectories=new Set(mergedGames().filter(row=>keyFor(row)!==key).map(keyFor));
+      focusWorkspaceElement($('#artwork-long-preview'));lastDirectionalActionAt=0;routeWorkspaceAction('navigate-down');
+      check(document.activeElement===button,'Steam artwork repair is not reachable by the controller');
+      const rect=button.getBoundingClientRect(),panel=button.closest('.edit-artwork-panel').getBoundingClientRect();
+      check(rect.width>0&&rect.height>0&&rect.left>=panel.left&&rect.right<=panel.right&&rect.top>=0&&rect.bottom<=innerHeight,'Steam artwork repair is clipped');
+      routeWorkspaceAction('accept');await waitFor(()=>checkAction().length===1&&$('#busy').classList.contains('hidden'));
+      const request=checkAction()[0].arguments;
+      check(request.selectionMode==='all-steam-accounts'&&request.selectedGameDirectories.length===1&&request.selectedGameDirectories[0]===dir&&!request.forceCloseSteam,'Repair used another card, bulk selection or forced closure');
+      check(editorOpen()&&keyFor(selectedActionGame)===initial,'Single-card repair changed editor context');
+    } finally {delete fixtureSnapshot.manualOverrides.items[fixtureExec];}
+  `);
+  await command('Emulation.setDeviceMetricsOverride',{width:1280,height:720,deviceScaleFactor:1,mobile:false});
+  await test('joined-editor-artwork-repair-rejects-stale-close-confirmation', `
+    const key=await openJoinedArtworkFixture();
+    const button=$('#edit-repair-steam-artwork');check(button&&!button.disabled,'Joined editor lacks a usable Steam artwork action');
+    focusWorkspaceElement($('#artwork-long-preview'));lastDirectionalActionAt=0;routeWorkspaceAction('navigate-down');await frames();
+    const rect=button.getBoundingClientRect(),panel=button.closest('.edit-artwork-panel').getBoundingClientRect();
+    check(document.activeElement===button&&rect.width>0&&rect.left>=panel.left&&rect.right<=panel.right&&rect.top>=0&&rect.bottom<=innerHeight,'Handheld repair action is clipped or unreachable');
+    window.fixtureArtworkPreflight={steamRunning:true,steamClient:{pid:77,birth:'115',powerGeneration:'1',powerSequence:'0',powerSerial:'0'}};
+    try {
+      button.click();await waitFor(()=>!$('#confirm-modal').classList.contains('hidden'));closeConfirm(false);await frames();
+      check(!fixtureCalls.some(call=>call.command==='refreshSteamArtwork'),'Cancelled confirmation wrote Steam');
+      button.click();await waitFor(()=>!$('#confirm-modal').classList.contains('hidden'));
+      openEdit(mergedGames().find(row=>keyFor(row)!==key));closeConfirm(true);await frames();
+      check(!fixtureCalls.some(call=>call.command==='refreshSteamArtwork'||call.command==='closeSteam'),'Stale confirmation closed Steam or repaired a different card');
+    } finally {delete window.fixtureArtworkPreflight;}
+  `);
+  await command('Emulation.setDeviceMetricsOverride',{width:1920,height:1080,deviceScaleFactor:1,mobile:false});
+  await evaluate(`
+    window.seedEditorRepairPreview=async()=>{
+      const key=await openJoinedArtworkFixture();closeEdit();
+      const row=fixtureSnapshot.steamPlan.items.find(row=>keyFor(row)===key);
+      const image=color=>'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="90" height="120"><rect width="90" height="120" fill="'+color+'"/></svg>');
+      Object.assign(row,{shortAppId:'3221225473',longAppId:'13835058059610685440',gridDirectory:'G:/FixtureSteam/userdata/1000/config/grid',artworkPreview:{tall:{url:image('blue')},long:{url:image('red')}}});
+      snapshot=normalizeWorkspaceSnapshot(structuredClone(fixtureSnapshot),snapshot);
+      openEdit(mergedGames().find(game=>keyFor(game)===key));await frames();
+      const original=row.artworkPreview.tall.url;
+      row.artworkPreview={tall:{url:image('green')},long:{url:image('gold')}};
+      fixtureSnapshot.steamArtworkFilesRepaired=1;
+      fixtureSnapshot.steamArtworkViewStale=false;
+      return {key,row,original,expected:row.artworkPreview.tall.url,image};
+    };
+  `);
+  await test('joined-editor-repair-refreshes-static-preview-without-replacing-draft', `
+    const {key,expected,image}=await seedEditorRepairPreview();
+    const draft=editDraft,button=$('#edit-repair-steam-artwork');
+    $('#identity-name').value='Unsaved game title';syncIdentityDraft('name');
+    window.fixtureHoldArtworkRepair=true;
+    focusWorkspaceElement(button);button.click();await waitFor(()=>!!window.fixtureReleaseArtworkRepair);
+    const chosen={state:'set',asset:{url:image('purple')}};
+    artworkDraft.long=chosen;artworkDraft.dirty.long=true;
+    try {
+      window.fixtureReleaseArtworkRepair();await waitFor(()=>!steamArtworkRequestInFlight&&$('#busy').classList.contains('hidden'));
+      check(artworkDraft.cover.asset?.url===expected&&$('#artwork-cover-preview img')?.getAttribute('src')===expected,'Verified repair left the original editor preview stale');
+      check(editDraft===draft&&keyFor(selectedActionGame)===key&&draftName()==='Unsaved game title'&&artworkDraft.long===chosen&&artworkDraft.dirty.long,'Static repair replaced the draft or a newer per-slot selection');
+      check(!fixtureCalls.some(call=>call.command==='saveEditor'),'Repair saved editor fields');
+    } finally {delete window.fixtureHoldArtworkRepair;delete window.fixtureReleaseArtworkRepair;}
+  `);
+  await test('joined-editor-repair-refuses-unverified-or-cross-account-preview', `
+    const {row,original}=await seedEditorRepairPreview();
+    const button=$('#edit-repair-steam-artwork');
+    const run=async()=>{button.click();await waitFor(()=>!steamArtworkRequestInFlight&&$('#busy').classList.contains('hidden'));check(artworkDraft.cover.asset?.url===original,'Unverified result replaced the original editor preview');};
+    fixtureCalls.length=0;fixtureSnapshot.steamArtworkViewStale=true;await run();
+    fixtureSnapshot.steamArtworkViewStale=false;row.gridDirectory='G:/FixtureSteam/userdata/1001/config/grid';await run();
+    check(fixtureCalls.filter(call=>call.command==='refreshSteamArtwork').length===2,'Skipped an original repair result');
+  `);
+  await test('single-card-new-account-import-distinguishes-untouched-old-card', `
+    await resetCommitFixture();const key=keyFor(selectedActionGame),row=fixtureSnapshot.steamPlan.items.find(game=>keyFor(game)===key);
+    const account=(accountId,committed,fields)=>({mode:'steam-library-add-commit',accountId,committed,
+      ...(!committed?{reason:'nothing-ready-to-add'}:{}),items:[{...row,...fields}]});
+    fixtureSnapshot.steamAddCompletion={mode:'steam-library-add-commit-all-accounts',accountResults:[
+      account('1000',true,{status:'added-to-steam'}),account('1001',false,{status:'already-in-steam',steamMembershipSource:'game-launch-script'})]};
+    try {
+      await openSingleCommit();await waitFor(()=>steamCommitTasks.get(key)?.phase==='completed');await frames();
+      check(!commitCalls()[0].arguments.updateVbsLaunch,'New import enabled conversion of a historical card');
+      const feedback=$('#steam-add-notice-message').textContent;
+      check(feedback.includes('已加入 Steam')&&feedback.includes('新加入 1 个账户')&&feedback.includes('保留原卡 1 个账户'),'Mixed accounts hid the untouched card');
+    } finally {delete fixtureSnapshot.steamAddCompletion;}
+  `);
+  await test('vbs-file-actions-use-saved-launch-draft', `
+    await resetCommitFixture();const exe=normalizedUiPath(selectedActionGame.primaryExecutable),key=keyFor(selectedActionGame);
+    const path='G:/Fixture/Games/Other/StartGame.vbs',source='G:/Fixture/Games/Other/Start.bat';
+    window.fixtureLaunchReplies={launchFileState:{fileState:'present',script:path},updateLaunchFile:{fileState:'present',script:path,updated:true,backup:path+'.bak'}};
+    const updates=()=>fixtureCalls.filter(call=>call.command==='updateLaunchFile');
+    try {
+      changeEditLaunch({mode:'auto',source});
+      await openEditLaunchMenu();
+      if(editLaunchMenu){
+        const update=performEditLaunchFile('updateLaunchFile');
+        if(!$('#confirm-modal').classList.contains('hidden'))closeConfirm(true);
+        await update;closeEditLaunchMenu();
+      }
+      check(updates().length===0&&$('#edit-launch-feedback').textContent.includes('请先保存启动配置'),'Unsaved launch draft rewrote the VBS referenced by Steam');
+      fixtureSnapshot.manualOverrides.items[exe]={launchConfiguration:{mode:'auto',source}};
+      check(await persistEditDraft(),'Configuration save failed');await frames();
+      check(!editDraft.launchEdits&&keyFor(selectedActionGame)===key,'Saved configuration was not rebased');
+      await openEditLaunchMenu();
+      const declined=performEditLaunchFile('updateLaunchFile');closeConfirm(false);await declined;
+      check(updates().length===0,'Cancelling the explicit update still wrote a script');
+      const accepted=performEditLaunchFile('updateLaunchFile');closeConfirm(true);await accepted;
+      check(updates().length===1&&updates()[0].arguments.configuration.source===source,'Saved explicit update did not use this card and saved entry');
+      check($('#edit-launch-status').textContent.includes('已更新启动文件'),'Completion did not show script result');
+
+      const reads=()=>fixtureCalls.filter(call=>call.command==='launchFileState');
+      const actions=()=>fixtureCalls.filter(call=>['editLaunchFile','createLaunchFile','updateLaunchFile','deleteLaunchFile'].includes(call.command));
+      const beforeRead=reads().length,beforeAction=actions().length;
+      fixtureLaunchReplies.launchFileState={fileState:'missing',script:path};
+      fixtureFailures.editLaunchFile='启动文件不存在或不可用';
+      $('#edit-launch-main').focus();
+      await performEditLaunchFile('editLaunchFile');
+      check(reads().length===beforeRead+1&&reads().at(-1).arguments.executable===selectedActionGame.primaryExecutable,'Failed Edit did not recheck the same saved game exactly once');
+      check(actions().length===beforeAction+1&&commitCalls().length===0,'Recovery retried a mutation or reached Steam');
+      const main=$('#edit-launch-main');
+      check(main.textContent==='新建'&&!main.disabled&&$('#edit-launch-update').disabled&&$('#edit-launch-delete').disabled,'Disappeared VBS still showed stale Edit/Update/Delete actions');
+      check($('#edit-launch-status').textContent.includes('启动文件不存在或不可用')&&document.activeElement===main,'Recovery suppressed the failure or lost controller focus');
+
+      fixtureFailures.createLaunchFile='测试：生成失败';
+      fixtureFailures.launchFileState='测试：读取失败';
+      await performEditLaunchFile('createLaunchFile');
+      check(reads().length===beforeRead+2&&actions().length===beforeAction+2&&commitCalls().length===0,'Unconfirmed state caused retries or Steam writes');
+      check(main.disabled&&$('#edit-launch-update').disabled&&$('#edit-launch-delete').disabled&&document.activeElement===$('#edit-launch-cancel'),'Unknown file state kept stale actions or stranded focus');
+      check($('#edit-launch-status').textContent.includes('测试：生成失败'),'Failed state check hid the original error');
+    }finally{
+      closeEditLaunchMenu(false);delete window.fixtureLaunchReplies;delete fixtureSnapshot.manualOverrides.items[exe];
+      for(const command of ['editLaunchFile','createLaunchFile','launchFileState'])delete fixtureFailures[command];
+    }
+  `);
+  await test('vbs-file-confirmation-rejects-changed-library-root', `
+    await resetCommitFixture();const key=keyFor(selectedActionGame),exe=normalizedUiPath(selectedActionGame.primaryExecutable);
+    closeEdit();fixtureSnapshot.manualOverrides.items[exe]={launchConfiguration:{mode:'auto'}};
+    applyLibrarySnapshot(structuredClone(fixtureSnapshot));openEdit(mergedGames().find(row=>keyFor(row)===key));
+    window.fixtureLaunchReplies={launchFileState:{fileState:'present',script:'G:/Fixture/StartGame.vbs'},updateLaunchFile:{fileState:'present',updated:true}};
+    const original=snapshot;
+    try {
+      await openEditLaunchMenu();const accepted=performEditLaunchFile('updateLaunchFile');
+      check(!$('#confirm-modal').classList.contains('hidden'),'Saved file update skipped confirmation');
+      snapshot={...snapshot,dataRoot:'G:/Fixture/ReplacedRoot'};
+      closeConfirm(true);await accepted;
+      check(!fixtureCalls.some(call=>call.command==='updateLaunchFile'),'Old confirmation reached a different library root');
+    }finally{snapshot=original;closeEditLaunchMenu(false);delete window.fixtureLaunchReplies;delete fixtureSnapshot.manualOverrides.items[exe];}
+  `);
+  await test('steam-card-conflict-blocks-editor-commit-until-refreshed', `
+    await resetCommitFixture();const key=keyFor(selectedActionGame),draft=editDraft;
+    const original=structuredClone(snapshot),conflict=structuredClone(original);
+    const item=conflict.steamPlan.items.find(row=>keyFor(row)===key);item.status='shortcut-id-conflict';
+    applyLibrarySnapshot(conflict);await frames();
+    check(editorOpen()&&editDraft===draft&&$('#edit-add-to-steam').disabled&&$('#edit-add-to-steam').textContent.includes('冲突'),'New Steam conflict did not disable the open editor action');
+    await joinEditedGameToSteam();check(commitCalls().length===0,'Conflict reached the commit bridge');
+    closeSteamAddNotice();
+    applyLibrarySnapshot(original);await frames();
+    check(editorOpen()&&editDraft===draft&&!$('#edit-add-to-steam').disabled,'Fresh clear result did not reenable the same draft');
+    await openSingleCommit();await waitFor(()=>steamCommitTasks.get(key)?.phase==='completed');
+    check(commitCalls().length===1&&commitCalls()[0].arguments.selectedGameDirectories[0]===key,'Recovery did not restore the original single-card action');
   `);
   await test('return-from-single-card-keeps-batch-selection-independent', `
     await resetCommitFixture();window.fixtureHoldCommit=true;const key=keyFor(selectedActionGame);await openSingleCommit();closeEdit();window.fixtureCommitReleases.shift()();await waitFor(()=>steamCommitTasks.get(key)?.phase==='completed');window.fixtureHoldCommit=false;fixtureCalls.length=0;

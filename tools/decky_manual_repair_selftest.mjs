@@ -50,7 +50,17 @@ function admitManualSources(root,io){
  const action=block(runtime,'if((action==Action::rebuild||action==Action::reopen)&&(config_.connectionStep||config_.connectionStepReserved))','Runtime UI action branch');
  ordered(action,['const bool defer=config_.connectionStepReserved&&!process&&retainedFrontend&&context&&','const auto retire=[&]{teardownEntered=true;closeOwned(cause);};','if(!defer)retire();','if(ownedBindingCleanupError_.load()==ERROR_SUCCESS&&launchAllowed(intent))'],'owned service retirement and admission');
  const admitted=block(action,'if(ownedBindingCleanupError_.load()==ERROR_SUCCESS&&launchAllowed(intent))','admitted Runtime action');
- ordered(admitted,['const std::function<bool()> beforeEffect=defer?','if(!launchAllowed(intent)||teardownEntered)return false;','retire();return ownedBindingCleanupError_.load()==ERROR_SUCCESS&&launchAllowed(intent);','config_.connectionStepReserved(action,commandOperation,beforeEffect):config_.connectionStep(action)','keptTransport=defer&&!teardownEntered&&noEffect;','receipt.value("ok",false)&&receipt.value("mutated",false)&&!receipt.value("uncertain",false)','connectionFallback.started(action','else if(noEffect)','connectionFallback.failed(action'],'confirmed Runtime action receipt');
+ ordered(admitted,['const std::function<bool()> beforeEffect=defer?','if(!launchAllowed(intent)||teardownEntered)return false;','retire();return ownedBindingCleanupError_.load()==ERROR_SUCCESS&&launchAllowed(intent);','config_.connectionStepReserved(action,commandOperation,beforeEffect):config_.connectionStep(action)'],'Runtime action before effect');
+ const receipt=admitted.replace(/\s+/g,'');
+ ordered(receipt,[
+  'constboolnoEffect=receipt.contains("ok")&&receipt["ok"]==false&&receipt.contains("mutated")&&receipt["mutated"]==false&&(!receipt.contains("uncertain")||receipt["uncertain"]==false);',
+  'constboolawaitObservedHealth=action==Action::reopen&&noEffect&&receipt.value("reason",nlohmann::json{})==deckyrepair::bigpicture::alreadyHealthy;',
+  'constboolidentityDeferred=noEffect&&receipt.value("awaitCurrentIdentity",nlohmann::json{})==true&&receipt.value("cleanupNotStarted",nlohmann::json{})==true&&receipt.value("reason",nlohmann::json{})=="decky-cleanup-account-unconfirmed";',
+  'keptTransport=defer&&!teardownEntered&&noEffect;',
+  'if(receipt.value("ok",false)&&receipt.value("mutated",false)&&!receipt.value("uncertain",false))connectionFallback.started(action,GetTickCount64());',
+  'elseif(keptTransport&&identityDeferred)connectionFallback.parkUnstartedPage(action,GetTickCount64());',
+  'elseif(noEffect&&!awaitObservedHealth)connectionFallback.failed(action,GetTickCount64(),identityDeferred);',
+ ],'confirmed Runtime action receipt');
  const repairHeader=read('native/decky_sidebar_manual_repair.h');
  ordered(repairHeader,['if(origin==Origin::Automatic)return refuse("steam-ui-refresh-requires-user")','const auto session=deps.session();','if(cleanup&&deps.cleanupWorker)','if(!current()||!deps.consent(session))','deps.cleanupWorker(session,args,current)','!deps.reserveCleanup||!deps.freshMode','if(!deps.reserveCleanup(session))return refuse','deps.dispatch(session,action,admit)'],'native cleanup authorization');
  need(deps,['[beforeFirstEffect](const auto& session,const auto& args,const auto& current)','cleanupworker::dispatchShared(g_steamSettingsObserver,verified','cleanupworker::schema,beforeFirstEffect'],'parent cleanup child wiring');

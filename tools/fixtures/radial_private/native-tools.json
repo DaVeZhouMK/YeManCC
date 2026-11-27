@@ -560,6 +560,11 @@
       "role": "actual MSVC include graph header"
     },
     {
+      "path": "c:\\program files (x86)\\microsoft visual studio\\2022\\buildtools\\vc\\tools\\msvc\\14.44.35207\\include\\unordered_set",
+      "sha256": "3e281112ab487066b6a41b33a5875156ff29c577d707ce303368c8a3716a49c0",
+      "role": "actual MSVC include graph header"
+    },
+    {
       "path": "c:\\program files (x86)\\microsoft visual studio\\2022\\buildtools\\vc\\tools\\msvc\\14.44.35207\\include\\use_ansi.h",
       "sha256": "f3133ce73105aa38ea2fa0ee1495c8620b2d7dc0ab00dd980d9325ac38c7d443",
       "role": "actual MSVC include graph header"
@@ -1557,6 +1562,11 @@
     {
       "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\windef.h",
       "sha256": "040535b19a60264e5fe6971f7cb13cbf24be17abeeaa8acd21e44f5d7dfe8d22",
+      "role": "actual MSVC include graph header"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\windowsx.h",
+      "sha256": "29484dbda5015abe60d67f333a19488841817a37c0a23c8cb03bfbce4d15ac72",
       "role": "actual MSVC include graph header"
     },
     {

@@ -67,7 +67,7 @@ try {
  // only their named virtual case, without repeating the real-time STA case.
  const modes=[
   {name:'current',expectedPass:true,scenarios:selectedCase?[selectedCase]:[...virtualScenarios,'power'],args:selectedCase?['--case',selectedCase]:undefined},
-  {name:'missing-early-power-pause',args:['--power-only'],scenarios:['power'],requiredFailure:'OS callback revokes admission before GUI exists',code:s=>once(s,'if (type == PBT_APMSUSPEND) inputCaptureSignalSensorPowerPause();','if (type == PBT_APMSUSPEND) {}','early power pause')},
+  {name:'missing-early-power-pause',args:['--power-only'],scenarios:['power'],requiredFailure:'OS callback revokes admission before GUI exists',code:s=>once(s,'if(type==PBT_APMSUSPEND)inputCaptureSignalSensorPowerPause();','if(type==PBT_APMSUSPEND){}','early power pause')},
   {name:'missing-display-off-pause',args:['--power-only'],scenarios:['power'],requiredFailure:'display OFF immediately revokes binding',code:s=>once(s,'if (state == 0) inputCaptureSuspendSensorsForPower();','if (state == 0) {}','display OFF pause')},
   {name:'resume-while-off',args:['--power-only'],scenarios:['power'],requiredFailure:'automatic resume while display OFF stays paused',code:s=>once(s,'display != 0;','true;','resume admission')},
   {name:'virtual-ignore-link-switch',args:['--case','disabled'],scenarios:['disabled'],assertions:3,requiredFailure:'virtual link OFF rejects the ready notification',header:s=>once(s,'enabled_.store(enabled,std::memory_order_release);','enabled_.store(true,std::memory_order_release);','ignore effective link switch')},

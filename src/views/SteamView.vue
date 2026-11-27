@@ -143,6 +143,8 @@ const steamUiState = ref<SteamUiState | null>(null);
 const steamPendingTarget = ref<'running' | 'desktop' | 'bigpicture' | null>(null);
 type SteamObservationKind = 'published' | 'passive';
 let steamReadEpoch = 0, steamObservationEpoch = 0, steamStateReadBusy = false;
+let steamObservationCancellation: AbortController | null = null;
+let steamObservationScopePending = false;
 let steamStateRefreshQueued: SteamObservationKind | null = null;
 let stopSteamUiState: (() => void) | null = null;
 let steamEventTimer: ReturnType<typeof setTimeout> | null = null;
@@ -184,6 +186,7 @@ function showNotice(message: string) {
 }
 
 function steamReadVisible() {
+  if (steamObservationScopePending) return false;
   // Process/status reads are independent of fan/input recovery readiness.
   if (typeof getUiVisibilityState !== 'function') return isUiVisible();
   const state = getUiVisibilityState();
@@ -191,8 +194,9 @@ function steamReadVisible() {
 }
 
 const steamReadonlyEvents = ['ipc:window.shown', 'ipc:window.restored', 'ipc:window.maximized', 'ipc:window.summoned'];
-async function detectSteamState(automatic = false): Promise<SteamUiState | null> {
-  try { return await steamUi.read(automatic ? { automatic: true } : undefined); } catch { return null; }
+async function detectSteamState(automatic = false, signal?: AbortSignal): Promise<SteamUiState | null> {
+  try { return await steamUi.read(automatic ? { automatic: true, shareNotification: true, signal } : signal ? { signal } : undefined); }
+  catch { return null; }
 }
 function acceptSteamState(state: SteamUiState | null) {
   if (!state?.known) {
@@ -216,6 +220,7 @@ function resumeQueuedSteamObservation(): void {
   if (steamStateRefreshQueued) queueSteamStateRefresh(steamStateRefreshQueued);
 }
 async function refreshSteamState(options?: { automatic: true; publishedOnly?: true }): Promise<SteamUiState | null> {
+  if (steamObservationScopePending) return null;
   const automatic = options?.automatic === true;
   const kind = options?.publishedOnly ? 'published' : 'passive';
   if (!automatic) {
@@ -231,6 +236,7 @@ async function refreshSteamState(options?: { automatic: true; publishedOnly?: tr
   }
   if (steamStateReadBusy) { retainSteamObservation(kind); return null; }
   steamStateReadBusy = true;
+  const { signal } = steamObservationCancellation = new AbortController();
   const epoch = steamObservationEpoch;
   steamLastStatusRead = performance.now();
   let probing = kind === 'passive';
@@ -241,7 +247,7 @@ async function refreshSteamState(options?: { automatic: true; publishedOnly?: tr
     let state: SteamUiState | null;
     if (kind === 'published') {
       let legacyNative = false;
-      try { state = await steamUi.read({ publishedOnly: true }); }
+      try { state = await steamUi.read({ publishedOnly: true, signal }); }
       catch (error) {
         state = null;
         legacyNative = (error as Error)?.message === 'Invalid Steam UI read';
@@ -256,9 +262,9 @@ async function refreshSteamState(options?: { automatic: true; publishedOnly?: tr
         probing = true;
         steamLastStatusRead = performance.now();
         steamReadBudget.started(steamLastStatusRead);
-        state = await detectSteamState(true);
+        state = await detectSteamState(true, signal);
       }
-    } else state = await detectSteamState(automatic);
+    } else state = await detectSteamState(automatic, signal);
     const confirmed = !!state?.known && (!state.running || state.mode !== 'unknown');
     if (probing && epoch === steamObservationEpoch) steamReadBudget.finished(confirmed);
     if (epoch === steamObservationEpoch && steamActive && steamReadVisible()) {
@@ -267,6 +273,7 @@ async function refreshSteamState(options?: { automatic: true; publishedOnly?: tr
     }
     return epoch === steamObservationEpoch ? state : null;
   } finally {
+    steamObservationCancellation = null;
     steamStateReadBusy = false;
     steamConfirmation?.drain();
     resumeQueuedSteamObservation();
@@ -323,11 +330,13 @@ function finishSteamPower(intent: number) {
   if (steamConfirmationHint) { steamConfirmationHint = false; retainSteamObservation('published'); }
   resumeQueuedSteamObservation();
 }
-function retireSteamObservation() {
+function retireSteamObservation(acrossPowerBoundary = false) {
   ++steamObservationEpoch;
   steamVisibilitySeedPending = false;
   if (steamEventTimer) { clearTimeout(steamEventTimer); steamEventTimer = null; }
   steamStateRefreshQueued = null; steamForceObservation = false;
+  // Release the old renderer wait; this does not cancel a Native operation.
+  if (acrossPowerBoundary) steamObservationCancellation?.abort();
 }
 function cancelSteamPowerWait() {
   ++steamPowerIntent; ++steamReadEpoch;
@@ -400,6 +409,11 @@ function confirmSteamState(
     const controller = new AbortController();
     const signal = controller.signal;
     pendingRead = { controller, forced: force };
+    if (force) {
+      // A live confirmation also covers the ordinary observation during this read gap.
+      steamLastStatusRead = performance.now();
+      steamReadBudget.started(steamLastStatusRead);
+    }
     try {
       const live = await steamUi.read(force ? { signal } : { publishedOnly: true, signal }).catch(() => null);
       if (!active() || signal.aborted) return;
@@ -731,25 +745,34 @@ onMounted(() => {
   steamActive = true;
   if (!stopSteamUiState) stopSteamUiState = steamUi.subscribe(onSteamStateChanged, { publishedMediaState: true });
   let sawPower = false, wakeGeneration = 0, wakeSuspendSerial = 0, wakeStage = 0;
+  let wakeNotificationSequence: number | undefined;
   stopSteamPowerObservation = onSharedPowerLifecycle(power => {
     const first = !sawPower;
     sawPower = true;
     if (power.generation <= 0 || power.generation < wakeGeneration) return;
+    const wasPending = steamObservationScopePending;
+    steamObservationScopePending = power.scopeReadbackPending === true;
     const suspendSerial = power.suspendSerial ?? wakeSuspendSerial;
-    if (power.generation !== wakeGeneration || suspendSerial !== wakeSuspendSerial) {
-      if (wakeGeneration > 0) retireSteamObservation();
+    const boundaryChanged = power.generation !== wakeGeneration || suspendSerial !== wakeSuspendSerial;
+    const sequence = power.observedNotificationSequence;
+    // A direct Ready can replace an active observation without a separate hint.
+    const replaceObservation = sequence !== undefined && sequence !== wakeNotificationSequence &&
+      (steamObservationCancellation !== null || steamStateRefreshQueued !== null);
+    wakeNotificationSequence = sequence ?? wakeNotificationSequence;
+    if (boundaryChanged || replaceObservation || (steamObservationScopePending && !wasPending)) {
+      if (wakeGeneration > 0 && !wasPending) retireSteamObservation(true);
       wakeGeneration = power.generation;
       wakeSuspendSerial = suspendSerial;
       wakeStage = 0;
     }
-    if (power.known !== true || power.notificationPending === true) return;
+    if (steamObservationScopePending || power.known !== true || power.notificationPending === true) return;
     // A confirmed F5 permits observation before input or hardware writes are ready.
     const stage = isSharedPowerLifecycleAdmitted(power) ? 2 :
       (power.phase === 'resuming' || power.phase === 'ready') && power.resumeReady === true ? 1 : 0;
     if (stage <= wakeStage) return;
     wakeStage = stage;
     if (!first && steamActive && steamReadVisible()) queueSteamResumeRefresh();
-  }, { observeSuspendSerial: true });
+  }, { observeSuspendSerial: true, observeNotificationSequence: true });
   for (const event of steamReadonlyEvents) window.addEventListener(event, queueSteamResumeRefresh);
   // document visibility can return after resume-ready while powerReady is still false.
   // The aggregate lifecycle suppresses that unchanged false state; read-only Steam

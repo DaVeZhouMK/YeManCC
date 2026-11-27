@@ -16,7 +16,7 @@ static ULONGLONG gpdPreHostFixtureClock() noexcept {
 #define GetTickCount64 gpdPreHostFixtureClock
 
 // A live, initially suspended child of THIS original regression executable is
-// the inert helper root. Its only user code is wmain's early return(6). Real
+// the inert helper root. Its only user code is wmain's early return. Real
 // LaunchScope/Job/owner-file/retire execute; no device operation is simulated as
 // an actual PnP call, and the controlled diagnostic facts remain an IO input.
 
@@ -26,7 +26,8 @@ static ULONGLONG gpdPreHostFixtureClock() noexcept {
 struct GpdPreHostChildCleanup {
     HANDLE root=nullptr,primary=nullptr,observer=nullptr,job=nullptr;
     bool transferred=false,resumed=false,zero=false;
-    GpdPreHostChildCleanup(HANDLE process,HANDLE thread,const std::wstring& name):root(process),primary(thread){
+    DWORD expectedExit;
+    GpdPreHostChildCleanup(HANDLE process,HANDLE thread,const std::wstring& name,DWORD expected=6):root(process),primary(thread),expectedExit(expected){
         (void)DuplicateHandle(GetCurrentProcess(),process,GetCurrentProcess(),&observer,
                 PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,0);
         job=OpenJobObjectW(JOB_OBJECT_QUERY,FALSE,name.c_str());
@@ -36,7 +37,7 @@ struct GpdPreHostChildCleanup {
         if(!resumed){if(ResumeThread(primary)==DWORD(-1))return false;resumed=true;}
         const auto observed=observer?observer:root;
         if(WaitForSingleObject(observed,2000)!=WAIT_OBJECT_0)return false;
-        DWORD exitCode=0;if(!GetExitCodeProcess(observed,&exitCode)||exitCode!=6||!job)return false;
+        DWORD exitCode=0;if(!GetExitCodeProcess(observed,&exitCode)||exitCode!=expectedExit||!job)return false;
         // Real process exit and positive Job0 are separate observations.
         for(unsigned i=0;i<1000;++i){
             JOBOBJECT_BASIC_ACCOUNTING_INFORMATION info{};
@@ -445,6 +446,7 @@ static std::pair<unsigned,unsigned> pauseMaskOnlyLogRegression() {
 
 int wmain(int argc,wchar_t** argv) {
     if(argc==2 && std::wstring(argv[1])==L"--gpd-terminal-inert-leaf")return 6;
+    if(argc==2 && std::wstring(argv[1])==L"--gpd-return-inert-leaf-exit2")return 2;
     if(argc!=2 && !(argc==3 && (std::wstring(argv[2])==L"--shield-mutation-probes" || std::wstring(argv[2])==L"--shield-priority-probes" || std::wstring(argv[2])==L"--shield-native-off-probes" || std::wstring(argv[2])==L"--native-visibility-write" || std::wstring(argv[2])==L"--native-handoff-cycle" || std::wstring(argv[2])==L"--native-handoff-before" || std::wstring(argv[2])==L"--native-handoff-partial-before"))) return 2;
     const bool mutationProbesOnly=argc==3 && std::wstring(argv[2])==L"--shield-mutation-probes";
     const bool priorityProbesOnly=argc==3 && std::wstring(argv[2])==L"--shield-priority-probes";

@@ -2,15 +2,17 @@ const listeners=new Map<string,Set<(value:any)=>void>>();
 export const isNativeRuntime=true;
 export const on=(event:string,fn:(v:any)=>void)=>{let set=listeners.get(event);if(!set)listeners.set(event,set=new Set());set.add(fn);return()=>set!.delete(fn);};
 export const emitNativeEvent=async()=>{};
-const state={ok:true,token:0,pending:false,remaining:0,stage:'idle',error:'',saved:null as any,excluded:new URLSearchParams(location.search).has('rog')};
-const seeded=new URLSearchParams(location.search).get('saved');
+const params=new URLSearchParams(location.search);
+const state={ok:true,token:0,pending:false,remaining:0,stage:'idle',error:'',saved:null as any,candidate:null as any,excluded:params.has('rog')};
+const seeded=params.get('saved');
 if(seeded)state.saved={schema:1,enabled:seeded!=='off',value:-4,vendor:'amd',unit:'co_step',identity:{family:'fixture',vendor:'amd'}};
+if(params.has('pending'))Object.assign(state,{pending:true,remaining:18,stage:'pending',candidate:{schema:1,enabled:true,value:-5,vendor:'amd',unit:'co_step',identity:{family:'fixture',vendor:'amd'}}});
 let timer:ReturnType<typeof setInterval>|undefined;
-export const stats={probe:0,hardware:[] as number[],saves:0,failNext:false};
+export const stats={probe:0,reads:0,hardware:[] as number[],saves:0,failNext:false};
 function emit(){for(const fn of listeners.get('cpu.undervolt.state')??[])fn({...state});}
 export async function invoke(command:string,args:any={}){
  if(!command.startsWith('cpu.undervolt.'))return null;
- if(command.endsWith('.state'))return {...state};
+ if(command.endsWith('.state')){stats.reads++;return {...state};}
  if(command.endsWith('.begin')||command.endsWith('.cancel')){if(timer)clearInterval(timer);state.token++;state.pending=false;state.stage=command.endsWith('.cancel')?'cancelled':'applying';return {...state};}
  if(command.endsWith('.arm')){
   if(args.token!==state.token)return {ok:false,error:'stale'};

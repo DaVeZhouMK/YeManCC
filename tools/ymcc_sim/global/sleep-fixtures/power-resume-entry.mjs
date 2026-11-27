@@ -23,10 +23,10 @@ let source = originalSource.replace(mainEntry, 'await main();');
 let appSource = fs.readFileSync(path.join(repo, 'src/App.vue'), 'utf8');
 const appFirstReadyNegative = process.argv.includes('--app-first-ready-negative');
 if (appFirstReadyNegative) {
-  const retainedRequest = '      if (latestResumeGeneration > 0 && state.generation === latestResumeGeneration)\n        scheduleResumeTransaction(state.generation);';
+  const retainedRequest = '    else if (!first || confirmedF5) onPowerResumed(event);';
   appSource = appSource.replaceAll('\r\n','\n');
   assert.equal(appSource.split(retainedRequest).length, 2, 'APP_FIRST_READY_NEGATIVE_UNIQUE');
-  appSource = appSource.replace(retainedRequest, '      // Private control: first Ready drops the earlier resume-ready request.');
+  appSource = appSource.replace(retainedRequest, '    else if (!first) onPowerResumed(event);');
 }
 const appSleepConfirmationOnly=process.argv.includes('--app-sleep-confirmation-only');
 const appSleepPlanOnly=process.argv.includes('--app-sleep-plan-only')||appSleepConfirmationOnly;
@@ -77,7 +77,7 @@ const appContinuationOnly=process.argv.includes('--app-continuation-only');
 const appSharedSourceOnly=process.argv.includes('--app-shared-source-only');
 const optionalSharedCases=declaredNames.filter(name=>name.startsWith('actual App shared source ')).length;
 assert.equal(caseCount-optionalContinuationCases-optionalSharedCases-optionalSleepCases, 23, 'POWER_RESUME_ORIGINAL_CASE_COUNT_CHANGED');
-assert.equal(optionalSharedCases,12,'POWER_RESUME_SHARED_CASE_COUNT_CHANGED');
+assert.equal(optionalSharedCases,23,'POWER_RESUME_SHARED_CASE_COUNT_CHANGED');
 assert.equal(optionalContinuationCases, 5, 'POWER_RESUME_CONTINUATION_CASE_COUNT_CHANGED');
 assert([appSchedulerOnly,appContinuationOnly,appSharedSourceOnly,appSleepPlanOnly].filter(Boolean).length<=1,'POWER_RESUME_SELECTION_CONFLICT');
 const built = await auditedPowerResumeBuild(scope, {
@@ -90,7 +90,7 @@ await import(importUrl);
 finishPowerResumeTools(scope, {
   schemaVersion: 1, domain: 'sleep', status: 'PASS', originalSelftestExecuted: true,
   productSourceExecuted: !serialNegative && !appFirstReadyNegative, sourceAssertionsMigrated: true,
-  originalBehaviorAssertionsUnchanged: true, sourceAssertionMigration: 'Committed Ready uses the same queue to compensate a missed resume-ready without re-entering Fan F5',
+  originalBehaviorAssertionsUnchanged: true, sourceAssertionMigration: 'Trace the current atomic Native commit, separate Fan observation and manual admission, and use the shared queue and Native-confirmed F5 for remount recovery',
   originalMainAwaited: true, declaredCases: caseCount, casesExecuted: selectedCase ? 1 : appSleepConfirmationOnly ? optionalSleepConfirmationCases : appSleepPlanOnly ? optionalSleepCases : appSharedSourceOnly ? optionalSharedCases : appContinuationOnly ? optionalContinuationCases : appSchedulerOnly ? 4 : 23, selectedCase, serialNegative,
   appContinuationOnly,optionalContinuationCases,appSharedSourceOnly,optionalSharedCases,appSleepPlanOnly,optionalSleepCases,appSleepConfirmationOnly,optionalSleepConfirmationCases,sharedSourceBindings,originalDefaultCases:23,
   appFirstReadyNegative, appSchedulerOnly, appSourceBindings: appPrepared.bindings,

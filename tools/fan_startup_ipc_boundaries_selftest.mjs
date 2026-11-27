@@ -41,8 +41,15 @@ function fixture(options={}){
   else if(cmd==='fs.readTextFile')result=String(args.path).endsWith('YeManFanHost.payload.json')?(options.manifestContent??JSON.stringify({files:[{path:'YeManFanHost.dll',sha256:'a'.repeat(64)}]})):content;
   else if(cmd==='fs.readTextRange'){const raw=String(args.path).endsWith('YeManFanHost.payload.json')?(options.manifestContent??JSON.stringify({files:[{path:'YeManFanHost.dll',sha256:'a'.repeat(64)}]})):content;result=options.rangeReply??{content:Buffer.from(raw).subarray(0,args.maxBytes).toString('utf8'),offset:0,size:Buffer.byteLength(raw)};}
   else if(cmd==='proc.findExact')result={found:resident,pid:resident?PID:0};
+  else if(cmd==='process.terminateExact'&&options.closeRecovery){assert.equal(args.pid,PID);assert.equal(args.processCreated,'133001111111111111');assert.equal(args.path,EXE);resident=false;result={ok:true,matched:true,exited:true};}
   else if(cmd==='process.identity')result=args.pid===PARENT.pid?(nativeSelf?.self??PARENT):{valid:true,pid:PID,path:options.foreign?'C:\\\\foreign\\\\Other.exe':EXE,processCreated:'133001111111111111'};
   else if(cmd==='http.request'&&!resident){deliver(message,null,'connect ECONNREFUSED');return;}
+  else if(cmd==='http.request'&&options.closeRecovery&&new URL(args.url).pathname==='/api/state'){
+   const state=options.closeRecovery.states.shift()??{};result={status:200,body:JSON.stringify({ok:true,state}),headers:''};
+  }
+  else if(cmd==='http.request'&&options.closeRecovery&&new URL(args.url).pathname==='/api/close'){
+   options.closeRecovery.onClose?.();result={status:200,body:JSON.stringify({ok:true,state:options.closeRecovery.closed}),headers:''};
+  }
   else if(cmd==='http.request')result={status:authStatus,body:JSON.stringify({ok:true,host:'YeManFanHost',protocolVersion:2,
     sharedPowerBusiness:options.noProfile?undefined:{profile:'native-f5-deadline-v1',hostPid:PID,hostProcessCreated:'133001111111111111',hostPath:EXE,hostAssemblySha256:'a'.repeat(64),hostAssemblyMvid:'00112233-4455-6677-8899-aabbccddeeff',parentPid:PARENT.pid,parentProcessCreated:PARENT.processCreated,parentPath:PARENT.path,...options.profileOverride},state:{state:'Ready'}}),headers:''};
   else if(cmd==='shell.run')result={exitCode:0,stdout:' TCP 127.0.0.1:8765 0.0.0.0:0 LISTENING '+PID,stderr:''};
@@ -61,6 +68,31 @@ function fixture(options={}){
 }
 const results=[];
 async function check(name,run){if((sharedProfileAiOnly&&!name.startsWith('shared-profile-ai:'))||(sharedProfileOnly&&!sharedProfileAiOnly&&!name.startsWith('shared-profile:')))return;try{await run();results.push({name,ok:true});console.log('PASS '+name)}catch(error){results.push({name,ok:false,error:String(error)});console.log('FAIL '+name+': '+error)}}
+const completedClose={state:'Stopped',openCalled:false,openEventsCalled:false,hardwareWrites:false,hardwareWritesEnabled:false,
+ controlAccepting:false,hcCloseCleanupPending:false,hcVirtualCloseReturned:true,hcDeviceManagerStopCompleted:true};
+for(const kind of ['previous-close-settles','previous-close-never-settles','revoked-on-close-reply','current-on-close-reply'])await check('resident close recovery: '+kind,async()=>{
+ let current=true;
+ const previous=kind.startsWith('previous-close-');
+ const closeRecovery=previous?{states:[{...completedClose,hcCloseCleanupPending:true},{},{state:'Stopped',hcVirtualCloseReturned:false},
+  ...(kind==='previous-close-settles'?[completedClose]:[])]}:{states:[{state:'FaultLocked'}],closed:completedClose,onClose:()=>{current=kind==='current-on-close-reply';}};
+ const f=fixture({closeRecovery}),launcher=new f.api.NativeFanHostLauncher(),config=f.api.resolveFanHostConfig('C:\\fixture');config.hostExecutable=EXE;config.sessionToken=TOKEN;
+ const p=f.observe(launcher.recoverPreviousHostBeforePayloadMutation(config,()=>{if(!current)throw Error('public suspend superseded old Host recovery');}));
+ await f.advance(19000);
+ const routes=f.calls.filter(c=>c.cmd==='http.request').map(c=>new URL(c.args.url).pathname);
+ assert.equal(routes.filter(r=>r==='/api/close').length,Number(!previous),'no duplicate Close after observing the previous owner');
+ assert.equal(routes.filter(r=>r==='/api/shutdown').length,Number(kind==='current-on-close-reply'),
+  'only the current request that submitted Close can send shutdown');
+ assert(!f.calls.some(c=>c.cmd==='shell.hidden'||c.cmd==='fs.writeTextFileAtomic'));
+ const settles=kind==='previous-close-settles'||kind==='current-on-close-reply';
+ assert.equal(p.status,settles?'fulfilled':'rejected',p.error??'resident Close did not settle');
+ assert.equal(f.calls.filter(c=>c.cmd==='process.terminateExact').length,Number(settles),'exact retirement requires a complete Close');
+ if(kind==='previous-close-settles')assert.equal(routes.filter(r=>r==='/api/state').length,4);
+ if(kind==='previous-close-never-settles'){
+  assert(routes.filter(r=>r==='/api/state').length>3,'partial receipts never end an in-flight Close wait');
+  assert.match(p.error,/HC Close.*资源清理在等待窗口内未完成/);
+ }
+ assert.equal(f.timers.size,0);
+});
 for(const [command,deadline] of [['fs.exists',5000],['fs.mkdir',15000]])await check('actual launcher retires missing '+command+' reply and next authenticated resident retry succeeds',async()=>{
  const f=fixture({drop:command,resident:false});const launcher=new f.api.NativeFanHostLauncher(),config=f.api.resolveFanHostConfig('C:\\fixture');config.hostExecutable=EXE;config.hostDirectory='C:\\fixture\\fan-host';config.sessionToken=TOKEN;
  const pending=f.observe(launcher.start(config));await f.flush();assert(f.calls.some(c=>c.cmd===command),'fault injection reached actual launcher');await f.advance(deadline+1);assert.equal(pending.status,'rejected','startup remained pending after its deadline');assert.match(pending.error,/IPC command timed out/);assert.equal(f.timers.size,0);assert(!f.calls.some(c=>c.cmd==='shell.hidden'),'missing prerequisite cannot launch');
@@ -157,6 +189,22 @@ await check('shared-profile: cold launch fixes profile and real PID in original 
  assert.equal(argv[argv.indexOf('--parent-pid')+1],String(PARENT.pid));
  assert.equal(argv[argv.indexOf('--shared-power-business-profile')+1],'native-f5-deadline-v1');
  assert(!argv.includes('--parent-process'));assert.equal(f.timers.size,0);
+});
+await check('shared-profile: final spawn guard runs after preflight and can prevent hidden launch',async()=>{
+ const f=fixture({resident:false}),launcher=new f.api.NativeFanHostLauncher(),config=f.api.resolveFanHostConfig('C:\fixture');
+ config.hostExecutable=EXE;config.hostDirectory='C:\fixture\fan-host';config.sessionToken=TOKEN;
+ launcher.ensureFanHostDeployment=async()=>{};
+ let spawnChecks=0;
+ const p=f.observe(launcher.start(config,stage=>{
+  if(stage!=='spawn')return;
+  spawnChecks++;
+  assert(f.calls.some(x=>x.cmd==='app.pid'),'spawn check ran before preparation');
+  assert(!f.calls.some(x=>x.cmd==='shell.hidden'),'spawn check ran after the launch');
+  throw new Error('inert coordinator revoked the wake');
+ }));
+ for(let n=0;n<220&&p.status==='pending';n++)await f.flush();
+ assert.equal(p.status,'rejected');assert.match(p.error,/inert coordinator revoked the wake/);
+ assert.equal(spawnChecks,1);assert(!f.calls.some(x=>x.cmd==='shell.hidden'));assert.equal(f.timers.size,0);
 });
 await check('shared-profile: valid warm exact package reattaches without deployment or launch',async()=>{
  const {f,p,deployments}=await sharedStart();assert.equal(p.status,'fulfilled',p.error??'warm pending');

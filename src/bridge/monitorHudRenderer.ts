@@ -9,9 +9,9 @@ import MonitorHudTemplate from '../components/MonitorHudTemplate.vue';
 import MonitorCrosshair from '../components/MonitorCrosshair.vue';
 import { hudPlacement } from './monitorHudProtocol';
 import { validHudViewport, type HudViewport } from './monitorHudViewport';
-import { isHorizontalHudLayout, boundedHudData, hudFromUniformSnapshot, normalizeMonitorOutput, sameHudAppearance, sameHudLayoutAppearance, sameHudDisplayInput, sameHudData, type HudData, type MonitorOutputPreferences } from './monitorHudModel';
-export function mountMonitorHud(container:HTMLElement, options:{preferences:MonitorOutputPreferences;data?:HudData;viewport?:HudViewport;mouseMode?:MouseModePresentation|null;onSize?:(width:number,height:number)=>void;onError?:(error:unknown)=>void}) {
-  const initialPreferences=normalizeMonitorOutput(options.preferences,false);
+import { isHorizontalHudLayout, boundedHudData, hudFromUniformSnapshot, normalizeHudDisplayPreferences, sameHudAppearance, sameHudLayoutAppearance, sameHudDisplayInput, sameHudData, type HudData, type HudDisplayPreferences } from './monitorHudModel';
+export function mountMonitorHud(container:HTMLElement, options:{preferences:HudDisplayPreferences;data?:HudData;viewport?:HudViewport;mouseMode?:MouseModePresentation|null;onSize?:(width:number,height:number)=>void;onError?:(error:unknown)=>void}) {
+  const initialPreferences=normalizeHudDisplayPreferences(options.preferences);
   const initialData=boundedHudData(options.data??hudFromUniformSnapshot(null,Date.now(),null,initialPreferences.ymcc.fields.clock === true));
   const preferences=shallowRef(initialPreferences),data=shallowRef(ageHudData(initialData,Date.now()));
   const mouseMode=shallowRef(options.mouseMode??null);
@@ -54,12 +54,12 @@ export function mountMonitorHud(container:HTMLElement, options:{preferences:Moni
   ageLease.accept(initialData);
   void nextTick(measure);
   return {
-    update(next:MonitorOutputPreferences,value:HudData){
+    update(next:HudDisplayPreferences,value:HudData){
       if(disposed)return;
       mouseStatusEnabled.value=next.mouseStatusEnabled!==false;
       // Packets are independently admitted at the client boundary. Repeated
       // display inputs need no second reconstruction of the saved preset banks.
-      const appearance=sameHudDisplayInput(preferences.value.ymcc,next?.ymcc)?preferences.value:normalizeMonitorOutput(next,false);
+      const appearance=sameHudDisplayInput(preferences.value.ymcc,next?.ymcc)?preferences.value:normalizeHudDisplayPreferences(next);
       const sample=boundedHudData(value);
       if(!sameHudAppearance(preferences.value.ymcc,appearance.ymcc)){
         const before=preferences.value.ymcc,after=appearance.ymcc;

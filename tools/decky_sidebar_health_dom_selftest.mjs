@@ -252,6 +252,8 @@ try{
  await check('early execution before the html element exists remains event-driven',async()=>{await setup({hidden:true});await page.evaluate(({source,run,loaderVersion})=>{window.__YMCC_DECKY_HEALTH__.dispose();const html=document.documentElement;html.remove();(0,eval)('('+source+')')({runId:run,loaderVersion});html.querySelector('.deckyErrorBoundary').hidden=false;document.append(html);},{source,run,loaderVersion});await page.waitForFunction(()=>window.signals.length===1);});
  await check('offline browser: current UI proof and bootstrap revocation work with external networking blocked',async()=>{
   const liveSource=fs.readFileSync(path.join(root,'native/steam_live.js'),'utf8');
+  const embedded=fs.readFileSync(path.join(root,'native/steam_live_script.h'),'utf8').split('inline constexpr const char kUiModeScript[] =')[1].split('inline constexpr const char kLightGamepadScript[] =')[0];
+  const compact=[...embedded.matchAll(/R"YMSTEAM\(([\s\S]*?)\)YMSTEAM"/g)].map(match=>match[1]).join('');
   let blocked=0;await page.route('**/*',route=>{blocked++;return route.abort('internetdisconnected');});
   const result=await page.evaluate(async({liveSource,source,run,loaderVersion})=>{
     window.__YMCC_DECKY_HEALTH__?.dispose();document.body.replaceChildren();delete window.__YMCC_DECKY_ACCOUNT_WATCH__;window.__ymccSteamLiveBusy=null;
@@ -290,6 +292,36 @@ try{
   assert.equal(result.socketListenersBefore,2);assert.equal(result.socketListenersAfterRevoke,0,'revoked account must immediately release the two official socket listeners');
   assert.equal(result.revokedDomCallbacks,0);assert.equal(result.revokedRead,'');
   assert.deepEqual(result.signals,[{runId:run,code:'decky-account-changed'}]);assert.equal(blocked,0,'identity and revoke chain never required a network fetch');
+
+  const panelFacts=await page.evaluate(async({liveSource,compact,loaderVersion})=>{
+    const original=window.__YMCC_DECKY_FRONTEND__,loader=window.DeckyPluginLoader,hook=window.__TABS_HOOK_INSTANCE;
+    let raw=4,readCount=0,state;
+    const tabsHook={tabs:[{id:999}],qamBrowserViewPatch:{hasUnpatched:false}};
+    window.DeckyPluginLoader={tabsHook,deckyState:{publicState:()=>({versionInfo:{current:loaderVersion}})}};
+    window.__TABS_HOOK_INSTANCE=tabsHook;
+    window.__YMCC_DECKY_FRONTEND__={active:true,qamReady:true,connectionReady:true,get qamPanelState(){
+      readCount++;if(state==='throw')throw new Error('private');return state;
+    }};
+    window.SteamClient.UI.GetUIMode=async()=>raw;
+    try{
+      const output=[];
+      for(const script of [liveSource,compact])for(const value of ['unobserved','committed','native-ready-commit','private',undefined,'throw','desktop']){
+        state=value;raw=value==='desktop'?7:4;
+        if(value==='desktop')state='native-ready-commit';
+        const before=readCount,result=await(0,eval)(script)({operation:'ui.mode.get'});
+        output.push({value:value??'legacy',mode:result.mode,state:result.deckyQamPanelState??null,readCount:readCount-before,hooks:result.deckyHooksInstalled,client:result.deckyClientConnected,mutated:result.mutated});
+      }
+      return output;
+    }finally{
+      window.SteamClient.UI.GetUIMode=async()=>4;
+      window.__YMCC_DECKY_FRONTEND__=original;window.DeckyPluginLoader=loader;window.__TABS_HOOK_INSTANCE=hook;
+    }
+  },{liveSource,compact,loaderVersion});
+  assert.deepEqual(panelFacts.slice(0,7),panelFacts.slice(7),'Full and embedded mode paths carry only the same diagnostic facts');
+  assert.deepEqual(panelFacts.slice(0,7).map(p=>p.state),['unobserved','committed','native-ready-commit',null,null,null,null]);
+  assert(panelFacts.every(p=>p.hooks===true&&p.client===true&&p.mutated===false));
+  assert(panelFacts.every(p=>p.readCount===(p.value==='desktop'?0:1)));
+  measurements.push({case:'qam-panel-commit-mode-read',panelFacts});
 
   // The existing offline case also covers a page whose native callback hook
   // is absent, throws once, or has not delivered its initial account yet.

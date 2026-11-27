@@ -634,6 +634,8 @@ static void runtimeFamilyTransportCase140(const std::string& familyToken,const s
  const ControlledDmi lenovo={"LENOVO","LNVNB161216","HandheldCompanion.Devices.LegionGoTablet",nullptr,"83E1","hc.device.LegionGoTablet"};
  const ControlledDmi* dmi=family==2?&gpd:family==3?&onex:family==4?&aya:family==5?&lenovo:nullptr;
  const bool terminalFallback=boundary=="terminal-exhausted-physical-return";
+ const bool msiWakeReturn=familyToken=="msi"&&persona=="steamdeck"&&boundary=="power-wake-after-stop";
+ const bool msiPowerReturn=msiWakeReturn||(familyToken=="msi"&&persona=="steamdeck"&&boundary=="power-after-stop");
  const bool delayedSuccessor=boundary=="delayed-same-period-successor"||terminalFallback;
  const unsigned wallGapMs=boundary=="wall-gap-5s"?5000u:boundary=="wall-gap-10s"?10000u:0u;
  const bool failedRestart=boundary=="persistent-start-failure"||boundary=="persistent-prepared-failure";
@@ -641,8 +643,8 @@ static void runtimeFamilyTransportCase140(const std::string& familyToken,const s
  const bool persistent=boundary=="persistent-budget"||boundary=="persistent-off"||failedRestart||repeatIncident;
  const unsigned replacementCount=(failedRestart||delayedSuccessor)?2u:1u;
  if(persistent)require(familyToken=="gpd"&&persona=="elite","persistent cases use exact existing GPD Elite managed consumer");
- if(!boundary.empty()&&!persistent&&!delayedSuccessor&&!wallGapMs)require(((familyToken=="rog"&&persona=="steamdeck")||(familyToken=="gpd"&&persona=="elite"))&&
-  std::find(std::begin(runtimeCancellationEdges140),std::end(runtimeCancellationEdges140),boundary)!=std::end(runtimeCancellationEdges140),"runtime cancellation uses one source-declared parameter of two actual route representatives");
+ if(!boundary.empty()&&!persistent&&!delayedSuccessor&&!wallGapMs)require(msiWakeReturn||(((familyToken=="rog"&&persona=="steamdeck")||(familyToken=="gpd"&&persona=="elite")||msiPowerReturn)&&
+  std::find(std::begin(runtimeCancellationEdges140),std::end(runtimeCancellationEdges140),boundary)!=std::end(runtimeCancellationEdges140)),"runtime cancellation uses an exact source-declared route and boundary");
  prepare(family,"runtime-after-final/"+familyToken+"/"+persona+(boundary.empty()?"":"/"+boundary),dmi);
  struct RestoreControlledPhysicalIdentity {
   std::wstring original=fixturePhysicalPath;
@@ -739,15 +741,16 @@ static void runtimeFamilyTransportCase140(const std::string& familyToken,const s
     "cancelled old incident does not own the distinct explicit OFF period");
   };
   if(isOff)actualOff();
-  else if(isPower){g_powerGeneration=oldPower+1;g_powerLifecycle=PowerLifecycle::Suspending;g_inputHostPowerAdmissionRevoked=true;}
+  else if(isPower){g_powerGeneration=oldPower+1;g_powerLifecycle=PowerLifecycle::Suspending;g_inputHostPowerAdmissionRevoked=true;if(msiPowerReturn)++g_sharedPowerSuspendSerial;}
   else g_exitRequested=true;
+  if(msiWakeReturn)inputHostArmWakePhysicalHold("offline-post-final-suspend");
   inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();
   require(!incident.pending&&incident.spent&&!incident.recoveryRequestId&&!g_inputHostRuntimeRecoveryPending.load()&&
    fullPipeSpawnCount==creates&&g_inputHostRecoveryEpisodeAttempts.load()==beforeBudget,
    "persistent authority cancellation retires the actual queued runtime incident without a restart ticket charge or Host");
   const auto retirement=fixtureEvents.size();
   fixtureClassifiedReturnReleasedEpoch=oldEpoch;fixtureRuntimeRecoveryCensus="absent";
-  inputHostStop(isOff?"virtual-target-disabled":isPower?"suspend":"app-exit");
+  if(!msiPowerReturn)inputHostStop(isOff?"virtual-target-disabled":isPower?"suspend":"app-exit");
   const auto child=fullPipeChildOutcome(oldChild,oldFile);const auto terminal=child.value("terminalSettlement",json::object());
   require(child.value("nativeObservedProcessExit",false)&&child.value("nativeObservedExitCode",999)==5&&
    terminal.value("Reason",std::string{})=="read-failed"&&terminal.value("ManagedReleaseComplete",false)&&
@@ -756,10 +759,103 @@ static void runtimeFamilyTransportCase140(const std::string& familyToken,const s
   cases.back()["managedReceipts"].push_back({{"path",W2U(oldFile)},{"processId",child.value("processId",0u)},
    {"persona",persona},{"creates",child.value("creates",0)},{"naturalExit",true},{"nativeExitCode",5},
    {"controllerReleased",true},{"contextReleased",true},{"faultScope","cancelled actual post-final transport incident"}});
-  if(isPower){g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;}
+  if(isPower){g_powerLifecycle=PowerLifecycle::Ready;if(!msiWakeReturn)g_inputHostPowerAdmissionRevoked=false;}
+  if(msiWakeReturn){
+   namespace wake=ymcc::inputHost::wakeExecutionRuntime;
+   namespace rearm=ymcc::inputHost::msiPowerWork;
+   const auto generation=currentPowerGeneration();
+   inputHostRequestPowerRearm(generation,"offline-post-final-commit");fullPipeDeliverSharedPowerReady();
+   inputHostConsumePowerRequests();
+   const auto oldRearm=rearm::first;
+   require(oldRearm.queued&&!rearm::consumed&&g_inputHostPowerAdmissionRevoked.load(),
+    "old Ready has queued its exact rearm but has not changed writer admission");
+   g_powerLifecycle=PowerLifecycle::Suspending;
+   ++g_sharedPowerSuspendSerial;
+   g_powerLifecycle=PowerLifecycle::Ready;
+   // Keep the original clock, intent, request, epoch and reason. The wire
+   // must still distinguish the two public suspend boundaries.
+   inputHostRequestPowerRearm(generation,"offline-post-final-commit");fullPipeDeliverSharedPowerReady();
+   inputHostConsumePowerRequests();
+   const auto nextRearm=rearm::first;
+   require(nextRearm.power==oldRearm.power&&nextRearm.origin.suspendSerial==oldRearm.origin.suspendSerial+1&&
+    nextRearm.signal==oldRearm.signal&&nextRearm.wire!=oldRearm.wire&&nextRearm.queued&&!rearm::consumed,
+    "same generation accepts the new suspend boundary and gives its queue work a distinct identity");
+   advance(1);
+   inputHostRequestPowerRearm(generation,"offline-duplicate-post-final-commit");fullPipeDeliverSharedPowerReady();
+   inputHostConsumePowerRequests();
+   require(rearm::first.wire==nextRearm.wire&&rearm::first.deadline==nextRearm.deadline&&
+    std::count(g_inputHostLifecycleWorkQueue.begin(),g_inputHostLifecycleWorkQueue.end(),oldRearm.wire)==1&&
+    std::count(g_inputHostLifecycleWorkQueue.begin(),g_inputHostLifecycleWorkQueue.end(),nextRearm.wire)==1,
+    "same-boundary duplicate cannot extend its deadline or queue another action");
+   inputHostConsumePowerRequests();fullPipeDrainQueuedLifecycle();fullPipeAssertSharedRearmClaim(generation);
+   const auto oldRejected=[&](const auto& event){return event.value("event",std::string{})=="input-host-msi-power-work"&&
+    event["detail"].value("action",std::string{})=="rejected"&&
+    event["detail"].value("reason",std::string{})=="unbound-or-malformed-original-power-work"&&
+    event["detail"].value("originalSuspendSerial",0ULL)==oldRearm.origin.suspendSerial;};
+   require(std::count_if(fixtureEvents.begin(),fixtureEvents.end(),oldRejected)==1&&rearm::first.wire==nextRearm.wire,
+    "queued old boundary is explicitly rejected and cannot consume or perform the successor rearm");
+   cases.back()["sameGenerationRearm"]={{"generation",generation},{"oldSuspend",oldRearm.origin.suspendSerial},
+    {"newSuspend",nextRearm.origin.suspendSerial},{"sameSignal",oldRearm.signal==nextRearm.signal},
+    {"distinctQueueWork",oldRearm.wire!=nextRearm.wire},{"nextConsumed",rearm::consumed}};
+   require(g_inputHostReleaseQuarantined&&g_wakeHoldPhysicalUnhide.load()&&fullPipeSpawnCount==creates,
+    "real power rearm cannot start through the quarantined old target");
+   fixtureRuntimeRecoveryCensus="unknown";
+   g_msiSdOwnedPnpSnapshotForTest=[](){return std::pair{false,std::set<std::string>{}};};
+   inputHostRequestWakeRescan(generation);advance(kWakeHandshakeWaitMs+1);
+   inputHostConsumeWakeRescan();{FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
+   const auto restores=fullPipeRestoreCount();
+   for(unsigned pass=0;pass<2;++pass){advance(1001);gamepadReadState(false);xinputSlotsEnsurePreTargetBoundaryDiscovery();fullPipeQuarantineProbe();}
+   require(g_inputHostReleaseQuarantined&&g_wakeHoldPhysicalUnhide.load()&&fullPipeRestoreCount()==restores&&fullPipeSpawnCount==creates,
+    "unknown endpoint census keeps the old physical source hidden and blocks successor creation");
+   require(wake::returnWait.pending&&wake::returnWait.host==oldEpoch&&wake::returnWait.run==oldRun&&
+    !wake::episode.completed&&g_msiVirtualWakeStartAttempts.load()==0,
+    "current wake parks on the exact old return without spending its start budget");
+   fixtureRuntimeRecoveryCensus="absent";
+  }
+  if(msiPowerReturn)g_msiSdOwnedPnpSnapshotForTest=[](){return std::pair{true,std::set<std::string>{}};};
   for(unsigned pass=0;pass<3;++pass){advance(1001);gamepadReadState(false);xinputSlotsEnsurePreTargetBoundaryDiscovery();fullPipeQuarantineProbe();inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();}
-  if(!isOff&&!g_exitRequested.load())actualOff();
-  if(offTicket){
+  if(msiPowerReturn){
+   std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+   require(g_realStickTest.virtualTargetEnabled&&!incident.pending&&incident.spent&&!incident.recoveryRequestId&&
+    !g_inputHostEpoch&&!g_inputHostReleaseQuarantined&&!g_hidHideVisibilityJournal.active&&
+    !g_msiDinputReturnOwed.load()&&inputHostTargetReturnRuntimeSettledLocked(oldRun,oldEpoch)&&fullPipeSpawnCount==creates,
+    "new Ready settles the exact MSI return before OFF without resuming the old incident or issuing another Stop");
+   if(msiWakeReturn){
+    const auto& wake=ymcc::inputHost::wakeExecutionRuntime::episode;
+    require(!ymcc::inputHost::wakeExecutionRuntime::returnWait.pending&&!wake.completed&&
+     g_wakeRescanRequested.load()&&g_msiVirtualWakeStartAttempts.load()==0,
+     "completed old return schedules the existing wake without renewing or spending its attempt");
+   }
+  }
+  if(msiWakeReturn){
+   namespace wake=ymcc::inputHost::wakeExecutionRuntime;
+   const auto oldWake=wake::episode;
+   inputHostRequestWakeRescan(currentPowerGeneration());
+   require(wake::episode.serial==oldWake.serial&&wake::episode.armedAt==oldWake.armedAt&&
+    wake::episode.maxAgeMs==oldWake.maxAgeMs,"duplicate Ready does not renew the waiting wake budget");
+   inputHostConsumeWakeRescan();{FullPipeWakeIoScope io;fullPipeDrainQueuedLifecycle();}
+   const auto replacement=g_inputHostEpoch;
+   require(replacement&&replacement!=oldEpoch&&g_inputHostProcess&&g_inputHostPrepared&&g_inputHostNeutralized&&
+    fullPipeSpawnCount==creates+1&&wake::episode.completed&&!g_wakeHoldPhysicalUnhide.load()&&g_msiVirtualWakeStartAttempts.load()==1,
+    "the same wake starts one prepared successor only after exact old return");
+   for(unsigned late=0;late<8;++late)inputHostPerformRuntimeRecovery(serial);
+   require(g_inputHostEpoch==replacement&&fullPipeSpawnCount==creates+1&&
+    !incident.recoveryRequestId&&g_virtualStartProtection.view(startProtectionClock).requestId==oldTicket&&
+    finalCount(oldTicket,"success")==1&&finalCount(oldTicket,"failure")==0,
+    "late fault work cannot stop the wake successor or replace the original final");
+   json accepted;
+   for(int pass=0;pass<=kInputHostFreshNeutralFramesRequired;++pass){
+    advance(8);auto sample=fresh(family);accepted=fullPipeSubmitSource(sample,true,false);
+   }
+   require(g_inputHostActive&&accepted.value("hostSubmission",std::string{})=="frame-accepted",
+    "wake successor resumes current-source reports over the actual managed pipe");
+   cases.back()["wakeSourceReceipt"]=accepted;
+   cases.back()["wakeHandoff"]={{"wakeSerial",oldWake.serial},{"armedAt",oldWake.armedAt},
+    {"deadlineMs",oldWake.maxAgeMs},{"retiredEpoch",oldEpoch},{"successorEpoch",replacement},{"starts",1}};
+   close(family,persona);
+   offTicket=g_virtualStartProtection.view(startProtectionClock).requestId;
+  }else if(!isOff&&!g_exitRequested.load())actualOff();
+  if(offTicket&&!msiWakeReturn){
    inputHostStop("virtual-target-disabled");fullPipeQuarantineProbe();fullPipeDrainQueuedLifecycle();
    if(family==1)fullPipeRogObserveReturnedSource(offTicket,true);
    const auto view=g_virtualStartProtection.view(startProtectionClock);if(view.locked&&view.verificationRemainingMs)advance(view.verificationRemainingMs);
@@ -767,9 +863,9 @@ static void runtimeFamilyTransportCase140(const std::string& familyToken,const s
    require(finalCount(offTicket,"success")==1&&finalCount(offTicket,"failure")==0,
     "explicit cancellation OFF reaches one successful closing final after actual return");
   }
-  for(unsigned late=0;late<8;++late){inputHostPerformRuntimeRecovery(serial);inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();}
+  if(!msiWakeReturn)for(unsigned late=0;late<8;++late){inputHostPerformRuntimeRecovery(serial);inputHostRecoveryMaintenanceTick();fullPipeDrainQueuedLifecycle();}
   bool settled=false;{std::lock_guard<InputHostMutex> lock(g_inputHostMx);settled=inputHostTargetReturnRuntimeSettledLocked(oldRun,oldEpoch);}
-  require(!incident.pending&&incident.spent&&!incident.recoveryRequestId&&fullPipeSpawnCount==creates&&
+  require(!incident.pending&&incident.spent&&!incident.recoveryRequestId&&fullPipeSpawnCount==creates+(msiWakeReturn?1u:0u)&&
    g_inputHostRecoveryEpisodeAttempts.load()==beforeBudget&&finalCount(oldTicket,"success")==1&&finalCount(oldTicket,"failure")==0,
    "eight late old worker dispatches after real cancellation cannot resurrect output spend quota or contradict the original success");
   require(!g_inputHostProcess&&!g_inputHostEpoch&&!g_inputHostPrepared&&!g_inputHostReleaseQuarantined&&
@@ -868,6 +964,32 @@ static void runtimeFamilyTransportCase140(const std::string& familyToken,const s
   }
   observeMsiReturn("after-existing-partial-discovery");
   for(unsigned pass=0;pass<3;++pass){advance(1001);gamepadReadState(false);xinputSlotsEnsurePreTargetBoundaryDiscovery();fullPipeQuarantineProbe();observeMsiReturn(("after-actual-canonical-read-"+std::to_string(pass)).c_str());}
+ }
+ if(familyToken=="rog"&&persona=="steamdeck"&&boundary.empty()){
+  const auto power=currentPowerGeneration(),suspendSerial=g_sharedPowerSuspendSerial.load();
+  const auto censusBefore=fixtureRuntimeRecoveryCensusCalls,restoreBefore=fullPipeRestoreCount();
+  const auto completeSameGenerationSuspend=[](){
+   g_powerLifecycle=PowerLifecycle::Suspending;
+   ++g_sharedPowerSuspendSerial;
+   g_powerLifecycle=PowerLifecycle::Ready;
+  };
+  require(g_inputHostReleaseQuarantined&&g_inputHostEpoch==oldEpoch,"same-generation return edge starts with the exact old Host quarantined");
+  fixtureRuntimeReturnCensusCompleted=completeSameGenerationSuspend;
+  fullPipeQuarantineProbe();
+  require(!fixtureRuntimeReturnCensusCompleted&&currentPowerGeneration()==power&&g_sharedPowerSuspendSerial.load()==suspendSerial+1,
+   "complete PnP census spans a second suspend serial and sees Ready again in the same generation");
+  require(fixtureRuntimeRecoveryCensusCalls==censusBefore+1&&fullPipeRestoreCount()==restoreBefore&&
+   g_inputHostReleaseQuarantined&&g_inputHostEpoch==oldEpoch&&fullPipeSpawnCount==creates,
+   "stale complete census cannot restore visibility, settle quarantine or create a successor after the same-generation suspend");
+  fixtureRuntimeReturnSettled=completeSameGenerationSuspend;
+  fullPipeQuarantineProbe();
+  require(!fixtureRuntimeReturnSettled&&currentPowerGeneration()==power&&g_sharedPowerSuspendSerial.load()==suspendSerial+2,
+   "a second interleaving arrives after the exact target-only durable commit");
+  {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+   require(inputHostTargetReturnRuntimeSettledLocked(oldRun,oldEpoch)&&g_inputHostReleaseQuarantined&&g_inputHostEpoch==oldEpoch&&fullPipeSpawnCount==creates,
+    "durable old-Host settlement survives the power edge without authorizing tuple clear or a successor");}
+  cases.back()["sameGenerationSuspendReturn"]={{"generation",power},{"initialSuspendSerial",suspendSerial},
+   {"retrySuspendSerial",g_sharedPowerSuspendSerial.load()},{"staleCensusRestored",false},{"committedDutyRetained",true}};
  }
  if(persona=="dualsense-edge"){FixturePsReadScope scope;fullPipeQuarantineProbe();}else fullPipeQuarantineProbe();
  bool settled=false;{std::lock_guard<InputHostMutex> lock(g_inputHostMx);settled=inputHostTargetReturnRuntimeSettledLocked(oldRun,oldEpoch);}

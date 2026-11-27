@@ -4,10 +4,10 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
-const [repoRoot,evidenceDir,selection]=process.argv.slice(2);if(selection&&!['service-power-admission','service-idle-resync'].includes(selection))throw Error('UNKNOWN_UPDATE_DIRECTED_SELECTION');const actualPower=selection==='service-power-admission';const require=createRequire(path.join(repoRoot,'package.json'));let esbuild,authority;const loadedTools=new Map();
+const [repoRoot,evidenceDir,selection]=process.argv.slice(2);if(selection&&!['service-power-admission','service-power-policy-startup','service-power-manager-startup','service-idle-resync'].includes(selection))throw Error('UNKNOWN_UPDATE_DIRECTED_SELECTION');const actualPower=selection==='service-power-admission'||selection==='service-power-policy-startup'||selection==='service-power-manager-startup';const require=createRequire(path.join(repoRoot,'package.json'));let esbuild,authority;const loadedTools=new Map();
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex'),inputs=new Map(),tool='tools/ymcc_sim/global/update-download-signals';
 const result={schemaVersion:1,status:'FAIL',stage:'build',originalTests:[],stabilityTests:[],checks:[],executedProductModules:[],compiledInputs:[],bundles:[],remainingGaps:['Native downloader/HTTP/Range/hash/filesystem/install behavior is not executed; memory IPC only.','Actual update UI component rendering is not exercised; provider reactive feedback is.','No actual network, installation, service startup, user configuration/token/session or C-install file operation.']};
-const gameSource="const f=globalThis.__updaterGameFixture;export const getPolicyGame=()=>f.game;export const isPolicyGameInitialized=()=>f.known;export const subscribePolicyGameStatus=fn=>{f.listeners.add(fn);return()=>f.listeners.delete(fn);};export const isPolicyTargetCurrent=()=>false;export const detectPolicyGame=async()=>f.game;export const gamePolicyKey=()=>'';export const samePolicyGame=(a,b)=>a===b;";
+const gameSource="const f=globalThis.__updaterGameFixture;export const getPolicyGame=()=>f.game;export const isPolicyGameInitialized=()=>f.known;export const isPolicyGameCurrent=isPolicyGameInitialized;export const subscribePolicyGameReadiness=fn=>{fn(f.known);return()=>{};};export const subscribePolicyGameStatus=fn=>{f.listeners.add(fn);return()=>f.listeners.delete(fn);};export const isPolicyTargetCurrent=()=>false;export const detectPolicyGame=async()=>f.game;export const gamePolicyKey=()=>'';export const samePolicyGame=(a,b)=>a===b;";
 // Inert fact input for the original business consumers. No raw notifications,
 // decoder, ordering, reconciliation IO or real shared-source factory executes.
 const powerInputSource=`const input=globalThis.__updateSharedPowerInput??=(
@@ -15,9 +15,18 @@ const powerInputSource=`const input=globalThis.__updateSharedPowerInput??=(
 export function getSharedPowerLifecycle(){input.reads++;return input.snapshot?{...input.snapshot}:null;}
 export function onSharedPowerLifecycle(listener){input.listeners.add(listener);input.subscriptions++;const state=getSharedPowerLifecycle();if(state)listener(state);let released=false;return()=>{if(released)return;released=true;input.releases++;input.listeners.delete(listener);};}
 export function requestSharedPowerLifecycleReconcile(_reason){input.reconcileRequests++;}
+export function beginSharedPowerLifecycleReadback(){throw Error('REAL_SHARED_POWER_READBACK_OUTSIDE_UPDATE_FIXTURE');}
 export function isSharedPowerLifecycleAdmitted(state:SharedPowerLifecycleSnapshot|null|undefined):boolean {
   return !!state&&state.known!==false&&state.phase==='ready'&&
     state.hardwareWritesAllowed===true&&state.notificationPending!==true;
+}
+export function sharedPowerWriteScope(power){
+  if (!isSharedPowerLifecycleAdmitted(power)) return null;
+  const { generation, suspendSerial, observedNotificationSequence } = power;
+  if (!Number.isSafeInteger(generation) || generation <= 0 ||
+      !Number.isSafeInteger(suspendSerial) || suspendSerial < 0 ||
+      !Number.isSafeInteger(observedNotificationSequence) || observedNotificationSequence < 0) return null;
+  return [generation, suspendSerial, observedNotificationSequence];
 }
 `;
 function inertPowerInput(build){
@@ -52,7 +61,8 @@ try{
  const powerText=fs.readFileSync(path.join(repoRoot,'src/bridge/powerLifecycleState.ts'),'utf8');const predicate=powerText.slice(powerText.indexOf('export function isSharedPowerLifecycleAdmitted('),powerText.indexOf('\n}',powerText.indexOf('export function isSharedPowerLifecycleAdmitted('))+2);if(!powerInputSource.includes(predicate))throw Error('INERT_POWER_PREDICATE_NOT_EXACT_PRODUCT');
  verifyBundledImplementation(repoRoot);authority=lockBundledNodeTools(repoRoot);result.bundledToolAuthority=authority;esbuild=require(authority.compilerEntry);
  if(selection){
-  const id=actualPower?'service-power':'service-idle',file=await bundle(id,`${tool}/memory-fixture.ts`),ran=execute(id,file,[actualPower?'power-admission':'idle-resync']),line=ran.stdout.split(/\r?\n/).find(value=>value.startsWith('UPDATE_DOWNLOAD_RECEIPT '));if(!line)throw Error('DIRECTED_UPDATE_RECEIPT_MISSING');const receipt=JSON.parse(line.slice('UPDATE_DOWNLOAD_RECEIPT '.length));result.checks=receipt.checks;result.executedProductModules=receipt.executedProductModules;result.directedOnly=true;result.selection=selection;result.sharedPowerInputBoundary=actualPower?{module:'powerLifecycleState',role:'actual source factory and Native IPC/events',realSharedPowerSourceExecuted:true}:result.sharedPowerInputBoundary;result.ioGuards=[JSON.parse(fs.readFileSync(path.join(evidenceDir,id+'.io-guard.json'),'utf8'))];result.compiledInputs=[...inputs].map(([path,sha256])=>({path,sha256}));result.compiledToolInputs=[...loadedTools.values()];result.toolAuthorityAfter=verifyBundledToolScope(authority,repoRoot);result.status=ran.exitCode===0&&receipt.status==='PASS'&&result.ioGuards.every(x=>x.fetch===0&&x.userStorage===0)?'PASS':'FAIL';result.stage='directed-complete';
+  const mode=selection==='service-power-manager-startup'?'power-manager-startup':selection==='service-power-policy-startup'?'power-policy-startup':actualPower?'power-admission':'idle-resync';
+  const id=actualPower?'service-power':'service-idle',file=await bundle(id,`${tool}/memory-fixture.ts`),ran=execute(id,file,[mode]),line=ran.stdout.split(/\r?\n/).find(value=>value.startsWith('UPDATE_DOWNLOAD_RECEIPT '));if(!line)throw Error('DIRECTED_UPDATE_RECEIPT_MISSING');const receipt=JSON.parse(line.slice('UPDATE_DOWNLOAD_RECEIPT '.length));result.checks=receipt.checks;result.executedProductModules=receipt.executedProductModules;result.directedOnly=true;result.selection=selection;result.sharedPowerInputBoundary=actualPower?{module:'powerLifecycleState',role:'actual source factory and Native IPC/events',realSharedPowerSourceExecuted:true}:result.sharedPowerInputBoundary;result.ioGuards=[JSON.parse(fs.readFileSync(path.join(evidenceDir,id+'.io-guard.json'),'utf8'))];result.compiledInputs=[...inputs].map(([path,sha256])=>({path,sha256}));result.compiledToolInputs=[...loadedTools.values()];result.toolAuthorityAfter=verifyBundledToolScope(authority,repoRoot);result.status=ran.exitCode===0&&receipt.status==='PASS'&&result.ioGuards.every(x=>x.fetch===0&&x.userStorage===0)?'PASS':'FAIL';result.stage='directed-complete';
  }else{
  const originals=[['scheduler-original','tools/updater_predownload_selftest.ts','UPDATER_PREDOWNLOAD_SELFTEST_OK'],['integration-original','tools/updater_predownload_integration_selftest.ts','UPDATER_PREDOWNLOAD_INTEGRATION_SELFTEST_OK'],['service-original','tools/updater_service_game_selftest.ts','UPDATER_SERVICE_GAME_SELFTEST_OK'],['successor-original','tools/updater_successor_selftest.ts','UPDATER_SUCCESSOR_SELFTEST_OK']];
  for(const[id,entry,marker]of originals){const file=await bundle(id,entry),ran=execute(id,file);const count=new RegExp(marker+' checks=([0-9]+)').exec(ran.stdout);result.originalTests.push({id,path:entry,status:ran.exitCode===0&&Number(count?.[1])>0?'PASS':'FAIL',checks:Number(count?.[1]??0),exitCode:ran.exitCode,errorCode:ran.errorCode,scope:'behavioral-mock',safety:'memory WebView IPC/fake clock only; install command in integration is inert memory feedback, no native handler'});}
@@ -66,7 +76,7 @@ try{
   result.stabilityTests.push({id:mode,status:ran.exitCode===0&&receipt?.status==='PASS'&&receipt.checks>0?'PASS':'FAIL',exitCode:ran.exitCode,receipt});
  }
  const gameFile=await bundle('game-recovery','tools/updater_game_recovery_selftest.ts',gameIOPlugin),gameRan=execute('game-recovery',gameFile);let gameReceipt;try{gameReceipt=JSON.parse(gameRan.stdout.trim());}catch{}
- result.stabilityTests.push({id:'game-recovery',status:gameRan.exitCode===0&&gameReceipt?.status==='PASS'&&gameReceipt.checks===10?'PASS':'FAIL',exitCode:gameRan.exitCode,receipt:gameReceipt});
+ result.stabilityTests.push({id:'game-recovery',status:gameRan.exitCode===0&&gameReceipt?.status==='PASS'&&gameReceipt.checks===13?'PASS':'FAIL',exitCode:gameRan.exitCode,receipt:gameReceipt});
  if(gameRan.exitCode===0&&gameReceipt?.status==='PASS')result.executedProductModules.push('src/bridge/gamePolicyTarget.ts','src/bridge/gamePolicyHysteresis.ts');
  result.ioGuards=result.bundles.map(item=>({id:item.id,...JSON.parse(fs.readFileSync(path.join(evidenceDir,item.id+'.io-guard.json'),'utf8'))}));
  result.compiledInputs=[...inputs].map(([path,sha256])=>({path,sha256})).sort((a,b)=>a.path.localeCompare(b.path));result.executedProductModules=[...new Set(result.executedProductModules)];

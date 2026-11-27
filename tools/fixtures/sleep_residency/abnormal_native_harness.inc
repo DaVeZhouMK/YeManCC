@@ -302,6 +302,29 @@ static unsigned abnormalRuntimeTests(const json& fixture){
     check(!testPowerOffCalls,"accepted-but-unconfirmed S4 never authorizes shutdown");
     testReset();testArmHistoricalStaged(1,testEpoch);testBad(30000,30000);testBad(230000,30000);testSuspendOnHibernate=true;testBad(330000,30000);
     check(!g_sgAbnormalEpisode.active()&&!testDue,"Windows hibernate suspend boundary ends pending shutdown");
+    for(const bool failSourceReceipt:{true,false}) {
+        testReset();testArmHistoricalStaged(1,testEpoch);
+        check(g_sgAbnormalEpisode.active()&&testDue&&g_sgAbnormalEtw.worker,"S4 cleanup fixture owns one timer and ETW source");
+        g_sgAutomaticSleepTarget=ymcc::sleeprequest::Mode::Hibernate;
+        runtimeFactObserver=failSourceReceipt?+[](const char* name,const json&){
+            if(std::string_view(name)=="abnormal-sleep-live-source-stop")throw std::bad_alloc();
+        }:+[](const char* name,const json&){
+            if(std::string_view(name)=="abnormal-sleep-finished")throw std::bad_alloc();
+        };
+        bool escaped=false;
+        try{sgAbnormalSuspendBoundary();}catch(const std::bad_alloc&){escaped=true;}
+        runtimeFactObserver=nullptr;
+        const std::string_view failedFact=failSourceReceipt?"abnormal-sleep-live-source-stop":"abnormal-sleep-finished";
+        check(std::count_if(captured.begin(),captured.end(),[&](const auto& row){return row.first==failedFact;})==1,
+            "S4 cleanup executes the selected failing diagnostic once");
+        check(!escaped,"S4 diagnostic failure cannot interrupt shared suspend delivery");
+        check(!g_sgAbnormalEpisode.active()&&!g_sgAbnormalOrigin.load()&&!g_sgAbnormalStopRequested.load()&&!testDue&&
+            !g_sgAbnormalEtw.session&&!g_sgAbnormalEtw.worker&&g_sgAbnormalEtw.consumer.load()==INVALID_PROCESSTRACE_HANDLE,
+            "S4 diagnostic failure releases the episode timer and all ETW ownership");
+        check(testCloses==2&&testEtwJoins==1&&!testSleepCalls&&!testPowerOffCalls,"S4 cleanup only retires the existing source once");
+        testAt(5000);testArmHistoricalStaged(1,testFileTime);
+        check(g_sgAbnormalEpisode.active()&&testDue&&g_sgAbnormalEtw.worker,"a later episode can acquire the returned resources");
+    }
     testReset();testArmHistoricalStaged(1,testEpoch);g_sgAutomaticSleepBudget.consume();g_sgAutomaticSleepBudget.consume();g_sgAutomaticSleepBudget.consume();testBad(30000,30000);
     check(!testSleepCalls&&!g_sgAbnormalEpisode.active(),"other repairs consume the same budget without refill");
     testReset();testArmHistoricalStaged(1,testEpoch);testBad(30000,30000);testBad(230000,30000);testAccepted=false;testBad(330000,30000);

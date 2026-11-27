@@ -36,6 +36,22 @@ Set `YMCC_FOREGROUND_SHIELD_MODE=handoff-cycle` to select only these handoff ass
 
 ## Explicit pre-Host writer selection (2026-11-12)
 
+The original `Priority` runner also accepts the explicit
+`-PreHostWriterSelection win5-return-exit2 -BuildProfile Unoptimized` with a
+fresh private `-OutputRoot` and the existing owned wall-budget guard. It is not
+part of `all`. It uses a tracked inert child of the regression EXE and the real
+diagnostic spool to reproduce exit 2 with no record, then checks three original
+player deadlines, refusal of stale work, and return only with fresh controlled
+observations. It does not run Win5 hardware, the actual refresh tool, or a Host.
+
+For the same single case through the core entry, use
+`YMCC_FOREGROUND_SHIELD_MODE=win5-return-exit2` with
+`Run.ps1 -Optimized -Mode plan -Tests controller.foreground-shield-field`.
+For a new execution use `-Mode run -Rerun -BudgetSeconds 360` instead, with a
+fresh evidence directory. Restore the environment afterwards. This mode rejects
+multi-test, module, release-bug and Full selections. Its receipt and cache slot
+are distinct from the original nine-case `prehost-writer` batch.
+
 Set `YMCC_FOREGROUND_SHIELD_MODE=prehost-writer` for one invocation, then use the original core `Run.ps1 -Optimized -Mode plan` or `-Mode run -Rerun -Tests controller.foreground-shield-field -BudgetSeconds 360 -EvidenceDir <fresh-directory>`. Restore the environment afterwards. The adapter selects `--prehost-writer`; no ID, module minimum, default release requirement or default suite is added. Explicit `-Rerun` is needed while this dynamic tool closure remains unproven; `-ReferenceOnly` does not start a compiler.
 
 The wrapper calls the original `verify-msi-foreground-isolation.ps1 -CaseFilter Priority -PreHostWriterSelection all -BuildProfile Unoptimized`. It compiles the actual production TU once using `/Od /MT /DNDEBUG`, then reuses that EXE for the nine original C++ selections. The explicit profile does not establish optimized Release acceptance. Direct callers may give one or more exact original selections; empty, unknown or duplicate selections and combinations with another CaseFilter are refused before preparing a build.

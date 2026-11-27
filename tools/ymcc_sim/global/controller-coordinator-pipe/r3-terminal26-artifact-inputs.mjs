@@ -24,6 +24,7 @@ const ALL_ROLES={...ROLES,switchReturn:'rollback-switch-return-rearm',switchOwne
 const ROLE_DIR={positive:'np2/p',cancellation:'nb3/cancel',psOwnership:'nb3/psown',psBinding:'nb3/psbind',switchReturn:'nb3/swret',switchOwner:'nb3/swown',recoveryInheritance:'nb3/recover',bypassAdmission:'nb3/admit'};
 const FIXED_DESCRIPTOR={path:D+'/FIXED-SOURCE-DESCRIPTOR-owned-r13.json',bytes:17330112,sha256:'f8e5b407c9e1e93fb21af6e7b4011779d7a69224e1ffb931c960a3da6f1bc793'};
 const FIXED_EXPECTATIONS={path:D+'/SOURCE-EXPECTATIONS-current26-owned-r13.json',bytes:4509852,sha256:'a1f2b703005d321230672a86d6039ae0eccb8771bd33ebec0ce96179ed230b1f'};
+const ARCHIVE_ROOT='G:/YeManCC-Work/Testing/YMCC/Workspace/vfixpipe26-archive';
 const RECEIPTS={positive:{path:E+'/OWNED-CURRENT-FOUR-PIPE-RESULT-r10.json',bytes:2413213,sha256:'17864dd733e87e6d553222b3668a4a5fcae581332722553ab6e040921849586e'},negative:{path:E+'/OWNED-CURRENT-THREE-PIPE-CONTINUATION-RESULT-r11.json',bytes:7177251,sha256:'8818944b4f7f817662e3ec6a86855d54ae5e689380f23d7c03b3e00dba53f99f'}};
 const PROFILE_KEYS='schemaVersion kind status scope workspaceRoot authorizedBuildRoot sourceRoot descriptor expectations qualification currentPipeOracle managedInputContract sourceCaptureManifestSha256 toolClosureComplete cacheAcceptance currentPrimaryAccepted nativeBudgetMs leafBudgetMs cleanupReserveMs powershell node'.split(' ');
 const live=new WeakMap();
@@ -74,7 +75,8 @@ function pass(){
 function validateProfile(p,repo){
  need(plain(p)&&p.schemaVersion===1&&p.kind===FIXED_ARTIFACT_PROFILE_KIND,'PROFILE_KIND_OR_VERSION');
  if(p.status==='UNBOUND'){keys(p,['schemaVersion','kind','status'],'UNBOUND_EXACT_SCHEMA');return false;}
- keys(p,PROFILE_KEYS,'BOUND_EXACT_SCHEMA');need(p.status==='BOUND'&&p.scope==='FIXED_CPP_ARTIFACT_SOFTWARE_ONLY','BOUND_SCOPE');
+ keys(p,Object.hasOwn(p,'historicalArchive')?[...PROFILE_KEYS,'historicalArchive']:PROFILE_KEYS,'BOUND_EXACT_SCHEMA');need(p.status==='BOUND'&&p.scope==='FIXED_CPP_ARTIFACT_SOFTWARE_ONLY','BOUND_SCOPE');
+ if(Object.hasOwn(p,'historicalArchive')){keys(p.historicalArchive,['path','bytes','sha256'],'ARCHIVE_PROFILE_PIN_KEYS');pin(p.historicalArchive,true);}
  need(same(repo,R)&&same(p.workspaceRoot,W)&&same(p.authorizedBuildRoot,B)&&same(p.sourceRoot,S),'FIXED_ROOTS_REQUIRED');
  need(p.managedInputContract===CONTRACT&&p.sourceCaptureManifestSha256===CAPTURE&&p.toolClosureComplete===false&&p.cacheAcceptance===false&&p.currentPrimaryAccepted===false,'PROFILE_AUTHORITY_SCOPE');
  need(p.nativeBudgetMs===135000&&p.leafBudgetMs===360000&&p.cleanupReserveMs===30000,'EXPLICIT_135_360_30_BUDGETS_REQUIRED');
@@ -164,18 +166,63 @@ function consumerSources(io,repo,oracle){
  const reviewed=io.json({path:path.join(repo,MODULE,'r3-reviewed-contract.json'),sha256:io.checked.get(key(path.join(repo,MODULE,'r3-reviewed-contract.json'))).pin.sha256},'reviewed-contract');for(const row of Object.values(reviewed.reviewedEvidence)){const file=path.join(repo,MODULE,relative(row.file));io.read({path:file,sha256:row.sha256},'reviewed-oracle-data');files.add(key(file));}
  return [...files].map(k=>path.relative(repo,io.checked.get(k).pin.path).replaceAll('\\','/')).sort();
 }
-export function openTerminal26ArtifactContext(role,repo){
+function bindHistoricalRepositoryInputs(io,archivePin,d,role,repo){
+ if(archivePin===null)return {io,resolve:p=>p};
+ pin(archivePin,true);need(same(archivePin.path,path.join(ARCHIVE_ROOT,'manifest.json')),'EXACT_ARCHIVE_MANIFEST_PATH');
+ const manifest=io.json(archivePin,'explicit-archive-manifest');
+ keys(manifest,['schemaVersion','kind','descriptor','archiveRoot','rows'],'ARCHIVE_MANIFEST_KEYS');
+ need(manifest.schemaVersion===1&&manifest.kind==='FIXED_CPP_ARCHIVED_REPOSITORY_INPUTS_V1'&&same(manifest.archiveRoot,ARCHIVE_ROOT)&&Array.isArray(manifest.rows)&&manifest.rows.length>0,'ARCHIVE_MANIFEST_SCOPE');
+ pinEq(manifest.descriptor,FIXED_DESCRIPTOR,'ARCHIVE_DESCRIPTOR_IDENTITY');
+ const descriptorByRole=new Map(Object.keys(ROLES).map(name=>[name,new Map(d.roles.find(r=>r.role===name).artifactInputIds.map(id=>d.inputs[id]).filter(p=>inside(repo,p.path)).map(p=>[key(p.path),p]))]));
+ const mapped=new Map(),logicalKeys=new Set(),physicalKeys=new Set();
+ for(const {logical,physical,roles} of manifest.rows){
+  pin(logical,true);pin(physical,true);
+  const logicalKey=key(logical.path),physicalKey=key(physical.path);
+  need(inside(repo,logical.path)&&same(physical.path,path.join(ARCHIVE_ROOT,logical.sha256+'.bytes'))&&!logicalKeys.has(logicalKey)&&!physicalKeys.has(physicalKey),'ARCHIVE_EXACT_UNIQUE_PATHS');
+  need(physical.sha256===logical.sha256&&physical.bytes===logical.bytes,'ARCHIVE_BYTES_MUST_MATCH_LOGICAL_PIN');
+  logicalKeys.add(logicalKey);physicalKeys.add(physicalKey);
+  const exactRoles=[...descriptorByRole].filter(([,members])=>members.get(logicalKey)?.sha256===logical.sha256).map(([name,members])=>{pinEq(members.get(logicalKey),logical,'ARCHIVE_ROLE_INPUT_IDENTITY');return name;});
+  need(Array.isArray(roles)&&exactRoles.length>0,'ARCHIVE_ROLE_REQUIRED');eq([...roles].sort(),exactRoles.sort(),'ARCHIVE_EXACT_ROLE_MEMBERSHIP');
+  if(roles.includes(role))mapped.set(logicalKey,{logical,physical});
+ }
+ const resolve=p=>{
+  const row=mapped.get(key(p.path));
+  if(!row||p.sha256!==row.logical.sha256)return p;
+  pinEq(row.logical,p,'ARCHIVE_REQUESTED_LOGICAL_PIN');return row.physical;
+ };
+ const historicalRead=(p,label,body)=>{
+  const physical=resolve(p);
+  if(physical!==p)io.relations.push({relation:'historical-archive:'+label,logicalPath:p.path,path:physical.path,sha256:physical.sha256});
+  return io.read(physical,label,body);
+ };
+ return {resolve,io:{read:historicalRead,json:(p,label)=>JSON.parse(historicalRead(p,label,true).toString('utf8').replace(/^\uFEFF/,''))}};
+}
+// A size mismatch can reject early, but equal size never substitutes for the full role hash.
+function checkLiveArtifactSizes(d,r,repo,resolve){
+ const dirs=new Set();
+ for(const id of r.artifactInputIds){
+  const p=d.inputs[id];
+  if(inside(repo,p.path))need(noRedirect(resolve(p).path,dirs).size===p.bytes,'INPUT_DRIFT:'+p.path);
+ }
+}
+export function openTerminal26ArtifactContext(role,repo,{historicalArchive=null,useConfiguredArchive=false}={}){
  need(Object.hasOwn(ROLES,role),'FOUR_PIPE_ROLE_REQUIRED');repo=path.resolve(repo);const io=pass(),file=profileFile(repo),profile=JSON.parse(io.current(file,'profile',true).toString('utf8').replace(/^\uFEFF/,''));need(validateProfile(profile,repo),'BOUND_PROFILE_REQUIRED');
- const d=io.json(profile.descriptor,'descriptor'),e=io.json(profile.expectations,'expectations');descriptorGraph(d,e,profile);io.read(profile.node,'node');io.read(profile.powershell,'powershell');io.read(profile.currentPipeOracle,'oracle');
- const r=d.roles.find(x=>x.role===role),n=io.json(r.nativePreparation,'native-preparation'),s=io.json(r.sourceManifest,'source-manifest'),l=io.json(r.compilerLedger,'compiler-ledger'),preparation=io.json(d.managedPreparation,'managed-preparation'),layout=io.json(d.layout,'layout'),managed=io.json(d.managedManifest,'managed-manifest');
+ const d=io.json(profile.descriptor,'descriptor'),r=d.roles.find(x=>x.role===role);need(r,'EXACT_SELECTED_ROLE_REQUIRED');
+ need(!useConfiguredArchive||historicalArchive===null,'ONLY_ONE_EXPLICIT_ARCHIVE_AUTHORITY');
+ const selectedArchive=useConfiguredArchive?(profile.historicalArchive??null):historicalArchive;
+ const historical=bindHistoricalRepositoryInputs(io,selectedArchive,d,role,repo);
+ checkLiveArtifactSizes(d,r,repo,historical.resolve);
+ const e=io.json(profile.expectations,'expectations');descriptorGraph(d,e,profile);io.read(profile.node,'node');io.read(profile.powershell,'powershell');io.read(profile.currentPipeOracle,'oracle');
+ const n=io.json(r.nativePreparation,'native-preparation'),s=io.json(r.sourceManifest,'source-manifest'),l=io.json(r.compilerLedger,'compiler-ledger'),preparation=io.json(d.managedPreparation,'managed-preparation'),layout=io.json(d.layout,'layout'),managed=io.json(d.managedManifest,'managed-manifest');
  for(const p of [d.captureManifest,d.nodeBinding,e.sourceProfile])io.read(p,'source-contract');need(same(layout.sourceRoot,S)&&same(layout.workspaceRoot,W)&&same(layout.authorizedBuildRoot,B)&&layout.manifestSha256===CAPTURE&&layout.managedInputContract===CONTRACT,'LAYOUT_FIXED_ROOTS');need(preparation.status==='MANAGED26_COMPILED_NOT_RUNTIME_ACCEPTED'&&preparation.managedInputContract===CONTRACT&&preparation.managedMemberCount===26&&same(preparation.sourceRoot,S)&&same(preparation.managed.manifestPath,d.managedManifest.path)&&preparation.managed.manifestSha256===d.managedManifest.sha256,'MANAGED_PREPARATION_IDENTITY');pinEq(preparation.layout,d.layout,'MANAGED_LAYOUT');
  need(managed.status==='BUILT'&&managed.managedInputContract===CONTRACT&&managed.managedInputCount===26&&managed.terminalCleanupCompiled===true&&managed.sourceStable===true&&managed.toolchainStable===true&&managed.semanticMutation===null&&managed.runtimeArtifacts.length===3,'EXACT_MANAGED26_BUILD');need(same(n.native.managedProof.manifest,d.managedManifest.path)&&n.native.managedProof.manifestSha256===d.managedManifest.sha256&&same(n.native.managedProof.dll.path,managed.fixtureDll),'NATIVE_MANAGED_IDENTITY');pinEq(n.native.managedProof.dll,managed.runtimeArtifacts.find(x=>same(x.path,managed.fixtureDll)),'MANAGED_DLL');
- const compiled=compileGraph(io,d,e,r,n,s,l,managed,layout),qualification=qualificationGraph(io,profile,d,r,n,managed),sources=consumerSources(io,repo,profile.currentPipeOracle);
+ const compiled=compileGraph(historical.io,d,e,r,n,s,l,managed,layout),qualification=qualificationGraph(historical.io,profile,d,r,n,managed),sources=consumerSources(io,repo,profile.currentPipeOracle);
  const inputPins=[...io.checked.values()].map(x=>x.pin).sort((a,b)=>key(a.path).localeCompare(key(b.path)));const inputMap=new Map(inputPins.map(x=>[key(x.path),x]));
  const physical=rows=>{const m=new Map();for(const p of rows)m.set(key(p.path),inputMap.get(key(p.path)));return [...m.values()].sort((a,b)=>key(a.path).localeCompare(key(b.path)));};
- const sourcePins=physical([...compiled.sourceIds,...qualification.sourcePins,...sources.map(relative=>inputMap.get(key(path.join(repo,relative))))]);
- const sourceKeys=new Set(sourcePins.map(p=>key(p.path)));const artifactPins=physical([...compiled.artifactIds,...qualification.artifactPins,...inputPins.filter(p=>!sourceKeys.has(key(p.path)))]);
+ const sourcePins=physical([...compiled.sourceIds,...qualification.sourcePins].map(historical.resolve).concat(sources.map(relative=>inputMap.get(key(path.join(repo,relative))))));
+ const sourceKeys=new Set(sourcePins.map(p=>key(p.path)));const artifactPins=physical([...compiled.artifactIds,...qualification.artifactPins].map(historical.resolve).concat(inputPins.filter(p=>!sourceKeys.has(key(p.path)))));
  const metadata={profile,native:n,nativePreparation:n,nativePreparationPin:r.nativePreparation,preparation,layout,managed,source:s,compilerLedger:l,roleRow:r,qualification,sourceCaptureManifest:d.captureManifest,descriptorPin:profile.descriptor,expectationsPin:profile.expectations,nativeBudgetMs:135000,leafBudgetMs:360000,cleanupReserveMs:30000,fullToolClosure:false,cacheAcceptance:false,currentPrimaryApproved:false,scope:'FIXED_CPP_ARTIFACT_SOFTWARE_ONLY',qualificationScope:'CPP_AND_USED_FIXTURE_SOURCE_ONLY',lifecycleQualified:false};
+ if(selectedArchive)metadata.historicalArchive=selectedArchive;
  io.finish(profile.powershell);
  const view={inputPins,sourcePins,artifactPins,sources,artifacts:inputPins.map(x=>x.path),metadata,nestedInputRelationships:io.relations,fullToolClosure:false,cacheAcceptance:false,currentPrimaryApproved:false};
  const context=Object.freeze({kind:FIXED_ARTIFACT_PROFILE_KIND,role,scope:'FIXED_CPP_ARTIFACT_SOFTWARE_ONLY',fullToolClosure:false,cacheAcceptance:false,currentPrimaryApproved:false});live.set(context,view);return context;

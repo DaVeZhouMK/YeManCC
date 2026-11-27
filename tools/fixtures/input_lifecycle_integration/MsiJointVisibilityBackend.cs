@@ -215,7 +215,7 @@ internal static partial class Program
                         case "HIDHIDE_CYCLE_POLL":
                         {
                             Require(string.IsNullOrEmpty(path), "unexpected-command-path"); var current = LatestCycle(state); var pending = current.State == "in-flight"; status = "hidhide-cycle-poll";
-                            detail = JsonSerializer.Serialize(new { state = current.State, ok = current.State == "done", inFlight = pending, retained = pending, phase, resourceDisposition = pending ? "owned-pending" : "fixture-signal-terminal-only", detail = current.Detail, elapsedMs = 0, totalMs = 0, path = current.Binding?.path ?? "", runId = current.Binding?.runId ?? "", epoch = current.Binding?.epoch ?? 0UL, powerGeneration = current.Binding?.powerGeneration ?? 0UL, scope = "controlled-fixture-signal-only", physicalReturnProven = false, businessSettlementProven = false }); break;
+                            detail = JsonSerializer.Serialize(new { state = current.State, ok = current.State == "done", inFlight = pending, retained = pending, phase, resourceDisposition = pending ? "owned-pending" : "settled", detail = current.Detail, elapsedMs = 0, totalMs = 0, path = current.Binding?.path ?? "", runId = current.Binding?.runId ?? "", epoch = current.Binding?.epoch ?? 0UL, powerGeneration = current.Binding?.powerGeneration ?? 0UL, scope = "controlled-fixture-signal-only", physicalReturnProven = false, businessSettlementProven = false }); break;
                         }
                     }
                     state.Commands.Add(log);

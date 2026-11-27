@@ -13,8 +13,14 @@ export function extractUpdaterHelper(source,bindings){
  const block=source.slice(start,end);let output='\ufeff',statements=0;
  const re=/\bf\s*<<((?:"(?:[^"\\]|\\.)*"|[^";])*);/g;
  for(const match of block.matchAll(re)){
-  const parts=match[1].match(/"(?:[^"\\]|\\.)*"|[^"<>]+/g)||[];
-  for(let part of parts){part=part.trim();if(!part)continue;
+  // Join string tokens inside one C++ insertion expression before binding it.
+  const operands=[];let operand='';
+  for(const piece of match[1].match(/"(?:[^"\\]|\\.)*"|<<|[^"<]+|</g)||[]){
+   if(piece==='<<'){operands.push(operand);operand='';}
+   else operand+=piece;
+  }
+  operands.push(operand);
+  for(let part of operands){part=part.trim();if(!part)continue;
    if(part.startsWith('"'))output+=JSON.parse(part);
    else if(Object.hasOwn(bindings,part))output+=bindings[part];
    else throw Error('Unbound production emitter expression: '+part);
@@ -28,6 +34,7 @@ export function updaterFixtureBindings(config){
  const bindings={};
  const values={zip:config.zip??'',staging:config.staging,exePath:path.win32.join(config.install,'YeManCC','YeManCC.exe'),exedir:path.win32.join(config.install,'YeManCC'),packagedYeManCC:path.win32.join(config.staging,'YeManCC'),packagedExe:path.win32.join(config.staging,'YeManCC','YeManCC.exe'),pcDir:path.win32.join(config.install,'PowerControl'),installRoot:config.install,packagedNestedCustomSteamLibrary:path.win32.join(config.staging,'YeManCC','CustomSteamLibrary'),packagedLegacyCustomSteamLibrary:path.win32.join(config.staging,'CustomSteamLibrary'),customSteamLibraryDir:path.win32.join(config.install,'YeManCC','CustomSteamLibrary'),supportPath:path.win32.join(config.install,'YeMan-Support.html'),script:config.script,recoveryJournal:config.recoveryJournal??path.win32.join(config.install,'fixture-install-journal.json')};
  for(const[k,v]of Object.entries(values))bindings['psLiteral('+k+')']=ps(v);
+ bindings['psLiteral(ymcc::maintenance::installedMaintenanceImage(L"YeManCC-Maintenance-Update.exe"))']=ps(config.maintenanceUpdater??'');
  Object.assign(bindings,{'GetCurrentProcessId()':String(config.parentPid),'std::to_string(updaterCreatedTicks)':String(config.parentCreationFileTime??'0'),'deckyResumeTicket':'','psLiteral(updateProgressPath())':ps(config.progress),'psLiteral(U2W(operationId))':ps(config.operationId??'fixture-operation'),'psLiteral(U2W(version))':ps(config.version),'psLiteral(U2W(ascii_lower(sha)))':ps(config.sha??'0'.repeat(64)),'ymcc::deckypackage::maintenanceScript()':fs.readFileSync(path.join(repo,'native/decky_package_maintenance.ps1'),'utf8').replace(/^\ufeff/,''),'ymcc::modulepackage::maintenanceScript()':fs.readFileSync(path.join(repo,'native/module_package_maintenance.ps1'),'utf8').replace(/^\ufeff/,''),'ymcc::updaterecovery::script()':fs.readFileSync(path.join(repo,'native/update_install_recovery.ps1'),'utf8').replace(/^\ufeff/,''),'ymcc::hcruntime::script()':fs.readFileSync(path.join(repo,'native/updater_hc_runtime.ps1'),'utf8').replace(/^\ufeff/,''),'ymcc::updatehooks::script()':fs.readFileSync(path.join(repo,'native/updater_hook_tools.ps1'),'utf8').replace(/^\ufeff/,''),'updateHookPathsLiteral':'@('+((config.hookToolPaths??[]).map(ps).join(','))+')'});return bindings;
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){

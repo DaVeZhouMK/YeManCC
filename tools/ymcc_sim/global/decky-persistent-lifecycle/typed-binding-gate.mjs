@@ -1,6 +1,7 @@
 // Public lifecycle wiring for the production typed binding path. Historical
 // callback receipts remain negative evidence; this file never rewrites them.
 import assert from 'node:assert/strict';
+import {extractDeckyReady,deckyReadyFixtureDelivery} from '../decky-update-recovery/native-source-admission.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -184,10 +185,16 @@ export function verifyTypedRuntime({root, out, execution, runtimeDirectory}) {
  // remain useful diagnostics, but can never authorize a release receipt.
  assert.equal(run.resumeConsumer?.intentOverride,undefined,'Negative Ready override is not production evidence');
  const readyMain=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8');
- const readyFunctions=[...readyMain.matchAll(/static bool deckySidebarResumeAfterIntent\(unsigned long long generation(?:,const char\* scope="sleep-intent-ready")?\) \{[\s\S]*?\n\}/g)],readyFunction=readyFunctions[0];
- assert(readyFunction,'Missing S0 Ready production consumer');assert.equal(readyFunctions.length,1,'Ambiguous S0 Ready production consumer');
- assert.equal(run.resumeConsumer.alternateReady.sourceSha256,sha(Buffer.from(readyFunction[0])));
- assert.equal(hashFile(path.join(dir,'source/native/decky_wake_ready_consumer.inc')),sha(Buffer.from(readyFunction[0]+'\n')),'Compiled S0 Ready consumer drift');
+ const readyFunction=extractDeckyReady(readyMain);
+ assert.equal(run.resumeConsumer.alternateReady.sourceSha256,sha(Buffer.from(readyFunction.code)));
+ assert.equal(hashFile(path.join(dir,'source/native/decky_wake_ready_consumer.inc')),sha(Buffer.from(readyFunction.code+'\n')),'Compiled S0 Ready consumer drift');
+ if(readyFunction.publicReady){
+  assert.equal(run.resumeConsumer.event,'kSharedPowerStateMessage');
+  assert.equal(run.resumeConsumer.publicReady.sourceSha256,sha(Buffer.from(readyFunction.delivery)));
+  const generated=sha(Buffer.from(deckyReadyFixtureDelivery(readyFunction)));
+  assert.equal(run.resumeConsumer.publicReady.generatedSha256,generated);
+  assert.equal(hashFile(path.join(dir,'source/native/decky_wake_committed_consumer.inc')),generated,'Compiled public Ready consumer drift');
+ }
 
  const planBegin=readyMain.indexOf('static ymcc::deckysidebar::BindingPlan deckySidebarOwnedBindingPlan('),planEnd=readyMain.indexOf('static void deckySidebarOwnedBindingDiagnostic(',planBegin);
  const diagnosticEnd=readyMain.indexOf('// Existing high-frequency lane only;',planEnd);

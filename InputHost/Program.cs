@@ -388,7 +388,15 @@ internal static partial class Program
             try
             {
                 _msiHostStageEvidence?.BeginRead();
-                request = await codec.ReadUtf8Async(pipe, parentLifetime.ExitToken).ConfigureAwait(false);
+                var readTask = codec.ReadUtf8Async(pipe, parentLifetime.ExitToken);
+                // A suspended coordinator may send no poll after Close returns.
+                // Keep the same pending read, but let its serial owner reap the
+                // exact completed Task without waiting for another command.
+                if (!readTask.IsCompleted && session.CloseRefreshPowerCompletion() is { } refreshTask &&
+                    await Task.WhenAny((Task)readTask, refreshTask).ConfigureAwait(false) == refreshTask &&
+                    parentLifetime.IsAlive)
+                    session.ReapCompletedCloseRefreshPower(refreshTask);
+                request = await readTask.ConfigureAwait(false);
                 _msiHostStageEvidence?.EndRead(request is { } read ? Encoding.UTF8.GetCharCount(read.Span) : 0);
             }
             catch (OperationCanceledException) when (!parentLifetime.IsAlive) { break; }
@@ -1582,6 +1590,21 @@ internal static partial class Program
             }
             _powerBindings?.Maintenance();
         }
+        internal Task? CloseRefreshPowerCompletion()
+        {
+            if (Volatile.Read(ref _closeRefreshPowerBorrower) is null) return null;
+            lock (_closeRefreshGate)
+                return _closeRefreshPowerBorrower is null ? null : _closeRefreshTask;
+        }
+        internal void ReapCompletedCloseRefreshPower(Task completed)
+        {
+            lock (_lifecycleGate)
+            {
+                lock (_closeRefreshGate)
+                    if (!ReferenceEquals(_closeRefreshTask, completed) || !completed.IsCompleted) return;
+                ReapCommandPower();
+            }
+        }
         private string HandleWithCommandPower(string message, out bool shutdown, ReadOnlyMemory<byte>? utf8 = null)
         {
             ReapCommandPower();
@@ -2426,6 +2449,11 @@ internal static partial class Program
                         // false；native 侧已有 cycle 失败不阻塞 admit/restore 的语义）。
                         if (string.IsNullOrWhiteSpace(envelope.HidHidePath))
                             return Ack(envelope, "hidhide-cycle", "false-empty-path");
+                        // Native's observation may expire before the old Close Task exits.
+                        // Both command handlers share the serial lifecycle gate, so a new
+                        // background refresh cannot start after this check during this call.
+                        if (HasCloseRefreshPending())
+                            return Ack(envelope, "hidhide-cycle", "false-close-refresh-owned-pending");
                         try
                         {
                             var device = FindPhysicalDevice(envelope.HidHidePath);

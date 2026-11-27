@@ -95,3 +95,22 @@ test('a same-owner managed receipt cannot hide a failed or missing observer clos
     }
   }
 });
+
+test('settled first ON binds OFF and app exit without accepting an expired or unrelated terminal', () => {
+  const selection = 'settled-first-on';
+  for (const terminal of ['off', 'exit']) {
+    const row = sample(terminal);
+    assert.equal(inspectGpdStopReceipt(row, selection).issue, 'invalid-terminal-owner');
+    row.name = 'GPD/first-on-settled-full-cycle/' + terminal;
+    if (terminal === 'exit') {
+      assert.equal(inspectGpdStopReceipt(row, selection).issue, 'wrong-stop-reason-or-target');
+      for (const event of row.nativeEvents) event.detail.stopReason = 'app-exit';
+    }
+    assert.equal(inspectGpdStopReceipt(row).issue, 'invalid-terminal-owner');
+    const accepted = inspectGpdStopReceipt(row, selection);
+    assert.equal(accepted.accepted, true);
+    assert.equal(accepted.physicalReturnObserved, 'UNKNOWN');
+    row.managedReceipt.processId += 1;
+    assert.equal(inspectGpdStopReceipt(row, selection).issue, 'managed-release-owner-mismatch');
+  }
+});

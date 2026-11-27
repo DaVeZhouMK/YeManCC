@@ -14,10 +14,19 @@
 #include <vector>
 #include "json.hpp"
 #include "dsu_frame.h"
+#include "sleep_power_observation.h"
 #include "controller_persona.h"
 #include "gamepad_ui_gate_evidence.h"
 using json = nlohmann::json;
 static uint64_t currentPowerGeneration();
+static std::atomic<uint64_t> g_sharedPowerSuspendSerial{1};
+static ymcc::sleeppower::SharedPowerV1 fixturePublicPower() {
+    using namespace ymcc::sleeppower;
+    return {sizeof(SharedPowerV1),1,currentPowerGeneration(),1,1,0,kKnown|kHardwareAllowed,g_sharedPowerSuspendSerial.load()};
+}
+static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& power) {
+    return ymcc::sleeppower::samePowerRevocation(power,fixturePublicPower());
+}
 static unsigned long long inputHostEpochToken();
 static std::atomic<unsigned long long> g_msiMainSourceRevision{1};
 
@@ -255,7 +264,7 @@ struct FixtureDsuSensor {std::atomic<uint64_t> activeBindingGeneration{1};};
 static const auto windowsMotionSensorOwner=std::make_shared<FixtureDsuSensor>();
 static const uint64_t gyroBindingGeneration=1;
 static const struct { ymcc::windows_motion::Stamp submission{}; } windowsSensorView;
-static const void* t_commonFrameSource=nullptr;
+static const struct FixtureDsuSample {ymcc::sleeppower::SharedPowerV1 sharedPower;}* t_commonFrameSource=nullptr;
 static constexpr int kTickCostPreHostDsu = 0;
 static struct { long long dsuUs = 0; } g_tickPreHostSub;
 struct TickPreHostSubScope { TickPreHostSubScope(int, long long*) {} };
@@ -432,8 +441,9 @@ int main(int argc,char** argv) {
     test("frontend-isolation-off-keeps-radial-and-return-protected", [] {
         g_controllerFrontendIsolationEnabled.store(false); foregroundWindow = otherHandle;
         for (const bool returning : {false, true}) {
-            radialInputIsolationOwnership(true);
-            if (returning) radialInputIsolationOwnership(false);
+            const auto power=fixturePublicPower();
+            radialInputIsolationOwnership(true,power);
+            if (returning) radialInputIsolationOwnership(false,power);
             check(gamepadUiOutputIsolationEligible(), "Isolation OFF bypassed radial ownership or return");
             for (const auto& persona : {"elite", "steamdeck", "dualsense-edge"})
                 check(outputFrame(virtualPlan(persona), liveFrame()) == focusIsolationAssembleFrame(focusIsolationNeutralContent()), "Radial-owned virtual output retained input with isolation OFF");
@@ -1012,7 +1022,7 @@ int main(int argc,char** argv) {
             useChild();
             const auto plan=plane=="virtual"?virtualPlan("elite"):nativeDsuPlan();
             if(plane=="dsu")dsuLiveSample();
-            duringImageQuery=[] {radialInputIsolationOwnership(true);foregroundWindow=otherHandle;};
+            duringImageQuery=[] {radialInputIsolationOwnership(true,fixturePublicPower());foregroundWindow=otherHandle;};
             if(plane=="virtual") {
                 const auto actual=outputFrame(plan,liveFrame());
                 const auto neutral=focusIsolationAssembleFrame(focusIsolationNeutralContent());

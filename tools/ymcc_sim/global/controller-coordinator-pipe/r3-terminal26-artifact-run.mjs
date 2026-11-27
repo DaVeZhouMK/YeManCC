@@ -116,7 +116,7 @@ export async function executeTerminal26ArtifactPipe(root,role='positive',repo=RE
   lifecycleVersion:'VC-LIFECYCLE-20261020-R3',cacheAcceptance:false,toolClosureComplete:false,currentPrimaryAccepted:false,fullSourceCurrent:false,fullCoordinatorRuntimeAccepted:false,fullSourceApproved:false,fullProductAcceptance:false,
   claims:{fixedCompiledCppSoftwareExecuted:false,physicalHardwareValidated:false,operatingSystemSleepPerformed:false,installedApplicationExercised:false},errors:[]};
  try{
-  context=openTerminal26ArtifactContext(role,repo);inputView=terminal26ArtifactInputs(context);
+  context=openTerminal26ArtifactContext(role,repo,{useConfiguredArchive:true});inputView=terminal26ArtifactInputs(context);
   const meta=inputView.metadata;assert(meta&&meta.profile&&meta.layout&&meta.native&&meta.managed,'FIXED_CPP_VERIFIED_CONTEXT_METADATA_REQUIRED');
   const {profile,layout,managed}=meta,n=meta.native;
   assert(profile.scope===FIXED_CPP_SCOPE&&profile.cacheAcceptance===false&&profile.toolClosureComplete===false&&profile.currentPrimaryAccepted===false,'FIXED_CPP_LIMITED_SCOPE_REQUIRED');
@@ -142,6 +142,7 @@ export async function executeTerminal26ArtifactPipe(root,role='positive',repo=RE
   const sourcePins=[...sources.values()],toolPins=[...tools.values()];
   assert(sourcePins.length<=3072&&toolPins.length<=3072,'FIXED_CPP_ORIGINAL_OWNED_INPUT_ROLE_LIMIT');
   const nested=fresh(path.join(root,'nested-inputs.json'),{schemaVersion:1,scope:FIXED_CPP_SCOPE,role,sourcePins,artifactPins:toolPins,qualification:meta.qualification,
+   historicalArchive:meta.historicalArchive??null,historicalArchiveRelations:inputView.nestedInputRelationships.filter(r=>r.relation.startsWith('historical-archive:')),
    historicalJavaScriptGeneratorClosureComplete:false,sourceAuthorityGranted:false,cacheAcceptance:false});
   result.sourceHashes=[{path:nested.path,sha256:nested.sha256},...sourcePins.filter(row=>inside(repo,row.path)).map(row=>({path:path.relative(repo,row.path).replaceAll('\\','/'),sha256:row.sha256}))];
   const own=spawnSync(powershell.path,['-NoLogo','-NoProfile','-NonInteractive','-Command','([Diagnostics.Process]::GetProcessById('+process.pid+')).StartTime.ToUniversalTime().Ticks.ToString()'],{encoding:'utf8',windowsHide:true,timeout:5000});

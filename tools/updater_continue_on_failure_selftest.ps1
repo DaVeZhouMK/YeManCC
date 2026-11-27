@@ -82,11 +82,19 @@ Write-Output 'PASS: overwrite, optional/core locks, later copies, rollback, prot
 $installer=@($ast.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.TryStatementAst] -and $_.Body.Extent.Text.Contains('Enter-YmccModuleMaintenance 15000') })
 Need ($installer.Count -eq 1) 'ambiguous installer statement'
 $installBody=[scriptblock]::Create($installer[0].Extent.Text)
+$nameAssignment=@($ast.EndBlock.Statements | Where-Object { $_ -is [Management.Automation.Language.AssignmentStatementAst] -and $_.Left.Extent.Text -ceq '$maintenanceBundleName' })
+Need ($nameAssignment.Count -eq 1) 'Missing maintenance attachment name'
+. ([scriptblock]::Create($nameAssignment[0].Extent.Text))
 function Enter-YmccModuleMaintenance { 'fixture-lease' }
 function Exit-YmccModuleMaintenance($Lease) { Need ($Lease -ceq 'fixture-lease') 'maintenance lease missing' }
 function Set-YmccInstallCheckpoint([string]$Step) { $script:ymccInstallStep=$Step; $steps.Add($Step) }
 function Set-YmccInstallJournal([string]$Phase) { $phases.Add($Phase) }
-function Write-YmccInstallTrace { }
+function Write-YmccInstallTrace([string]$Outcome) {
+    if ($script:ymccInstallIssues['maintenance-refresh']) {
+        Need ($Outcome -ceq 'committed') 'maintenance error overwrote committed app outcome'
+        $hostObserved.Add('maintenance-warning')
+    }
+}
 function Stop-YmccUpdateHookTools { throw 'simulated tool auto-restart' }
 function Stop-YmccUpdaterParent { 'forced-owned-parent' }
 function Stop-AdditionalLayoutRootProcesses { }
@@ -98,7 +106,16 @@ function Get-YmccModulePlan { throw 'simulated HIDM module in use' }
 function Get-YmccDeckyPlan { throw 'DECKY_BACKEND_IN_USE_OR_UNAVAILABLE' }
 function Restore-YmccDeckyPackage { }
 function Get-Process([int]$Id,$ErrorAction) { if ($Id -eq 5000) { @{Id=$Id} } }
-function Start-Process($FilePath,$WorkingDirectory,$ArgumentList,[switch]$PassThru) {
+function Start-Process($FilePath,$WorkingDirectory,$ArgumentList,$WindowStyle,[switch]$PassThru) {
+    if ($FilePath -ceq $maintenanceUpdater) {
+        Need ($ArgumentList[0] -ceq '--refresh' -and $ArgumentList[1] -ceq ('"'+(Join-Path $programSource $maintenanceBundleName)+'"')) 'wrong maintenance handoff'
+        Need ($phases[-1] -ceq 'committed' -and !$coreSetupLocked) 'maintenance started before app commit or while holding its mutex'
+        Need ([IO.File]::Exists((Join-Path $programSource $maintenanceBundleName))) 'maintenance attachment removed before handoff'
+        $hostObserved.Add('maintenance')
+        $result=[pscustomobject]@{ExitCode=$(if ($RejectMaintenance) {1} else {0})}
+        $result | Add-Member ScriptMethod WaitForExit { param($Timeout) return $true }
+        return $result
+    }
     if (!$ArgumentList) { $hostObserved.Add('relaunch-old'); return @{Id=5100} }
     $hostObserved.Add('launch-new')
     Need ([IO.File]::ReadAllText($FilePath) -ceq 'new core EXE') 'stale core launched'
@@ -106,10 +123,12 @@ function Start-Process($FilePath,$WorkingDirectory,$ArgumentList,[switch]$PassTh
     [IO.File]::WriteAllText($handshakePath,(@{phase='started';pid=5000;token=$handshakeToken}|ConvertTo-Json -Compress))
     return @{Id=5000;HasExited=$false}
 }
-function Run-InstallCase([string]$Case,[switch]$LockCore,[switch]$AfterRollback) {
+function Run-InstallCase([string]$Case,[switch]$LockCore,[switch]$AfterRollback,[switch]$RejectMaintenance) {
     $sandbox=Join-Path $root $Case
     $installRoot=Join-Path $sandbox 'installed';$staging=Join-Path $sandbox 'staging'
     $programSource=Join-Path $staging 'YeManCC';$powerControlSource=Join-Path $staging 'PowerControl'
+    $maintenanceUpdater=Join-Path $sandbox 'fixture-maintenance-updater.exe'
+    $null=Put $programSource $maintenanceBundleName 'fake attachment; execution is intercepted by fixture'
     $exeDir=Join-Path $installRoot 'YeManCC';$pcDir=Join-Path $installRoot 'PowerControl'
     $packageExe=Put $programSource 'YeManCC.exe' 'new core EXE';$exePath=Join-Path $exeDir 'YeManCC.exe'
     $null=Put $programSource 'index.html' 'new core UI';$oldUi=Join-Path $exeDir 'index.html'
@@ -144,10 +163,15 @@ function Run-InstallCase([string]$Case,[switch]$LockCore,[switch]$AfterRollback)
     $immutablePayloadStarted=$false;$immutablePayloadComplete=$false;$immutableRepairPending=$false
     $moduleTransaction=$null;$deckyTransaction=$null;$deckyPreparationLease=$null
     $tdpCommitted=$false;$tdpOriginalMoved=$false;$updateCommitted=$false;$rollbackSucceeded=$false;$recoveryError=$null
+    # Simulate the fixed-install gate holding its lease, without touching the live named mutex.
+    $coreSetupMutex=[Threading.Mutex]::new($true);$coreSetupLocked=$true
     $locked=if($LockCore){$exePath}else{$oldConfig}
     $lock=if(!$AfterRollback){[IO.File]::Open($locked,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)}else{$null}
     try { . $installBody } finally { if($lock){$lock.Dispose()} }
     $receipt=Get-Content -LiteralPath $state -Raw -Encoding UTF8 | ConvertFrom-Json
+    Need (!(Test-Path -LiteralPath (Join-Path $exeDir $maintenanceBundleName))) 'maintenance attachment was copied into installed files'
+    Need ($hostObserved.Contains('maintenance') -eq !$LockCore) 'maintenance handoff did not follow app commit'
+    Need ($hostObserved.Contains('maintenance-warning') -eq [bool]$RejectMaintenance) 'maintenance failure not handled independently'
     Need ($steps.Contains('copy-program') -and $steps.Contains('prepare-launch')) 'an optional failure cut off copying'
     Need ($script:ymccInstallIssues['stop-hooks'] -eq 1 -and $script:ymccInstallIssues['stop-residents'] -eq 1 -and $script:ymccInstallIssues['apply-input'] -eq 1 -and $script:ymccInstallIssues['plan-decky'] -eq 1) 'optional failures not reported'
     if ($LockCore) {
@@ -168,3 +192,4 @@ function Run-InstallCase([string]$Case,[switch]$LockCore,[switch]$AfterRollback)
 . Run-InstallCase 'forward-optional-failures'
 . Run-InstallCase 'reverse-core-lock' -LockCore
 . Run-InstallCase 'reverse-core-lock' -AfterRollback
+. Run-InstallCase 'maintenance-rejected' -RejectMaintenance

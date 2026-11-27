@@ -110,10 +110,12 @@ test('decoder23 entry: duplicate and unrelated decoder paths cannot satisfy the 
 });
 
 
-import {TERMINAL_SIGNAL_EVIDENCE_MANAGED_CONTRACT,validateManagedSourceRequirements} from './r3-managed-input-contract.mjs';
+import {TERMINAL_SIGNAL_EVIDENCE_MANAGED_CONTRACT,TERMINAL_SHARED_INPUT_POWER_MANAGED_CONTRACT,validateManagedSourceRequirements} from './r3-managed-input-contract.mjs';
 import contractFs from 'node:fs';
 const signal26Id=TERMINAL_SIGNAL_EVIDENCE_MANAGED_CONTRACT;
+const sharedPowerId=TERMINAL_SHARED_INPUT_POWER_MANAGED_CONTRACT;
 const signal26Helpers=['InputHost/HostSdkFirstWitness.cs','InputHost/TargetCreationLifetimeEvidence.cs','InputHost/CompactFrameReplyBinding.cs'];
+const powerSources=['InputHost/HostInputPowerBinding.cs','native/SharedSleepPower/RemotePowerContracts.cs','native/SharedSleepPower/RemoteNativePowerClient.cs'];
 function signal26Receipt(){
  const value=decoder23Receipt(),root=path.dirname(value.fixtureProject),sha256='a'.repeat(64);
  value.managedInputContract=signal26Id;value.managedInputCount=26;value.signalEvidenceCompiled=true;
@@ -162,14 +164,41 @@ test('signal26 compile identity: actual source generated and Compile membership 
   ]){const value=signal26Receipt();mutate(value);assert.throws(()=>verifyManagedDecoderCompileEvidence(value,signal26Id,decoder23UnitBuildRoot));}
  }
 });
-test('signal26 preflight: current consumed type requirements reject legacy before expensive capture',()=>{
+test('managed preflight: existing signal requirements and current shared power require their exact generations',()=>{
  const source=contractFs.readFileSync(new URL('../../../../InputHost/Program.cs',import.meta.url),'utf8');
- const proof=validateManagedSourceRequirements(source,signal26Id);
- assert.deepEqual(new Set(proof.required),new Set(signal26Helpers));
+ const proof=validateManagedSourceRequirements(source,sharedPowerId);
+ assert.deepEqual(new Set(proof.required),new Set([...signal26Helpers,...powerSources]));
  assert.equal(proof.compileReadyProven,false);assert.equal(proof.runtimeAuthorityGranted,false);
- for(const id of [LEGACY_MANAGED_CONTRACT,TERMINAL_MANAGED_CONTRACT,decoder23Id])
+ for(const id of [LEGACY_MANAGED_CONTRACT,TERMINAL_MANAGED_CONTRACT,decoder23Id,signal26Id])
   assert.throws(()=>validateManagedSourceRequirements(source,id),/SOURCE_DEPENDENCIES_MISSING/);
+ const signalOnly='class Signal26 { HostSdkFirstWitness? _sdkFirstWitness; TargetCreationLifetimeEvidence _targetCreationLifetime; CompactFrameReplyBinding _compactFrameReplies; }';
+ assert.deepEqual(new Set(validateManagedSourceRequirements(signalOnly,signal26Id).required),new Set(signal26Helpers));
+ assert.throws(()=>validateManagedSourceRequirements(signalOnly,sharedPowerId),/SHARED_POWER_SOURCE_REQUIRED/);
  assert.equal(validateManagedSourceRequirements('class OldBaseline {}',decoder23Id).compileReadyProven,false);
+});
+
+test('shared power29 requires all three actual compile members, regardless of the receipt flag',()=>{
+ const value=signal26Receipt(),root=path.dirname(value.fixtureProject),sha256='a'.repeat(64);
+ value.managedInputContract=sharedPowerId;value.managedInputCount=29;value.sharedInputPowerCompiled=true;
+ assert.deepEqual(managedCompileContract(sharedPowerId).names,[...managedCompileContract(signal26Id).names,...powerSources]);
+ for(const relative of powerSources){
+  const file=path.join(root,path.basename(relative));
+  value.inputBindings.sources.push({relative,path:path.join(path.resolve('G:/unit-decoder-contract-source'),relative),snapshot:path.join(root,'input-sources',relative),sha256});
+  value.inputBindings.generatedInputs.push({path:file,sha256});
+  value.evaluatedCompilerInputs.push({kind:'Compile',path:file,sha256});
+ }
+ const verify=v=>verifyManagedDecoderCompileEvidence(v,sharedPowerId,decoder23UnitBuildRoot);
+ const proof=verify(value);
+ assert.deepEqual(proof.sharedInputPower.map(row=>row.source.relative),powerSources);assert.equal(proof.runtimeAuthorityGranted,false);
+ for(const relative of powerSources){
+  const file=path.join(root,path.basename(relative));
+  const missing=structuredClone(value);missing.evaluatedCompilerInputs=missing.evaluatedCompilerInputs.filter(row=>row.path!==file);
+  assert.throws(()=>verify(missing),/SHARED_POWER_EXACT_COMPILE_IDENTITY_REQUIRED/);
+  const duplicate=structuredClone(value);duplicate.inputBindings.generatedInputs.push({path:file,sha256});
+  assert.throws(()=>verify(duplicate),/SHARED_POWER_EXACT_COMPILE_IDENTITY_REQUIRED/);
+  const wrong=structuredClone(value);wrong.evaluatedCompilerInputs.find(row=>row.path===file).sha256='b'.repeat(64);
+  assert.throws(()=>verify(wrong),/SHARED_POWER_EXACT_COMPILE_IDENTITY_REQUIRED/);
+ }
 });
 
 test('signal26 preparation: known missing dependencies reject before any workspace or capture creation',async()=>{

@@ -10,5 +10,15 @@ export function verifyRequestTimeline(output,node){
  const controls=issued.filter(r=>controlPaths.includes(r.path));for(const control of controls){const read=rows.filter(r=>r.sequence<control.sequence&&r.event==='native-read').at(-1);need(control.sequence>off.sequence&&control.native?.phase==='ready'&&control.native.hardwareWritesAllowed===true&&control.native.generation===control.coordinator?.powerGeneration,'EXPLICIT_NEW_CONTROL_WITHOUT_NATIVE_PERMISSION');need(read?.native?.phase==='ready'&&read.native.hardwareWritesAllowed===true&&read.native.generation===control.native.generation,'EXPLICIT_NEW_CONTROL_WITHOUT_OBSERVED_NATIVE_PERMISSION');}
  const refusal=rows.find(r=>r.event==='control-refused');if(refusal)need(!controls.some(r=>r.sequence>refusal.sequence),'EXPLICIT_NEW_CONTROL_AFTER_REFUSAL');
  if(output.mode==='sleep'||output.mode==='stale-native')need(output.ok===true&&output.error.includes('FAN_MANUAL_WAKE_NOT_READY')&&controls.length===0&&!!refusal,'EXPLICIT_REFUSAL_MODE_ACCEPTED_CONTROL');
+ if(output.mode==='empty-apply'){
+  const one=event=>{const matches=rows.filter(row=>row.event===event);need(matches.length===1,'EXPLICIT_EMPTY_WAKE_EVENT:'+event);return matches[0];};
+  const notice=one('client-wake-notice'),wake=one('committed-wake-settled'),late=one('late-auto-settled'),cleanup=one('cleanup-completed');
+  need(off.sequence<notice.sequence&&notice.sequence<wake.sequence&&wake.sequence<late.sequence&&late.sequence<cleanup.sequence,'EXPLICIT_EMPTY_WAKE_ORDER');
+  const generation=notice.native?.generation;
+  need(Number.isSafeInteger(generation)&&generation>0&&[notice,wake,late].every(row=>
+   row.native?.generation===generation&&row.native.phase==='ready'&&row.native.resumeReady===true&&row.native.hardwareWritesAllowed===true&&
+   row.coordinator?.powerGeneration===generation&&row.coordinator.wakeReadyGeneration===generation),'EXPLICIT_EMPTY_WAKE_GENERATION');
+  need(output.ok===true&&!refusal&&wake.intent===false&&late.intent===false&&late.submitted===false&&late.offRetired===true&&late.ok===true&&controls.length===0,'EXPLICIT_EMPTY_WAKE_REPLAY_NOT_RETIRED');
+ }
  return{schemaVersion:1,status:'PASS',mode:output.mode,httpRequests:issued.length,newControlsAfterOff:controls.length,refused:!!refusal,clientTimeline:true,serverArrivalInferred:false,physicalAcceptance:false};
 }

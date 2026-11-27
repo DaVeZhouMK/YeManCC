@@ -22,7 +22,7 @@ const serialActionType=serialActionFenceNeeded?serialActionTypeMatches[0][0]:'';
 if(serialConfigSourceOrigin)for(const name of ['ConfigurationWrite','rulesPublished','RulesRequired','RulesApplied','captureRevision','currentRevision'])assert(serialActionType.includes(name),'Directed origin scenario needs actual existing fence '+name);
 
 const req=createRequire(path.join(root,'package.json')),defaultsModule={exports:{}};if(!serialConfigSourceOrigin)new Function('module','exports','require',req('esbuild').buildSync({entryPoints:[path.join(root,'src/bridge/controllerShortcutRules.ts')],bundle:true,platform:'node',format:'cjs',write:false}).outputFiles[0].text)(defaultsModule,defaultsModule.exports,req);const factoryDefaults=serialConfigSourceOrigin?[]:defaultsModule.exports.NATIVE_DEFAULT_SHORTCUTS.map(d=>defaultsModule.exports.nativeDefaultRule(d.defaultKey));
-const legacyStart=source.indexOf('    const bool shoulderDown = ',source.indexOf('static void gamepadEval() {'));
+const legacyStart=source.indexOf('    const bool shoulderDown = ',source.search(/^static void gamepadEval(?:Impl)?\([^;\r\n]*\)\s*\{/m));
 const legacyTail=source.indexOf('gamepadProcessUiInput(w, now',legacyStart);
 const legacyEnding=source.slice(legacyStart,legacyTail).match(/(?:\s*\{\s*UiCostGamepadSpan uiInputCost\(kUiCostGamepadUiInput,uiStageCostOn\);)?\s*$/);
 assert(legacyStart>0&&legacyTail>legacyStart&&legacyEnding);const allLegacyCore=source.slice(legacyStart,legacyStart+legacyEnding.index);

@@ -58,7 +58,11 @@ export function deckyConnectionSummary(state: DeckySidebarState | null): {label:
   // earlier connection-recovery status is still present.
   if(state.phase==='failed'&&state.reason==='launch-failed'&&state.launchStage==='shell-token-elevated')return {label:'启动权限不满足',detail:deckySidebarDescription(state),tone:'warning'};
   if(state.recovery?.phase==='recovering')return {label:'正在恢复连接',detail:'恢复完成后自动可用',tone:'pending'};
-  if(state.recovery?.phase==='manual-required')return {label:'需要手动修复',detail:state.recovery.reason==='steam-ui-refresh-requires-user'?'插件后台未连接，请点击修复连接':'自动恢复未完成，请重试',tone:'warning'};
+  if(state.recovery?.phase==='manual-required'){
+    const reason=state.recovery.reason;
+    const detail=reason==='official-backend-unavailable'?'Decky 后台未能恢复':reason==='steam-ui-refresh-requires-user'?'插件后台未连接，请点击修复连接':'自动恢复未完成，请重试';
+    return {label:'需要手动修复',detail,tone:'warning'};
+  }
   if(state.phase==='unavailable'&&state.reason==='mirror-bootstrap-session-changed')return {label:'连接已中断',detail:'Steam 会话校验发生变化，请手动修复并重新验证',tone:'warning'};
   if(state.phase==='frontend-attached')return {label:'正在接续服务',detail:'侧栏已接通，插件服务尚未就绪',tone:'pending'};
   if(state.phase==='loader-started'&&state.mirrorConnected){

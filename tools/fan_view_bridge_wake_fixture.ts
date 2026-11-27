@@ -25,6 +25,7 @@ const fx = {
   trace: [] as {op:string;generation:number;nodes?:FanNode[]}[],
   native: {generation:0,phase:'ready',inputReady:true,resumeReady:true,hardwareWritesAllowed:true,hibernateAvailable:true} as PowerLifecycleState,
   slowResumeMs: 0, fault: false, throwState: false, enableFailures: 0, heartbeatFailure: false, stopFailures: 0,
+  unavailablePowerReads: 0,
   lastControlActive: false, lastNavDuty: 0,
   note(op:string,nodes?:readonly FanNode[]) { this.trace.push({op,generation:this.native.generation,nodes:nodes?.map(n=>({...n}))}); },
 };
@@ -101,7 +102,11 @@ export const fanHostLifecycle = new FanHostLifecycle({enabled:true,adapter:bound
     observe?.(active,curve);
   },
   launcher:{async start(){fx.note('launch');await fx.waitAt('launch');return {pid:1234,executable:'fixture-FanHost.exe'};},async stop(){fx.note('stop');if(fx.stopFailures-- > 0)throw new Error('fixture-exact-exit-not-confirmed');}},
-  heartbeatIntervalMs:5000,resumeWaitDeadlineMs:1500,readNativePowerState:async()=>{fx.note('power-read');const snapshot={...fx.native};await fx.waitAt('power-read');return snapshot;},
+  heartbeatIntervalMs:5000,resumeWaitDeadlineMs:1500,readNativePowerState:async()=>{
+    fx.note('power-read');const snapshot={...fx.native};await fx.waitAt('power-read');
+    if(fx.unavailablePowerReads>0){fx.unavailablePowerReads--;fx.note('power-read-unavailable');return null;}
+    return snapshot;
+  },
   readNativeActivity:async()=>null,requestManualWake:async(g)=>{
     fx.note('fanManualWake');
     if(g!==fx.native.generation)return {ok:false,generation:fx.native.generation,phase:fx.native.phase,reason:'stale_generation'};

@@ -366,8 +366,13 @@ export function buildCatalog({ repoRoot, adapters = [] } = {}) {
     });
     return { id: adapter.id, scope: adapter.scope || 'unspecified', matches };
   });
+  const associationsByPath = new Map();
   for (const surface of surfaces) {
-    const associated = registrations.filter(adapter => adapter.matches.some(pattern => pattern.test(surface.path)));
+    let associated = associationsByPath.get(surface.path);
+    if (associated === undefined) {
+      associated = registrations.filter(adapter => adapter.matches.some(pattern => pattern.test(surface.path)));
+      associationsByPath.set(surface.path, associated);
+    }
     surface.adapterIds = associated.map(adapter => adapter.id).sort();
     surface.evidenceScopes = [...new Set(associated.map(adapter => adapter.scope))].sort();
     if (associated.length && surface.kind !== 'discovery-gap') surface.coverage = 'REGISTERED_TEST';

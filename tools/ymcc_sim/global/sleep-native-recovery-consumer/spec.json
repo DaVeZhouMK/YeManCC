@@ -135,7 +135,8 @@
     "native/startup_resume_delivery.h",
     "native/sleep_legacy_resume_journal.h",
     "native/input_host_shared_power.h",
-    "native/sleep_power_revocation.h"
+    "native/sleep_power_revocation.h",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-maintenance-public-delivery.json"
   ],
   "originalScripts": [
     {
@@ -235,5 +236,9 @@
   "sourceSuccessorCompatibilityReview": {
     "manifest": "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-maintenance-source-successor.json",
     "sha256": "fa1d70309e12dab3ceb441c1ecce3678b82ac68310161ed479fe980dfb2d20d0"
+  },
+  "publicDeliveryCompatibilityReview": {
+    "manifest": "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-maintenance-public-delivery.json",
+    "sha256": "cc001149d64007f91d50ecbea92cd0036fc05faaf9f515caa148da2391025ec0"
   }
 }

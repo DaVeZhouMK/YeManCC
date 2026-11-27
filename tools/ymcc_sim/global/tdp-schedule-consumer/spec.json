@@ -90,6 +90,7 @@
     "tools/performance_schedule_tdp_selftest.ts",
     "src/bridge/bootModeSharedShortcuts.ts",
     "src/bridge/monitorControlFramerate.ts",
+    "src/bridge/networkAccelerationStartup.ts",
     "tools/ymcc_sim/global/tdp-schedule-consumer/fixture-clock.ts",
     "src/bridge/bootModeGlobalPreferences.ts"
   ],
@@ -183,6 +184,7 @@
     "tools/performance_schedule_tdp_selftest.ts",
     "src/bridge/bootModeSharedShortcuts.ts",
     "src/bridge/monitorControlFramerate.ts",
+    "src/bridge/networkAccelerationStartup.ts",
     "tools/ymcc_sim/global/tdp-schedule-consumer/fixture-clock.ts",
     "src/bridge/bootModeGlobalPreferences.ts"
   ],

@@ -218,6 +218,7 @@ static std::atomic<ULONGLONG> g_lastSuspendTick{0};
 static SRWLOCK g_recoveryPowerObservationLock=SRWLOCK_INIT;
 static std::atomic<std::uint64_t> g_recoveryPowerObservationSerial{0};
 static std::uint64_t g_recoveryPowerAppliedSerial=0; // Protected by the observation lock.
+static std::uint64_t g_recoveryLastSuspendSerial=0;
 static HPOWERNOTIFY g_powerNotify = nullptr;
 // 唤醒恢复 grace：主进程 UI 泵在唤醒后需要时间恢复（实测 5-6s），此窗口内不判死。
 constexpr DWORD kWakeGraceMs = 15000;
@@ -237,6 +238,7 @@ static ULONG CALLBACK powerNotifyCallback(PVOID /*context*/, ULONG type, PVOID /
     AcquireSRWLockExclusive(&g_recoveryPowerObservationLock);
     if(serial>g_recoveryPowerAppliedSerial){
         if(type==PBT_APMSUSPEND){
+            g_recoveryLastSuspendSerial=serial;
             g_lastSuspendTick.store(tick,std::memory_order_release);
             g_systemSleeping.store(true,std::memory_order_release);
         }else{
@@ -255,32 +257,59 @@ static ULONG CALLBACK powerNotifyCallback(PVOID /*context*/, ULONG type, PVOID /
 // （ULONG CALLBACK(PVOID Context, ULONG Type, PVOID Setting)；Setting 对 suspend/resume 不使用）。
 static DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS g_powerNotifyParams = { &powerNotifyCallback, nullptr };
 
+// Call under the local observation lock. A probe can prompt this read, but
+// only the bound Native commit can settle a missed local Resume.
+static bool applySharedRecoveryWakeLocked(const ymcc::sleeppower::RecoveryWakeObservation& observed,
+                                         std::uint64_t serial,ULONGLONG now) noexcept {
+    if(serial==(std::numeric_limits<std::uint64_t>::max)()||serial!=g_recoveryPowerAppliedSerial)return false;
+    const bool sleeping=g_systemSleeping.load(std::memory_order_acquire);
+    const auto tick=observed.projection.committedTick;
+    if(!sleeping&&(!observed.boundary.required||tick<=g_lastWakeTick.load(std::memory_order_acquire)))return false;
+    if(!ymcc::sleeppower::freshRecoveryWake(observed,g_lastSuspendTick.load(std::memory_order_acquire),now,
+        sleeping?kHeartbeatStaleMs:(std::numeric_limits<std::uint64_t>::max)(),sleeping,sleeping))return false;
+    if(serial!=g_recoveryPowerObservationSerial.load(std::memory_order_acquire)||!observed.boundary.current())return false;
+    g_systemSleeping.store(false,std::memory_order_release);
+    g_lastWakeTick.store(tick,std::memory_order_release);
+    return true;
+}
+
+static void logSharedRecoveryWake(const std::wstring& log,const ymcc::sleeppower::RecoveryWakeObservation& observed) noexcept {
+    try{writeLog(log,"sleep-observation-reconciled","\"source\":\"shared-native-commit\",\"generation\":"+
+        std::to_string(observed.projection.power.generation)+",\"committedTick\":"+
+        std::to_string(observed.projection.committedTick));}catch(...) {}
+}
+
 static bool powerDeferKill(const std::wstring& log,const ymcc::sleeppower::RecoveryWakeObservation* observed=nullptr,ymcc::sleeppower::RecoveryTerminationPermit* permit=nullptr) {
     if(permit)*permit={};
     if(observed&&!observed->boundary.current()){writeLog(log,"confirmation-deferred-sleep","\"reason\":\"native-boundary-revoked\"");return true;}
     const auto now=GetTickCount64();
-    bool reconciled=false;
     AcquireSRWLockExclusive(&g_recoveryPowerObservationLock);
     const auto serial=g_recoveryPowerObservationSerial.load(std::memory_order_acquire);
     const bool exhausted=serial==(std::numeric_limits<std::uint64_t>::max)();
     const bool pending=serial!=g_recoveryPowerAppliedSerial;
-    const bool wasSleeping=g_systemSleeping.load(std::memory_order_acquire);
-    if(!pending&&!exhausted&&observed&&(wasSleeping||observed->boundary.required)&&(wasSleeping||observed->projection.committedTick>g_lastWakeTick.load(std::memory_order_acquire))&&
-       ymcc::sleeppower::freshRecoveryWake(*observed,g_lastSuspendTick.load(std::memory_order_acquire),now,wasSleeping?kHeartbeatStaleMs:(std::numeric_limits<std::uint64_t>::max)(),wasSleeping,wasSleeping)){
-        g_systemSleeping.store(false,std::memory_order_release);
-        g_lastWakeTick.store(observed->projection.committedTick,std::memory_order_release);
-        reconciled=true;
-    }
+    const bool reconciled=observed&&applySharedRecoveryWakeLocked(*observed,serial,now);
     const bool sleeping=g_systemSleeping.load(std::memory_order_acquire);
+    const auto suspendTick=g_lastSuspendTick.load(std::memory_order_acquire);
     const auto lastWake=g_lastWakeTick.load(std::memory_order_acquire);
     if(permit){permit->notificationSequence=serial;permit->accepted=!pending&&!sleeping&&!exhausted&&(!lastWake||(now>=lastWake&&now-lastWake>=kWakeGraceMs));}
     ReleaseSRWLockExclusive(&g_recoveryPowerObservationLock);
     if(permit&&observed)permit->boundary=observed->boundary;
-    if(reconciled){try{writeLog(log,"sleep-observation-reconciled","\"source\":\"shared-native-commit\",\"generation\":"+std::to_string(observed->projection.power.generation)+",\"committedTick\":"+std::to_string(observed->projection.committedTick));}catch(...) {}}
+    if(reconciled)logSharedRecoveryWake(log,*observed);
     if(exhausted){try{writeLog(log,"confirmation-deferred-sleep","\"reason\":\"notification-sequence-exhausted\"");}catch(...) {}return true;}
     if(pending){writeLog(log,"confirmation-deferred-sleep","\"reason\":\"local-notification-pending\"");return true;}
     if (sleeping) {
-        writeLog(log, "confirmation-deferred-sleep", "\"reason\":\"system-sleeping\"");
+        std::string fields="\"reason\":\"system-sleeping\",\"localNotificationSequence\":"+std::to_string(serial)+
+            ",\"localSuspendTick\":"+std::to_string(suspendTick);
+        if(observed){
+            const auto& native=observed->projection;
+            fields+=",\"nativeProcessBound\":"+std::string(observed->processBound?"true":"false")+
+                ",\"nativeGeneration\":"+std::to_string(native.power.generation)+
+                ",\"nativeSuspendSerial\":"+std::to_string(native.power.suspendSerial)+
+                ",\"nativeNotificationSequence\":"+std::to_string(native.power.observedNotificationSequence)+
+                ",\"nativeCommittedTick\":"+std::to_string(native.committedTick)+
+                ",\"nativePublishedTick\":"+std::to_string(observed->publishedTick);
+        }
+        writeLog(log,"confirmation-deferred-sleep",fields);
         return true;
     }
     if (lastWake != 0 && (now<lastWake || now-lastWake < kWakeGraceMs)) {
@@ -307,6 +336,35 @@ static RecoveryTerminationAttempt guardedRecoveryTerminate(HANDLE process,ymcc::
         result.attempted=true;
         result.ok=TerminateProcess(process,0xE001)!=FALSE;
         if(!result.ok)result.error=GetLastError();
+    }
+    ReleaseSRWLockExclusive(&g_recoveryPowerObservationLock);
+    return result;
+}
+
+enum class RecoveryRestartPower { Admitted, Deferred, Retired };
+
+// The old Native process has exited. Its ticket can still veto this restart;
+// it cannot supply another Ready. A paired local power receipt only releases
+// the watchdog's replacement process, never the Native hardware gate.
+static RecoveryRestartPower withRecoveryRestartPower(const ymcc::sleeppower::RecoveryTerminationPermit& origin,
+                                                     const std::function<void()>& launch) {
+    AcquireSRWLockExclusive(&g_recoveryPowerObservationLock);
+    const auto serial=g_recoveryPowerObservationSerial.load(std::memory_order_acquire);
+    const auto now=GetTickCount64();
+    const auto wake=g_lastWakeTick.load(std::memory_order_acquire);
+    RecoveryRestartPower result=RecoveryRestartPower::Deferred;
+    if(!origin.targetPid||!origin.targetStartKey||origin.accepted||!origin.boundary.current()||
+       serial==(std::numeric_limits<std::uint64_t>::max)()) {
+        result=RecoveryRestartPower::Retired;
+    } else if(serial==g_recoveryPowerAppliedSerial&&!g_systemSleeping.load(std::memory_order_acquire)&&
+              (!wake||(now>=wake&&now-wake>=kWakeGraceMs))&&
+              (serial==origin.notificationSequence||(origin.boundary.required&&
+                g_recoveryLastSuspendSerial>origin.notificationSequence&&g_recoveryLastSuspendSerial<serial&&
+                wake>g_lastSuspendTick.load(std::memory_order_acquire)))&&
+              origin.boundary.current()&&serial==g_recoveryPowerObservationSerial.load(std::memory_order_acquire)) {
+        result=RecoveryRestartPower::Admitted;
+        try { if(launch) launch(); }
+        catch(...) { ReleaseSRWLockExclusive(&g_recoveryPowerObservationLock); throw; }
     }
     ReleaseSRWLockExclusive(&g_recoveryPowerObservationLock);
     return result;
@@ -685,12 +743,37 @@ struct RecoveryEpisodeState {
     ULONGLONG lastDeferLogTick = 0;
 };
 
+static void observeResponsiveRecoveryWake(SnapshotChannel& channel,HANDLE process,DWORD pid,const std::wstring& log) noexcept {
+    if(!g_systemSleeping.load(std::memory_order_acquire))return;
+    try {
+        SnapshotObservation observation;
+        if(readRecoverySnapshot(channel,process,pid,observation)!=SnapshotRead::Ok||!observation.powerObservation.boundary.required)return;
+        const auto now=GetTickCount64();
+        AcquireSRWLockExclusive(&g_recoveryPowerObservationLock);
+        const auto serial=g_recoveryPowerObservationSerial.load(std::memory_order_acquire);
+        const bool reconciled=g_systemSleeping.load(std::memory_order_acquire)&&applySharedRecoveryWakeLocked(observation.powerObservation,serial,now);
+        ReleaseSRWLockExclusive(&g_recoveryPowerObservationLock);
+        if(reconciled)logSharedRecoveryWake(log,observation.powerObservation);
+    } catch (...) { /* Keep the latch if the optional observation fails. */ }
+}
+
+static void recoveryProbeResponsive(SnapshotChannel& channel,HANDLE process,DWORD pid,RecoveryEpisodeState& episode,const std::wstring& log) {
+    observeResponsiveRecoveryWake(channel,process,pid,log);
+    episode.uiProgress.reset();
+    if (episode.deferActive) {
+        episode.deferActive = false;
+        writeLog(log, "recovery-cancelled-lifecycle-settled",
+            "\"reason\":\"ui-recovered\",\"targetPid\":" + std::to_string(pid));
+    }
+}
+
 struct RecoveryOps {
     std::function<bool()> processAlive;
     std::function<bool()> terminateTarget;
     std::function<bool()> powerDeferred;
     std::function<bool()> waitTargetExit;
     std::function<OwnerProbe()> ownerProbe;
+    std::function<RecoveryRestartPower(const std::function<void()>&)> restartPower;
     std::function<bool()> spawnTarget;
     std::function<ULONGLONG()> now;
     std::function<ULONGLONG()> uiNow; // Working-time clock excludes system sleep.
@@ -698,17 +781,54 @@ struct RecoveryOps {
 };
 
 // §5.8/§5.9：旧 PID 结束后等待 FanHost/8765 所有权释放（有界 20 s）。
-// 释放 ⇒ true（可 CreateProcess）；占用写 recovery-restart-blocked-owner；
+// 归还后在同一电源围栏内启动；占用写 recovery-restart-blocked-owner；
 // 超时写 recovery-restart-owner-timeout 并返回 false（停手，绝不并发第二 FanHost）。
-bool waitForOwnerRelease(RecoveryOps& ops, const SnapshotObservation& obs,
-                         RecoveryEpisodeState& episode, const std::wstring& log) {
-    const ULONGLONG deadline = ops.now() + kOwnerReleaseWaitMs;
+bool waitForOwnerReleaseAndLaunch(RecoveryOps& ops, const SnapshotObservation& obs,
+                                  RecoveryEpisodeState& episode, const std::wstring& log) {
+    const auto& clock=ops.restartPower ? ops.uiNow : ops.now;
+    const auto started=clock();
+    if(ops.restartPower&&!started) return false;
+    const auto waitExpired=[&] {
+        const auto now=clock();
+        return now<started||now-started>=kOwnerReleaseWaitMs;
+    };
+    bool powerLogged=false;
+    const auto waitForPower=[&](RecoveryRestartPower power) {
+        if(!powerLogged){
+            writeLog(log,"recovery-restart-deferred-power","\"reason\":\"post-termination-power-boundary\"");
+            powerLogged=true;
+        }
+        if(power==RecoveryRestartPower::Retired||waitExpired()){
+            writeLog(log,"restart-result",power==RecoveryRestartPower::Retired?
+                "\"ok\":false,\"reason\":\"post-termination-power-retired\"":
+                "\"ok\":false,\"reason\":\"post-termination-power-timeout\"");
+            return false;
+        }
+        ops.sleep(kOwnerReleasePollMs);
+        return true;
+    };
     bool blockedLogged = false;
     for (;;) {
+        if(ops.restartPower){
+            const auto power=ops.restartPower({});
+            if(power!=RecoveryRestartPower::Admitted){
+                if(!waitForPower(power)) return false;
+                continue;
+            }
+            if(powerLogged&&waitExpired()){
+                writeLog(log,"restart-result","\"ok\":false,\"reason\":\"post-termination-power-timeout\"");
+                return false;
+            }
+        }
         const OwnerProbe probe = ops.ownerProbe();
         if (!probe.fanHostProcessFound && !probe.port8765Found) {
             writeLog(log, "recovery-fan-owner-state", ownerProbeFields(probe) + "," + observationFields(obs));
-            return true;
+            if(!ops.restartPower) return ops.spawnTarget();
+            bool spawned=false;
+            const auto power=ops.restartPower([&]{spawned=ops.spawnTarget();});
+            if(power==RecoveryRestartPower::Admitted) return spawned;
+            if(!waitForPower(power)) return false;
+            continue;
         }
         const ULONGLONG now = ops.now();
         if (!blockedLogged) {
@@ -720,7 +840,7 @@ bool waitForOwnerRelease(RecoveryOps& ops, const SnapshotObservation& obs,
             writeLog(log, "recovery-fan-owner-state", ownerProbeFields(probe) + "," + observationFields(obs));
             episode.lastOwnerLogTick = now;
         }
-        if (now >= deadline) {
+        if (waitExpired()) {
             writeLog(log, "recovery-restart-owner-timeout",
                 "\"waitMs\":" + std::to_string(kOwnerReleaseWaitMs) + "," + ownerProbeFields(probe) +
                 "," + observationFields(obs));
@@ -747,9 +867,11 @@ RoundResult recoveryPerformRestart(const SnapshotObservation& obs, RecoveryEpiso
                 "\"waitMs\":" + std::to_string(kTerminationWaitMs) + "," + observationFields(obs));
             return RoundResult::Continue;
         }
+    } else if(ops.restartPower) {
+        // No watchdog termination was committed for this exit.
+        return RoundResult::Stop;
     }
-    if (!waitForOwnerRelease(ops, obs, episode, log)) return RoundResult::Stop;
-    if (!ops.spawnTarget()) return RoundResult::Stop;
+    if (!waitForOwnerReleaseAndLaunch(ops, obs, episode, log)) return RoundResult::Stop;
     writeLog(log, "recovery-restart-started", observationFields(obs));
     writeLog(log, "restart-result", "\"ok\":true");
     return RoundResult::Stop;
@@ -1423,6 +1545,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
     ops.terminateTarget = [&]() { return terminateTargetProcess(process, log,terminationPermit); };
     ops.waitTargetExit = [&]() { return targetTerminationSettled(process); };
     ops.ownerProbe = []() { return probeFanHostOwner(); };
+    ops.restartPower = [&](const std::function<void()>& launch) { return withRecoveryRestartPower(terminationPermit,launch); };
     ops.spawnTarget = [&]() { return spawnTargetProcess(options, log); };
     ops.now = []() { return GetTickCount64(); };
     ops.uiNow = []() -> ULONGLONG {
@@ -1436,8 +1559,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
         // First inquiry is a cheap single sample. Only an all-fail result
         // escalates to the 1-second / 3-sample confirmation inquiry.
         if (!firstProbe(options, pongEvent, serial++)) {
-            writeLog(log, "first-probe-failed", "\"channels\":\"hwnd,webview\"");
-            writeLog(log, "confirmation-start", "\"samples\":3,\"windowMs\":1000");
+            writeLog(log, "confirmation-start", "\"samples\":3,\"windowMs\":1000,"
+                "\"firstProbeFailed\":true,\"channels\":\"hwnd,webview\"");
             if (!confirmationProbe(options, pongEvent, serial)) {
                 writeLog(log, "unresponsive-confirmed", "\"failedSamples\":3,\"channels\":\"hwnd,webview\"");
                 // R-A（§32 A2）：睡眠中或唤醒 grace 内不判死——S0 Modern Standby
@@ -1459,20 +1582,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
                 if (recoveryDecisionRound(observation, episode, ops, log) == RoundResult::Stop) break;
             } else {
                 writeLog(log, "confirmation-passed", "\"rule\":\"any-channel-success\"");
-                episode.uiProgress.reset();
-                if (episode.deferActive) {
-                    episode.deferActive = false;
-                    writeLog(log, "recovery-cancelled-lifecycle-settled",
-                        "\"reason\":\"ui-recovered\",\"targetPid\":" + std::to_string(options.pid));
-                }
+                recoveryProbeResponsive(channel,process,options.pid,episode,log);
             }
         } else {
-            episode.uiProgress.reset();
-            if (episode.deferActive) {
-                episode.deferActive = false;
-                writeLog(log, "recovery-cancelled-lifecycle-settled",
-                    "\"reason\":\"ui-recovered\",\"targetPid\":" + std::to_string(options.pid));
-            }
+            recoveryProbeResponsive(channel,process,options.pid,episode,log);
         }
         Sleep(kRoundIntervalMs);
     }

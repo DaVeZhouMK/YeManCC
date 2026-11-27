@@ -20014,7 +20014,7 @@
         },
         {
           "file": "native/BatteryHost/Controller.cs",
-          "sha256": "b1b0c4ab85fa199521b6de7b16a822c98036585ed01d8654e9479f98020cacd5"
+          "sha256": "548be59435bb189da9c75e3548c0f4ceea2db9d006bdeeb86f576ca00fec63fe"
         },
         {
           "file": "native/BatteryHost/Providers.cs",
@@ -20066,7 +20066,7 @@
         },
         {
           "file": "native/BatteryHost/Program.cs",
-          "sha256": "1b6ad82d0532d03b8fffe58f73792e365e00717b204dff028a1097a3c1932936"
+          "sha256": "b2e98020c71f24e6dedd48e7948397340b9763c111d5f69b45cfda140fe27c50"
         },
         {
           "file": "native/BatteryHost/InProcessEntry.cs",
@@ -20089,7 +20089,7 @@
           "sha256": "5c0f9ae26f1b01233d0ffee78dc7831df2bf2447dacbbea7145f8a321617371a"
         }
       ],
-      "catalogSha256": "41161d6f9ff2002688d01e1804043474cf57e3c0fa549fb100436d8e3184f54c"
+      "catalogSha256": "4a6bc0c3f52702a5cdd92f96f7f7301caae0d6609e52b7bc15dada447c73f18a"
     },
     "motion": {
       "schemaVersion": 1,
@@ -20109,8 +20109,8 @@
         {
           "kind": "Default",
           "file": "native/hc_default_motion_catalog.h",
-          "count": 3,
-          "sha256": "de416c9823fb06e4519feac98fa810c81bfe46ac39e8728fe838c96249ad4d4d"
+          "count": 4,
+          "sha256": "d9aa7affb86090781ae7dc0461a117b56071890e7fb5d86ec04413a464c91e15"
         },
         {
           "kind": "Generic",
@@ -20131,7 +20131,7 @@
           ]
         }
       ],
-      "registeredRecipes": 96,
+      "registeredRecipes": 97,
       "rows": [
         {
           "index": 0,
@@ -21543,6 +21543,22 @@
         },
         {
           "index": 88,
+          "kind": "Default",
+          "slot": 3,
+          "capabilityId": "motion.default.GPDWinMax3.3",
+          "deviceId": "ymcc.device.GPDWinMax3",
+          "origin": "reviewed-native-extension",
+          "deviceClass": "YeManCC.SourceDevices.GPDWinMax3",
+          "selectorId": "ymcc:observed-default:GPDWinMax3",
+          "gyroMatrixId": "hc-a250b19a:generic-DefaultDevice:gyro:x-z-y",
+          "accelMatrixId": "hc-a250b19a:generic-DefaultDevice:accel:x-z-y",
+          "sourceSha256": "c5c539950e9bc737bff519b4bfd6879669f5e3d952e4dd2fdc7ee9f78528ccd7",
+          "controllerPreferred": false,
+          "windowsAdmitted": true,
+          "primaryKind": "Default"
+        },
+        {
+          "index": 89,
           "kind": "Generic",
           "slot": 0,
           "capabilityId": "motion.generic.DefaultDevice.0",
@@ -21558,7 +21574,7 @@
           "primaryKind": "Generic"
         },
         {
-          "index": 89,
+          "index": 90,
           "kind": "Generic",
           "slot": 1,
           "capabilityId": "motion.generic.ASUS.1",
@@ -21574,7 +21590,7 @@
           "primaryKind": "Generic"
         },
         {
-          "index": 90,
+          "index": 91,
           "kind": "Private",
           "slot": 0,
           "capabilityId": "motion.private.ClawA1M.0",
@@ -21590,7 +21606,7 @@
           "primaryKind": "Private"
         },
         {
-          "index": 91,
+          "index": 92,
           "kind": "Private",
           "slot": 1,
           "capabilityId": "motion.private.ClawA2VM.1",
@@ -21606,7 +21622,7 @@
           "primaryKind": "Private"
         },
         {
-          "index": 92,
+          "index": 93,
           "kind": "Private",
           "slot": 2,
           "capabilityId": "motion.private.ClawBZ2EM.2",
@@ -21622,7 +21638,7 @@
           "primaryKind": "Private"
         },
         {
-          "index": 93,
+          "index": 94,
           "kind": "Private",
           "slot": 3,
           "capabilityId": "motion.private.ClawCG3EM.3",
@@ -21638,7 +21654,7 @@
           "primaryKind": "Private"
         },
         {
-          "index": 94,
+          "index": 95,
           "kind": "Private",
           "slot": 4,
           "capabilityId": "motion.private.XboxROGAlly.4",
@@ -21654,7 +21670,7 @@
           "primaryKind": "Private"
         },
         {
-          "index": 95,
+          "index": 96,
           "kind": "Private",
           "slot": 5,
           "capabilityId": "motion.private.XboxROGAllyX.5",
@@ -21674,7 +21690,7 @@
         "controller-source-qualified recipe/submit/calibration binding"
       ],
       "availability": "registration-is-not-provider-admission-or-physical-acceptance",
-      "catalogSha256": "f47120a9b81ac2c178cf0718b052922e60fb3f01666360b1f2496d7a9a2f54b5"
+      "catalogSha256": "be1eaa2eac23c6269d909ab350ba258d91a1d824b074d70d9cab57ed7356c97a"
     },
     "controller": {
       "schemaVersion": 1,

@@ -24,7 +24,7 @@
     },
     {
       "path": "deps/json/json.hpp",
-      "sha256": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f"
+      "sha256": "aa3b2db201305507022ad9780b758dacb1a247cd6aaeee420e150e38b5c07ccb"
     },
     {
       "path": "native/process_inventory.h",
@@ -64,6 +64,13 @@
     }
   ],
   "reviewNote": "2026-10-24 manual-only fixed Steam Shell fallback, no cooldown for explicit action, unchanged logon grant/fence. Reviewed restricted memory ports; no real Steam/BAT/registry calls.",
+  "jsonDefaultParserReview20261127": {
+    "scope": "One dependency pin. Native Launch ledger uses ordinary json::parse and dump; the opt-in model-adaptation SAX path is not used. No terminal, tool, or launch policy changed.",
+    "priorHeaderSha256": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f",
+    "differentialReceiptSha256": "01ee11d1b96f18eccbf53365cb5b0d56bf5c305eb93bd591088216cff0bca008",
+    "memoryInputsCompared": 647,
+    "sourceApprovalGranted": false
+  },
   "releaseReview": {
     "date": "2026-10-25",
     "scope": "Actual current producer headers; original consumers, negative cases, budgets and production files unchanged",

@@ -46,13 +46,13 @@ async function currentGameAdmissionProbe(){
   api.onLoad({filter:/.*/,namespace:'owned-admission-ports'},args=>{const ref=`globalThis.${fixtureSymbol}`;let code='';
    if(args.path==='./gameMediaDownloads')code=`export const backgroundDownloadEnabled=()=>${ref}.enabled;export const gameMediaDownloads={state:{},start:()=>()=>{},policy:()=>{},subscribe:()=>()=>{},watchCompleted:()=>()=>{},recheck:async()=>{}};`;
    else if(args.path==='./ipc')code=`export const invoke=(...args)=>${ref}.invoke(...args),on=(name,fn)=>{const entries=${ref}.events.get(name)||new Set();${ref}.events.set(name,entries);entries.add(fn);return()=>entries.delete(fn);};`;
-   else if(args.path==='./gamePolicyTarget')code=`export const subscribePolicyGameStatus=fn=>{${ref}.game=value=>{${ref}.currentGame=value;fn(value);};return()=>{${ref}.game=null;}},refreshPolicyGameStrict=async()=>${ref}.currentGame;`;
-   else if(args.path==='./gameMediaPreparationPolicy')code=`export class GameMediaPreparationPolicy{constructor(){}game(value){${ref}.gameGates.push(value)}request(){}demand(){}suspend(){}resume(){}stop(){}}export const subscribeGameMediaResume=(fn,on)=>on('power.resumed',fn);`;
+   else if(args.path==='./gamePolicyTarget')code=`export const subscribePolicyGameStatus=fn=>{${ref}.game=value=>{${ref}.currentGame=value;fn(value);};return()=>{${ref}.game=null;}},refreshPolicyGameStrict=async()=>{const f=${ref};if(f.confirmations)return new Promise((resolve,reject)=>f.confirmations.push(Object.assign(resolve,{reject})));return f.currentGame;};export const isPolicyGameCurrent=()=>${ref}.gameCurrent===true,getPolicyGame=()=>${ref}.currentGame,subscribePolicyGameReadiness=fn=>{${ref}.readiness=fn;fn(isPolicyGameCurrent());return()=>{${ref}.readiness=null;}};`;
+   else if(args.path==='./gameMediaPreparationPolicy')code=`export class GameMediaPreparationPolicy{constructor(){}game(value){${ref}.gameGates.push(value)}request(){}demand(){}suspend(){}resume(){}notificationAdvanced(){}stop(){}}export const subscribeGameMediaResume=(fn,on)=>on('power.resumed',fn);`;
    else if(args.path==='./uiSettings')code=`export const getUiSetting=()=>false,setUiSettings=async()=>{},uiSettingsLoaded=()=>${ref}.loaded;`;
-   else if(args.path==='./steamMediaSource')code=`export const resolveSteamWallpaperIdentity=game=>${ref}.resolve(game),installedSteamWallpaperTargets=async()=>[],steamWallpaperCandidates=async()=>{throw Error('network forbidden')},normalizeSteamMediaUrl=value=>value;`;
+   else if(args.path==='./steamMediaSource')code=`export const resolveSteamWallpaperIdentity=(game,signal)=>${ref}.resolve(game,signal),installedSteamWallpaperTargets=async()=>[],steamWallpaperCandidates=async()=>{throw Error('network forbidden')},normalizeSteamMediaUrl=value=>value;`;
    else if(args.path==='./steamHttp')code=`export const requestSteamHttp=async()=>{throw Error('network forbidden')};`;
    else if(args.path==='./steamUi')code=`export const steamUi={read:async()=>({known:false,running:false,mode:'unknown',pid:0,birth:'0',reason:'not-selected'}),subscribe:()=>()=>{}};`;
-   else if(args.path==='./powerLifecycleState')code=powerAdmissionFunction+`;export const onSharedPowerLifecycle=fn=>{${ref}.lifecycle=fn;fn({phase:'ready',generation:1,known:true,hardwareWritesAllowed:true,notificationPending:false});return()=>{${ref}.lifecycle=null;}};`;
+   else if(args.path==='./powerLifecycleState')code=powerAdmissionFunction+`;export const onSharedPowerLifecycle=fn=>{${ref}.lifecycle=fn;fn({phase:'ready',generation:1,suspendSerial:0,observedNotificationSequence:1,known:true,hardwareWritesAllowed:true,notificationPending:false});return()=>{${ref}.lifecycle=null;}};`;
    else code=`export const parseHlsAsset=()=>{throw Error('network forbidden')};`;
    return{loader:'ts',contents:code};
   });
@@ -62,7 +62,7 @@ async function currentGameAdmissionProbe(){
  const saved={window:globalThis.window,setTimeout:globalThis.setTimeout,clearTimeout:globalThis.clearTimeout,now:Date.now};
  let clock=100000,timerId=0;const timers=new Map();globalThis.window=new EventTarget();globalThis.setTimeout=(fn,delay)=>{timers.set(++timerId,{fn,delay});return timerId;};globalThis.clearTimeout=id=>timers.delete(id);Date.now=()=>clock;
  function fixture(){
-  const f={enabled:true,loaded:true,events:new Map(),gameGates:[],queries:[],submissions:[],game:null,logicalReads:0,coalesce:false,resolve(value){f.logicalReads++;if(f.coalesce){const prior=f.queries.find(q=>q.game.path.toLowerCase()===value.path.toLowerCase());if(prior)return prior.promise;}let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});f.queries.push({promise,game:{...value},resolve:target=>resolve(target||{appId:value.pid,name:value.name,executable:value.path,verified:true}),reject});return promise;},invoke:async(command,args)=>{if(command==='gameMedia.background')f.submissions.push(structuredClone(args));else if(command!=='gameMedia.snapshot'&&command!=='gameMedia.watch')throw Error('unexpected '+command);return command==='gameMedia.snapshot'?{entries:{},aliases:{}}:{};},emit(name){if(name==='power.suspending')f.lifecycle?.({phase:'suspending',generation:2,known:true,hardwareWritesAllowed:false,notificationPending:true});else if(name==='power.resumed')f.lifecycle?.({phase:'ready',generation:2,known:true,hardwareWritesAllowed:true,notificationPending:false});for(const fn of f.events.get(name)||[])fn({});},settings(){window.dispatchEvent(new Event('ui-settings:changed'));}};
+  const f={enabled:true,loaded:true,events:new Map(),gameGates:[],queries:[],submissions:[],game:null,logicalReads:0,coalesce:false,resolve(value,signal){f.logicalReads++;if(f.coalesce&&!signal){const prior=f.queries.find(q=>!q.signal&&q.game.path.toLowerCase()===value.path.toLowerCase());if(prior)return prior.promise;}let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});f.queries.push({promise,signal,game:{...value},resolve:target=>resolve(target||{appId:value.pid,name:value.name,executable:value.path,verified:true}),reject});return promise;},invoke:async(command,args)=>{if(command==='gameMedia.watch')return true;if(command==='gameMedia.snapshot')return {entries:{},aliases:{}};if(command==='gameMedia.background'){f.submissions.push(structuredClone(args));return {};}throw Error('unexpected '+command);},emit(name){if(name==='power.suspending')f.lifecycle?.({phase:'suspending',generation:2,known:true,hardwareWritesAllowed:false,notificationPending:true});else if(name==='power.resumed')f.lifecycle?.({phase:'ready',generation:2,known:true,hardwareWritesAllowed:true,notificationPending:false});for(const fn of f.events.get(name)||[])fn({});},settings(){window.dispatchEvent(new Event('ui-settings:changed'));}};
   globalThis[fixtureSymbol]=f;f.stop=module.startSharedGameMedia();return f;
  }
  async function run(name,fn){let f;const start=checks;try{clock=100000;f=fixture();await flush();await fn(f);cases.push({name,ok:true,checks:checks-start,work:{logicalReads:f.logicalReads,localRequests:f.queries.length,nativeEnrollments:f.submissions.length}});}catch(error){cases.push({name,ok:false,error:String(error?.message||error),checks:checks-start,work:f?{logicalReads:f.logicalReads,localRequests:f.queries.length,nativeEnrollments:f.submissions.length}:null});}finally{f?.stop();await flush();timers.clear();}}
@@ -76,6 +76,50 @@ async function currentGameAdmissionProbe(){
   await run('pid-reuse-and-identity-generation-trigger-fresh-read',async f=>{f.game(game());f.queries[0].resolve();await flush();f.game(game(1,{processCreated:'new-birth'}));check(f.queries.length===2,'new birth is a distinct identity');f.queries[1].resolve();await flush();f.game(game(1,{processCreated:'new-birth',identityGeneration:99}));check(f.queries.length===3,'new authority identity revision stays distinct');f.queries[2].resolve();await flush();check(f.submissions.length===3,'each actual identity transition is preserved');});
   await run('played-at-is-observation-time',async f=>{clock=123000;f.game(game());clock=456000;f.queries[0].resolve();await flush();check(f.submissions[0].targets[0].lastPlayed===123000,'slow resolution must not fabricate later play recency');});
   await run('suspend-retires-old-admission-and-resume-rereads',async f=>{f.game(game());f.emit('power.suspending');f.queries[0].resolve();await flush();check(f.submissions.length===0,'suspended old identity cannot admit');f.emit('power.resumed');await flush();check(f.queries.length===2,'resume requests one current fresh identity after authoritative refresh');f.queries[1].resolve();await flush();check(f.submissions.length===1,'resumed owner may enroll');});
+  for(const merged of [false,true])await run(merged?'coalesced-ready-does-not-join-old-executable-read':'resume-does-not-join-old-executable-read',async f=>{
+   f.coalesce=true;f.game(game());const old=f.queries[0];
+   const ready={phase:'ready',generation:merged?1:2,suspendSerial:1,observedNotificationSequence:2,known:true,hardwareWritesAllowed:true,notificationPending:false};
+   if(!merged){f.lifecycle({...ready,phase:'suspending',hardwareWritesAllowed:false,notificationPending:true});await flush();check(f.submissions.length===0,'suspending cannot enroll the old executable');}
+   f.lifecycle(ready);await flush();
+   check(f.queries.length===2,'a new Ready must start an independent identity read before the old executable read returns');
+   check(old.signal?.aborted,'the previous scope releases its identity IPC wait');
+   f.queries[1].resolve();await flush();check(f.submissions.length===1,'current Ready enrolls the game before the old reply');
+   old.resolve({appId:99,name:'Stale',executable:old.game.path,verified:true});f.lifecycle(ready);await flush();
+   check(f.submissions.length===1&&f.submissions[0].targets[0].appId===1&&f.queries.length===2,'the late old reply and repeated Ready cannot enroll or retry');
+  });
+  const admittedNotice=observedNotificationSequence=>({phase:'ready',generation:1,suspendSerial:0,observedNotificationSequence,known:true,hardwareWritesAllowed:true,notificationPending:false});
+  await run('new-sequence-reconfirms-held-game-before-enrollment',async f=>{
+   clock=123000;f.game(game());const old=f.queries[0];f.confirmations=[];
+   clock=456000;f.lifecycle(admittedNotice(2));await flush();
+   old.resolve({appId:99,name:'Stale',executable:old.game.path,verified:true});await flush();
+   check(f.submissions.length===0,'the previous sequence cannot enroll while game authority for the new sequence is pending');
+   check(old.signal?.aborted&&f.confirmations.length===1&&f.queries.length===1,'one current game confirmation replaces the obsolete identity wait');
+   f.confirmations[0](game());await flush();check(f.queries.length===2,'confirmed game may request its current identity');
+   f.queries[1].resolve();await flush();
+   check(f.submissions.length===1&&f.submissions[0].targets[0].appId===1&&f.submissions[0].targets[0].lastPlayed===123000,'continuing the same game preserves the initial play observation time');
+   f.lifecycle(admittedNotice(2));f.lifecycle(admittedNotice(1));f.lifecycle(admittedNotice(3));await flush();
+   check(f.confirmations.length===1&&f.queries.length===2&&f.submissions.length===1,'duplicate, older and healthy newer notices do not request or enroll again');
+  });
+  for(const terminal of ['exited','off'])await run(`new-sequence-respects-${terminal}-while-confirming-game`,async f=>{
+   f.game(game());const old=f.queries[0];f.confirmations=[];
+   f.lifecycle(admittedNotice(2));f.lifecycle(admittedNotice(3));await flush();
+   if(terminal==='off'){f.enabled=false;f.settings();}
+   old.resolve();await flush();check(f.submissions.length===0,'obsolete identity cannot enroll during the newer confirmation');
+   check(f.confirmations.length===2,'consecutive notifications replace only the pending game confirmation');
+   f.confirmations[0](game());await flush();check(f.queries.length===1,'late game confirmation cannot start a new identity lookup');
+   f.confirmations[1](terminal==='exited'?null:game());await flush();
+   check(f.queries.length===1&&f.submissions.length===0,'no current game or OFF remains idle');
+  });
+  await run('failed-confirmation-resumes-on-same-game-readiness',async f=>{
+   clock=123000;f.game(game());const old=f.queries[0];f.confirmations=[];
+   clock=234000;f.lifecycle(admittedNotice(2));await flush();
+   f.confirmations[0].reject(Error('current game read temporarily unavailable'));old.resolve();await flush();
+   check(f.submissions.length===0&&f.queries.length===1,'failed confirmation cannot release the previous identity');
+   clock=345000;f.gameCurrent=true;f.readiness?.(true);await flush();
+   check(f.queries.length===2,'public game readiness must continue the same game without a selection change or another wake');
+   f.queries[1].resolve();f.readiness?.(true);await flush();
+   check(f.submissions.length===1&&f.submissions[0].targets[0].lastPlayed===123000&&f.queries.length===2,'readiness continues the same observation only once');
+  });
   await run('resume-does-not-reenroll-a-game-that-exited-during-sleep',async f=>{f.game(game());f.emit('power.suspending');f.queries[0].resolve();await flush();f.currentGame=null;f.emit('power.resumed');await flush();check(f.queries.length===1&&f.submissions.length===0,'fresh authoritative empty target wins over retained pre-sleep game');});
   await run('unloaded-settings-do-not-admit',async f=>{f.loaded=false;f.settings();f.game(game());check(f.queries.length===0,'unloaded intent cannot start identification');f.loaded=true;window.dispatchEvent(new Event('ui-settings:loaded'));check(f.queries.length===1,'loaded enabled intent reconciles current game');});
   await run('stop-ignores-already-issued-read',async f=>{f.game(game());f.stop();f.queries[0].resolve();await flush();check(f.submissions.length===0,'stop never revives accepted read callback');});
@@ -89,7 +133,7 @@ async function sharedSteamInventoryProbe(){
  const {strict:assert}=await import('node:assert');
  const selected=process.argv[5],symbol='__sharedSteamMediaInventoryFixture',moduleFile=path.resolve(out,'shared-steam-inventory.mjs');
  if(process.argv.length>6||selected!==undefined&&!selected.trim())throw Error('Invalid shared Steam inventory selection');
- await build({entryPoints:[project+'/src/bridge/sharedGameMedia.ts'],bundle:true,platform:'node',format:'esm',outfile:moduleFile,metafile:true,plugins:[{name:'shared-steam-inventory-owned-ports',setup(api){
+ await build({stdin:{contents:"export * from './src/bridge/sharedGameMedia.ts';export {steamUi} from './src/bridge/steamUi.ts';",resolveDir:project,loader:'ts'},bundle:true,platform:'node',format:'esm',outfile:moduleFile,metafile:true,plugins:[{name:'shared-steam-inventory-owned-ports',setup(api){
   if(before)api.onLoad({filter:/sharedGameMedia\.ts$/},()=>({contents:fs.readFileSync(before,'utf8'),loader:'ts',resolveDir:project+'/src/bridge'}));
   api.onResolve({filter:/^\.\/(gameMediaDownloads|ipc|gamePolicyTarget|gameMediaPreparationPolicy|uiSettings|steamHttp|steamMediaPlaylist|steamMediaSource|powerLifecycleState|wallpaperPowerPolicy|yeman)$/},args=>{
    const source=args.importer.replaceAll('\\','/');return source.endsWith('/sharedGameMedia.ts')||source.endsWith('/steamUi.ts')?{path:args.path,namespace:'shared-steam-inventory-ports'}:null;
@@ -97,16 +141,16 @@ async function sharedSteamInventoryProbe(){
   api.onLoad({filter:/.*/,namespace:'shared-steam-inventory-ports'},args=>{
    const ref=`globalThis.${symbol}`;let contents;
    if(args.path==='./ipc')contents=`export const invoke=(...a)=>${ref}.invoke(...a),on=(name,fn,includeDispatch)=>${ref}.on(name,fn,includeDispatch);`;
-   else if(args.path==='./gameMediaDownloads')contents=`export const backgroundDownloadEnabled=()=>${ref}.enabled;export const gameMediaDownloads={get state(){return ${ref}.downloadState;},start:()=>()=>{},policy:()=>{},subscribe:fn=>{${ref}.downloadListeners.add(fn);return()=>${ref}.downloadListeners.delete(fn);},watchCompleted:()=>()=>{},recheck:async()=>{}};`;
-   else if(args.path==='./gamePolicyTarget')contents='export const subscribePolicyGameStatus=()=>()=>{},refreshPolicyGameStrict=async()=>null;';
-   else if(args.path==='./gameMediaPreparationPolicy')contents='export class GameMediaPreparationPolicy{game(){}request(){}demand(){}suspend(){}resume(){}stop(){}}';
+   else if(args.path==='./gameMediaDownloads')contents=`export const backgroundDownloadEnabled=()=>${ref}.enabled;export const gameMediaDownloads={get state(){return ${ref}.downloadState;},start:()=>()=>{},policy:reason=>${ref}.preparationReasons?.push(reason),subscribe:fn=>{${ref}.downloadListeners.add(fn);return()=>${ref}.downloadListeners.delete(fn);},watchCompleted:()=>()=>{},recheck:async()=>{}};`;
+   else if(args.path==='./gamePolicyTarget')contents='export const subscribePolicyGameStatus=()=>()=>{},refreshPolicyGameStrict=async()=>null,isPolicyGameCurrent=()=>false,getPolicyGame=()=>null,subscribePolicyGameReadiness=()=>()=>{};';
+   else if(args.path==='./gameMediaPreparationPolicy')contents=`import {GameMediaPreparationPolicy as ActualPolicy} from './src/bridge/gameMediaPreparationPolicy.ts';export class GameMediaPreparationPolicy{constructor(ports){if(${ref}.preparationReads)return new ActualPolicy(ports);}game(){}request(){}demand(){}suspend(){}resume(){}notificationAdvanced(){}stop(){}}`;
    else if(args.path==='./uiSettings')contents=`export const getUiSetting=()=>true,setUiSettings=async()=>{},uiSettingsLoaded=()=>${ref}.loaded;`;
    else if(args.path==='./steamMediaSource')contents=`export const installedSteamWallpaperTargets=async()=>{${ref}.installed++;return[];},resolveSteamWallpaperIdentity=async()=>{throw Error('not selected');},steamWallpaperCandidates=async()=>{throw Error('network forbidden');},normalizeSteamMediaUrl=v=>v;`;
-   else if(args.path==='./powerLifecycleState')contents=powerAdmissionFunction+`;export const onSharedPowerLifecycle=(fn,options)=>{${ref}.lifecycle=fn;${ref}.observeSuspendSerial=options?.observeSuspendSerial===true;fn({phase:'ready',generation:1,suspendSerial:0,known:true,hardwareWritesAllowed:true,notificationPending:false});return()=>{${ref}.lifecycle=null;}};`;
+   else if(args.path==='./powerLifecycleState')contents=powerAdmissionFunction+`;export const onSharedPowerLifecycle=(fn,options)=>{const initial={phase:'ready',generation:1,suspendSerial:0,observedNotificationSequence:21,known:true,hardwareWritesAllowed:true,notificationPending:false};${ref}.lifecycle=fn;${ref}.observeSuspendSerial=options?.observeSuspendSerial===true;${ref}.publishNotice=state=>{if(options?.observeNotificationSequence===true)fn(state);};fn(initial);return()=>{${ref}.lifecycle=${ref}.publishNotice=null;}};`;
    else if(args.path==='./wallpaperPowerPolicy')contents=`export const wallpaperPowerBlocked=()=>${ref}.blocked,wallpaperPowerReason=()=>'wallpaper-on-battery',subscribeWallpaperPowerChanged=fn=>{${ref}.powerChanged=fn;return()=>{${ref}.powerChanged=null;}},captureWallpaperPower=()=>${ref}.powerEpoch,wallpaperPowerCurrent=epoch=>epoch===${ref}.powerEpoch;`;
    else if(args.path==='./yeman')contents='export const steamRunning=async()=>{throw Error("Private/legacy running read forbidden");};';
    else contents='export const requestSteamHttp=async()=>{throw Error("network forbidden");},parseHlsAsset=()=>{throw Error("network forbidden");};';
-   return{contents,loader:'ts'};
+   return{contents,loader:'ts',resolveDir:project};
   });
  }}]}).then(result=>fs.writeFileSync(path.join(out,'bundle-inputs.json'),JSON.stringify(result.metafile,null,2),{flag:'wx'}));
  const saved={window:globalThis.window,setTimeout:globalThis.setTimeout,clearTimeout:globalThis.clearTimeout,now:Date.now,performance:globalThis.performance};
@@ -118,7 +162,7 @@ async function sharedSteamInventoryProbe(){
  const state=(extra={})=>({known:true,running:true,mode:'bigpicture',pid:400,birth:'12345',reason:'shared',observedAccount:17,modeEpoch:'document-a:1',...extra});
  const check=(ok,label)=>{checks++;assert.ok(ok,label);};
  const origins=(f,bits)=>{checks++;assert.deepEqual(f.inventoryArgs.at(-1),{originMask:bits},'inventory request includes only the expected bounded origin mask');};
- async function fixture(beforeBoot){
+ async function fixture(beforeBoot,setup){
   const f={enabled:true,loaded:true,blocked:false,powerEpoch:1,installed:0,inventories:0,inventoryArgs:[],holdInventory:false,inventoryFlights:[],holdSnapshot:false,snapshots:[],submissions:[],events:new Map(),reads:[],hold:false,state:state(),lifecycle:null,powerChanged:null,downloadState:{},downloadListeners:new Set(),
    on(name,fn,includeDispatch){const list=f.events.get(name)||new Set(),listener=event=>includeDispatch?fn(event.detail,event):fn(event.detail);f.events.set(name,list);list.add(listener);return()=>list.delete(listener);},
    emit(){const event=new CustomEvent('ipc:steam.uiStateChanged',{detail:{}});for(const fn of f.events.get('steam.uiStateChanged')||[])fn(event);},
@@ -126,14 +170,32 @@ async function sharedSteamInventoryProbe(){
    snapshotNotice(){const event=new CustomEvent('ipc:gameMedia.changed',{detail:{}});for(const fn of f.events.get('gameMedia.changed')||[])fn(event);},
    manualRequest(id){f.downloadState={manualUntil:clock+30000,inventoryRequestId:id};for(const fn of f.downloadListeners)fn();},
    invoke:async(command,args,options)=>{
-    if(command==='steam.uiState'){check(JSON.stringify(args)==='{}','shared UI reads must remain automatic/cache-only');const r={args,options};f.reads.push(r);if(f.hold)return new Promise((resolve,reject)=>Object.assign(r,{resolve,reject}));return structuredClone(f.state);}
+    if(command==='steam.uiState'){check(JSON.stringify(args)==='{}','shared UI reads must remain automatic/cache-only');const r={args,options,live:false};f.reads.push(r);if(f.hold)return new Promise((resolve,reject)=>{
+     const signal=options?.signal;
+     const clear=()=>{r.live=false;signal?.removeEventListener('abort',abort);};
+     const abort=()=>{clear();reject(Error('IPC request retired: steam.uiState'));};
+     r.live=true;r.resolve=value=>{clear();resolve(value);};r.reject=error=>{clear();reject(error);};
+     if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});
+    });return structuredClone(f.state);}
     if(command==='gameMedia.inventory'){f.inventories++;f.inventoryArgs.push(structuredClone(args));if(f.holdInventory)return new Promise(resolve=>{f.inventoryFlights.push({resolve,signal:options?.signal});f.releaseInventory=()=>resolve([]);});return[];}
     if(command==='gameMedia.snapshot'){const r={signal:options?.signal};f.snapshots.push(r);if(f.holdSnapshot)return new Promise(resolve=>{r.resolve=resolve;});return{entries:{},aliases:{}};}
+    if(command==='gameMedia.preparationPolicy'&&f.preparationReads)return new Promise((resolve,reject)=>f.preparationReads.push({resolve,reject,signal:options?.signal}));
     if(command==='gameMedia.background'){f.submissions.push(structuredClone(args));return{};}
-    if(command==='gameMedia.watch')return{};
+    if(command==='gameMedia.watch'){
+     f.watchCalls.push(args.enabled);
+     if(args.enabled&&f.watchFailures>0){f.watchFailures--;throw Error('media watch request or reply lost');}
+     if(args.enabled&&f.holdWatch)return new Promise((resolve,reject)=>{
+      const abort=()=>reject(Error('media watch request retired'));
+      options?.signal?.addEventListener('abort',abort,{once:true});
+      f.watchReply=value=>{options?.signal?.removeEventListener('abort',abort);resolve(value);};
+      f.watchRequestOptions=options;
+     });
+     return true;
+    }
     throw Error('Forbidden native command '+command);
    }};
-  globalThis[symbol]=f;const module=await import('file:///'+moduleFile.replaceAll('\\','/')+'?fixture='+(++fixtureId));f.stop=module.startSharedGameMedia();f.displayHint=()=>module.sharedGameMedia.changed('inventory');await flush();beforeBoot?.(f);await advance(30000);await advance(250);return f;
+  f.watchCalls=[];f.watchFailures=0;setup?.(f);
+  globalThis[symbol]=f;const module=await import('file:///'+moduleFile.replaceAll('\\','/')+'?fixture='+(++fixtureId));f.stop=module.startSharedGameMedia();f.displayHint=()=>module.sharedGameMedia.changed('inventory');f.steamUi=module.steamUi;await flush();beforeBoot?.(f);await advance(30000);await advance(250);return f;
  }
  const definitions=[
   ['shared-source-without-decky',async f=>{check(f.events.get('steam.uiStateChanged')?.size===1,'wallpaper inventory must subscribe to common Steam source');check(!f.events.has('deckySidebar.updated'),'Steam inventory must not depend on Decky status');check(f.reads.length===1&&f.installed===1&&f.inventories===1,'initial shared snapshot and original startup scan are coalesced');}],
@@ -187,14 +249,135 @@ async function sharedSteamInventoryProbe(){
     check(stable.join() === [f.reads.length,f.inventories,f.snapshots.length].join(),'duplicate or old serial cannot replay work');
    }finally{window.removeEventListener('game-media:changed',record);}
   }],
+  ['notification-advance-retires-held-media-snapshot',async f=>{
+   const ready={phase:'ready',generation:1,suspendSerial:0,observedNotificationSequence:22,known:true,hardwareWritesAllowed:true,notificationPending:false};
+   f.holdSnapshot=true;f.snapshotNotice();await flush();
+   const held=f.snapshots.at(-1),reads=f.snapshots.length,steam=f.reads.length,watches=f.watchCalls.length;
+   const changes=[];const record=e=>changes.push(e.detail.key);window.addEventListener('game-media:changed',record);
+   try{
+    f.publishNotice(ready);await flush();
+    held.resolve({entries:{old:{key:'retired',bindingRevision:1}},aliases:{}});await flush();
+    check(changes.length===0,'a pre-notification snapshot may not publish a stale asset change');
+    check(held.signal?.aborted&&f.snapshots.length===reads+1,'the current scope owns one replacement without waiting for the old read');
+    const replacement=f.snapshots.at(-1);
+    f.publishNotice(ready);f.publishNotice({...ready,observedNotificationSequence:21});await flush();
+    check(!replacement.signal.aborted&&f.snapshots.length===reads+1,'duplicate and older notices cannot replace the new read');
+    replacement.resolve({entries:{current:{key:'current',bindingRevision:2}},aliases:{}});await flush();
+    check(changes.join() === 'current','only the new scope may publish its asset change');
+    f.publishNotice({...ready,observedNotificationSequence:23});await advance(60000);
+    check(f.snapshots.length===reads+1&&f.reads.length===steam&&f.watchCalls.length===watches,'a healthy notice schedules no snapshot, Steam scan or watcher registration');
+   }finally{window.removeEventListener('game-media:changed',record);}
+  }],
+  ['notification-advance-retires-held-preparation-read',async f=>{
+   const ready={phase:'ready',generation:1,suspendSerial:0,observedNotificationSequence:22,known:true,hardwareWritesAllowed:true,notificationPending:false};
+   const reads=f.preparationReads,reasons=f.preparationReasons;
+   check(reads.length===1&&reasons.at(-1)==='capacity-unavailable','original wake started one unresolved capacity read');
+   const old=reads[0],before=reasons.length;
+   f.publishNotice(ready);await advance(250);
+   old.resolve({});await flush();
+   check(reasons.length===before,'a pre-notification capacity reply must not release the current policy');
+   check(old.signal?.aborted&&reads.length===2,'the current scope must replace the read without waiting');
+   const current=reads[1];
+   f.publishNotice(ready);f.publishNotice({...ready,observedNotificationSequence:21});await advance(250);
+   check(!current.signal.aborted&&reads.length===2,'duplicate or older notices cannot retire the replacement');
+   current.reject(Error('current wake read failed'));await flush();await advance(250);
+   check(reads.length===3,'retirement must preserve the original wake-read retry');
+   reads[2].resolve({blockedReason:'media-disk-space-low'});await flush();
+   check(reasons.at(-1)==='media-disk-space-low','only current capacity may change admission');
+   f.publishNotice({...ready,observedNotificationSequence:23});await advance(60000);
+   check(reads.length===3&&timers.size===0,'a healthy notification must not start a capacity read or polling');
+   for(const fn of f.events.get('gameMedia.preparationPolicyChanged')||[])fn(new CustomEvent('policy'));
+   await advance(250);check(reads.length===4,'the original event still starts a capacity read');
+   f.stop();check(reads[3].signal.aborted&&timers.size===0,'stop returns the owned capacity wait and timers');
+   const stopped=reasons.length;reads[3].resolve({});await flush();
+   check(reasons.length===stopped&&timers.size===0,'late completion after stop cannot apply policy');
+  },undefined,f=>{f.preparationReads=[];f.preparationReasons=[];}],
+  ['notification-advance-retires-held-steam-account-read',async f=>{
+   const ready={phase:'ready',generation:1,suspendSerial:0,observedNotificationSequence:22,known:true,hardwareWritesAllowed:true,notificationPending:false};
+   const start=f.reads.length,scans=f.inventories,snapshots=f.snapshots.length;
+   f.hold=true;f.emit();const held=f.reads.at(-1);
+   try{
+    f.publishNotice(ready);await flush();
+    held.resolve(state({observedAccount:99}));await flush();await advance(250);
+    check(f.inventories===scans,'the retired Steam account may not schedule an inventory scan');
+    check(held.options.signal?.aborted&&f.reads.length===start+1,'retirement releases the old wait and does not bypass the read gap');
+    await advance(fallbackGap-250);
+    check(f.reads.length===start+2,'the current public scope replaces only the held Steam read');
+    const current=f.reads.at(-1);
+    f.publishNotice(ready);f.publishNotice({...ready,observedNotificationSequence:21});await flush();
+    check(current.live&&f.reads.length===start+2,'duplicate and late public notices leave the replacement read alone');
+    current.resolve(state({observedAccount:18}));await flush();await advance(250);
+    check(f.inventories===scans+1,'the current confirmed account may scan once');origins(f,64);
+    f.publishNotice({...ready,observedNotificationSequence:23});await advance(60000);
+    check(f.reads.length===start+2&&f.inventories===scans+1&&f.snapshots.length===snapshots,'a newer healthy notice does not replay account, inventory, or snapshot work');
+   }finally{held.resolve(state());for(const r of f.reads.slice(start+1))r.resolve?.(state());}
+  }],
+  ['coalesced-ready-replaces-held-steam-read',async f=>{
+   const count=f.inventories,start=f.reads.length;
+   const ready={phase:'ready',generation:1,suspendSerial:1,known:true,hardwareWritesAllowed:true,notificationPending:false};
+   f.hold=true;f.emit();const old=f.reads.at(-1);
+   try{
+    check(f.reads.length===start+1,'first Steam read is held');
+    f.lifecycle(ready);await flush();
+    check(f.reads.length===start+2,'current Ready must obtain a new Steam read before the old reply or timeout');
+    const current=f.reads.at(-1);check(current!==old,'current Steam read must own a distinct request');
+    check(old.options.signal?.aborted&&old.live===false,'last media reader must release the original transport wait');
+    old.resolve(state({observedAccount:99}));await flush();await advance(250);
+    check(f.inventories===count,'old Steam account cannot schedule a scan');
+    current.resolve(state());await flush();await advance(250);
+    check(f.inventories===count+1,'current Steam context alone restores inventory');origins(f,16|512);
+    f.lifecycle(ready);await advance(60000);
+    check(f.reads.length===start+2&&f.inventories===count+1&&timers.size===0,'duplicate Ready leaves no extra read, scan, or timer');
+   }finally{old.resolve(state());for(const r of f.reads.slice(start+1))r.resolve?.(state());}
+  }],
+  ['retired-media-reader-does-not-abort-peer-steam-read',async f=>{
+   const count=f.inventories,start=f.reads.length,peer=[];
+   const off=f.steamUi.subscribe(()=>{void f.steamUi.read({automatic:true}).then(value=>peer.push(value.observedAccount),()=>peer.push('aborted'));});
+   f.hold=true;f.emit();const old=f.reads.at(-1);
+   try{
+    check(f.reads.length===start+1,'two observers of one Steam notice share one read');
+    const paused={phase:'suspending',generation:2,suspendSerial:1,known:true,hardwareWritesAllowed:false,notificationPending:true};
+    f.lifecycle(paused);await flush();
+    check(old.live&&!old.options.signal.aborted&&f.reads.length===start+1,'media retirement preserves the shared transport while the peer still waits');
+    f.lifecycle({...paused,phase:'ready',hardwareWritesAllowed:true,notificationPending:false});await flush();
+    check(f.reads.length===start+2,'current media read cannot wait for another observer to finish');
+    f.reads.at(-1).resolve(state());await flush();await advance(250);
+    check(f.inventories===count+1&&peer.length===0,'current scan settles independently of the shared old request');
+    old.resolve(state({observedAccount:99}));await flush();await advance(5000);
+    check(peer.length===1&&peer[0]===99&&!old.live&&f.inventories===count+1,'only the original peer receives its old reply');
+   }finally{off();old.resolve(state());for(const r of f.reads.slice(start+1))r.resolve?.(state());}
+  }],
   ['sleep-retires-pending-shared-response',async f=>{const count=f.inventories;f.hold=true;f.emit();const old=f.reads.at(-1);f.lifecycle({phase:'suspending',generation:2,known:true});old.resolve(state({observedAccount:99}));await flush();f.emit();check(f.reads.at(-1)===old,'suspend performs no new shared reads');await advance(1000);check(f.inventories===count,'suspended pending response cannot scan');f.hold=false;f.lifecycle({phase:'ready',generation:2,known:true,hardwareWritesAllowed:true,notificationPending:false});await flush();await advance(250);check(f.inventories===count+1,'committed Ready revalidates same Steam identity');const stable=f.inventories;f.hold=true;f.emit();await advance(fallbackGap-250);const waiting=f.reads.at(-1);f.lifecycle({phase:'ready',generation:2,known:true,hardwareWritesAllowed:true,notificationPending:true});waiting.resolve(state({observedAccount:99}));await flush();await advance(250);check(f.inventories===stable,'same-generation pending authority rejects old source reply');f.hold=false;f.lifecycle({phase:'ready',generation:2,known:true,hardwareWritesAllowed:true,notificationPending:false});await flush();await advance(250);check(f.inventories===stable+1,'same-generation admitted correction restores shared source read');}],
   ['off-and-dc-reject-pending-shared-response',async f=>{const count=f.inventories;f.hold=true;f.emit();const old=f.reads.at(-1);f.enabled=false;window.dispatchEvent(new Event('ui-settings:changed'));old.resolve(state({observedAccount:99}));await flush();const readCount=f.reads.length;for(let n=0;n<20;n++)f.emit();await advance(1000);check(f.reads.length===readCount&&f.inventories===count,'OFF performs no source reads or scans');f.enabled=true;f.blocked=true;f.powerEpoch++;f.powerChanged(true);window.dispatchEvent(new Event('ui-settings:changed'));f.emit();await flush();check(f.reads.length===readCount&&f.inventories===count,'physical DC pause performs no source reads or scans');f.hold=false;f.blocked=false;f.powerEpoch++;f.powerChanged(false);await flush();await advance(250);check(f.reads.length===readCount+1&&f.inventories===count+1,'power recovery reconciles through shared source');}],
+  ['media-watch-recovers-only-after-current-ready',async f=>{
+   check(f.watchCalls.join(',')==='true','no replacement registration while suspended');
+   const ready={phase:'ready',generation:1,suspendSerial:1,known:true,hardwareWritesAllowed:true,notificationPending:false};
+   f.lifecycle(ready);await advance(1000);
+   check(f.watchCalls.join(',')==='true,true','current Ready replaces exactly one lost registration');
+   f.lifecycle({...ready,suspendSerial:0});f.lifecycle(ready);f.lifecycle({...ready,suspendSerial:2});await advance(60000);
+   check(f.watchCalls.join(',')==='true,true','an acknowledged passive watcher survives duplicate, old and new Ready');
+   f.stop();f.stop();await flush();check(f.watchCalls.join(',')==='true,true,false','stop sends exactly one release');
+  },f=>f.lifecycle({phase:'suspending',generation:1,suspendSerial:1,known:true,hardwareWritesAllowed:false,notificationPending:true}),f=>{f.watchFailures=1;}],
+  ['media-watch-retry-is-bounded-without-a-second-fact',async f=>{
+   check(f.watchCalls.join(',')==='true,true','two failures exhaust the current initial registration and its retry');
+   const ready={phase:'ready',generation:1,suspendSerial:0,known:true,hardwareWritesAllowed:true,notificationPending:false};
+   f.lifecycle(ready);await advance(60000);check(f.watchCalls.length===2,'no retry loop or same-scope budget refund');
+   f.lifecycle({...ready,suspendSerial:1});await advance(1000);
+   check(f.watchCalls.join(',')==='true,true,true','a newer coalesced Ready can repair the observation');
+   await advance(60000);check(timers.size===0,'healthy idle retains no timer');
+  },undefined,f=>{f.watchFailures=2;}],
+  ['media-watch-stop-retires-inflight-ack',async f=>{
+   check(f.watchCalls.join(',')==='true'&&f.watchRequestOptions?.timeoutMs===3000,'only one bounded registration while the acknowledgement is held');
+   const signal=f.watchRequestOptions.signal;f.stop();f.watchReply(true);await advance(60000);
+   check(signal.aborted&&f.watchCalls.join(',')==='true,false','released waiter and ignored the late acknowledgement');
+   check(timers.size===0,'stop leaves no watcher retry timer');
+  },undefined,f=>{f.holdWatch=true;}],
   ['stop-unsubscribes-and-stays-idle',async f=>{const count=f.inventories;f.hold=true;f.emit();const pending=f.reads.at(-1);f.stop();pending.resolve(state({observedAccount:99}));await flush();await advance(60000);check(f.events.get('steam.uiStateChanged')?.size===0,'stop releases common source subscription');check(f.inventories===count&&timers.size===0,'stopped consumer leaves no scan or timer');}]
  ];
  try{
   if(selected!==undefined&&!definitions.some(([id])=>id===selected))throw Error('Unknown shared Steam inventory case');
-  for(const[name,body,beforeBoot]of definitions){if(selected!==undefined&&selected!==name)continue;let f;const start=checks;
-   try{clock=100000;f=await fixture(beforeBoot);await body(f);rows.push({name,ok:true,checks:checks-start,sharedReads:f.reads.length,inventories:f.inventories,installedScans:f.installed,inventoryArgs:f.inventoryArgs});}
+  for(const[name,body,beforeBoot,setup]of definitions){if(selected!==undefined&&selected!==name)continue;let f;const start=checks;
+   try{clock=100000;f=await fixture(beforeBoot,setup);await body(f);rows.push({name,ok:true,checks:checks-start,sharedReads:f.reads.length,inventories:f.inventories,installedScans:f.installed,inventoryArgs:f.inventoryArgs,watchCalls:f.watchCalls.slice()});}
    catch(error){rows.push({name,ok:false,checks:checks-start,error:String(error?.message||error)});}
    finally{f?.stop();await flush();timers.clear();}
   }

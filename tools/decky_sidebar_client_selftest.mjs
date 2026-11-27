@@ -887,7 +887,23 @@ async function verifyClientDiagnostic(){
   const factory=tree.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='createYmccPlugin'&&node.modifiers?.some(m=>m.kind===ts.SyntaxKind.ExportKeyword)&&node.modifiers?.some(m=>m.kind===ts.SyntaxKind.DefaultKeyword));
   const declarations=(factory?.body?.statements??tree.statements).filter(ts.isVariableStatement).flatMap(n=>n.declarationList.declarations);
   const receipt=declarations.find(n=>n.name.getText(tree)==='frontendReceipt');assert(receipt);
-  const exposure=vm.runInNewContext('({receipt:('+receipt.initializer.getText(tree)+'),retire:()=>{dismounted=true}})',{client:f.client,window:f.nativeWindow,dismounted:false,directConsoleInstalled:false,placement:{active:true},__YMCC_DECKY_BUILD_ID__:'a'.repeat(64)});
+  const content=(factory?.body?.statements??tree.statements).find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='Content');
+  const panelEffect=content.body.statements.filter(ts.isExpressionStatement).map(n=>n.expression).find(n=>ts.isCallExpression(n)&&n.expression.getText(tree)==='React.useLayoutEffect'&&n.arguments[0]?.getText(tree).includes('committedQamPanels.set'));
+  assert(panelEffect,'The actual Content layout effect must publish observed commits');
+  const committedQamPanels=new Map(),panelScope={client:f.client,window:f.nativeWindow,dismounted:false,directConsoleInstalled:false,placement:{active:true},committedQamPanels,__YMCC_DECKY_BUILD_ID__:'a'.repeat(64)};
+  const exposure=vm.runInNewContext('({receipt:('+receipt.initializer.getText(tree)+'),retire:()=>{dismounted=true}})',panelScope);
+  const compiled=transformSync(panelEffect.arguments[0].getText(tree),{loader:'ts'}).code;
+  const mount=(visible,isConnected,runId,nativeReady)=>vm.runInNewContext(compiled,{
+    ...panelScope,visible,sidebarRoot:{current:{isConnected}},panelRun:runId,panelNativeReady:nativeReady,visibilityOwner:{current:{}}
+  })();
+  assert.equal(exposure.receipt.qamPanelState,'unobserved');
+  assert.equal(mount(false,true,'run-1',true),undefined);
+  assert.equal(mount(true,false,'run-1',true),undefined);
+  const waiting=mount(true,true,'run-1',false);assert.equal(exposure.receipt.qamPanelState,'committed');
+  const oldReady=mount(true,true,'run-2',true);assert.equal(exposure.receipt.qamPanelState,'committed');
+  const ready=mount(true,true,'run-1',true);assert.equal(exposure.receipt.qamPanelState,'native-ready-commit');
+  ready();assert.equal(exposure.receipt.qamPanelState,'committed','Removing one popup cannot erase another commit');
+  waiting();oldReady();assert.equal(exposure.receipt.qamPanelState,'unobserved');
   assert.equal(exposure.receipt.connectionReady,true);assert.equal(exposure.receipt.connectionState,'connected');
   assert.equal(f.client.connectionVerified('run-1'),false,'Bare TCP and an uncorrelated snapshot cannot suppress UI recovery');
   let proofNotifications=0;f.client.deps.connectionCheckCompleted=()=>{proofNotifications++;};

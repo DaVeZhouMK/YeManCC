@@ -132,8 +132,14 @@ private:
                 detail::Handle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,row.pid));
                 const auto object=processParentEvidenceOwner().capture(process.value);
                 const auto path=group_detail::utf16(row.path);
-                if(!object||path.empty()||!samePath(object->witness().image,path)||object->windowsSession()!=steam.windowsSession||
+                if(!object||path.empty()||object->windowsSession()!=steam.windowsSession||
                     object->witness().created<steam.birth||!group_detail::launchWindow(object->witness().created,row.at)||!object->stillAlive())continue;
+                // ShellExecute logs the shortcut's script path, while the held
+                // process image is the Windows script host. Bind only its actual
+                // script operand, and only for the original full shortcut ID.
+                if(!samePath(object->witness().image,path)&&
+                    ((row.fullGameId&0xffffffffULL)!=0x02000000ULL||
+                        !detail::scriptHostRunsVbs(process.value,object->witness().image,path,steam.pid)))continue;
                 auto launch=std::shared_ptr<const StartupLaunchEvidence>(new StartupLaunchEvidence(steam,epoch,object,
                     source->observation.sourceRevision,row.appid,row.fullGameId,row.sourceLine,row.at,row.path,source->lines[row.sourceLine-1]));
                 if(!startupSourceMatches(*launch,*source)||!current()){result.status=StartupLaunchCapture::Status::ContextChanged;return result;}

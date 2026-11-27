@@ -2273,7 +2273,7 @@ export function getAdapters(_repoRoot, {identityOnly=false,selectedIds}={}) {
     make('controller.lossless-return-focus', 'controller', 'Exact original game return after LS with three attempts inside ten seconds and bounded teardown', 'node',
 
 
-      'tools/lossless_return_focus_selftest.mjs', ['native/main.cpp','native/lossless_return_focus.h','native/resume_focus.h','native/monitor_identity.h','native/process_inventory.h','tools/lossless_return_focus_selftest.cpp','tools/lossless_return_focus_selftest.py','deps/json/json.hpp','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'],
+      'tools/lossless_return_focus_selftest.mjs', ['native/main.cpp','native/lossless_return_focus.h','native/resume_focus.h','native/monitor_identity.h','native/process_inventory.h','native/sleep_power_observation.h','native/sleep_power_state.h','tools/lossless_return_focus_selftest.cpp','tools/lossless_return_focus_selftest.py','deps/json/json.hpp','tools/fixtures/hc_reviewed_calibration/toolchain.mjs'],
 
 
       {args:['{outDir}'],resultFiles:['lossless-return-focus-result.json'],timeoutMs:60000}),
@@ -2300,7 +2300,7 @@ export function getAdapters(_repoRoot, {identityOnly=false,selectedIds}={}) {
     make('controller.task-view-native-wiring', 'controller', 'Actual native TaskView producer preserves Windows grant outcome across disabled and three virtual personas', 'node',
 
 
-      'tools/task_view_native_wiring_selftest.mjs', ['native/main.cpp','native/task_view_dispatch.h','native/task_view_foreground_grant.h','tools/task_view_api_wiring_selftest.py','tools/virtual_sample_tree_perf_selftest.py','deps/json/json.hpp'],
+      'tools/task_view_native_wiring_selftest.mjs', ['native/main.cpp','native/task_view_dispatch.h','native/task_view_foreground_grant.h','native/sleep_power_observation.h','native/sleep_power_state.h','tools/task_view_api_wiring_selftest.py','tools/virtual_sample_tree_perf_selftest.py','deps/json/json.hpp'],
 
 
       {args:['{outDir}'],resultFiles:['native-wiring-result.json'],timeoutMs:60000}),
@@ -2609,7 +2609,7 @@ export function getAdapters(_repoRoot, {identityOnly=false,selectedIds}={}) {
     make("screen.standalone-actions", "display", "Screen standalone Steam menu actions in an isolated receiver VM", "node",
 
 
-      "tools/screen_standalone_special_actions_selftest.mjs", ["native/main.cpp", "native/steam_live.js", "tools/fixtures/steam_menu_composition/cases.mjs", "tools/fixtures/steam_menu_composition/navigation.mjs", "tools/fixtures/steam_menu_composition/official-methods.json"]),
+      "tools/screen_standalone_special_actions_selftest.mjs", ["native/main.cpp", "native/steam_live.js", "tools/fixtures/steam_menu_composition/cases.mjs", "tools/fixtures/steam_menu_composition/navigation.mjs", "tools/fixtures/steam_menu_composition/official-methods.json", "tools/fixtures/steam_menu_composition/ds2-split-registration-field.json"]),
 
 
     make("game-tools.trainer-foreground", "game-library", "Decky interactive desktop Shell launch, no replay after uncertain dispatch", "node",

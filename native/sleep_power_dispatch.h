@@ -31,8 +31,9 @@ private:
     mutable std::mutex mutex_;
     HANDLE receiptWake_=nullptr;
     bool projectionWake_=false;
-    bool committedWake_=false;
-    Sequence lastCommittedWakeGeneration_=0;
+    bool committedWake_=false,committedWindowWake_=false;
+    Sequence lastCommittedWakeGeneration_=0,lastCommittedWakeSuspendSerial_=0;
+    Sequence lastWindowFallbackHead_=0,lastWindowFallbackScope_=0;
     Sequence issued_=0,claimed_=0,completed_=0;
     Receipt latest_; // Latest receipt eligible for delivery, independent of diagnostic-only receipts.
     Receipt latestSleepBoundary_; // Original ingress witness; never a second power owner.
@@ -146,10 +147,18 @@ public:
         std::lock_guard lock(mutex_);
         if(receiptWake_){CloseHandle(receiptWake_);receiptWake_=nullptr;}
     }
-    void signalReceiptWakeIfPending() {
+    template<class Forward> void scheduleReceiptReplay(Forward&& forward) {
         std::lock_guard lock(mutex_);
-        if(receiptWake_&&(firstUnclaimedBoundary()||latest_.sequence>claimed_))
-            SetEvent(receiptWake_);
+        const auto first=firstUnclaimedBoundary();
+        const auto next=first?first:latest_.sequence>claimed_?latest_:Receipt{};
+        if(!next||(receiptWake_&&SetEvent(receiptWake_)))return;
+        // Completion will try again if the current consumer is still active.
+        // For a refused transport, only a new receipt or a new queue head
+        // can renew the fallback. A stale window post cannot spin the pump.
+        if(consuming_||(lastWindowFallbackHead_==next.sequence&&lastWindowFallbackScope_==latest_.sequence))return;
+        lastWindowFallbackHead_=next.sequence;
+        lastWindowFallbackScope_=latest_.sequence;
+        if(!forward(next))++postFailures_;
     }
     bool signalOwnerWake() {
         std::lock_guard lock(mutex_);
@@ -167,13 +176,26 @@ public:
         projectionWake_=false;
         return pending;
     }
-    // The event is a one-shot transport fallback when both posting and the
-    // repair timer fail. Persistent failures must not spin the window pump.
-    void signalCommittedWakeOnce(Sequence generation) {
+    // One fallback per committed sleep scope. Input can owe new work after
+    // another suspend within the same generation.
+    // WM_POWER_RESUME_COMMIT reserves 0 for normal and 1 for degraded delivery.
+    static constexpr WPARAM committedWindowTag=2;
+    template<class Forward> void scheduleCommittedWake(Sequence generation,Sequence suspendSerial,Forward&& forward) {
         std::lock_guard lock(mutex_);
-        if(generation<=lastCommittedWakeGeneration_||!receiptWake_||!SetEvent(receiptWake_))return;
+        if(!generation||generation<lastCommittedWakeGeneration_||
+           (generation==lastCommittedWakeGeneration_&&suspendSerial<=lastCommittedWakeSuspendSerial_))return;
         lastCommittedWakeGeneration_=generation;
-        committedWake_=true;
+        lastCommittedWakeSuspendSerial_=suspendSerial;
+        committedWindowWake_=false;
+        if(receiptWake_&&SetEvent(receiptWake_)){committedWake_=true;return;}
+        if(suspendSerial<=(~WPARAM{0})-committedWindowTag)
+            committedWindowWake_=forward(static_cast<WPARAM>(suspendSerial)+committedWindowTag,static_cast<LPARAM>(generation));
+    }
+    bool takeCommittedWindowWake(Sequence generation,Sequence suspendSerial) {
+        std::lock_guard lock(mutex_);
+        if(!committedWindowWake_||generation!=lastCommittedWakeGeneration_||suspendSerial!=lastCommittedWakeSuspendSerial_)return false;
+        committedWindowWake_=false;
+        return true;
     }
     bool takeCommittedWake() {
         std::lock_guard lock(mutex_);

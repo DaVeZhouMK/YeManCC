@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import AppIcon from '@/components/AppIcon.vue';
 import GameValueScanner from '@/components/GameValueScanner.vue';
-import { isGameValueScanAvailable } from '@/bridge/gameValueScan';
+import { isGameValueScanAvailable, getGameValueSessionTarget } from '@/bridge/gameValueScan';
 import type { DetectedGame } from '@/bridge/gamedetect';
 import { captureAndLockGameTarget, type LockedGameTarget } from '@/bridge/gameQuickSession';
 import { focusGamepadElement, getGamepadPopupPlacement, getGamepadViewportSafeArea } from '@/gamepad/focus';
@@ -110,10 +110,10 @@ async function openCe(): Promise<void> {
   finally { opening.value = false; }
 }
 async function openScanner(): Promise<void> {
-  if (opening.value || !props.game || !ceScanAvailable.value) return;
+  if (opening.value || (!props.game && !getGameValueSessionTarget()) || !ceScanAvailable.value) return;
   opening.value = true;
   try {
-    const target = await captureAndLockGameTarget(props.game);
+    const target = getGameValueSessionTarget() || await captureAndLockGameTarget(props.game);
     if (!target) throw new Error('当前游戏已退出，请重新获取游戏');
     scanTarget.value = target;
   } catch (error) { emit('status', { error: (error as Error).message }); }
@@ -157,7 +157,7 @@ onBeforeUnmount(() => {
           <AppIcon :name="busy ? 'close' : 'play'" /><span><strong>{{ launchLabel }}</strong><small>{{ hint }}</small><small v-if="error || message" class="trainer-menu-result" :class="{ 'trainer-menu-error': error }" role="status" aria-live="polite">{{ error || message }}</small></span>
         </button>
         <button type="button" class="trainer-menu-action" data-gp-row="1" data-gp-col="0" :disabled="opening" @click="openManager"><AppIcon name="folder" /><span><strong>打开修改器管理器</strong><small>Game Cheats Manager</small></span></button>
-        <button v-if="ceScanAvailable" type="button" class="trainer-menu-action" data-gp-row="2" data-gp-col="0" data-trainer-value-scan :disabled="!game || opening" @click="openScanner"><AppIcon name="search" /><span><strong>简单改数值</strong><small>填数字 · 变化一次 · 一起修改</small></span></button>
+        <button v-if="ceScanAvailable" type="button" class="trainer-menu-action" data-gp-row="2" data-gp-col="0" data-trainer-value-scan :disabled="(!game && !getGameValueSessionTarget()) || opening" @click="openScanner"><AppIcon name="search" /><span><strong>简单改数值</strong><small>填数字 · 变化一次 · 一起修改</small></span></button>
         <button type="button" class="trainer-menu-action" data-gp-row="3" data-gp-col="0" data-trainer-ce :disabled="opening" @click="openCe"><AppIcon name="bolt" /><span><strong>启动 Cheat Engine</strong><small>与修改器管理器共用 CE 配置</small></span></button>
         <button type="button" class="trainer-menu-action" data-gp-row="4" data-gp-col="0" :disabled="saving" :aria-pressed="autoEnabled" @click="toggleAuto"><AppIcon name="rotate" /><span><strong>{{ autoEnabled ? '关闭自动下载修改器' : '开启自动下载修改器' }}</strong><small>{{ autoEnabled ? '识别游戏后，在额度内后台下载' : '自动下载已关闭' }}</small></span></button>
         </div>

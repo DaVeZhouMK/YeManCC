@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {createHash,randomUUID} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {calibrationToolchainPreamble} from '../hc_reviewed_calibration/toolchain.mjs';
-import {toolInputs} from '../../ymcc_sim/global/controller-signal-evidence/adapter.mjs';
+import {readNativeExitTools} from '../../ymcc_sim/global/controller-host-exit/tool-profile.mjs';
 import {consumerEnvironment} from '../../ymcc_sim/global/controller-signal-evidence/environment.mjs';
 import {createOwnedWorkspace} from '../../ymcc_sim/global/controller-signal-evidence/owned-workspace.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url)),repo=path.resolve(here,'../../..');
@@ -19,7 +19,7 @@ fs.mkdirSync(out,{recursive:true});
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const source=path.join(repo,'native/dsu_server.cpp'),fixture=path.join(here,'native.cpp');
 const result={schema:1,status:'RUNNING',at:new Date().toISOString(),repo,evidence:out,sources:[],runs:[],limitations:[
-    'Existing std::thread::join has no arbitrary blocking deadline. Queries can wait behind lifecycleMx and that join.',
+    'Stop requests are nonblocking. Only a signalled thread handle allows join and cleanup; the fixture observes completion in the existing two-second window.',
     'Software-only DSU resource ownership proof. No main.cpp typed capture receipt integration, full app, installation, devices, drivers, services, real sleep or export.',
     'Private API failures are injected before calling real valid resources; no invalid real handle operations.',
     'Thread construction exception unwind is compiled but not forced. A hung worker or failed stop-event signal has no bounded-stop proof.',
@@ -43,7 +43,25 @@ function requireSuccess(run){if(run.exitCode!==0||run.error)throw Error('Command
 try{
     bind(source);bind(path.join(repo,'native/dsu_server.h'));bind(fixture);bind(fileURLToPath(import.meta.url));
     bind(path.resolve(here,'../hc_reviewed_calibration/toolchain.mjs'));
-    const tools=toolInputs(repo),primary=tools.primary;
+    for(const relative of ['controller-host-exit/tool-profile.mjs','controller-host-exit/tool-profile.json',
+        'controller-signal-evidence/tool-inputs.json','controller-signal-evidence/environment.mjs',
+        'controller-signal-evidence/owned-workspace.mjs','decky-update-recovery/native-launch-noio/native-tools.json']){
+        bind(path.join(repo,'tools/ymcc_sim/global',relative));
+    }
+    const tools=readNativeExitTools(repo),primary=tools.primary;
+    // Git is only used to tag the source receipt. Keep the reviewed portable
+    // launcher and the executable it delegates to in the same identity gate.
+    const gitRoot=path.resolve(repo,'../../../Environment/Toolchains/Git/2.56.0.4');
+    primary.git=path.join(gitRoot,'cmd/git.exe');
+    const gitCore=path.join(gitRoot,'ucrt64/bin/git.exe');
+    const gitTools=[{path:primary.git,sha256:'20d0dde30a65afb6e5810a883700a94dcd77fbf3b44b32868d45bf7c9b30137c'},
+        {path:gitCore,sha256:'9c75f3f41eb5686bacde4b7c4fdfcd7970e8b699ee05c8d7a0cc9c8a7ddaffe8'}];
+    for(const item of gitTools){
+        if(fs.realpathSync.native(item.path).toLowerCase()!==item.path.toLowerCase()||identity(item.path).sha256!==item.sha256)
+            throw Error('DSU_GIT_TOOL_IDENTITY:'+item.path);
+        bind(item.path);
+    }
+    tools.files.push(...gitTools);
     const workspace=createOwnedWorkspace({repo,output:out,primary}),owned=workspace.allocate('dsu-tools');
     const cleanEnv={...consumerEnvironment({ambient:process.env,tools,out,nodeExecutable:process.execPath}),TEMP:owned.temp,TMP:owned.temp};
     const toolIdentities=()=>Object.entries(primary).map(([role,p])=>{
@@ -82,7 +100,7 @@ try{
         {name:'public-Release',configuration:'Release',public:true},
         {name:'private-Debug',configuration:'Debug'},
         {name:'private-Release',configuration:'Release'},
-        {name:'negative-running-only',configuration:'Debug',needle:'return !running.load(std::memory_order_acquire)&&!serverThread.joinable()&&resourcesClosed();',replacement:'return !running.load(std::memory_order_acquire);',expectedCase:'running-false-with-exited-unjoined-thread'},
+        {name:'negative-running-only',configuration:'Debug',needle:'return !running.load(std::memory_order_acquire)&&!serverThread.joinable()&&resourcesClosed();',replacement:'return !running.load(std::memory_order_acquire);',expectedCase:'running-false-with-exited-unjoined-thread',args:['--exited-unjoined-only']},
         {name:'negative-discard-socket-owner',configuration:'Debug',needle:'if(serverSocket!=INVALID_SOCKET&&closesocket(serverSocket)==0)serverSocket=INVALID_SOCKET;',replacement:'if(serverSocket!=INVALID_SOCKET){closesocket(serverSocket);serverSocket=INVALID_SOCKET;}',expectedCase:'stop-failure-retains-closesocket'}
     ];
     for(const variant of variants){
@@ -98,7 +116,7 @@ try{
         const flags=variant.configuration==='Debug'?['/Od','/Zi','/MDd']:['/O2','/MD','/DNDEBUG'];
         const args=['/nologo','/std:c++20','/EHsc','/utf-8','/W4','/permissive-',...flags,...defines,'/I'+path.join(repo,'native'),...inputs,'/Fo'+dir+path.sep,'/Fd'+path.join(dir,'consumer.pdb'),'/Fe'+exe,'/link','ws2_32.lib','/INCREMENTAL:NO'];
         const compile=invoke(primary.compiler,args,dir,path.join(dir,'compile.log'),env);const row={name:variant.name,configuration:variant.configuration,expected:variant.expectedCase?'ASSERTION_FAILURE':'PASS',compile:{...compile,text:undefined},mutation:variant.mutation};result.runs.push(row);save();requireSuccess(compile);
-        row.binary=identity(exe);const runtime=invoke(exe,[],dir,path.join(dir,'run.log'),env,20000);row.runtime={...runtime,text:undefined};
+        row.binary=identity(exe);const runtime=invoke(exe,variant.args??[],dir,path.join(dir,'run.log'),env,20000);row.runtime={...runtime,text:undefined};
         row.events=runtime.text.split(/\r?\n/).filter(line=>line.startsWith('{')).map(line=>JSON.parse(line));
         if(variant.expectedCase){
             const failed=row.events.find(event=>event.status==='FAIL');

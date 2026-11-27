@@ -6,12 +6,14 @@
 #include <mutex>
 #include <string>
 #include "sleep_power_state.h"
+#include "steam_qam_origin.h"
 namespace ymcc::qamfollowup {
 using Json=nlohmann::json;
 inline constexpr UINT_PTR kTimerId=0x594D5141;
 inline constexpr ULONGLONG kWindowMs=3000,kIntervalMs=750;
+enum class OriginalRoute { Pending, SteamContext, GameOverlay };
 struct Ticket {unsigned long long generation=0;ULONGLONG started=0,startedAt=0,power=0;bool deck=false;std::string id;
-    ymcc::sleeppower::SharedPowerV1 powerScope;};
+    ymcc::sleeppower::SharedPowerV1 powerScope;NativeSteamQamOrigin origin;OriginalRoute route=OriginalRoute::Pending;};
 inline std::atomic<unsigned long long> generation{1};
 inline std::atomic<bool> pending{false},done{true};
 inline std::mutex mutex;
@@ -37,7 +39,7 @@ inline void abandon(const Ticket& t) {
     if(t.generation!=generation.load(std::memory_order_acquire))return;
     done.store(true,std::memory_order_release);pending.store(false,std::memory_order_release);
 }
-inline void complete(const Ticket& t,const Json& result) {
+inline void complete(const Ticket& t,const Json& result,bool original=false) {
     std::lock_guard<std::mutex> lock(mutex);
     if(t.generation!=generation.load(std::memory_order_acquire))return;
     // A malformed remote acknowledgment must not throw through the original
@@ -61,11 +63,20 @@ inline void complete(const Ticket& t,const Json& result) {
             }
         }
     }
+    if(keep&&original){
+        const auto delivered=result.find("keyDelivered"),target=result.find("menuTarget");
+        keep=delivered!=result.end()&&*delivered==true&&target!=result.end()&&target->is_object();
+        if(keep){
+            const auto source=target->find("source");
+            keep=source!=target->end()&&source->is_string();
+            if(keep)current.route=*source=="steam-proven-game-overlay"?OriginalRoute::GameOverlay:OriginalRoute::SteamContext;
+        }
+    }
     if(!keep)done.store(true,std::memory_order_release);
     pending.store(false,std::memory_order_release);
 }
 inline void launch(const Ticket& t,const char* operation,bool supplement) {
-    if(!valid(t))return;
+    if(!valid(t)||(supplement&&t.route==OriginalRoute::Pending))return;
     {std::lock_guard<std::mutex> lock(mutex);
      if(t.generation!=generation.load()||done.load()||pending.load())return;
      pending.store(true,std::memory_order_release);}
@@ -80,9 +91,11 @@ inline void CALLBACK timerProc(HWND window,UINT,UINT_PTR id,DWORD) {
     if(!valid(t)){cancel();++finishedCount;return;}
     launch(t,"menu.qam.retry",true);
 }
-inline void begin(HWND owner,bool deck,ULONGLONG power,const ymcc::sleeppower::SharedPowerV1* captured=nullptr) {
+inline void begin(HWND owner,bool deck,ULONGLONG power,const ymcc::sleeppower::SharedPowerV1* captured=nullptr,
+                  const NativeSteamQamOrigin& origin={}) {
     cancel();Ticket t;t.generation=generation.load();t.started=GetTickCount64();t.startedAt=unixMilliseconds();t.deck=deck;t.power=power;
     if(captured)t.powerScope=*captured;
+    t.origin=origin;
     t.id=std::to_string(GetCurrentProcessId())+"-"+std::to_string(t.generation)+"-"+std::to_string(t.started);
     {std::lock_guard<std::mutex> lock(mutex);current=t;}
     done.store(false,std::memory_order_release);++startedCount;

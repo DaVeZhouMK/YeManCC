@@ -4,6 +4,7 @@ param(
  [ValidateRange(0,2147483647)][int]$TargetProcessId=0,
  [ValidateSet('YeManCC.exe','YeManInputHost.exe')][string]$TargetImageName='YeManCC.exe',
  [switch]$FullDuration,
+ [switch]$PeakSweep,
  [ValidateRange(0.01,100)][double]$TriggerPercent=0.30,
  [ValidateRange(10,600)][int]$MaximumSeconds=360,
  [ValidateRange(1,10)][int]$TailSeconds=1,
@@ -17,6 +18,12 @@ param(
  [string]$OutputRoot=''
 )
 $ErrorActionPreference='Stop'
+if($PeakSweep){
+ if(!$PSBoundParameters.ContainsKey('MaximumSeconds')){$MaximumSeconds=20}
+ if($MaximumSeconds -gt 60){throw 'PeakSweep recording is limited to 60 seconds.'}
+ $ProfileMode='Scheduling'
+ $FileMode=$true
+}
 if($ProfileMode -eq 'FileIO' -and -not $FileMode){throw 'FileIO diagnosis requires explicit -FileMode; memory history is not used for this high-volume profile.'}
 $taskEvidenceRoot=[IO.Path]::GetFullPath($EvidenceRoot)
 if(-not [IO.Directory]::Exists($taskEvidenceRoot)){throw 'EvidenceRoot must be an existing development evidence directory.'}
@@ -91,6 +98,7 @@ try{
   return
  }
  if(!$taskIsAdmin){throw 'Windows CPU stack profiling requires an elevated Administrator PowerShell here; no elevation or recording was attempted. Run this same script with -Mode Capture from an Administrator PowerShell.'}
+ if($PeakSweep -and !($taskProbe.wprStatus -match '^WPR is not recording\s*$')){throw 'WPR is not confirmed idle; no recording started.'}
  $taskInstance='YMCC-CPU-'+$taskRunId
  $taskProbe['instanceName']=$taskInstance;$taskProbe['triggerPercent']=$TriggerPercent;$taskProbe['maximumSeconds']=$MaximumSeconds;$taskProbe['tailSeconds']=$TailSeconds
  Write-Json $taskProbe (Join-Path $taskRunPath 'IDENTITY.json')
@@ -98,6 +106,7 @@ try{
  $taskProbe['warmupSeconds']=$WarmupSeconds
  $taskProbe['targetImageName']=$TargetImageName
  $taskProbe['fullDuration']=[bool]$FullDuration
+ $taskProbe['peakSweep']=[bool]$PeakSweep
  $taskProbe['expectedIdentityPath']=$ExpectedIdentityPath
  $taskProbe['expectedBirthFileTime']=$ExpectedBirthFileTime
  Write-Json $taskProbe (Join-Path $taskRunPath 'IDENTITY.json')
@@ -108,6 +117,19 @@ try{
  if($taskStartExitCode -ne 0){throw "WPR start failed: $taskStartExitCode; no stop/cancel will be sent"}
  $taskOwnStarted=$true
  $taskClock=[Diagnostics.Stopwatch]::StartNew();$taskObserver=[Diagnostics.Process]::GetCurrentProcess();$taskObserverCpuStart=$taskObserver.TotalProcessorTime.TotalMilliseconds
+ if($PeakSweep){
+  Start-Sleep -Milliseconds 750
+  $begin=[DateTime]::UtcNow
+  $watch=[Diagnostics.Stopwatch]::StartNew()
+  Start-Sleep -Seconds $MaximumSeconds
+  $end=[DateTime]::UtcNow
+  if([Math]::Abs(($end-$begin).TotalMilliseconds-$watch.Elapsed.TotalMilliseconds) -gt 50){throw 'PeakSweep UTC clock changed during the recording.'}
+  Start-Sleep -Milliseconds 750
+  $final=Read-TargetTimes
+  $hash=(Get-FileHash -LiteralPath $taskImage -Algorithm SHA256).Hash.ToLowerInvariant()
+  if(!$final.alive -or $final.birthFileTime -cne $taskInitial.birthFileTime -or $hash -cne $taskProbe.diskImageSha256){throw 'PeakSweep target identity changed.'}
+  Write-Json ([ordered]@{beginUtc=$begin.ToString('o');endUtc=$end.ToString('o');pid=$TargetProcessId;birthFileTime=$final.birthFileTime;diskImageSha256=$hash;heldAlive=$true;profileMode=$ProfileMode;formatVersion=1}) (Join-Path $taskRunPath 'PEAK-SWEEP-WINDOW.json')
+ }else{
  $taskWriter=[IO.StreamWriter]::new((Join-Path $taskRunPath 'CPU.jsonl'),$false,[Text.UTF8Encoding]::new($false))
  $taskSamples=[Collections.Generic.Queue[object]]::new();$taskTrigger=$null;$taskReason=if($FullDuration){'FIXED_DURATION'}else{'DEADLINE_WITHOUT_THRESHOLD'};$taskSequence=0
  while($taskClock.Elapsed.TotalSeconds -lt $MaximumSeconds){
@@ -127,6 +149,7 @@ try{
  $taskFinalImageSha256=(Get-FileHash -LiteralPath $taskImage -Algorithm SHA256).Hash.ToLowerInvariant()
  $taskObserver.Refresh();$taskCollectorMs=$taskObserver.TotalProcessorTime.TotalMilliseconds-$taskObserverCpuStart
  Write-Json ([ordered]@{finishedUtc=[DateTime]::UtcNow.ToString('o');reason=$taskReason;finalTargetIdentity=$taskFinalIdentity;finalDiskImageSha256=$taskFinalImageSha256;finalHeldBirthVerified=($taskFinalIdentity.birthFileTime -ceq $taskInitial.birthFileTime);finalHeldAliveVerified=$taskFinalIdentity.alive;profileMode=$ProfileMode;sampleCount=$taskSequence+1;elapsedMs=$taskClock.Elapsed.TotalMilliseconds;trigger=$taskTrigger;collectorPid=$taskObserver.Id;collectorCpuMs=$taskCollectorMs;collectorMachineCpuPercent=$taskCollectorMs/$taskClock.Elapsed.TotalMilliseconds/[Environment]::ProcessorCount*100;limitations=@('Own collector CPU excludes ETW kernel/stack-walking and WPR start/stop costs.','Whole-system ETW has observation overhead. Sampled stacks locate running work; context-switch stacks locate scheduling edges.','Memory-mode retention depends on event rate; inspect ETL lost events and peak-window retention before accepting.','A saved ETL is not evidence of source-line resolution until module/PDB identities and sampled frames are checked.');candidateCpuAcceptance=$false}) (Join-Path $taskRunPath 'CAPTURE.json')
+ }
 }catch{$taskFailure=$_.Exception.Message;throw}
 finally{
  if($taskWriter){$taskWriter.Dispose()}

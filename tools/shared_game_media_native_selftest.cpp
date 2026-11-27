@@ -18,7 +18,29 @@ static unsigned long long threadCpu(){FILETIME c{},e{},k{},u{};constantCheck(Get
 static Json constantEntry(int id){return {{"key","steam-"+std::to_string(id)},{"appId",id},{"bindingRevision",4},{"status","missing"},{"name","Fixture "+std::to_string(id)},{"assets",Json::object()},{"manualSlots",Json::object()},{"deletedSlots",Json::object()},{"invalidSlots",Json::object()},{"playback",{{"start",8},{"end",38},{"fit","cover"}}},{"playbackExplicit",false},{"modeExplicit",false},{"wallpaperMode","static"},{"unknownField",{{"preserved",true}}}};}
 static std::string constantReadBytes(const fs::path& p){std::ifstream f(p,std::ios::binary);return {std::istreambuf_iterator<char>(f),{}};}
 int wmain(int argc,wchar_t** argv){try{
- constantCheck(argc==2||(argc==3&&std::wstring_view(argv[2])==L"--default-ownership-only"),"fresh owned root and known selection required");const fs::path root=fs::absolute(argv[1]);constantCheck(!fs::exists(root),"owned root must be fresh");fs::create_directories(root);Store store(root);const auto index=root/L"config"/L"game-media.json";Json costs=Json::array(),semantics=Json::array();
+ const auto selection=argc==3?std::wstring_view(argv[2]):std::wstring_view{};
+ constantCheck(argc==2||selection==L"--default-ownership-only"||selection==L"--playback-start-mode-only","fresh owned root and known selection required");const fs::path root=fs::absolute(argv[1]);constantCheck(!fs::exists(root),"owned root must be fresh");fs::create_directories(root);Store store(root);const auto index=root/L"config"/L"game-media.json";Json costs=Json::array(),semantics=Json::array();
+
+ if(selection==L"--playback-start-mode-only"){
+  auto source=constantEntry(570);const auto control=constantEntry(571);
+  atomicWrite(index,{{"schemaVersion",1},{"entries",{{"steam-570",source},{"steam-571",control}}}});
+  const auto identity=Json{{"appId",570}};
+  constantCheck(store.resolve(identity)["playback"]==source["playback"],"legacy playback reads unchanged");
+  auto request=Json{{"action","playback"},{"key","steam-570"},{"bindingRevision",source["bindingRevision"]},{"start",8},{"end",38},{"fit","contain"},{"startMode","from-start"}};
+  const auto fromStart=store.edit(request);
+  constantCheck(fromStart["playback"]==Json{{"start",8},{"end",38},{"fit","contain"},{"startMode","from-start"}},"from-start changes only mode and requested fit");
+  constantCheck(Store(root).resolve(identity)["playback"]==fromStart["playback"],"fresh native reader gets saved mode from disk");
+  request.erase("startMode");request["end"]=68;request["bindingRevision"]=fromStart["bindingRevision"];
+  const auto oldEdit=store.edit(request);
+  constantCheck(oldEdit["playback"]==Json{{"start",8},{"end",68},{"fit","contain"},{"startMode","from-start"}},"old editor request preserves start mode");
+  const auto saved=constantReadBytes(index);bool rejected=false;request["startMode"]="invalid-mode";request["bindingRevision"]=oldEdit["bindingRevision"];
+  try{store.edit(request);}catch(const std::exception& ex){rejected=std::string_view(ex.what())=="media-playback-start-mode-invalid";}
+  constantCheck(rejected&&constantReadBytes(index)==saved,"invalid mode is rejected without disk mutation");
+  request["startMode"]="random";const auto random=store.edit(request);
+  constantCheck(random["playback"]==Json{{"start",8},{"end",68},{"fit","contain"}},"restoring random yields the legacy representation");
+  constantCheck(store.resolve({{"appId",571}})["playback"]==control["playback"],"no change to another game");
+  std::cout<<Json({{"status","PASS_PLAYBACK_START_MODE_ONLY"},{"checks",constantChecks},{"networkOrAppControl",false}}).dump()<<'\n';return 0;
+ }
 
  if(argc==3){
   auto entry=constantEntry(570);entry.erase("playback");entry.erase("playbackExplicit");auto second=entry;second["key"]="steam-571";second["appId"]=571;atomicWrite(index,{{"schemaVersion",1},{"entries",{{"steam-570",entry},{"steam-571",second}}}});const auto disk=constantReadBytes(index);

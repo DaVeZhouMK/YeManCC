@@ -17,6 +17,14 @@ static std::vector<std::string> scopeEvents,feedbackEvents,diagnosticEvents;
 static std::atomic<unsigned long long> g_c17aOwnedEvents{0},g_c17aParityChecks{0},g_c17aParityFailures{0};
 static bool tickCostEnabled(){const bool value=scriptedGate ? ((gateMask>>(gateCalls%4))&1u)!=0 : gate;++gateCalls;return value;}
 static unsigned long long currentPowerGeneration(){return 17;}
+#ifdef YMCC_GENERIC_EVENT_WIRE_REUSE
+enum class PowerLifecycle : uint8_t { Ready, Suspending, Suspended, Resuming };
+static ymcc::sleeppower::SharedPowerV1 fixtureReadbackPower;
+[[maybe_unused]] static int readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* output,uint32_t) noexcept{
+ if(!fixtureReadbackPower.generation)return 0;
+ *output=fixtureReadbackPower;return 1;
+}
+#endif
 static void nativeShortcutFeedbackFromResult(const std::string& ev,const json&){if(observing)feedbackEvents.push_back(ev);}
 static void appendNativeLifecycleLog(const char* ev,const json&){if(observing)diagnosticEvents.emplace_back(ev);}
 struct UiCostIpcScope{explicit UiCostIpcScope(const char* ev){if(observing)scopeEvents.emplace_back(ev);}};
@@ -52,4 +60,7 @@ static void reset(int targets,bool logOn,bool deadOnly=false){
  observing=true;gate=logOn;scriptedGate=false;gateMask=0;gateCalls=0;conversions=0;deliveryDumps=0;postCalls=0;throwAtPost=-1;failConversionAt=-1;conversionApiCalls=0;partialConversionFailure=false;failConversionCalls.clear();
  postHook=nullptr;resolutions.clear();posts.clear();scopeEvents.clear();feedbackEvents.clear();diagnosticEvents.clear();
  g_c17aOwnedEvents=0;g_c17aParityChecks=0;g_c17aParityFailures=0;
+#ifdef YMCC_GENERIC_EVENT_WIRE_REUSE
+ fixtureReadbackPower={};
+#endif
 }

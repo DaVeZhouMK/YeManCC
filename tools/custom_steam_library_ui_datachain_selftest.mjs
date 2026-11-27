@@ -111,6 +111,9 @@ for (const name of ['normalizedUiPath', 'escapeHtml', 'initials', 'artworkMarkup
 const artworkBegin = source.indexOf('function artworkOverride(');
 const artworkEnd = source.indexOf('function artworkDropMarkup(', artworkBegin);
 vm.runInContext(source.slice(artworkBegin, artworkEnd), artworkContext);
+const artworkDraftStart = source.indexOf('function artworkDraftFromGame(');
+const artworkDraftEnd = source.indexOf('\nfunction ', artworkDraftStart + 1);
+vm.runInContext(source.slice(artworkDraftStart, artworkDraftEnd), artworkContext);
 const autoGame = () => ({ steam: { status: 'waiting-steam-verification', artworkPreview: {
   tall: { url: 'https://fixture.invalid/auto-cover.png', provider: 'playnite-igdb' },
   long: { url: 'https://fixture.invalid/auto-long.png', provider: 'baidu-image' },
@@ -118,12 +121,37 @@ const autoGame = () => ({ steam: { status: 'waiting-steam-verification', artwork
 } } });
 run('no-steamid-igdb-and-baidu-artwork-is-visible', () => { const game = autoGame(); for (const slot of ['cover', 'long', 'wallpaper']) assert.equal(artworkContext.artworkEntry(game, slot).priority, 'automatic'); assert.match(artworkContext.artworkMarkup(game, 'Fixture'), /<img/); });
 run('manual-file-cover-wins-grid-and-editor', () => { const game = autoGame(); game.override = { cover: { portableFile: 'G:\\Fixture\\data\\manual.png', file: 'G:\\OldJob\\gone.png' } }; assert.equal(artworkContext.artworkEntry(game, 'cover').priority, 'manual'); assert.match(artworkContext.artworkMarkup(game, 'Fixture'), /manual.png/); });
+run('verified-same-choice-original-wins-in-list-and-editor-without-changing-the-saved-path', () => {
+  const game = autoGame();
+  const cover = { file: 'G:\\Original\\chosen.png', portableFile: 'G:\\Fixture\\data\\broken.png', updatedAt: 42 };
+  game.override = { cover, artworkProtection: { cover: 'manual' } };
+  game.steam.artworkPreview.tall = { provider: 'manual-override', source: 'manual', portableFile: 'G:\\Fixture\\data\\recovered.png', manualRecovery: { ...cover } };
+  assert.match(artworkContext.artworkMarkup(game, 'Fixture'), /recovered.png/);
+  const slot = artworkContext.artworkDraftFromGame(game).cover;
+  assert.match(artworkContext.artworkPreviewUrl(slot.previewAsset || slot.asset), /recovered.png/);
+  assert.equal(slot.asset.path, cover.file);
+  assert.equal(slot.asset.portableFile, cover.portableFile);
+  game.override.cover.updatedAt++;
+  assert.match(artworkContext.artworkMarkup(game, 'Fixture'), /broken.png/);
+  assert.equal(artworkContext.artworkDraftFromGame(game).cover.previewAsset, undefined);
+  game.override.artworkProtection.cover = 'deleted';
+  assert.equal(artworkContext.artworkEntry(game, 'cover'), null);
+  assert.equal(artworkContext.artworkDraftFromGame(game).cover.state, 'deleted');
+});
 run('manual-cover-does-not-hide-automatic-background', () => { const game = autoGame(); game.override = { cover: { url: 'https://fixture.invalid/manual.png' } }; assert.equal(artworkContext.artworkEntry(game, 'wallpaper').priority, 'automatic'); assert.equal(artworkContext.artworkEntry(game, 'long').priority, 'automatic'); });
 run('manual-wallpaper-does-not-hide-automatic-cover', () => { const game = autoGame(); game.override = { wallpaper: { url: 'https://fixture.invalid/manual.png' } }; assert.equal(artworkContext.artworkEntry(game, 'cover').priority, 'automatic'); assert.equal(artworkContext.artworkEntry(game, 'wallpaper').priority, 'manual'); });
 run('manual-deletion-wins-over-stale-manual-and-auto-assets', () => { const game = autoGame(); game.override = { cover: { url: 'https://fixture.invalid/manual.png' }, artworkProtection: { cover: 'deleted' } }; assert.equal(artworkContext.artworkEntry(game, 'cover'), null); assert.doesNotMatch(artworkContext.artworkMarkup(game, 'Fixture'), /<img/); });
 run('missing-manual-file-falls-back-to-automatic-preview', () => { const game = autoGame(); game.override = { cover: { available: false, portableFile: 'G:\\Fixture\\data\\missing.png' }, artworkProtection: { cover: 'manual' } }; assert.equal(artworkContext.artworkEntry(game, 'cover').priority, 'automatic'); });
 run('automatic-preview-wins-over-initials', () => assert.match(artworkContext.artworkMarkup(autoGame(), 'Fixture'), /auto-cover.png/));
 run('no-image-uses-initials-without-throwing', () => { assert.equal(artworkContext.artworkEntry({}, 'cover'), null); assert.equal(artworkContext.artworkMarkup({}, 'Fixture Game'), 'FG'); });
+run('same-path-steam-grid-artwork-uses-the-current-revision', () => {
+  const copy = { portableFile: String.raw`G:\Fixture\data\cover.png`, provider: 'steam-grid-existing' };
+  const before = artworkContext.artworkPreviewUrl({ ...copy, previewRevision: '7-1-1-2-3' });
+  const after = artworkContext.artworkPreviewUrl({ ...copy, previewRevision: '7-2-1-3-3' });
+  assert.match(before, /[?]v=7-1-1-2-3$/);
+  assert.match(after, /[?]v=7-2-1-3-3$/);
+  assert.match(artworkContext.artworkPreviewUrl({ ...copy, updatedAt: 200 }), /[?]v=200$/);
+});
 run('portable-local-copy-wins-over-dead-download-url', () => assert.match(artworkContext.artworkPreviewUrl({ portableFile: 'G:\\Fixture\\data\\saved.png', url: 'https://fixture.invalid/dead.png' }), /steam-library-data.localhost\/saved.png/));
 run('legacy-manual-artwork-uses-the-same-priority', () => { const game = autoGame(); game.override = { artwork: { cover: { url: 'https://fixture.invalid/legacy.png' } } }; assert.match(artworkContext.artworkMarkup(game, 'Fixture'), /legacy.png/); });
 run('artwork-source-priority-1000-slot-combinations', () => {
@@ -175,6 +203,7 @@ const mergeBegin=source.indexOf('function defaultSelectedDirectories('),mergeEnd
 assert(mergeBegin>=0&&mergeEnd>mergeBegin,'Missing production library merge boundaries');
 vm.runInContext(source.slice(mergeBegin,mergeEnd),mergeContext);
 mergeContext.isBuiltinExcludedSteamTool=context.isBuiltinExcludedSteamTool;
+mergeContext.isWorkspaceRecord=context.isWorkspaceRecord;
 for(const name of ['formalSteamAppId','confirmedMediaAppId','pageSelectable','pageSelectionKeys','isPageSelected']){
  const line=source.split(/\r?\n/).find(value=>value.startsWith('function '+name+'('));assert(line,'Missing production '+name);
  if(name==='pageSelectionKeys'){const begin=source.indexOf('function pageSelectionKeys('),end=source.indexOf('\nfunction defaultPageKeys(',begin);assert(end>begin);vm.runInContext(source.slice(begin,end),mergeContext);}else vm.runInContext(line,mergeContext);
@@ -265,6 +294,63 @@ run('changed-primary-does-not-inherit-old-directory-plan-or-media',()=>{
 run('directory-plan-without-an-executable-retains-legacy-display-fallback',()=>{
  const state=mergeFixture(1);delete state.steamPlan.items[0].primaryExecutable;mergeContext.snapshot=state;assert.equal(mergeContext.mergedGames()[0].steam.appId,1000);
 });
+function ownedDirectoryAliasFixture(){
+ const state=mergeFixture(1),game=state.library.games[0],row=state.steamPlan.items[0],old=game.gameDirectory;
+ game.gameDirectory=old+'/bin';game.primaryExecutable=old+'/bin/game.exe';
+ game.alternateGameDirectories=[old.toUpperCase().replaceAll('/','\\')+'\\',old];
+ Object.assign(row,{primaryExecutable:game.primaryExecutable,status:'already-in-steam',shortAppId:'3221225473',longAppId:'13835058059610685440'});
+ state.gameMedia.entries={};
+ return {state,game,row,old};
+}
+run('steam-card-conflict-blocks-selection-without-clearing-store-identity',()=>{
+ const state=mergeFixture(2),first=state.library.games[0],row=state.steamPlan.items[0];
+ Object.assign(row,{identityStatus:'verified',steamVerificationStatus:'steam-verified',status:'shortcut-id-conflict'});
+ state.config.manualBuckets={[mergeContext.keyFor(first)]:{bucket:'not-in-steam'}};
+ const matches=mergeContext.librarySidebarMatches;
+ mergeContext.librarySidebarMatches=()=>true;
+ try {
+  mergeContext.snapshot=state;
+  for(const status of ['shortcut-id-conflict','shortcut-id-collision']) {
+   row.status=status;
+   const conflict=mergeContext.mergedGames()[0];
+   assert.equal(mergeContext.confirmedMediaAppId(conflict),'1000');
+   assert.equal(mergeContext.category(conflict),'unclassified');
+   assert.equal(mergeContext.pageSelectable(conflict,'unclassified'),false);
+   mergeContext.activeTab='unclassified';mergeContext.selectedCategoryDirectories.unclassified=new Set([mergeContext.keyFor(first)]);
+   assert.equal(mergeContext.selectedCommitDirectories().length,0);
+  }
+  row.status='ready-to-add';mergeContext.activeTab='not-in-steam';mergeContext.selectedGameDirectories=null;
+  assert(mergeContext.selectedCommitDirectories().includes(mergeContext.keyFor(first)));
+ } finally {
+  mergeContext.activeTab='not-in-steam';mergeContext.selectedCategoryDirectories.unclassified=new Set();
+  mergeContext.librarySidebarMatches=matches;
+ }
+});
+run('confirmed-directory-alias-keeps-owned-card-and-current-selection',()=>{
+ const {state,game,row}=ownedDirectoryAliasFixture();
+ const before=JSON.stringify(state);mergeContext.snapshot=normalize(state,{});const card=mergeContext.mergedGames()[0];
+ assert.equal(card.steam.status,'already-in-steam');assert.equal(mergeContext.category(card),'in-steam');
+ assert.equal(card.steam.shortAppId,row.shortAppId);assert.equal(card.steam.longAppId,row.longAppId);
+ assert.equal(mergeContext.keyFor(card),mergeContext.normalizedUiPath(game.gameDirectory));assert.equal(JSON.stringify(state),before);
+});
+for (const variant of ['no-alias','other-exe','pending','native-source','new-plan','new-conflict','duplicate-source','duplicate-claim','live-source','two-old-cards','host-merged-plan']) {
+ run(`directory-alias-does-not-borrow-${variant}`,()=>{
+  const {state,game,row,old}=ownedDirectoryAliasFixture();
+  if(variant==='no-alias')delete game.alternateGameDirectories;
+  if(variant==='other-exe')row.primaryExecutable=old+'/different.exe';
+  if(variant==='pending')row.status='ready-to-add';
+  if(variant==='native-source')row.steamNative=true;
+  if(variant==='new-plan'||variant==='new-conflict')state.steamPlan.items.push({...row,gameDirectory:game.gameDirectory,shortAppId:undefined,status:variant==='new-plan'?'ready-to-add':'shortcut-id-conflict'});
+  if(variant==='duplicate-source')state.steamPlan.items.push({...row,shortAppId:'3221225474'});
+  if(variant==='duplicate-claim')state.library.games.push({...game,gameDirectory:old+'/runtime',directoryName:'Second claim'});
+  if(variant==='live-source')state.library.games.push({...game,gameDirectory:old,primaryExecutable:old+'/other.exe',directoryName:'Other game'});
+  if(variant==='two-old-cards'){game.alternateGameDirectories.push(old+'/another');state.steamPlan.items.push({...row,gameDirectory:old+'/another',shortAppId:'3221225474'});}
+  if(variant==='host-merged-plan')row.alternateGameDirectories=[game.gameDirectory];
+  mergeContext.snapshot=variant==='duplicate-claim'?state:normalize(state,{});const card=mergeContext.mergedGames().find(item=>item.gameDirectory===game.gameDirectory);
+  assert(!['already-in-steam','added-to-steam'].includes(card.steam.status));assert.equal(card.steam.shortAppId,undefined);
+  if(variant==='new-plan'||variant==='new-conflict')assert.equal(card.steam.status,variant==='new-plan'?'ready-to-add':'shortcut-id-conflict');
+ });
+}
 function manualRefreshFixture() {
   let listener, invokeCount=0, refreshCount=0;
   const notices=[], requests=[];

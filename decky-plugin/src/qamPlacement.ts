@@ -11,7 +11,10 @@ export function installConsoleTab(dfl: any, host: any, content: any, icon: any):
   const registration={id,title:'',content,icon};
   const owns=()=>hook.tabs.includes(registration);
   const isConsole=(tab:any)=>String(tab?.key)===String(id)&&tab?.decky===true;
-  const panelContent=(tab:any)=>tab?.panel?.props?.children?.props?.children;
+  const providerProps=(tab:any)=>tab?.panel?.props?.children?.props;
+  const panelContent=(tab:any)=>providerProps(tab)?.children;
+  const isNativeTab=(tab:any)=>tab?.decky===true&&Number.isSafeInteger(tab.key)&&providerProps(tab)?.tab===tab;
+  const matches=(tab:any,entry:any)=>entry&&tab.key===entry.id&&tab.title===entry.title&&tab.tab===entry.icon&&panelContent(tab)===entry.content;
   const seen=new WeakSet<any[]>(), receipts:WeakRef<any[]>[]=[];
   let stopped=false,patch:any,before:any;
   const isCurrent=()=>!stopped&&host.__TABS_HOOK_INSTANCE===hook&&owns()&&
@@ -22,17 +25,51 @@ export function installConsoleTab(dfl: any, host: any, content: any, icon: any):
     hook.add(registration);
     before=dfl.beforePatch(hook,'render',(args:any[])=>{
       const tabs=args[0];if(!isCurrent()||!Array.isArray(tabs)||Object.isFrozen(tabs))return;
-      const consoles=tabs.filter(isConsole);
-      if(consoles.length===1&&panelContent(consoles[0])===content)return;
-      if(!consoles.length&&!tabs.some(t=>String(t?.key)==='999'&&t?.decky===true))return;
-      // Native TabsHook's same-count fast path otherwise keeps an old provider and
-      // Content closure. Build ONLY our replacement with the CURRENT native class;
-      // a scratch array is never mounted and foreign/native home entries stay intact.
-      const scratch:any[]=[];nativeRender.call(hook,scratch,args[1]);
-      const current=scratch.find(isConsole);if(!current||panelContent(current)!==content)return;
-      let position=tabs.findIndex(isConsole);if(position<0)position=tabs.length;
-      for(let i=tabs.length-1;i>=0;i--)if(isConsole(tabs[i]))tabs.splice(i,1);
-      tabs.splice(Math.min(position,tabs.length),0,current);
+      const entries=hook.tabs;
+      let next=0,ownCount=0,cached=0,dirty=false;
+      for(const tab of tabs){
+        if(!tab?.decky)continue;
+        if(!isNativeTab(tab))return; // Unknown Loader shape: leave the native render in charge.
+        ++cached;
+        if(tab.key===id){if(++ownCount!==1||!matches(tab,registration))dirty=true;}
+        else {if(entries[next]===registration)++next;if(!matches(tab,entries[next++]))dirty=true;}
+      }
+      if(cached===0||(!dirty&&ownCount===1&&cached===entries.length))return;
+
+      // The native renderer compares counts only and appends all registrations
+      // on mismatch. Restore its cache before that branch can duplicate panels.
+      const byId=new Map<number,any>();
+      for(const entry of entries){
+        if(!Number.isSafeInteger(entry?.id)||byId.has(entry.id))return;
+        byId.set(entry.id,entry);
+      }
+      const keep=new Map<number,any>();
+      for(const tab of tabs){
+        if(!tab?.decky||keep.has(tab.key)||!matches(tab,byId.get(tab.key)))continue;
+        keep.set(tab.key,tab);
+      }
+      let fresh:any[]=[];
+      if(keep.size!==entries.length){
+        nativeRender.call(hook,fresh,args[1]); // A scratch array is never mounted.
+        if(fresh.length!==entries.length||!fresh.every((tab,i)=>isNativeTab(tab)&&matches(tab,entries[i])))return;
+      }
+      const repaired:any[]=[];
+      let own:any;
+      entries.forEach((entry:any,i:number)=>{
+        const tab=keep.get(entry.id)??fresh[i];
+        if(entry===registration)own=tab;else repaired.push(tab);
+      });
+      // Keep Steam's own entries and their order. Existing healthy Decky tabs
+      // retain the provider's live visibility setter instead of remounting.
+      let slot=0,placedOwn=false;
+      for(let i=0;i<tabs.length;){
+        if(!tabs[i]?.decky){++i;continue;}
+        if(tabs[i].key===id){
+          if(!placedOwn){tabs[i++]=own;placedOwn=true;}else tabs.splice(i,1);
+        }else if(slot<repaired.length)tabs[i++]=repaired[slot++];else tabs.splice(i,1);
+      }
+      while(slot<repaired.length)tabs.push(repaired[slot++]);
+      if(!placedOwn)tabs.push(own);
     });
     patch=dfl.afterPatch(hook,'render',(args:any[],result:any)=>{
       const tabs=args[0];if(!isCurrent()||!Array.isArray(tabs)||Object.isFrozen(tabs))return result;
@@ -48,7 +85,8 @@ export function installConsoleTab(dfl: any, host: any, content: any, icon: any):
             receipts.shift();
           }
           seen.add(tabs);receipts.push(new WeakRef(tabs));}
-        const current=consoles[consoles.length-1];remove(tabs);tabs.unshift(current);
+        const current=consoles[consoles.length-1];
+        if(consoles.length!==1||tabs[0]!==current){remove(tabs);tabs.unshift(current);}
       }catch{/* Unknown Steam layout must not break native QAM. */}
       return result;
     });

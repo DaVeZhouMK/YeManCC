@@ -50,6 +50,20 @@ static unsigned lateWakeNativeTests(const json& payload){
     lateScenario(c.at("id").get<std::string>(),[&]{replayCase(c);},c);
 #else
     for(const auto& c:payload.at("cases"))lateScenario(c.at("id").get<std::string>(),[&]{replayCase(c);},c);
+    lateScenario("S4-ingress-same-generation-vetoes-stale-507",[]{
+        at(1200000);g_sgOriginalHibernateIngress={currentPowerGeneration(),fixtureFileTime+10000};
+        observe507(5,1200000,3000);dispatch();
+        check(!g_sgNonUserWakeObserved&&!sgSleepRetryActive()&&!timerWrites&&!apiCalls&&!uiRecoveryCalls,
+              "same-generation later S4 ingress vetoes queued 507 before recovery or retry");
+    });
+    lateScenario("S4-ingress-other-generation-does-not-veto-507",[]{
+        at(1200000);g_sgOriginalHibernateIngress={currentPowerGeneration()-1,fixtureFileTime+10000};
+        observe507(5,1200000,3000);dispatch();requireSend();
+    });
+    lateScenario("S4-ingress-older-time-does-not-veto-new-507",[]{
+        at(1200000);g_sgOriginalHibernateIngress={currentPowerGeneration(),fixtureFileTime-10000};
+        observe507(5,1200000,3000);dispatch();requireSend();
+    });
     lateScenario("late507-reason7-wrapper-at20min",[]{observe507(7,1200000);dispatch();requireSend();});
     lateScenario("late507-reason28-no-reason-whitelist",[]{observe507(28,1200000);dispatch();requireSend();});
     lateScenario("zero-DRIPS-nonmanual507-still-detected",[]{at(1200000);completed("<Data Name=\"DurationInUs\">1200000000</Data><Data Name=\"DripsResidencyInUs\">0</Data><Data Name=\"HwDripsResidencyInUs\">0</Data><Data Name=\"SleepEntered\">true</Data>",fixtureFileTime);observe507(5,1200000);dispatch();requireSend();});

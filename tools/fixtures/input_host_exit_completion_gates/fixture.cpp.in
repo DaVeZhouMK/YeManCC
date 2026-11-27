@@ -107,7 +107,11 @@ struct MemoryPowerSourceRecoveryFlag {
  operator bool() const noexcept{return value;}
 };
 static MemoryPowerSourceRecoveryFlag g_powerSourceRecoveryRunning;
+static bool g_powerSourceRecoveryTimerPending=true,g_gpHoldTimerOn=true;
+static std::atomic<bool> g_gpStateFallbackTimerArmed{true};
+static constexpr bool checkSuccessorReadyPorts=@CHECK_SUCCESSOR_READY_PORTS@;
 static bool memoryFocusSessionActive=true,memoryTaskbarLayoutObserverActive=true,memoryPowerSourceRecoveryTimerArmed=true;
+static bool memoryGpHoldTimerArmed=true,memoryGpStateFallbackTimerArmed=true;
 static void focusClearSession(){memoryFocusSessionActive=false;touch("memory-focus-clear-session");}
 static void stopTaskbarLayoutObserver(){memoryTaskbarLayoutObserverActive=false;touch("memory-stop-taskbar-layout-observer");}
 static DWORD WINAPI privateCleanup(void* parameter){
@@ -182,12 +186,27 @@ static DWORD fixtureMsgWaitForMultipleObjectsEx(DWORD count,const HANDLE* handle
 // leaf use the actual kernel object, except designated WAIT_FAILED injection.
 #define MsgWaitForMultipleObjectsEx fixtureMsgWaitForMultipleObjectsEx
 #include "exit_cleanup_wait.h"
-#undef MsgWaitForMultipleObjectsEx
 static DWORD portLastError(){return lastMemoryError;}
 static BOOL portKillTimer(HWND,UINT_PTR timer){
  if(timer==TIMER_ID_POWER_SOURCE_RECOVERY)memoryPowerSourceRecoveryTimerArmed=false;
+ if(timer==GP_HOLD_TIMER_ID)memoryGpHoldTimerArmed=false;
+ if(timer==GP_STATE_FALLBACK_TIMER_ID)memoryGpStateFallbackTimerArmed=false;
  touch(timer==TIMER_ID_POWER_SOURCE_RECOVERY?"memory-kill-power-source-recovery-timer":"memory-kill-timer");return TRUE;
 }
+[[maybe_unused]] static void stopPowerSourceRecovery(HWND h){
+ g_powerSourceHeartbeat.cancel();
+ g_powerSourceRecoveryRunning=false;
+ g_powerSourceRecoveryTimerPending=false;
+ portKillTimer(h,TIMER_ID_POWER_SOURCE_RECOVERY);
+}
+// The exit fixture compiles the public delivery branch but must never reach it.
+struct OutOfScopePowerReceiptPort {
+ HANDLE receiptWakeHandle(){throw std::runtime_error("non-exit receipt handle read in exit fixture");}
+ void closeReceiptWake(){throw std::runtime_error("public receipt wake close in exit fixture");}
+};
+[[maybe_unused]] static OutOfScopePowerReceiptPort g_sleepPowerDispatch;
+[[maybe_unused]] static void sleepPowerReplayWindowDelivery(HWND){throw std::runtime_error("public receipt replay in exit fixture");}
+[[maybe_unused]] static void traceLog(const char*,DWORD){throw std::runtime_error("public receipt wait failure in exit fixture");}
 static BOOL portUnregisterPower(HANDLE){touch("memory-unregister-power");return TRUE;}
 static DWORD portUnregisterSuspend(HANDLE){touch("memory-unregister-suspend");return ERROR_SUCCESS;}
 static BOOL portDestroyIcon(HICON){touch("memory-destroy-icon");return TRUE;}
@@ -237,6 +256,7 @@ static WPARAM fixtureWWinMainLoop(){
 @MESSAGE_LOOP@
  return msg.wParam;
 }
+#undef MsgWaitForMultipleObjectsEx
 #undef WaitForSingleObject
 #undef CloseHandle
 #undef GetLastError
@@ -270,7 +290,10 @@ static void fresh(){
  g_memTrayIcon=reinterpret_cast<HICON>(token(0x107));g_monitorEntryFailureTimerArmed=true;g_monitorEntryFailureGeneration=7;
  ymcc::powerSource::memoryOwner.listener=token(0x401);ymcc::powerSource::memoryOwner.observer=token(0x402);
  g_powerSourceHeartbeat.active=true;g_powerSourceRecoveryRunning.value=true;
+ g_powerSourceRecoveryTimerPending=g_gpHoldTimerOn=true;
+ g_gpStateFallbackTimerArmed.store(true,std::memory_order_relaxed);
  memoryFocusSessionActive=memoryTaskbarLayoutObserverActive=memoryPowerSourceRecoveryTimerArmed=true;
+ memoryGpHoldTimerArmed=memoryGpStateFallbackTimerArmed=true;
  cleanupIdentity=releaseEvent=nullptr;cleanupObserved=false;completedOnNextKernelWait=false;
  cleanupCloseAttempts=cleanupCloseSuccesses=teardownCalls=windowDestroyed=0;
  outerWaits=messageOnlyWaits=loopPortCalls=portErrors=0;
@@ -290,7 +313,10 @@ static json snapshot(){
   {"memoryPowerSourceObserverCleared",ymcc::powerSource::memoryOwner.observer==nullptr},
   {"memoryPowerSourceHeartbeatActive",g_powerSourceHeartbeat.active},
   {"memoryPowerSourceRecoveryRunning",g_powerSourceRecoveryRunning.value},
+  {"memoryPowerSourceRecoveryTimerPending",g_powerSourceRecoveryTimerPending},
   {"memoryPowerSourceRecoveryTimerArmed",memoryPowerSourceRecoveryTimerArmed},
+  {"memoryGpHoldTimerOn",g_gpHoldTimerOn},{"memoryGpHoldTimerArmed",memoryGpHoldTimerArmed},
+  {"memoryGpStateFallbackFlagArmed",g_gpStateFallbackTimerArmed.load()},{"memoryGpStateFallbackTimerArmed",memoryGpStateFallbackTimerArmed},
   {"memoryFocusSessionActive",memoryFocusSessionActive},{"memoryTaskbarLayoutObserverActive",memoryTaskbarLayoutObserverActive},
   {"privateHandles",privateHandles.size()},{"privateThreadsRunning",privateThreadsRunning.load()},
   {"lastWait",lastObservedWait},{"messageOnlyWaits",messageOnlyWaits},{"trace",trace},{"memoryLog",memoryLog},
@@ -336,7 +362,9 @@ static json oneCase(const std::string& route,const std::string& fault){
   check(g_exitCleanupThread==cleanupIdentity&&privateHandles.count(cleanupIdentity)&&initial["actualKernelOwnerValid"]==true,prefix+"retain-cleanup-owner");
   if(afterWait)check(g_exitCleanupCompleted,prefix+"designated-memory-completed-flag-injected");
   else check(!g_exitCleanupCompleted,prefix+"do-not-mark-completed");
-  check(teardownCalls==0&&windowDestroyed==0&&memoryWindowExists,prefix+"no-window-or-module-teardown");
+  check(teardownCalls==0&&windowDestroyed==0&&memoryWindowExists&&
+    g_powerSourceRecoveryTimerPending&&g_gpHoldTimerOn&&g_gpStateFallbackTimerArmed.load()&&
+    memoryGpHoldTimerArmed&&memoryGpStateFallbackTimerArmed,prefix+"no-window-or-module-teardown");
   check(cleanupCloseAttempts==(fault=="close-failed"?1u:0u),prefix+"checked-close-only-after-all-gates");
   if(route=="ready")check(!g_exitReadyPosted,prefix+"pending-ready-wake-is-rearmed");
   else check(!loopReturned,prefix+"pending-loop-must-not-return-to-final-cleanup");
@@ -376,7 +404,11 @@ static json oneCase(const std::string& route,const std::string& fault){
   check(firstTeardownObservation["completed"]==true&&firstTeardownObservation["cleanupOwnerNull"]==true&&
     firstTeardownObservation["actualCleanupCloseSuccesses"]==1,prefix+"window-teardown-follows-actual-checked-close-and-completed");
   check(!g_acdcNotify&&!g_monitorNotify&&!g_idleDisplayNotify&&!g_schemeNotify&&!g_suspendResumeNotify&&
-    !g_tdpDaemonJob&&!g_memTrayIcon&&!g_monitorEntryFailureTimerArmed&&g_monitorEntryFailureGeneration==0,
+     !g_tdpDaemonJob&&!g_memTrayIcon&&!g_monitorEntryFailureTimerArmed&&g_monitorEntryFailureGeneration==0&&
+     (!checkSuccessorReadyPorts||(ymcc::powerSource::memoryOwner.listener==nullptr&&ymcc::powerSource::memoryOwner.observer==nullptr&&
+      !g_powerSourceHeartbeat.active&&!g_powerSourceRecoveryRunning.value&&!g_powerSourceRecoveryTimerPending&&
+      !memoryPowerSourceRecoveryTimerArmed&&!g_gpHoldTimerOn&&!g_gpStateFallbackTimerArmed.load()&&
+      !memoryGpHoldTimerArmed&&!memoryGpStateFallbackTimerArmed)),
     prefix+"all-ready-memory-module-fields-retired");
  }else check(windowDestroyed==0&&teardownCalls==0,prefix+"no-window-loop-completes-without-fabricated-ui-teardown");
  const auto final=snapshot();const auto closed=cleanupCloseSuccesses,destroyed=windowDestroyed,touched=teardownCalls;

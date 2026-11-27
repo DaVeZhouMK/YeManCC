@@ -97,11 +97,65 @@ void manualDuringPending(){
  handle507Native(1,nowFile);drainActualWake();check(!frozen&&!requestCount&&!classificationTimerDue,"human GUI veto did not return lease");
  sgResumeClassificationTick();check(!requestCount,"late timer sent sleep after human veto");passed("human-veto-pending-and-late-timer");
 }
-void windowsHandoff(){
+void windowsHandoff(int superseded=0){
  baseCycle(true,false);const auto origin=nowFile;at(13000);originalEntry(origin);resumeAutomatic();drainActualWake();handle506(1,origin);
- at(14000);g_sgLastKernel507EventFileTime=nowFile;sgSleepTimeoutRecordSystemSuccess(nowFile);handle507Native(20,nowFile);drainActualWake();
+ ULONGLONG staleWake=0;
+ if(superseded){
+  const auto due=classificationTimerDue,gen=generation;
+  check(due&&frozen,"stale handoff control did not retain the original lease");
+  at(14000);staleWake=nowFile;at(15000);
+  if(superseded==1)sgPublishSleepEventTime(g_sgLatestSleepEntryFileTime,nowFile);
+  else fixtureSleepFactHook=+[](const char* event){
+   if(strcmp(event,"s0-wake-message")!=0)return;
+   fixtureSleepFactHook=nullptr;
+   sgPublishSleepEventTime(g_sgLatestSleepEntryFileTime,nowFile);
+  };
+  handle507Native(20,staleWake);drainActualWake();
+  check(!fixtureSleepFactHook,"new entry missed the selected logging interleave");
+  check(classificationTimerDue==due&&frozen&&!resumeCount&&!requestCount&&generation==gen,
+        "old reason20 ended current classification after a newer original 506");
+ }
+ at(superseded?16000:14000);g_sgLastKernel507EventFileTime=nowFile;sgSleepTimeoutRecordSystemSuccess(nowFile);handle507Native(20,nowFile);drainActualWake();
  check(frozen&&!requestCount&&!classificationTimerDue,"Reason20 prematurely completed Windows S4 handoff");
- handleS4();drainActualWake();check(!frozen&&!requestCount,"completed S4 boundary did not recover exact lease");passed("windows-handoff-awaits-completed-s4");
+ if(staleWake){
+  handleS4(currentPowerGeneration(),static_cast<LPARAM>(staleWake));drainActualWake();
+  check(frozen&&!requestCount&&!resumeCount,"stale 107 completed a newer Windows S4 handoff");
+ }
+ at(nowTick+1);
+ handleS4();drainActualWake();check(!frozen&&!requestCount&&resumeCount==1,"completed S4 boundary did not recover exact lease");
+ passed(superseded==1?"windows-handoff-rejects-stale-reason20-after-original-506":superseded==2?
+        "windows-handoff-rechecks-original-506-after-logging":"windows-handoff-awaits-completed-s4");
+}
+void s4WakeSupersededBeforeClassification(int control){
+ baseCycle(true,false);const auto origin=nowFile,gen=generation;
+ at(13000);originalEntry(origin);resumeAutomatic();drainActualWake();handle506(1,origin);
+ const auto due=classificationTimerDue;
+ check(due&&frozen&&!sharedSleepWakeClassified(gen),"S4 reentry case did not hold classification");
+ g_sgAutomaticSleepTarget=ymcc::sleeprequest::Mode::Hibernate;
+ static const auto publish=[](const char* event,const char* expected,bool nativeSuspend){
+  if(strcmp(event,expected)!=0)return;
+  fixtureSleepFactHook=nullptr;at(nowTick+1);
+  if(nativeSuspend)g_sleepPowerDispatch.callback(PBT_APMSUSPEND,nowTick,[](const auto&){return true;},nowFile);
+  else sgPublishSleepEventTime(g_sgLatestSleepEntryFileTime,nowFile);
+ };
+ if(control==0)fixtureSleepFactHook=+[](const char* e){publish(e,"s4-wake-message",false);};
+ if(control==1)fixtureSleepFactHook=+[](const char* e){publish(e,"s4-wake-message",true);};
+ if(control==2)fixtureSleepFactHook=+[](const char* e){publish(e,"resume-classification-stopped",false);};
+ if(control==3)fixtureSleepFactHook=+[](const char* e){publish(e,"sleep-timeout-stopped",false);};
+ at(14000);handleS4();drainActualWake();
+ check(!fixtureSleepFactHook,"S4 wake missed the requested reentry point");
+ check(!sharedSleepWakeClassified(gen)&&g_sgAutomaticSleepTarget==ymcc::sleeprequest::Mode::Hibernate&&
+       frozen&&!resumeCount&&!requestCount,"superseded original 107 committed public classification or cleared the current sleep target");
+ if(control<2)check(classificationTimerDue==due,"superseded 107 retired the classification timer before commit");
+ if(control==1){
+  const auto pending=g_sleepPowerDispatch.pendingReplay();
+  const auto claimed=g_sleepPowerDispatch.forwarded(pending.sequence,pending.type,nowTick);
+  check(bool(claimed),"current suspend was not preserved for delivery");
+  handleSuspendAdmission(PBT_APMSUSPEND,&claimed);g_sleepPowerDispatch.complete(claimed,nowTick);
+ }
+ at(nowTick+1);handleS4();drainActualWake();
+ check(!frozen&&resumeCount==1&&!requestCount&&sharedSleepWakeClassified(generation),"current original 107 did not recover once after supersession");
+ passed(std::string("s4-final-wake-revalidates-before-publication/")+std::to_string(control));
 }
 void delayedWork(){
  baseCycle(true,false);const auto origin=nowFile;at(13000);originalEntry(origin);resumeAutomatic();resumeInteractive();handle506(1,origin);
@@ -421,6 +475,76 @@ void wakeBeforeEntryGui(bool nonUser){
  check(sgSleepTimeoutOriginalIntent()==original,"late506GUI after retry lost240s identity");
  dispatch();check(requestCount==1,"late506GUI canceled accepted retry");passed(nonUser?"507-before506GUI-nonUser-on":"507-before506GUI-nonUser-off");
 }
+void queuedButtonWakeAcrossKernelEntry(int control){
+ baseCycle(true,false);const auto original=nowFile,gen=generation;
+ at(13000);originalEntry(original);resumeAutomatic();drainActualWake();handle506(1,original);
+ const auto due=classificationTimerDue;
+ check(due&&frozen,"queued button control did not retain the original sleep lease");
+ at(14000);const auto queued=nowFile;
+ sgPublishSleepEventTime(g_sgLastPowerButtonWakeEventFileTime,queued);
+ sgPublishSleepEventTime(g_sgOriginalPowerButtonWakeFileTime,queued);
+ at(15000);const auto entry=control?nowFile:queued-1;
+ // Native ingress publishes this even when a non-user 506 has no intent message.
+ if(control==3){
+  fixtureSleepFactHook=+[](const char* event){
+   if(strcmp(event,"s0-wake-message")!=0)return;
+   fixtureSleepFactHook=nullptr;
+   sgPublishSleepEventTime(g_sgLatestSleepEntryFileTime,nowFile);
+  };
+ }else sgPublishSleepEventTime(g_sgLatestSleepEntryFileTime,entry);
+ const auto newerButton=nowFile+10000;
+ if(control==2){
+  at(15001);
+  sgPublishSleepEventTime(g_sgLastPowerButtonWakeEventFileTime,newerButton);
+  sgPublishSleepEventTime(g_sgOriginalPowerButtonWakeFileTime,newerButton);
+ }
+ handle507Native(1,queued);drainActualWake();
+ check(!fixtureSleepFactHook,"506 did not arrive at the selected logging boundary");
+ if(control){
+  check(classificationTimerDue==due&&frozen&&resumeCount==0&&!requestCount,
+        "old queued button 507 ended classification or released the lease after a newer original 506");
+  at(15001);
+  sgPublishSleepEventTime(g_sgLastPowerButtonWakeEventFileTime,newerButton);
+  sgPublishSleepEventTime(g_sgOriginalPowerButtonWakeFileTime,newerButton);
+  handle507Native(1,newerButton);drainActualWake();
+ }
+ check(!classificationTimerDue&&!frozen&&resumeCount==1&&!requestCount&&generation==gen,
+       "current original button 507 did not complete the retained lease once");
+ passed(std::string("queued-button-507-vs-original-506/")+std::to_string(control));
+}
+void queued507AcrossSuspendReceipt(int control){
+ baseCycle(true,false);const auto original=nowFile,gen=generation;
+ at(13000);originalEntry(original);resumeAutomatic();drainActualWake();handle506(1,original);
+ const auto due=classificationTimerDue;
+ check(due&&frozen,"queued 507 control did not retain the original sleep lease");
+ at(14000);const auto queued=nowFile;
+ const auto receipt=[&](ULONGLONG stamp){
+  check(g_sleepPowerDispatch.callback(PBT_APMSUSPEND,nowTick,[](const auto&){return true;},stamp),
+        "suspend ingress did not queue");
+ };
+ if(control!=3){
+  sgPublishSleepEventTime(g_sgLastPowerButtonWakeEventFileTime,queued);
+  sgPublishSleepEventTime(g_sgOriginalPowerButtonWakeFileTime,queued);
+ }
+ at(15000);
+ if(control==2){
+  fixtureSleepFactHook=+[](const char* event){
+   if(strcmp(event,"s0-wake-message")!=0)return;
+   fixtureSleepFactHook=nullptr;
+   g_sleepPowerDispatch.callback(PBT_APMSUSPEND,nowTick,[](const auto&){return true;},nowFile);
+  };
+ }else receipt(control?nowFile:queued-1);
+ handle507Native(control==3?20:1,queued);drainActualWake();
+ check(!fixtureSleepFactHook&&g_sleepPowerDispatch.pendingSuspend(),"suspend did not arrive at the selected ingress point");
+ if(control){
+  check(classificationTimerDue==due&&frozen&&resumeCount==0&&!requestCount&&generation==gen,
+        "old queued 507 settled classification after a newer native suspend receipt");
+ }else{
+  check(!classificationTimerDue&&!requestCount&&generation==gen,
+        "an older native suspend receipt prevented current 507 classification");
+ }
+ passed(std::string("queued-507-vs-native-suspend/")+std::to_string(control));
+}
 void criticalDuringPending(){
  baseCycle(true,false);const auto original=nowFile,gen=generation;
  at(13000);originalEntry(original);resumeAutomatic();drainActualWake();
@@ -484,10 +608,11 @@ static int publicFactsMain(bool firstOnly,bool retryOnly=false){
   sgSleepTimeoutRecordSystemSuccess(oldS4);
   ymcc::sleeppower::nativeWakeFacts.kernel(gen,107,-1,5,oldS4,nowFile);
   at(94000);const auto retryEntry=nowFile-640*10000ULL,finalExit=nowFile-73*10000ULL;
-  sgSleepTimeoutRecordKernel(506,20,retryEntry,gen);
+  if(control!=4)sgSleepTimeoutRecordKernel(506,20,retryEntry,gen);
   ymcc::sleeppower::nativeWakeFacts.kernel(gen,506,20,-1,retryEntry,nowFile);
   sgRememberKernelSleepEntry(20,retryEntry);
   handleSuspendAdmission();
+  const auto confirmedRetrySequence=g_sleepPowerDispatch.latestSleepBoundary().sequence;
   publicFactRequire(!sgSleepRetryActive()&&g_powerLifecycle==PowerLifecycle::Suspended&&generation==gen&&frozen,"retry suspend did not retain original target");
   if(control==1){
    at(94009);const auto fresh=nowFile;
@@ -512,16 +637,36 @@ static int publicFactsMain(bool firstOnly,bool retryOnly=false){
    return;
   }
   std::cout<<"C196_EARLY "<<json{{"retryActive",sgSleepRetryActive()},{"classificationHeld",sgResumeClassificationHeld(gen)},{"sharedClassified",sharedSleepWakeClassified(gen)},{"frozen",frozen},{"resumes",earlyResumes},{"classificationDue",classificationTimerDue},{"timeoutDue",timeoutTimerDue},{"closedIntent",g_sgClosedSleepIntentFileTime.load()},{"intent",g_sgLastPowerButtonSleepIntentFileTime.load()}}.dump()<<"\n";
-  at(95015);ymcc::sleeppower::nativeWakeFacts.kernel(gen,507,1,-1,finalExit,nowFile);
+  at(95015);
+  if(control==3){
+   const auto prior=g_sleepPowerDispatch.latestSleepBoundary();
+   g_sleepPowerDispatch.callback(PBT_APMSUSPEND,nowTick,[](const auto&){return true;},prior.fileTime100ns);
+  }
+  if(control==5)sgPublishSleepEventTime(g_sgLatestSleepEntryFileTime,nowFile);
+  ymcc::sleeppower::nativeWakeFacts.kernel(gen,507,1,-1,finalExit,nowFile);
   g_sgLastPowerButtonWakeEventFileTime=finalExit;g_sgOriginalPowerButtonWakeFileTime=finalExit;
+  fixtureFanS0Exit={};
   handle507Native(1,finalExit);drainActualWake();
+  if(control>=3){
+   publicFactRequire(frozen&&resumeCount==0&&requestCount==1&&!sharedSleepWakeClassified(gen),
+                     "507 borrowed a retired or unproven retry suspend");
+   publicFactRequire(!fixtureFanS0Exit.startup&&!fixtureFanS0Exit.suspendSequence&&!fixtureFanS0Exit.entry,
+                     "rejected late 507 passed a retry boundary to Fan");
+   return;
+  }
   std::cout<<"C196_LATE "<<json{{"frozen",frozen},{"resumes",resumeCount},{"requests",requestCount},{"generation",generation},{"sharedClassified",sharedSleepWakeClassified(gen)}}.dump()<<"\n";
   publicFactRequire(earlyResumes==0,"original lease admitted before final classification");
   publicFactRequire(!frozen&&resumeCount==1&&requestCount==1&&generation==gen,"same lease did not recover once after 507");
+  publicFactRequire(fixtureFanS0Exit.startup&&fixtureFanS0Exit.generation==gen&&fixtureFanS0Exit.wake==finalExit&&
+                    confirmedRetrySequence&&fixtureFanS0Exit.suspendSequence==confirmedRetrySequence&&fixtureFanS0Exit.entry==retryEntry,
+                    "WM_SG_S0_WAKE did not hand the exact late retry evidence to Fan");
  };
  test("retry-suspend-before-late-507",[&]{retryReturn(0);});
  test("retry-suspend-current-s4-completion",[&]{retryReturn(1);});
  test("retry-suspend-without-507-releases-at-original-deadline",[&]{retryReturn(2);});
+ test("retry-suspend-does-not-borrow-replacement-sequence",[&]{retryReturn(3);});
+ test("retry-suspend-requires-original-506",[&]{retryReturn(4);});
+ test("retry-suspend-rejects-new-entry",[&]{retryReturn(5);});
  unsigned failed=0;for(const auto& row:publicFactRows)if(row["pass"]==false)++failed;std::cout<<"PUBLIC_CLASSIFICATION_FACTS "<<json{{"tests",publicFactRows.size()},{"checks",publicFactChecks},{"failed",failed},{"cases",publicFactRows},{"actualNativeOwner",true},{"actualPrelude",true},{"actualClassification",true},{"nativeOsActions",0}}.dump()<<"\n";return failed?2:0;
 }
 #endif
@@ -538,7 +683,7 @@ int main(int argc,char** argv){try{
 #endif
  }
  else if(argc==2&&strcmp(argv[1],"--classification-lifetime-only")==0){criticalDuringPending();missingKernelEvidence(true);missingKernelEvidence(false);actualSettingsCancellation();}
- else if(argc==2&&strcmp(argv[1],"--classification-edge-only")==0){wakeBeforeEntryGui(false);wakeBeforeEntryGui(true);}
+ else if(argc==2&&strcmp(argv[1],"--classification-edge-only")==0){wakeBeforeEntryGui(false);wakeBeforeEntryGui(true);for(int control:{0,1,2,3})queuedButtonWakeAcrossKernelEntry(control);for(int control:{0,1,2,3})queued507AcrossSuspendReceipt(control);for(int mode:{0,1,2})windowsHandoff(mode);for(int mode:{0,1,2,3})s4WakeSupersededBeforeClassification(mode);}
  else
  if(argc==2&&(strcmp(argv[1],"--s3")==0||strcmp(argv[1],"--caps-unknown")==0)){
   platformAoAc=false;platformCapsKnown=strcmp(argv[1],"--caps-unknown")!=0;
@@ -548,7 +693,9 @@ int main(int argc,char** argv){try{
  }else{
   for(bool nonUser:{false,true})for(bool pid:{false,true})for(int order:{0,1,2})fieldScenario(nonUser,pid,order);
   noEvidence(false);noEvidence(true);displayEvidence();manualBeforeGui();manualDuringPending();
-  windowsHandoff();delayedWork();newerEntry();timeoutIndependent();retiredLifetime(false);retiredLifetime(true);
+  for(int mode:{0,1,2})windowsHandoff(mode);
+  for(int mode:{0,1,2,3})s4WakeSupersededBeforeClassification(mode);
+  delayedWork();newerEntry();timeoutIndependent();retiredLifetime(false);retiredLifetime(true);
   for(int control:{0,1,2,3,4,5,6,7,8,9,10,11})win5DisplayRelight(control);
   for(int control:{0,1,2,3,4,5,6})g3eDisplayRelight(control);
 #ifdef YMCC_FIXTURE_ENTRY_HANDOFF_ENABLE
@@ -558,6 +705,8 @@ int main(int argc,char** argv){try{
   retryExitWithNewEntryDuringClassification("s0-wake-classified");retryExitWithNewEntryDuringClassification("sleep-retry-failure-attribution");
   repeatedAttempt();softwareGate();
   wakeBeforeEntryGui(false);wakeBeforeEntryGui(true);
+  for(int control:{0,1,2,3})queuedButtonWakeAcrossKernelEntry(control);
+  for(int control:{0,1,2,3})queued507AcrossSuspendReceipt(control);
   criticalDuringPending();missingKernelEvidence(true);missingKernelEvidence(false);actualSettingsCancellation();
  }
  std::cout<<"RESUME_CLASSIFICATION "<<json({{"cases",resumeCases},{"count",resumeCases.size()},{"actualCommon",true},{"actualWorkerArms",3},{"osSleep",false}}).dump()<<"\n";

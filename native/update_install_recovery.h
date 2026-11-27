@@ -85,7 +85,7 @@ inline bool live(const Json& j){
     return j.value("phase",std::string{})=="authorized"&&age>=0&&age<15000&&liveProcess(j,"launcher"); }catch(...){return false;}
 }
 inline bool sidIs(PSID sid,WELL_KNOWN_SID_TYPE kind){return sid&&IsWellKnownSid(sid,kind);}
-inline bool protectedDescriptor(PSECURITY_DESCRIPTOR sd){
+inline bool protectedDescriptor(PSECURITY_DESCRIPTOR sd,bool usersReadExecute=false){
     PSID owner=nullptr;BOOL d=false,present=false;PACL acl=nullptr;SECURITY_DESCRIPTOR_CONTROL control{};DWORD revision=0;
     if(!GetSecurityDescriptorOwner(sd,&owner,&d)||(!sidIs(owner,WinBuiltinAdministratorsSid)&&!sidIs(owner,WinLocalSystemSid))||
         !GetSecurityDescriptorControl(sd,&control,&revision)||!(control&SE_DACL_PROTECTED)||
@@ -94,21 +94,23 @@ inline bool protectedDescriptor(PSECURITY_DESCRIPTOR sd){
     for(DWORD i=0;i<acl->AceCount;++i){void* raw=nullptr;if(!GetAce(acl,i,&raw))return false;auto* ace=static_cast<ACCESS_ALLOWED_ACE*>(raw);
         if(ace->Header.AceType!=ACCESS_ALLOWED_ACE_TYPE)return false;
         auto sid=reinterpret_cast<PSID>(&ace->SidStart);bool a=sidIs(sid,WinBuiltinAdministratorsSid),s=sidIs(sid,WinLocalSystemSid);
-        if(!a&&!s)return false;if(a)admin=true;if(s)system=true;
+        if(!a&&!s&&(!usersReadExecute||!sidIs(sid,WinBuiltinUsersSid)||
+            (ace->Mask&~(FILE_GENERIC_READ|FILE_GENERIC_EXECUTE))!=0))return false;
+        if(a)admin=true;if(s)system=true;
     }return admin&&system;
 }
-inline bool secureHandle(HANDLE h){
+inline bool secureHandle(HANDLE h,bool usersReadExecute=false){
     BY_HANDLE_FILE_INFORMATION info{};if(!GetFileInformationByHandle(h,&info)||(info.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT))return false;
     PSECURITY_DESCRIPTOR sd=nullptr;DWORD err=GetSecurityInfo(h,SE_FILE_OBJECT,OWNER_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION,nullptr,nullptr,nullptr,nullptr,&sd);
-    bool ok=err==ERROR_SUCCESS&&protectedDescriptor(sd);if(sd)LocalFree(sd);return ok;
+    bool ok=err==ERROR_SUCCESS&&protectedDescriptor(sd,usersReadExecute);if(sd)LocalFree(sd);return ok;
 }
 inline PSECURITY_DESCRIPTOR descriptor(){PSECURITY_DESCRIPTOR sd=nullptr;
     if(!ConvertStringSecurityDescriptorToSecurityDescriptorW(L"O:BAG:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",SDDL_REVISION_1,&sd,nullptr))throw std::runtime_error("UPDATE_RECOVERY_SECURITY_UNAVAILABLE");return sd;
 }
-inline bool secureDirectory(const std::wstring& root,bool create){
+inline bool secureDirectory(const std::wstring& root,bool create,bool usersReadExecute=false){
     if(create){auto sd=descriptor();SECURITY_ATTRIBUTES sa{sizeof(sa),sd,FALSE};BOOL ok=CreateDirectoryW(root.c_str(),&sa);DWORD err=GetLastError();LocalFree(sd);if(!ok&&err!=ERROR_ALREADY_EXISTS)return false;}
     HANDLE h=CreateFileW(root.c_str(),READ_CONTROL|FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
-    if(h==INVALID_HANDLE_VALUE)return false;bool ok=secureHandle(h);CloseHandle(h);return ok;
+    if(h==INVALID_HANDLE_VALUE)return false;bool ok=secureHandle(h,usersReadExecute);CloseHandle(h);return ok;
 }
 inline std::wstring directory(){PWSTR p=nullptr;if(FAILED(SHGetKnownFolderPath(FOLDERID_ProgramData,0,nullptr,&p)))throw std::runtime_error("UPDATE_RECOVERY_DIRECTORY_UNAVAILABLE");
     std::wstring root=p;CoTaskMemFree(p);return root+L"\\YeManCC.UpdateRecovery";

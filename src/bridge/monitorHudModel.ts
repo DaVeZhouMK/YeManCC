@@ -153,7 +153,7 @@ export function hudTemperatureWarning(data: HudData, id: HudMetricId): boolean {
   return (id==='cpuTemp'||id==='gpuTemp') && !data.stale && typeof value==='number' && Number.isFinite(value) && value>90;
 }
 const metricById = Object.fromEntries(HUD_METRICS.map(metric => [metric.id, metric])) as Record<HudMetricId, typeof HUD_METRICS[number]>;
-const clockFormatter = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+let clockFormatter: Intl.DateTimeFormat | undefined;
 export type HudMetricToggles = Record<HudMetricId, boolean>;
 // Collection leases follow selected fields, never hideUnavailable/FPS entrance
 // state: temporarily missing data must not switch off its own acquisition.
@@ -242,6 +242,8 @@ export interface MonitorOutputPreferences {
   ymccTemplateResets?: Partial<Record<HudTemplateId, number>>;
   ymcc: HudAppearance & { fields: HudMetricToggles; dataPresetVersion: 1; dataPreset: HudDataPresetId; dataPresetFields: Record<HudDataPresetId, HudMetricToggles>; fieldGroup: string }; rtssScale: number; rtssTemplate: RtssMonitorTemplate;
 }
+export type HudDisplayAppearance = Omit<MonitorOutputPreferences['ymcc'], 'dataPresetFields'>;
+export type HudDisplayPreferences = Omit<MonitorOutputPreferences, 'ymcc' | 'ymccTemplates' | 'ymccTemplateResets'> & { ymcc: HudDisplayAppearance };
 export interface HudData {
   source: 'fixture' | 'ymcc-uniform'; stale: boolean; hardwareSession?: number; freshUntil?: HudFreshUntil; batteryPowerEstimated?: boolean; batteryTimeEstimated?: boolean;
   // Observation/target proofs are copied from the sole publisher for display entrance.
@@ -290,10 +292,14 @@ function position(value: unknown, fallback: number): number {
   return HUD_POSITIONS.some(p => p.value === value) ? value as number : fallback;
 }
 export const HUD_DEFAULT_TEMPLATE_SCALES = { A: .7, B: .5 } as const;
-function normalizeFlatMonitorOutput(raw?: unknown, bank: HudTemplateId = 'A'): MonitorOutputPreferences {
+function normalizeFlatMonitorOutput(raw?: unknown, bank?: HudTemplateId): MonitorOutputPreferences;
+function normalizeFlatMonitorOutput(raw: unknown, bank: HudTemplateId, displayOnly: true): HudDisplayPreferences;
+function normalizeFlatMonitorOutput(raw?: unknown, bank: HudTemplateId = 'A', displayOnly = false): HudDisplayPreferences {
   const r = record(raw), y = record(r.ymcc), fields = record(y.fields);
   const toggles = {} as HudMetricToggles;
-  const initialPreset = HUD_DATA_PRESETS.find(preset => preset.value === y.dataPreset)?.value ?? (Object.keys(fields).length ? 'standard' : HUD_DEFAULT_DATA_PRESET);
+  const hasFields = Object.keys(fields).length > 0;
+  const declaredPreset = HUD_DATA_PRESETS.find(preset => preset.value === y.dataPreset)?.value;
+  const initialPreset = declaredPreset ?? (hasFields ? 'standard' : HUD_DEFAULT_DATA_PRESET);
   for (const metric of HUD_METRICS) toggles[metric.id] = typeof fields[metric.id] === 'boolean' ? fields[metric.id] as boolean : presetFields[initialPreset][metric.id];
   // Older saved battery-number selections gain the requested battery graphic;
   // explicit new batteryBar=false remains an independent user choice.
@@ -303,25 +309,30 @@ function normalizeFlatMonitorOutput(raw?: unknown, bank: HudTemplateId = 'A'): M
   const legacyPreset = HUD_UNDERLAY_PRESETS.find(item => item.value === y.underlay)?.value ?? (underlayImage ? 'custom' : HUD_DEFAULT_APPEARANCE.underlayPreset);
   const underlayPreset = HUD_UNDERLAY_PRESETS.find(item => item.value === y.underlayPreset)?.value ?? legacyPreset;
   const underlay: HudUnderlayPreset = underlayPreset === 'custom' && !underlayImage ? 'none' : underlayPreset;
-  const inferredPreset = detectHudDataPreset(toggles);
-  const oldDetailed = y.dataPresetVersion !== 1 && HUD_METRICS.every(metric => toggles[metric.id]);
-  const dataPreset = HUD_DATA_PRESETS.find(preset => preset.value === y.dataPreset)?.value ?? (oldDetailed ? 'detailed' : inferredPreset === 'custom' ? 'standard' : inferredPreset);
-  const dataPresetFields = {} as Record<HudDataPresetId, HudMetricToggles>;
-  const savedPresets = record(y.dataPresetFields);
-  for (const preset of HUD_DATA_PRESETS) {
-    const saved = record(savedPresets[preset.value]);
-    const selected = {} as HudMetricToggles;
-    for (const metric of HUD_METRICS) selected[metric.id] = typeof saved[metric.id] === 'boolean'
-      ? saved[metric.id] as boolean : presetFields[preset.value][metric.id];
-    dataPresetFields[preset.value] = selected;
+  const legacy = y.dataPresetVersion !== 1;
+  const inferred = declaredPreset ?? (legacy && HUD_METRICS.every(metric => toggles[metric.id]) ? 'detailed' : detectHudDataPreset(toggles));
+  const dataPreset = inferred === 'custom' ? 'standard' : inferred;
+  const dataPresetFields = displayOnly ? undefined : {} as Record<HudDataPresetId, HudMetricToggles>;
+  // Flat fields override the saved active bank. Display frames read that bank
+  // only when a sender omits the flat fields.
+  if (dataPresetFields || !hasFields) {
+    const savedPresets = record(y.dataPresetFields);
+    for (const {value: preset} of HUD_DATA_PRESETS) {
+      if (!dataPresetFields && preset !== dataPreset) continue;
+      if (preset === dataPreset && hasFields) {
+        if (dataPresetFields) dataPresetFields[preset] = { ...toggles };
+        continue;
+      }
+      const saved = record(savedPresets[preset]), selected = {} as HudMetricToggles;
+      for (const {id} of HUD_METRICS) selected[id] = typeof saved[id] === 'boolean' ? saved[id] as boolean : presetFields[preset][id];
+      if (dataPresetFields) dataPresetFields[preset] = selected;
+      if (preset === dataPreset) Object.assign(toggles, selected);
+    }
   }
-  // Older flat fields seed the active preset; explicit false stays false.
-  if (Object.keys(fields).length) dataPresetFields[dataPreset] = { ...toggles };
-  else Object.assign(toggles, dataPresetFields[dataPreset]);
   // Apply the requested detailed-preset change once. Subsequent manual clock
   // choices are saved normally and remain independent of the reset defaults.
-  if (y.dataPresetVersion !== 1) {
-    dataPresetFields.detailed.clock = false;
+  if (legacy) {
+    if (dataPresetFields) dataPresetFields.detailed.clock = false;
     if (dataPreset === 'detailed') toggles.clock = false;
   }
   const fieldGroup = y.fieldGroup==='附加'?'电池':y.fieldGroup==='TDP' || HUD_METRICS.some(metric => metric.group === y.fieldGroup) ? y.fieldGroup as string : 'CPU';
@@ -337,19 +348,27 @@ function normalizeFlatMonitorOutput(raw?: unknown, bank: HudTemplateId = 'A'): M
       opacity: bounded(y.opacity, HUD_DEFAULT_APPEARANCE.opacity, 0, 1), layout: normalizeHudLayout(y.layout),
       textScale: hudTextScale(y.textScale,1.2), valueScales: hudValueScales(y.valueScales), showCpuName: y.showCpuName===true, showGpuName: y.showGpuName===true,
       font: HUD_FONTS.find(item => item.value === y.font)?.value ?? 'system', fpsFont: HUD_FPS_FONTS.find(item => item.value === y.fpsFont)?.value ?? 'inherit',
-      radius: bounded(y.radius, 10, 0, 18), gap: bounded(y.gap, 8, 4, 16), crosshair: HUD_CROSSHAIRS.find(item => item.value === y.crosshair)?.value ?? 'none', hideUnavailable: typeof y.hideUnavailable === 'boolean' ? y.hideUnavailable : true, fpsEmphasis: y.fpsEmphasis !== false, underlay, underlayPreset, underlayImage, underlayOpacity: bounded(y.underlayOpacity, HUD_DEFAULT_APPEARANCE.underlayOpacity, 0, 1), fields: toggles, dataPresetVersion: 1, dataPreset, dataPresetFields, fieldGroup },
+      radius: bounded(y.radius, 10, 0, 18), gap: bounded(y.gap, 8, 4, 16), crosshair: HUD_CROSSHAIRS.find(item => item.value === y.crosshair)?.value ?? 'none', hideUnavailable: typeof y.hideUnavailable === 'boolean' ? y.hideUnavailable : true, fpsEmphasis: y.fpsEmphasis !== false, underlay, underlayPreset, underlayImage, underlayOpacity: bounded(y.underlayOpacity, HUD_DEFAULT_APPEARANCE.underlayOpacity, 0, 1), fields: toggles, dataPresetVersion: 1, dataPreset, ...(dataPresetFields ? {dataPresetFields} : {}), fieldGroup },
   };
 }
 // Keep the active appearance at ymcc for all existing renderers. The banks are
 // settings only; transporting a frame never needs both templates or both images.
-export function normalizeMonitorOutput(raw?: unknown, includeTemplates=true): MonitorOutputPreferences {
+function normalizeActiveMonitorOutput<T extends HudDisplayPreferences>(raw: unknown, flat: (raw: unknown, bank: HudTemplateId) => T): T {
   const r=record(raw), selected:HudTemplateId=r.ymccTemplate==='A'?'A':'B';
-  const prefs=normalizeFlatMonitorOutput(raw,selected);
+  const prefs=flat(raw,selected);
   // Start new configurations in minimal B; preserve explicit saved choices.
-  if(!r.ymcc) prefs.ymcc=normalizeFlatMonitorOutput({ymcc:record(r.ymccTemplates)[selected]??(selected==='B'?{...HUD_DEFAULT_APPEARANCE,scale:HUD_DEFAULT_TEMPLATE_SCALES.B,dataPreset:'minimal',fields:hudDataPresetFields('minimal')}:undefined)},selected).ymcc;
+  if(!r.ymcc) prefs.ymcc=flat({ymcc:record(r.ymccTemplates)[selected]??(selected==='B'?{...HUD_DEFAULT_APPEARANCE,scale:HUD_DEFAULT_TEMPLATE_SCALES.B,dataPreset:'minimal',fields:hudDataPresetFields('minimal')}:undefined)},selected).ymcc;
   prefs.ymccTemplate=selected;
   prefs.ymccTemplateRevision=typeof r.ymccTemplateRevision==='number'&&Number.isSafeInteger(r.ymccTemplateRevision)&&r.ymccTemplateRevision>=0?r.ymccTemplateRevision:0;
+  return prefs;
+}
+export function normalizeHudDisplayPreferences(raw: unknown): HudDisplayPreferences {
+  return normalizeActiveMonitorOutput(raw, (value, bank) => normalizeFlatMonitorOutput(value, bank, true));
+}
+export function normalizeMonitorOutput(raw?: unknown, includeTemplates=true): MonitorOutputPreferences {
+  const prefs=normalizeActiveMonitorOutput<MonitorOutputPreferences>(raw, normalizeFlatMonitorOutput);
   if(!includeTemplates)return prefs;
+  const r=record(raw), selected=prefs.ymccTemplate!;
   const resets=record(r.ymccTemplateResets), admittedResets:Partial<Record<HudTemplateId,number>>={};
   for(const bank of ['A','B'] as const){const value=resets[bank];if(typeof value==='number'&&Number.isSafeInteger(value)&&value>0)admittedResets[bank]=value;}
   if(Object.keys(admittedResets).length)prefs.ymccTemplateResets=admittedResets;
@@ -484,7 +503,12 @@ export function hudFromUniformSnapshot(snapshot: MonitorSnapshotView | null, now
   // survives continuous collector changes; weak legacy packets retain the
   // generation boundary. Native-session changes still require fresh entrance.
   // Local presentation only: hidden clocks need no locale formatting.
-  values.clock = includeClock ? clockFormatter.format(now) : null;
+  if (includeClock) {
+    clockFormatter ??= new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    values.clock = clockFormatter.format(now);
+  } else {
+    values.clock = null;
+  }
   return { cpuName: hudHardwareName(cpuName), gpuName: top?.gpuSelectionPresent === false ? '' : hudHardwareName(top?.gpuName), source: 'ymcc-uniform', ...(typeof snapshot?.session === 'number' && Number.isSafeInteger(snapshot.session) && snapshot.session > 0 ? {hardwareSession:snapshot.session}:{}), freshUntil,
     ...(gameFpsFresh ? { fpsObservedAt: fps!.fpsObservedAt ?? fps!.ts, fpsSource: fps!.fpsSource, fpsTarget: [snapshot!.session, fps!.pid, fps!.processCreated ?? ('legacy-generation:' + snapshot!.generation)].join('|') } : {}), stale: !topFresh && !fpsFresh && !cpuUsageFresh && !(coreFresh && coreUsage.length) && !batteryFresh && !batteryStatusFresh && !fpsLimitFresh && !fanFresh && !(fileFresh&&(values.diskRead!==null||values.diskWrite!==null)), batteryPowerEstimated: batteryFresh && top?.batteryPowerEstimated === true, batteryTimeEstimated: batteryTimeFresh && top?.batteryTimeEstimated === true, values,
     coreUsage, coreLabels: coreFresh ? coreUsageLabels(top?.coreLabels, coreUsage.length) : [], coreClocks: [], frameTimes: frameFresh ? frame!.frameTimes : [] };
@@ -548,11 +572,11 @@ export function sameHudFields(a: HudMetricToggles, b: HudMetricToggles): boolean
   return a === b || HUD_METRICS.every(metric => a[metric.id] === b[metric.id]);
 }
 // Only placement/composition fields previously serialized by the output client.
-export function sameHudLayoutAppearance(a: MonitorOutputPreferences['ymcc'], b: MonitorOutputPreferences['ymcc']): boolean {
+export function sameHudLayoutAppearance(a: HudDisplayAppearance, b: HudDisplayAppearance): boolean {
   return sameHudTypography(a,b) && a.position === b.position && a.crosshair === b.crosshair && a.layout === b.layout &&
     a.scale === b.scale && a.gap === b.gap && (a.font ?? 'system') === (b.font ?? 'system') && (a.fpsFont ?? 'inherit') === (b.fpsFont ?? 'inherit') && sameHudFields(a.fields, b.fields);
 }
-export function sameHudAppearance(a: MonitorOutputPreferences['ymcc'], b: MonitorOutputPreferences['ymcc']): boolean {
+export function sameHudAppearance(a: HudDisplayAppearance, b: HudDisplayAppearance): boolean {
   return sameHudTypography(a,b) && (a.visibility ?? 'always') === (b.visibility ?? 'always') && (a.crosshair ?? 'none') === (b.crosshair ?? 'none') && a.position === b.position && a.dragX === b.dragX && a.dragY === b.dragY && (a.dragLocked === true) === (b.dragLocked === true) && (a.dragRevision ?? 0) === (b.dragRevision ?? 0) && a.scale === b.scale && a.saturation === b.saturation &&
     (a.font ?? 'system') === (b.font ?? 'system') && (a.fpsFont ?? 'inherit') === (b.fpsFont ?? 'inherit') && a.opacity === b.opacity && a.layout === b.layout && a.radius === b.radius && a.gap === b.gap &&
     a.hideUnavailable === b.hideUnavailable && (a.fpsEmphasis !== false) === (b.fpsEmphasis !== false) && (a.underlay ?? 'none') === (b.underlay ?? 'none') && (a.underlayPreset ?? 'none') === (b.underlayPreset ?? 'none') && (a.underlayOpacity ?? .28) === (b.underlayOpacity ?? .28) && (a.underlayImage ?? '') === (b.underlayImage ?? '') && sameHudFields(a.fields, b.fields);
@@ -563,7 +587,7 @@ export function sameHudAppearance(a: MonitorOutputPreferences['ymcc'], b: Monito
 // Preset banks remain normalized/persisted at packet/UI boundaries as before.
 const hudDisplayInputKeys = ['textScale','showCpuName','showGpuName','visibility','crosshair','position','dragX','dragY','dragLocked','dragRevision','scale','saturation','opacity','layout','font','fpsFont','radius','gap',
   'hideUnavailable','fpsEmphasis','underlay','underlayPreset','underlayOpacity','underlayImage'] as const;
-export function sameHudDisplayInput(owned: MonitorOutputPreferences['ymcc'], raw: unknown): boolean {
+export function sameHudDisplayInput(owned: HudDisplayAppearance, raw: unknown): boolean {
   const input = record(raw), fields = record(input.fields);
   return HUD_METRICS.every(metric=>(owned.valueScales?.[metric.id]??1)===(record(input.valueScales)[metric.id]??1)) && input.dataPresetVersion === 1 && hudDisplayInputKeys.every(key => owned[key] === input[key]) &&
     HUD_METRICS.every(metric => owned.fields[metric.id] === fields[metric.id]);

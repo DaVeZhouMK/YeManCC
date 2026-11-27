@@ -60,6 +60,24 @@ await check('frozen v1 defaults match the actual normalizer and all catalogued s
   for (const { name } of contract.sections) assert.equal(typeof defaults[name], 'object');
   assert.equal(f.state.calls.length, 0);
 });
+await check('a repeated TDP limit skips only a healthy unchanged settings commit', async () => {
+  const f = createFixture(code, defaults);
+  const { tdpMax } = (await f.repo.loadSettings()).tdp;
+  const writes = f.state.writes.length, calls = f.state.calls.length;
+  await f.repo.saveSettingsSection('tdp', { tdpMax });
+  assert(f.state.calls.slice(calls).some(({ cmd }) => cmd === 'settings.read'));
+  assert.equal(f.state.writes.length, writes);
+
+  const changed = f.document();
+  changed.tdp.tdpMax = tdpMax + 1;
+  f.seed(f.state.file, changed);
+  await f.repo.saveSettingsSection('tdp', { tdpMax });
+  assert.equal(f.state.writes.length, writes + 1);
+  assert.equal(f.document().tdp.tdpMax, tdpMax);
+
+  await f.repo.saveSettingsSection('tdp', { tdpMax, fpsLimit: changed.tdp.fpsLimit });
+  assert.equal(f.state.writes.length, writes + 2, 'the fast path is limited to a single TDP field');
+});
 await check('legacy 035 imports missing sections and commits receipt with an atomic delta', async () => {
   const original = old(), f = createFixture(code, original);
   f.seed(f.state.directory + '\\music_player.json', { volume: 0.42, folder: 'user-music' });

@@ -1,9 +1,10 @@
-export function inspectGpdStopReceipt(row) {
+export function inspectGpdStopReceipt(row, selection) {
+  const settled = selection === 'settled-first-on';
   const terminal = row?.terminal;
-  const stopReason = terminal === 'off' ? 'virtual-target-disabled' : terminal === 'exit' ? 'shutdown' : null;
+  const stopReason = terminal === 'off' ? 'virtual-target-disabled' : terminal === 'exit' ? (settled ? 'app-exit' : 'shutdown') : null;
   const host = row?.hostStart;
   const fail = issue => ({accepted: false, issue});
-  if (!stopReason || row.name !== 'GPD/first-on-expired-full-cycle/' + terminal ||
+  if (!stopReason || row.name !== (settled ? 'GPD/first-on-settled-full-cycle/' : 'GPD/first-on-expired-full-cycle/') + terminal ||
       !Number.isSafeInteger(host?.pid) || host.pid <= 0 || !Number.isSafeInteger(host.epoch) || host.epoch <= 0 ||
       typeof host.runId !== 'string' || !host.runId.trim() || host.runId === 'UNBOUND') return fail('invalid-terminal-owner');
 

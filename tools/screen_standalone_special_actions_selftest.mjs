@@ -6,6 +6,9 @@ const selectorFlags=process.argv.slice(2).filter(value=>value.startsWith('--case
 assert(selectorFlags.length<=1,'DUPLICATE_CASE_SELECTOR');
 const compositionSelector=selectorFlags.length?selectorFlags[0].slice('--case='.length):null;
 const allowedCompositionSelectors=['menu-composition/popup-native-decky-lifetime','menu-composition/popup-native-decky-wrapper','menu-composition/popup-native-depth-path','menu-composition/popup-native-depth','menu-composition/popup-native-pair-guard','menu-composition/popup-native-shared-return','menu-composition/popup-native-shared-child','menu-composition/popup-native-focus','menu-composition/popup-native-focus-control','menu-composition/popup-previous-control','menu-composition/popup-mount-control','menu-composition/popup-mount-successor','menu-composition/popup-late-control','menu-composition/popup-final','menu-composition/popup-activation-remainder','menu-composition/popup-activation','menu-composition/popup-activation-control','menu-composition/focus-coordinator-scope-r2','menu-composition/focus-scope-incomplete-control','menu-composition/focus-scope-row-control','menu-composition/focus-coordinator-scope','menu-composition/focus-coordinator-control','menu-composition/focus-handoff-final','menu-composition/focus-handoff','menu-composition/focus-handoff-control','menu-composition/assemble','menu-composition/affected','menu-composition/stale-global','menu-composition/late-browser','menu-composition/native-owner','menu-composition/guide','menu-composition/owner-successor','menu-composition/owner-window-control','menu-composition/review-final','menu-composition/review-control','menu-composition/promise-final','menu-composition/promise-rejected','menu-composition/throw-sync','menu-composition/focus-diagnostic','menu-composition/focus-shadow-control','menu-composition/context-diagnostic','menu-composition/context-leaf-control','menu-composition/context-health-control','menu-composition/native-route-trace','menu-composition/native-route-control','menu-composition/native-route-remainder','menu-composition/activation-observation','menu-composition/activation-control','menu-composition/activation-cleanup-result','menu-composition/short-registration-reassert','menu-composition/short-registration-control','menu-composition/short-registration-home'];
+allowedCompositionSelectors.push('menu-composition/missing-receiver');
+allowedCompositionSelectors.push('menu-composition/proven-followup');
+allowedCompositionSelectors.push('menu-composition/base-registration');
 if(compositionSelector!==null)assert(allowedCompositionSelectors.includes(compositionSelector),'UNKNOWN_OR_EMPTY_CASE_SELECTOR');
 const outputPath=process.argv[2]?.startsWith('--case=')?undefined:process.argv[2];
 const source=fs.readFileSync('native/steam_live.js','utf8'),cases=[];
@@ -63,8 +66,10 @@ async function test(name,body){
   throw error;
  }
 }
-function identityFixture({healthy=false}={}) {
- const f=fixture({gameOverlayFocus:true}),logical=3301072349,full='14177997780718452736',registered=healthy?full:'2054970',app=healthy?logical:2054970;
+function identityFixture({healthy=false,registration}={}) {
+ let logical=3301072349,full='14177997780718452736',registered=healthy?full:'2054970',app=healthy?logical:2054970;
+ if(registration)({logical,full,registered,app}=registration);
+ const f=fixture({gameOverlayFocus:true});
  const info={m_unPID:901,m_nBrowserID:900,m_unAppID:app,m_gameID:registered,m_eBrowserType:0,m_eUIMode:4};
  f.overlay.params={appid:app,gameid:registered,browserInfo:info};f.overlay.Destroy=()=>{f.destroyed=true};
  f.overlay.CompositionStateStore={GetCompositionState:()=>f.overlayMenu?2:0,
@@ -145,9 +150,9 @@ await test('production native path has no Windows focus, PID gate, virtual outpu
  const main=fs.readFileSync('native/main.cpp','utf8'),start=main.indexOf('static bool nativeScreenStandaloneSubmit('),end=main.indexOf('// Shared only by shortcut summon routes',start),body=main.slice(start,end);
  for(const forbidden of ['GetForegroundWindow','GetWindowThreadProcessId','foregroundPid','SetForegroundWindow','SetFocus(','AttachThreadInput','sendMenuChord','SendInput','inputHostSubmit','outputTarget','g_frontendButtonPulse.request'])assert(!body.includes(forbidden),forbidden);
  const sharedStart=main.indexOf('static json nativeSteamMenuButton('),shared=main.slice(sharedStart,start);
- assert(sharedStart>=0);assert(main.includes('"operation","menu.button"'));assert(shared.includes('"menu.button"'));assert(/nativeSteamMenuButton\(quick,allowed,followup(?:,coldDeadline,requestId)?\)/.test(body));assert(body.includes('keyDelivered'));assert(body.includes('menuStateVerified'));assert(body.includes('focusChangedByYmcc'));assert(body.includes('standaloneCurrent(generation)'));
+ assert(sharedStart>=0);assert(main.includes('"operation","menu.button"'));assert(shared.includes('"menu.button"'));assert(body.includes('nativeSteamMenuButton(quick,allowed,followup,coldDeadline,requestId,quick?&origin:nullptr)'));assert(body.includes('keyDelivered'));assert(body.includes('menuStateVerified'));assert(body.includes('focusChangedByYmcc'));assert(body.includes('standaloneCurrent(generation)'));
  const shortcut=fs.readFileSync('native/shortcut_steam_buttons.h','utf8');
- assert(/nativeSteamMenuButton\(button==ymcc::FrontendButton::SteamQuickAccess,allowed(?:,json\(\),coldDeadline,actionEpoch)?\)/.test(shortcut));
+ assert(shortcut.includes('nativeSteamMenuButton(quick,allowed,json(),coldDeadline,actionEpoch,quick?&origin:nullptr)'));
  for(const forbidden of ['SendCtrl1','g_frontendButtonPulse.request','focusBeginReturnToPreviousWindow','nativeFrontendButtonTargetEpoch'])assert(!shortcut.includes(forbidden),forbidden);
  const menuStart=source.indexOf("    if (['menu.button', 'menu.toggle', 'menu.inspect'].includes(request.operation)) {");assert(menuStart>=0);
  const branch=source.slice(menuStart,source.indexOf("if (request.operation === 'settings.get'",menuStart));

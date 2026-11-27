@@ -11,6 +11,7 @@ import {OWNED_SOURCES,OWNED_INPUTS,ownedToolDeclaration} from './owned-adapter.m
 import {ORIGINAL_CASES,ORIGINAL_SELECTION,ORIGINAL_REGISTRATION_IDS,originalReadyConsumer,originalCommittedReadyConsumer,originalOfflineConsumer,originalManagedBackendConsumer,originalAggregateCases,validateOriginalResult,verifyOriginalFrozenSources} from './owned-run.mjs';
 import {resourceZero,verifyDeferredResourceProof} from './typed-binding-gate.mjs';
 import {lockBundledNodeTools,verifyBundledToolScope} from '../bundled-node-tool-authority.mjs';
+import {extractDeckyReady,deckyReadyFixtureDelivery} from '../decky-update-recovery/native-source-admission.mjs';
 const repo=path.resolve(import.meta.dirname,'../../../..');
 const moduleRel='tools/ymcc_sim/global/decky-persistent-lifecycle';
 const sha=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -20,11 +21,22 @@ const within=(parent,file)=>key(file).startsWith(key(parent)+path.sep);
 const args=process.argv.slice(2),get=name=>{const i=args.indexOf(name);return i<0?null:args[i+1];};
 const write=(file,value)=>{fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,JSON.stringify(value,null,2)+'\n');};
 const pin=file=>({path:path.resolve(file),sha256:sha(file)});
-function checkedNative(file,digest){assert.equal(sha(file),digest,'CONSUMER_NATIVE_RECEIPT_CHANGED');const value=read(file);assert.equal(value.schemaVersion,1);assert(Array.isArray(value.cases));return value;}
+const nativeReadyId='native.committed-ready-executes-original-rebind-consumer';
+const nativeStopFallbackId='native.job-stop-failure-falls-back-to-owned-job-close';
+const consumerReadyId='consumer.sleep-rejects-write-and-automatically-publishes-current-ready';
+const directed=args.includes('--native-case');
+const nativeId=directed?get('--native-case'):null;
+const needsReadyConsumer=nativeId===nativeReadyId;
+const consumerDirected=args.includes('--consumer-case');
+function exactFlags(names){const seen=new Set();assert.equal(args.length,names.length*2,'DIRECTED_ARGUMENTS_REQUIRED');for(let i=0;i<args.length;i+=2){assert(names.includes(args[i])&&!seen.has(args[i])&&args[i+1]&&!args[i+1].startsWith('--'),'DIRECTED_ARGUMENT_INVALID');seen.add(args[i]);}}
+function checkedNative(file,digest){const bytes=fs.readFileSync(file);assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'),digest,'CONSUMER_NATIVE_RECEIPT_CHANGED');const value=JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/,''));assert.equal(value.schemaVersion,1);assert(Array.isArray(value.cases));return value;}
+if(directed){exactFlags(['--evidence-dir','--workspace-dir','--native-case']);assert([nativeReadyId,nativeStopFallbackId].includes(nativeId),'NATIVE_CASE_UNKNOWN');}
+if(consumerDirected){exactFlags(['--consumer-native','--consumer-native-sha256','--consumer-output','--consumer-case']);assert.equal(get('--consumer-case'),consumerReadyId,'CONSUMER_CASE_UNKNOWN');}
 if(get('--consumer-native')){
  const native=checkedNative(get('--consumer-native'),get('--consumer-native-sha256'));
  const {lifecycleConsumerTests}=await import('./consumer-selftest.mjs');
- const result=await lifecycleConsumerTests(native);write(get('--consumer-output'),result);
+ if(consumerDirected){assert.deepEqual(native.cases.map(row=>row.id),[nativeReadyId],'DIRECTED_NATIVE_CASE_MEMBERSHIP');assert.equal(native.cases[0].passed,true,'DIRECTED_NATIVE_READY_NOT_PROVEN');}
+ const result=await lifecycleConsumerTests(native,consumerDirected?{caseIds:[consumerReadyId]}:undefined);write(get('--consumer-output'),result);
  console.log(JSON.stringify({scope:'unchanged production host-relay-client lifecycle consumer',cases:result.cases.length,failed:result.cases.filter(c=>!c.passed).map(c=>c.id)}));
  process.exitCode=result.passed?0:1;
 }else{
@@ -34,7 +46,9 @@ if(get('--consumer-native')){
  assert(within(path.join(core,'Evidence/DeckyParentMigration-20261023'),out),'EVIDENCE_SCOPE');
  assert(within(path.join(core,'Workspace/DeckyParentMigration-20261023'),work),'WORKSPACE_SCOPE');
  assert(!fs.existsSync(out),'FRESH_EVIDENCE_REQUIRED');assert(fs.statSync(work).isDirectory(),'OWNED_WORKSPACE_REQUIRED');
- assert.equal(key(fs.realpathSync(work)),key(work),'WORKSPACE_REPARSE');fs.mkdirSync(out,{recursive:true});
+ assert.equal(key(fs.realpathSync(work)),key(work),'WORKSPACE_REPARSE');
+ if(directed){assert.deepEqual(fs.readdirSync(work),[],'DIRECTED_WORKSPACE_MUST_BE_EMPTY');assert.equal(key(fs.realpathSync(path.dirname(out))),key(path.dirname(out)),'DIRECTED_EVIDENCE_PARENT_REPARSE');}
+ fs.mkdirSync(out,{recursive:!directed});
  const report={schemaVersion:1,id:'plugins.decky-current-parent-migration',status:'FAIL',passed:false,fullPersistentAcceptance:false,
   startedAt:new Date().toISOString(),cases:[],sourceInputs:[],toolArtifacts:[],physicalSleepPerformed:false,officialLoaderExecuted:false,
   installedApplicationsStarted:false,realSteamOrDeviceActions:0,networkScope:'unchanged owned source-built protocol peers only; production TS socket boundaries are in-memory',
@@ -43,6 +57,7 @@ if(get('--consumer-native')){
   requiredIntegration:'Main agent must separately register this entry and refresh parent sourceInputs/requiredComponents; adapter/contract remain unchanged',
   lifecycleComponent:{featureId:'plugins.decky',persistence:'persistent',parentAdapterId:'plugins.decky-persistent-lifecycle',fullPersistentAcceptance:false},
   historicalLegacyVerdict:'FAIL retained; original raw receipts and legacy source are not reclassified'};
+ if(directed)report.directed={nativeId,consumerId:needsReadyConsumer?consumerReadyId:null,originalTyped:'NOT_RUN',consumer:'NOT_RUN',formalParentExecuted:false};
  const sourcePins=new Map(),toolPins=new Map();
  function bind(relative){relative=relative.replaceAll('\\','/');if(sourcePins.has(relative))return;const file=path.join(repo,relative);assert(within(repo,file));assert.equal(key(fs.realpathSync(file)),key(file),'SOURCE_REPARSE');sourcePins.set(relative,{path:relative,sha256:sha(file)});}
  function run(id,program,argv,{timeout=45000,cwd=work,env=process.env}={}){
@@ -73,11 +88,16 @@ if(get('--consumer-native')){
   write(path.join(out,'SOURCE-PINS.json'),report.sourceInputs);write(path.join(out,'TOOL-PINS.json'),report.toolArtifacts);
   const originalCpp=fs.readFileSync(path.join(repo,'tools/decky_binding_runtime_selftest.cpp'),'utf8');
   assert.deepEqual([...originalCpp.matchAll(/\btest\("([^"]+)"/g)].map(m=>m[1]).filter(id=>ORIGINAL_REGISTRATION_IDS.includes(id)),ORIGINAL_CASES.map(r=>r.registrationId),'ORIGINAL_SOURCE_REGISTRATIONS_CHANGED');
-  const main=fs.readFileSync(path.join(repo,'native/main.cpp'),'utf8'),start=main.indexOf('    case WM_POWER_RESUME_COMMIT:'),begin=main.indexOf('        if (g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready) {',start),end=main.indexOf('ipc_emit("power.resumed"',begin);
-  assert(start>=0&&begin>start&&end>begin,'CURRENT_READY_EXTRACTION_BOUNDARY_CHANGED');const slice=main.slice(begin,end);
-  assert(slice.includes('PowerLifecycle::Ready'),'CURRENT_READY_GUARD_REQUIRED');
+  const main=fs.readFileSync(path.join(repo,'native/main.cpp'),'utf8'),productionReady=extractDeckyReady(main);
+  const start=main.indexOf('    case WM_POWER_RESUME_COMMIT:');
+  const begin=productionReady.publicReady?productionReady.deliveryAt:main.indexOf('        if (g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready) {',start);
+  const end=productionReady.publicReady?begin+productionReady.delivery.length:main.indexOf('ipc_emit("power.resumed"',begin);
+  assert(begin>=0&&end>begin,'CURRENT_READY_EXTRACTION_BOUNDARY_CHANGED');const slice=main.slice(begin,end);
+  if(!productionReady.publicReady)assert(start>=0&&begin>start&&slice.includes('PowerLifecycle::Ready'),'CURRENT_READY_GUARD_REQUIRED');
   const sharedCall=slice.includes('deckySidebarResumeAfterIntent(generation,"committed-ready")')?'deckySidebarResumeAfterIntent(generation,"committed-ready")':'deckySidebarResumeAfterIntent(currentPowerGeneration(),"committed-ready")';
-  assert.equal(slice.split(sharedCall).length-1,1,'CURRENT_SHARED_READY_CONSUMER_REQUIRED');
+  assert.equal(slice.split(productionReady.publicReady?productionReady.call:sharedCall).length-1,1,'CURRENT_SHARED_READY_CONSUMER_REQUIRED');
+  let typedPassed=false;
+  if(!directed){
   const originalDir=path.join(work,'o');
   const originalRun=run('original-typed',process.execPath,[path.join(repo,'tools/decky_binding_runtime_selftest.mjs'),originalDir],{timeout:135000});
   assert.equal(originalRun.exitCode,0,'ORIGINAL_TYPED_PRODUCER_FAILED_SEE_ORIGINAL_TYPED_PROCESS_AND_STDERR');
@@ -98,6 +118,8 @@ if(get('--consumer-native')){
   report.originalProducer={deferredRaw:report.deferredResourceProof.raw,raw:pin(path.join(originalDir,'typed-runtime-result.json')),result:pin(path.join(originalDir,'RESULT.json')),sourcePins:pin(path.join(originalDir,'SOURCE-PINS.json')),exe:pin(path.join(originalDir,'FixtureSteam/steam.exe'))};
   // The original six producer verdicts and all raw fields remain intact.
   report.cases.push(...originalAggregateCases(raw).map(row=>({id:row.id,passed:row.passed,measurements:Object.fromEntries(Object.entries(row).filter(([k])=>!['id','passed'].includes(k))),evidence:report.originalProducer.raw})));
+  typedPassed=raw.passed;
+  }
   const nativeDir=path.join(work,'n'),source=path.join(nativeDir,'s');fs.mkdirSync(source,{recursive:true});const nativeFrozen=new Map();
   for(const relative of [...OWNED_SOURCES,moduleRel+'/current-parent-native.cpp']){
    const target=path.join(source,relative);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(path.join(repo,relative),target);assert.equal(sha(target),sourcePins.get(relative).sha256);nativeFrozen.set(key(target),{path:target,sha256:sha(target)});
@@ -107,13 +129,14 @@ if(get('--consumer-native')){
   const mainStart=originalCpp.indexOf('\n// YMCC_DECKY_RUNTIME_SHARED_PREAMBLE_END');assert(mainStart>0&&originalCpp.indexOf('\n// YMCC_DECKY_RUNTIME_SHARED_PREAMBLE_END',mainStart+1)<0,'ORIGINAL_PREAMBLE_BOUNDARY_CHANGED');
   const helper=path.join(source,'tools/current-runtime-helpers.inc');fs.writeFileSync(helper,originalCpp.slice(0,mainStart)+'\n');nativeFrozen.set(key(helper),pin(helper));
   const ready=path.join(source,'tools/current-committed-ready.inc');const currentCode=sharedCall.includes('(generation,')?'        if (g_powerLifecycle.load(std::memory_order_acquire) == PowerLifecycle::Ready) {\n            const auto generation=currentPowerGeneration();\n            '+sharedCall+';\n':slice;
-  fs.writeFileSync(ready,'static void consumeCommittedReady(){\n'+currentCode+'        }\n}\n');report.currentCommittedScope=sharedCall.includes('(generation,')?'Original Ready guard and exact Decky leaf; borrowed generation supplied by standalone fixture, no full committed fanout claim':'Original committed Ready branch';nativeFrozen.set(key(ready),pin(ready));
+  fs.writeFileSync(ready,productionReady.publicReady?deckyReadyFixtureDelivery(productionReady).replace('inline void productionCommittedReady','static void consumeCommittedReady'):'static void consumeCommittedReady(){\n'+currentCode+'        }\n}\n');
+  report.currentCommittedScope=productionReady.publicReady?'Exact public Ready consumer; synthetic power facts and no Windows dispatch':sharedCall.includes('(generation,')?'Original Ready guard and exact Decky leaf; borrowed generation supplied by standalone fixture, no full committed fanout claim':'Original committed Ready branch';nativeFrozen.set(key(ready),pin(ready));
   const crashPolicy=fs.readFileSync(path.join(repo,'tools/decky_sidebar_crash_breaker_selftest.cpp'),'utf8'),policyBegin=crashPolicy.indexOf('static void policy(){'),policyEnd=crashPolicy.indexOf('\nint wmain(',policyBegin);
   assert(policyBegin>=0&&policyEnd>policyBegin,'ORIGINAL_CRASH_POLICY_BOUNDARY_CHANGED');
   const policyText=crashPolicy.slice(policyBegin,policyEnd),policyInclude=path.join(source,'tools/current-crash-policy.inc');
   assert(policyText.includes('b.exited(10)')&&policyText.includes('LoaderCrashBudget::maxUnstableExits')&&policyText.includes('b.healthy(LoaderCrashBudget::stableUptimeMs)'),'ORIGINAL_CRASH_POLICY_CHANGED');
   fs.writeFileSync(policyInclude,policyText+'\n');nativeFrozen.set(key(policyInclude),pin(policyInclude));
-  report.nativeExtractions={producer:{path:'tools/decky_binding_runtime_selftest.cpp',sha256:sourcePins.get('tools/decky_binding_runtime_selftest.cpp').sha256,beginByte:0,endByte:mainStart,generated:pin(helper),scope:'unchanged reusable producer helpers; original six cases execute separately through original mjs'},ready:{path:'native/main.cpp',sha256:sourcePins.get('native/main.cpp').sha256,beginByte:begin,endByte:end,sliceSha256:crypto.createHash('sha256').update(slice).digest('hex'),generated:pin(ready),scope:'unchanged current committed-Ready consumer; UI/OS events are not dispatched'}};
+  report.nativeExtractions={producer:{path:'tools/decky_binding_runtime_selftest.cpp',sha256:sourcePins.get('tools/decky_binding_runtime_selftest.cpp').sha256,beginByte:0,endByte:mainStart,generated:pin(helper),scope:'reusable producer helpers; original six cases execute separately through original mjs'},ready:{path:'native/main.cpp',sha256:sourcePins.get('native/main.cpp').sha256,beginByte:begin,endByte:end,sliceSha256:crypto.createHash('sha256').update(slice).digest('hex'),generated:pin(ready),scope:report.currentCommittedScope}};
   report.nativeExtractions.crashPolicy={path:'tools/decky_sidebar_crash_breaker_selftest.cpp',sha256:sourcePins.get('tools/decky_sidebar_crash_breaker_selftest.cpp').sha256,beginByte:policyBegin,endByte:policyEnd,generated:pin(policyInclude),scope:'unchanged original pure policy() body; entire legacy fixture and its macro are not compiled'};
   write(path.join(out,'NATIVE-EXTRACTIONS.json'),report.nativeExtractions);
   const tools=selectedNativeTools().native;
@@ -131,15 +154,26 @@ if(get('--consumer-native')){
   assert.equal(imageBytes.readUInt16LE(peOffset+24+68),2,'CURRENT_NATIVE_GUI_IMAGE_REQUIRED');
   report.currentNativeImage={...pin(image),machine:imageBytes.readUInt16LE(peOffset+4),subsystem:imageBytes.readUInt16LE(peOffset+24+68),sourceBuilt:true,officialLoaderExecuted:false};
   report.currentCompilerGraph=validateGraph(graph,nativeFrozen);const cef=path.join(nativeDir,'bin/cef/fixture/steamwebhelper.exe');fs.mkdirSync(path.dirname(cef),{recursive:true});fs.copyFileSync(image,cef);assert.equal(sha(image),sha(cef));
-  const nativeRun=run('current-native',image,[path.join(nativeDir,'f')],{timeout:45000,cwd:nativeDir,env});
+  const nativeRun=run('current-native',image,[path.join(nativeDir,'f'),...(directed?[nativeId]:[])],{timeout:45000,cwd:nativeDir,env});
   assert([0,1].includes(nativeRun.exitCode),'CURRENT_NATIVE_NONTERMINAL_EXIT:'+nativeRun.exitCode+'; original process/fault/progress receipts retained; no result inferred');
   const current=read(path.join(nativeDir,'native-result.json'));assert.equal(current.schema,'ymcc.current-decky-parent-native.v1');assert.equal(current.productCallbackMode,'typed-only; legacy macro absent');assert.equal(nativeRun.exitCode,current.passed?0:1);
-  const currentIds=['native.exit-clears-owned-process-job-worker-event','native.explicit-off-and-fatal-off-veto-late-wakes','native.late-actual-recovery-callback-after-exit','native.committed-ready-executes-original-rebind-consumer','native.job-stop-failure-falls-back-to-owned-job-close','native.crash-budget-cannot-renew-on-recovery-or-unknown'];assert.deepEqual(current.cases.map(r=>r.id),currentIds,'CURRENT_CASE_MEMBERSHIP_CHANGED');
+  const currentIds=['native.exit-clears-owned-process-job-worker-event','native.explicit-off-and-fatal-off-veto-late-wakes','native.late-actual-recovery-callback-after-exit',nativeReadyId,nativeStopFallbackId,'native.crash-budget-cannot-renew-on-recovery-or-unknown'];assert.deepEqual(current.cases.map(r=>r.id),directed?[nativeId]:currentIds,'CURRENT_CASE_MEMBERSHIP_CHANGED');
   assert.equal(current.remainingTrackedJobHandles,0,'CURRENT_OWNED_JOB_HANDLE_LEDGER_NOT_EMPTY');assert.equal(current.resourceLedgerOverflow,false,'CURRENT_RESOURCE_LEDGER_OVERFLOW');
   report.currentProducer={raw:pin(path.join(nativeDir,'native-result.json')),exe:pin(image),cef:pin(cef)};report.cases.push(...current.cases.map(row=>({...row,evidence:report.currentProducer.raw})));
-  const combined={schemaVersion:1,passed:raw.passed&&current.passed,cases:report.cases};const combinedFile=path.join(out,'native-result.json');write(combinedFile,combined);
-  const consumerFile=path.join(out,'consumer-result.json');const consumerRun=run('current-consumer',process.execPath,[path.join(repo,moduleRel,'current-parent-native.mjs'),'--consumer-native',combinedFile,'--consumer-native-sha256',sha(combinedFile),'--consumer-output',consumerFile],{timeout:45000,cwd:repo});
+  if(!directed||(needsReadyConsumer&&current.passed)){
+  const combined={schemaVersion:1,passed:(directed||typedPassed)&&current.passed,cases:report.cases};const combinedFile=path.join(out,'native-result.json');write(combinedFile,combined);
+  const consumerFile=path.join(out,'consumer-result.json');const consumerRun=run('current-consumer',process.execPath,[path.join(repo,moduleRel,'current-parent-native.mjs'),'--consumer-native',combinedFile,'--consumer-native-sha256',sha(combinedFile),'--consumer-output',consumerFile,...(directed?['--consumer-case',consumerReadyId]:[])],{timeout:45000,cwd:repo});
   const consumer=read(consumerFile);assert.equal(consumerRun.exitCode,consumer.passed?0:1);assert.equal(consumer.productionHostExecuted,true);assert.equal(consumer.productionRelayExecuted,true);assert.equal(consumer.productionClientExecuted,true);report.cases.push(...consumer.cases.map(row=>({...row,evidence:pin(consumerFile)})));
+  if(directed){
+   assert.deepEqual(consumer.cases.map(row=>row.id),[consumerReadyId],'DIRECTED_CONSUMER_MEMBERSHIP');
+   assert.equal(consumer.selection.mode,'exact');assert.equal(consumer.fullConsumerGroupExecuted,false);assert.equal(consumer.nativeEvidenceProvided,true);
+   report.directed.consumer=consumer.passed?'PASS':'FAIL';
+  }
+  }
+  if(directed){
+   report.selectedCasesPassed=current.passed&&(!needsReadyConsumer||report.directed.consumer==='PASS');
+   report.status=report.selectedCasesPassed?'DIRECTED_PASS':'FAIL';
+  }else{
   const c=id=>report.cases.find(r=>r.id===id),ids=ORIGINAL_CASES.map(r=>r.id),exit='consumer.exit-disposes-observers-and-delivered-late-recovery-callbacks';
   function requirement(name,caseIds,gaps=[]){const failed=caseIds.filter(id=>c(id)?.passed!==true);return {requirement:name,status:failed.length?'FAIL':gaps.length?'INCOMPLETE':'PASS',caseIds,failedOrMissingCaseIds:failed,gaps,observations:caseIds.map(id=>({caseId:id,evidence:c(id)?.evidence??null,measurements:c(id)?.measurements??null}))};}
   report.requirements=[
@@ -153,6 +187,7 @@ if(get('--consumer-native')){
   ];
   // Every returned consumer verdict, including negative controls, gates this run.
   report.selectedCasesPassed=report.cases.every(r=>r.passed===true)&&report.originalSummary.failed===0;report.allSevenObservationsPassed=report.requirements.length===7&&report.requirements.every(r=>r.status==='PASS');report.status=report.selectedCasesPassed&&report.allSevenObservationsPassed?'INCOMPLETE':'FAIL';
+  }
  }catch(error){report.error=String(error.stack??error);report.status='FAIL';report.cases.push({id:'current-parent.execution-integrity',passed:false,error:report.error});}
  const changed=(rows,resolve)=>rows.filter(row=>{try{return sha(resolve(row))!==row.sha256;}catch{return true;}});
  report.sourceChanges=changed([...sourcePins.values()],r=>path.join(repo,r.path)).map(r=>r.path);report.toolChanges=changed([...toolPins.values()],r=>r.path).map(r=>r.path);
@@ -162,5 +197,5 @@ if(get('--consumer-native')){
  report.finishedAt=new Date().toISOString();report.passed=false;write(path.join(out,'result.json'),report);
  write(path.join(out,'REQUIREMENTS.json'),{status:report.status,fullPersistentAcceptance:false,requirements:report.requirements??[],originalBaseline:report.originalBaseline,requiredIntegration:report.requiredIntegration});
  console.log(JSON.stringify({status:report.status,summary:report.summary,error:report.error??null,sourceUnchanged:report.sourceUnchanged,toolsUnchanged:report.toolsUnchanged,fullPersistentAcceptance:false,out}));
- process.exitCode=report.status==='INCOMPLETE'?2:1;
+ process.exitCode=report.status==='DIRECTED_PASS'?0:report.status==='INCOMPLETE'?2:1;
 }

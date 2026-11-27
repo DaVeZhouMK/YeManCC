@@ -46,10 +46,12 @@ export async function runtimePowerOnly({arguments_,root,scriptDirectory,calibrat
    assert.equal(original.split('ymcc::lossless::runtimeMonitor()').length,2,'Watch singleton adapter must be exact');
    const adapted=original.replace('ymcc::lossless::runtimeMonitor()','fixtureMonitor()');fs.writeFileSync(path.join(out,'watch-entry.inc'),adapted);
    result.watchEntry={source:pin(path.join(candidate,'main.cpp')),originalSha256:createHash('sha256').update(original).digest('hex'),adapted:pin(path.join(out,'watch-entry.inc')),adaptations:[{from:'ymcc::lossless::runtimeMonitor()',to:'fixtureMonitor()',count:1}],scope:'Only singleton lookup uses the owned actual RuntimeMonitor with inert discovery. Entire original schema/exit/configure/public-source/receipt body remains verbatim.'};
-   const projectionStart=main.indexOf('static void projectSharedPowerLifecycle(HWND window) {'),projectionEnd=main.indexOf('static DWORD WINAPI suspendResumeSubscriptionCallback(',projectionStart);assert(projectionStart>=0&&projectionEnd>projectionStart);
-   const projection=main.slice(projectionStart,projectionEnd).trimEnd();assert.equal(projection.split('ymcc::lossless::runtimeMonitor()').length,2,'Common singleton adapter must be exact');
-   const projected=projection.replace('ymcc::lossless::runtimeMonitor()','fixtureMonitor()');fs.writeFileSync(path.join(out,'common-projection.inc'),projected);
-   result.commonProjection={originalSha256:createHash('sha256').update(projection).digest('hex'),adapted:pin(path.join(out,'common-projection.inc')),adaptations:[{from:'ymcc::lossless::runtimeMonitor()',to:'fixtureMonitor()',count:1}],scope:'Actual complete main projection; original current Reader/Registration and actual RuntimeMonitor worker; peripheral listeners/IPC/timer terminal are inert.'};
+   if(!readOnly){
+    const projectionStart=main.indexOf('static void projectSharedPowerLifecycle(HWND window) {'),projectionEnd=main.indexOf('static DWORD WINAPI suspendResumeSubscriptionCallback(',projectionStart);assert(projectionStart>=0&&projectionEnd>projectionStart);
+    const projection=main.slice(projectionStart,projectionEnd).trimEnd();assert.equal(projection.split('ymcc::lossless::runtimeMonitor()').length,2,'Common singleton adapter must be exact');
+    const projected=projection.replace('ymcc::lossless::runtimeMonitor()','fixtureMonitor()');fs.writeFileSync(path.join(out,'common-projection.inc'),projected);
+    result.commonProjection={originalSha256:createHash('sha256').update(projection).digest('hex'),adapted:pin(path.join(out,'common-projection.inc')),adaptations:[{from:'ymcc::lossless::runtimeMonitor()',to:'fixtureMonitor()',count:1}],scope:'Actual complete main projection; original current Reader/Registration and actual RuntimeMonitor worker; peripheral listeners/IPC/timer terminal are inert.'};
+   }
   }
   if(watchOrder){
    const {cppBlock}=await import((await import('node:url')).pathToFileURL(path.join(root,'tools/ymcc_sim/global/decky-update-recovery/native-source-admission.mjs')));

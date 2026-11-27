@@ -4,7 +4,8 @@ import {createHash} from 'node:crypto';import {spawnSync} from 'node:child_proce
 import {generateOemConsumers} from './fixtures/unified_oem_input/generate.mjs';
 import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/toolchain.mjs';
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),args=process.argv.slice(2);
-if(args.length!==2||args[0]!=='--out')throw Error('Usage: --out fresh-evidence-directory');
+const max3Only=args[2]==='--winmax3-only';
+if(args[0]!=='--out'||args.length!==(max3Only?3:2))throw Error('Usage: --out fresh-evidence-directory [--winmax3-only]');
 const out=path.resolve(args[1]),rel=path.relative(repo,out);if(!rel||(!path.isAbsolute(rel)&&rel!=='..'&&!rel.startsWith('..'+path.sep)))throw Error('EVIDENCE_OUTSIDE_REPO_REQUIRED');
 if(fs.existsSync(out))throw Error('FRESH_EVIDENCE_REQUIRED');fs.mkdirSync(out,{recursive:true});
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex'),write=(p,x)=>fs.writeFileSync(p,JSON.stringify(x,null,2)+'\n');
@@ -18,17 +19,20 @@ function change(source,before,after){if(!source.includes(before)&&before.include
 function execute(name,root,configuration,expectedFailure){
  const flags=configuration==='Release'?['/O2','/DNDEBUG','/MD']:['/Od','/RTC1','/Zi','/D_DEBUG','/D_ITERATOR_DEBUG_LEVEL=2','/MDd'];
  const target=path.join(root,configuration);fs.mkdirSync(target,{recursive:true});const exe=path.join(target,'consumer.exe');
- const build=spawnSync('cl.exe',['/nologo','/std:c++17','/EHsc','/utf-8','/W4',...flags,path.join(root,'actual-oem-consumers.cpp'),'/Fo'+path.join(target,'consumer.obj'),'/Fd'+path.join(target,'consumer.pdb'),'/Fe'+exe,'/link','/INCREMENTAL:NO'],{cwd:target,env:compilerEnv,windowsHide:true,encoding:'utf8',timeout:90000,maxBuffer:8*1024*1024});
+ const build=spawnSync('cl.exe',['/nologo','/std:c++20','/EHsc','/utf-8','/W4',...flags,path.join(root,'actual-oem-consumers.cpp'),'/Fo'+path.join(target,'consumer.obj'),'/Fd'+path.join(target,'consumer.pdb'),'/Fe'+exe,'/link','/INCREMENTAL:NO'],{cwd:target,env:compilerEnv,windowsHide:true,encoding:'utf8',timeout:90000,maxBuffer:8*1024*1024});
  fs.writeFileSync(path.join(target,'compile.log'),(build.stdout||'')+(build.stderr||'')+(build.error?.message||''));if(build.status!==0)throw Error('COMPILATION_FAILED_NOT_SEMANTIC:'+name+':'+configuration);
- const run=spawnSync(exe,[],{cwd:target,env:compilerEnv,windowsHide:true,encoding:'utf8',timeout:30000,maxBuffer:8*1024*1024});fs.writeFileSync(path.join(target,'run.log'),(run.stdout||'')+(run.stderr||''));
+ const run=spawnSync(exe,max3Only?['--winmax3-only']:[],{cwd:target,env:compilerEnv,windowsHide:true,encoding:'utf8',timeout:30000,maxBuffer:8*1024*1024});fs.writeFileSync(path.join(target,'run.log'),(run.stdout||'')+(run.stderr||''));
  let report;try{report=JSON.parse(run.stdout.trim());}catch{throw Error('CONSUMER_TERMINATION_SUMMARY_MISSING:'+name);}
- const valid=expectedFailure?run.status===1&&report.status==='FAIL'&&report.error===expectedFailure:run.status===0&&report.status==='PASS'&&report.completeProductionGate&&report.productionQuery&&report.productionHook&&report.selections===baseline.selections&&report.hardwareIo===false;
+ const valid=expectedFailure?run.status===1&&report.status==='FAIL'&&report.error===expectedFailure:run.status===0&&report.status==='PASS'&&report.completeProductionGate&&report.productionQuery&&report.productionHook&&report.selections===(max3Only?0:baseline.selections)&&report.hardwareIo===false;
  if(!valid)throw Error('CONSUMER_ASSERTION_NOT_EXPECTED:'+name+':'+JSON.stringify(report));
  const result={name,configuration,compileExitCode:build.status,exitCode:run.status,status:expectedFailure?'EXPECTED_REJECTION':'PASS',report,executableSha256:sha(fs.readFileSync(exe))};results.push(result);return result;
 }
 try{
  for(const config of ['Release','Checked'])execute('current',baselinePath,config);
- const faults=[
+ const faults=max3Only?[
+  ['missing-max3-recognition','ymcc::capabilities::oem::gpd::matchesWinMax3(m, p)','false','actual resolver admits the MAX3 DMI without borrowing Win5 motion'],
+  ['menu-leak','return {win5.keys, count};','return win5;','MAX3 query exposes the shared model and five trial keys'],
+ ]:[
   ['discard-unified-profile','return oemUnifiedInputBindingFor(family, cls).profileId;','return static_cast<int>(OemChordProfileId::None);','full gate consumes unified canonical profile'],
   ['raw-alias-capture-predicate','const std::string consumerClass = binding.model ? std::string(binding.model->consumerClass) : g_machineIdentity.deviceClass;\n        OemCatalogRef ref = binding.catalog;','const std::string consumerClass = g_machineIdentity.deviceClass;\n        OemCatalogRef ref = binding.catalog;','query aliases retain complete canonical capture predicates and routes'],
   ['lost-profile-epoch','g_oemShortcutEdgeEpoch.fetch_add(1, std::memory_order_acq_rel);\n    const bool chordCapable','g_oemShortcutEdgeEpoch.fetch_add(0, std::memory_order_acq_rel);\n    const bool chordCapable','full gate keeps profile-change epoch'],
@@ -40,5 +44,5 @@ try{
  const sourceIdentity=baseline.inputs.map(row=>({...row,currentSha256:sha(fs.readFileSync(row.path))}));if(sourceIdentity.some(r=>r.sha256!==r.currentSha256))throw Error('SOURCE_CHANGED_DURING_RUN');
  const outputTree=dir=>fs.readdirSync(dir,{withFileTypes:true}).flatMap(entry=>{if(entry.isSymbolicLink())throw Error('OUTPUT_LINK_NOT_ADMITTED');const file=path.join(dir,entry.name);return entry.isDirectory()?outputTree(file):[file];});
  const sourceHashes=[...sourceIdentity.map(r=>({path:r.file,sha256:r.sha256})),...outputTree(out).map(file=>({path:file,sha256:sha(fs.readFileSync(file))}))];
- const result={schemaVersion:1,status:'PASS',sourceHashes,generatedAt:new Date().toISOString(),hardwareIo:false,registeredProductConsumers:true,sourceIdentity,scope:baseline.scope,results,summary:{configurations:2,selectionsPerConfiguration:baseline.selections,checks:results.filter(r=>r.name==='current').map(r=>r.report.checks),compiledFaults:faults.length,negativeExecutions:faults.length*2},limitations:['Hook installation, registry/device identity and log sinks are memory IO boundaries.','No full native binary, Host startup, hardware, Windows sleep or physical source transport acceptance.']};write(path.join(out,'result.json'),result);console.log(JSON.stringify({status:result.status,summary:result.summary}));console.log('OEM_INPUT_CONSUMERS_COMPLETED configurations=2 faults='+faults.length);
+ const result={schemaVersion:1,status:'PASS',sourceHashes,generatedAt:new Date().toISOString(),hardwareIo:false,registeredProductConsumers:true,sourceIdentity,scope:max3Only?'MAX3 identity, OEM profile, catalog query and keyboard path only':baseline.scope,results,summary:{configurations:2,selectionsPerConfiguration:max3Only?0:baseline.selections,checks:results.filter(r=>r.name==='current').map(r=>r.report.checks),compiledFaults:faults.length,negativeExecutions:faults.length*2},limitations:['Hook installation, registry/device identity and log sinks are memory IO boundaries.','No full native binary, Host startup, hardware, Windows sleep or physical source transport acceptance.']};write(path.join(out,'result.json'),result);console.log(JSON.stringify({status:result.status,summary:result.summary}));console.log('OEM_INPUT_CONSUMERS_COMPLETED configurations=2 faults='+faults.length);
 }catch(error){write(path.join(out,'result.json'),{status:'FAIL',error:error.message,results,hardwareIo:false});console.error(error.message);process.exitCode=1;}

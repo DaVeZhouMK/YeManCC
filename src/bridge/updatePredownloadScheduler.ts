@@ -16,6 +16,7 @@ export interface PredownloadDependencies {
   clearTimer(timer: unknown): void;
   online(): boolean;
   canRun?(): boolean;
+  capturePolicyScope?(): () => boolean;
   readPolicy(): Promise<PredownloadPolicy>;
   setEnabled(enabled: boolean): Promise<PredownloadPolicy>;
   saveSchedule(failureCount: number, nextCheckAt: number): Promise<unknown>;
@@ -23,7 +24,7 @@ export interface PredownloadDependencies {
   refresh(): Promise<void | 'retired'>;
   current(): { info: UpdateInfo | null; progress: UpdateProgressState };
   check(): Promise<boolean | void | 'retired'>;
-  prepare(cacheOnly: boolean): Promise<boolean>;
+  prepare(cacheOnly: boolean): Promise<boolean | 'retired'>;
   cancel(): Promise<void>;
   notify(version: string): Promise<boolean>;
   notified(policy: PredownloadPolicy, info: UpdateInfo): Promise<boolean>;
@@ -38,7 +39,7 @@ const identity = (info: UpdateInfo) => info.version + ':' + info.sha256.toUpperC
 export function createUpdatePredownloadScheduler(deps: PredownloadDependencies): UpdatePredownloadProvider & {
   start(): void; stop(): void; wake(recover?: boolean): void; invalidateCache(): void; progress(): void; run(): Promise<void>;
 } {
-  let policy: PredownloadPolicy | null = null, loading: Promise<void> | null = null;
+  let policy: PredownloadPolicy | null = null, loading: Promise<void | 'retired'> | null = null;
   let ended = false, running = false, started = false, timer: unknown = null;
   let verified = '', probed = '', verifiedAt = 0, revision = 0, lastRecovery = -Infinity;
   let quietUntil = 0;
@@ -88,7 +89,11 @@ export function createUpdatePredownloadScheduler(deps: PredownloadDependencies):
     if (policy) return;
     const ticket = revision;
     if (!loading) loading = (async () => {
-      const saved = await deps.readPolicy();
+      const current = deps.capturePolicyScope?.() ?? (() => true);
+      let saved: PredownloadPolicy;
+      try { saved = await deps.readPolicy(); }
+      catch (error) { if (!current()) return 'retired' as const; throw error; }
+      if (!current()) return 'retired' as const;
       if (!saved || typeof saved.enabled !== 'boolean' || typeof saved.bootId !== 'string' ||
           typeof saved.lastNotifiedBoot !== 'string' || !Number.isFinite(saved.failureCount) ||
           !Number.isFinite(saved.nextCheckAt)) throw Error('后台更新策略回读无效');
@@ -96,13 +101,14 @@ export function createUpdatePredownloadScheduler(deps: PredownloadDependencies):
       const next = { ...saved, failureCount: Math.max(0, Math.min(32, Math.floor(saved.failureCount))),
         nextCheckAt: Math.max(0, Math.min(deps.now() + CHECK_INTERVAL, Number(saved.nextCheckAt) || 0)) };
       await deps.initialize();
+      if (!current()) return 'retired' as const;
       if (ended || ticket !== revision) return;
       quietUntil = Math.max(quietUntil, Math.min(deps.now() + 600000, Number(saved.cacheQuietUntil) || 0));
       next.nextCheckAt = Math.max(next.nextCheckAt, quietUntil);
       policy = next;
       publish({ phase: saved.enabled ? 'waiting' : 'paused', message: saved.enabled ? '等待后台检查更新' : '后台预下载已关闭' });
     })().finally(() => { loading = null; });
-    await loading;
+    return await loading;
   }
   async function schedule(failed: boolean) {
     if (!policy || ended) return;
@@ -135,8 +141,9 @@ export function createUpdatePredownloadScheduler(deps: PredownloadDependencies):
     if (ended || running) return;
     running = true;
     const runRevision = revision;
+    let retryRetiredRead = false;
     try {
-      await load();
+      if (await load() === 'retired') { retryRetiredRead = true; return; }
       if (ended || !policy) return;
       if (deps.now() < quietUntil) { publish({phase:'waiting',version:'',percent:0,message:'更新缓存已清理，稍后再自动检查；也可手动检查更新'}); return; }
       if (deps.canRun?.() === false) { publish({phase:'paused',message:'游戏运行或状态待确认，已暂停自动更新并保留下载进度'}); return; }
@@ -153,10 +160,12 @@ export function createUpdatePredownloadScheduler(deps: PredownloadDependencies):
       // Recover a completed .part after a crash even without network. Probe an
       // interrupted identity once, so ordinary partials don't bypass backoff.
       if (current.info && probed !== identity(current.info) && ['interrupted', 'failed'].includes(current.progress.phase || '') && current.progress.stage !== 'install') {
-        probed = identity(current.info);
+        const key = identity(current.info);
         const prepared = await deps.prepare(true);
         if (ended || runTicket !== revision) return;
-        if (prepared) { verified = probed; verifiedAt = deps.now(); }
+        if (prepared === 'retired') { retryRetiredRead = true; return; }
+        probed = key;
+        if (prepared) { verified = key; verifiedAt = deps.now(); }
         current = deps.current();
       }
       if (current.info && current.progress.phase === 'downloaded') {
@@ -164,6 +173,7 @@ export function createUpdatePredownloadScheduler(deps: PredownloadDependencies):
         if (verified !== key || deps.now() - verifiedAt >= CHECK_INTERVAL) {
           const prepared = await deps.prepare(true);
           if (ended || runTicket !== revision) return;
+          if (prepared === 'retired') { retryRetiredRead = true; return; }
           if (prepared) { verified = key; verifiedAt = deps.now(); }
           else { verified = ''; policy.nextCheckAt = 0; }
           if (ended) return;
@@ -209,7 +219,7 @@ export function createUpdatePredownloadScheduler(deps: PredownloadDependencies):
       if (current.progress.phase !== 'downloaded' || verified !== identity(current.info)) {
         publish({ phase: 'downloading', version: current.info.version, percent: 0, message: '正在后台下载新版本' });
         const prepared = await deps.prepare(false);
-        if (ended || ticket !== revision) return;
+        if (ended || ticket !== revision || prepared === 'retired') return;
         if (!prepared) {
           if(deps.current().progress.backgroundPaused){policy.nextCheckAt=0;publish({phase:'paused',message:'后台下载已暂停，空闲后自动继续'});return;}
           throw Error(deps.current().progress.error || '后台下载未完成');
@@ -228,7 +238,11 @@ export function createUpdatePredownloadScheduler(deps: PredownloadDependencies):
         publish({ phase: policy?.enabled === false ? 'paused' : 'failed', message: policy?.enabled === false ? '后台预下载已关闭，下载缓存已保留' : '稍后自动重试：' + message });
         try { if (policy?.enabled) await schedule(true); } catch { /* Keep the in-memory backoff even if the disk is full. */ }
       }
-    } finally { running = false; scheduleNext(); }
+    } finally {
+      running = false;
+      if (retryRetiredRead && deps.canRun?.() !== false) arm(1000);
+      else scheduleNext();
+    }
   }
   return {
     async read() { await load(); return { ...state }; },

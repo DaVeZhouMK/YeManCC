@@ -44,9 +44,6 @@ static bool gameOverlaySurfaceRestore(){
     if(!surface)return true;
     g_gameOverlayPanel.close();
     g_mainWebViewComposition.setBackgroundInput(false);
-    if(g_controllerEditorWidth.active()){
-        try{endControllerEditorWidth(g_controllerEditorWidth.owner);}catch(...){g_controllerEditorWidth={};}
-    }
     if(g_ctrl)g_ctrl->put_IsVisible(FALSE);
     ShowWindow(surface,SW_HIDE);
     const bool treeRestored=g_gameOverlayDisplayTree.restore();
@@ -55,7 +52,12 @@ static bool gameOverlaySurfaceRestore(){
     gameOverlaySurfaceRecord("surface-return",{{"originalParentRestored",SUCCEEDED(restored)},{"hresult",static_cast<std::int64_t>(restored)}});
     if(FAILED(restored)||!treeRestored)return false; // Keep ownership for a bounded explicit retry.
     if(!DestroyWindow(surface)&&IsWindow(surface))return false;
-    g_gameOverlaySurfaceAttached=false;g_gameOverlaySurface=nullptr;return true;
+    g_gameOverlaySurfaceAttached=false;g_gameOverlaySurface=nullptr;
+    // Returning the same WebView does not close its editor or change its scale.
+    if(g_controllerEditorWidth.active())applyControllerEditorWidth();
+    RECT bounds{};
+    if(g_ctrl&&!IsIconic(g_hwnd)&&GetClientRect(g_hwnd,&bounds)&&bounds.right>0&&bounds.bottom>0)g_ctrl->put_Bounds(bounds);
+    return true;
 }
 static LRESULT CALLBACK gameOverlaySurfaceProc(HWND h,UINT m,WPARAM w,LPARAM l){
     LRESULT result=0;
@@ -93,7 +95,9 @@ static bool gameOverlaySurfaceShow(const FocusTargetSnapshot& target,ymcc::gameo
     WNDCLASSEXW cls{sizeof(cls)};cls.lpfnWndProc=gameOverlaySurfaceProc;cls.hInstance=GetModuleHandleW(nullptr);cls.lpszClassName=L"YMCC_IndependentOverlaySurface";
     if(!RegisterClassExW(&cls)&&GetLastError()!=ERROR_CLASS_ALREADY_EXISTS)return false;
     RECT base{};
-    if(IsIconic(g_hwnd)){
+    if(g_controllerEditorWidth.active()&&g_controllerEditorWidth.normalDpi){
+        base=g_controllerEditorWidth.normalBounds;
+    }else if(IsIconic(g_hwnd)){
         WINDOWPLACEMENT saved{sizeof(saved)};
         if(!GetWindowPlacement(g_hwnd,&saved))return false;
         base=saved.rcNormalPosition; // GetWindowRect on an iconic HWND is not its restore size.
@@ -117,7 +121,6 @@ static bool gameOverlaySurfaceShow(const FocusTargetSnapshot& target,ymcc::gameo
                 ymcc::presentationpower::current(&readSharedSystemPower,current.sharedPower):gameOverlayBindingCurrent(current))&&
             (current.globalProbe||focusTargetIdentityMatches(target,target.pid));},
         [target,display,base,maximize]{
-            if(g_controllerEditorWidth.active())return applyControllerEditorWidth();
             const HMONITOR monitor=MonitorFromWindow(target.hwnd?target.hwnd:display,MONITOR_DEFAULTTONEAREST);
             if(g_fullHeight)return applyFullHeightLayout(monitor);
             RECT area{};
@@ -128,7 +131,7 @@ static bool gameOverlaySurfaceShow(const FocusTargetSnapshot& target,ymcc::gameo
                 if(!GetMonitorInfoW(monitor,&info))return false;
                 area=info.rcWork;
             }
-            const int width=maximize?area.right-area.left:std::min<int>(base.right-base.left,area.right-area.left);
+            const int width=maximize?area.right-area.left:controllerEditorScaledWidth(std::min<int>(base.right-base.left,area.right-area.left),area.right-area.left);
             const int height=maximize?area.bottom-area.top:std::min<int>(base.bottom-base.top,area.bottom-area.top);
             return SetWindowPos(display,nullptr,maximize||windowPlacementIsLeft()?area.left:area.right-width,area.top,width,height,SWP_NOZORDER|SWP_NOACTIVATE)!=FALSE;
         },

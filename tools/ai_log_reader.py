@@ -291,6 +291,544 @@ def byte_excerpt_index(raw, offset):
             'payloadRetainedSeparately': True, 'excerpts': excerpts}
 
 
+TDP_HELPER_START_ROOT_MEMBER = re.compile(r'tdp(?:-detail)?(?:\.log(?:\.(?:prev|previous|[0-9]+))?|\.(?:prev|previous|[0-9]+)\.log)')
+TDP_HELPER_START_CONTEXT = {
+    'owner': 'YMCC-parent', 'machineIdentitySource': 'existing-native-startup-cache', 'processStarted': False,
+    'hardwareCommandReturned': 'not-observed', 'readbackMatched': 'not-observed',
+}
+
+
+def tdp_helper_start_context_projection(value):
+    marker = 'helperStartContextV1'
+    if not isinstance(value, dict) or value.get('event') != 'tdp.helper-start' or marker not in value:
+        return None
+    if (type(value[marker]) is not int or value[marker] != 1 or type(value.get('schemaVersion')) is not int or
+            value['schemaVersion'] != 1 or value.get('route') not in ('daemon', 'cli')):
+        return {'state': 'invalid-envelope'}
+    present = sorted(TDP_HELPER_START_CONTEXT.keys() & value.keys())
+    if present:
+        return {'state': 'conflicting-inline-fields', 'fields': present}
+    return {'state': 'restorable', 'restoredFields': dict(TDP_HELPER_START_CONTEXT)}
+
+
+MSI_WMI_CALL_DEFAULTS_V1 = {
+    'owner': 'YMCC-native-MSI-TDP', 'verificationScope': 'existing-WMI-call-boundary-only',
+    'machineIdentitySource': 'existing-native-startup-cache', 'runtimeHelperRelevant': False,
+    'processStarted': False, 'physicalPowerVerified': False,
+}
+
+
+def msi_wmi_call_defaults_projection(value):
+    if not isinstance(value, dict) or 'msiWmiCallDefaultsV1' not in value:
+        return None
+    if (value['msiWmiCallDefaultsV1'] is not True or
+            type(value.get('schemaVersion')) is not int or value['schemaVersion'] != 1 or
+            value.get('event') not in ('tdp.oem-call-start', 'tdp.oem-call-result') or
+            value.get('route') != 'msi-g3e-wmi'):
+        return {'state': 'invalid-envelope'}
+    present = sorted(MSI_WMI_CALL_DEFAULTS_V1.keys() & value.keys())
+    if present:
+        return {'state': 'conflicting-inline-fields', 'fields': present}
+    return {'state': 'restorable', 'restoredFields': dict(MSI_WMI_CALL_DEFAULTS_V1)}
+
+
+FRONTEND_CANONICAL_MESSAGE_MEMBER = re.compile(
+    r'frontend-trace(?:-detail)?(?:\.log(?:\.(?:prev|previous|[0-9]+))?|\.(?:prev|previous|[0-9]+)\.log)')
+
+
+def frontend_canonical_message_projection(value):
+    if not isinstance(value, dict) or 'frontendMessageFromTraceV1' not in value:
+        return None
+    if (value['frontendMessageFromTraceV1'] is not True or value.get('event') != 'frontend-trace' or
+            value.get('where') not in ('monitor-notice-lifecycle', 'monitor-hud-startup') or
+            value.get('traceParseStatus') != 'parsed' or value.get('messageTruncated') is not False):
+        return {'state': 'invalid-envelope'}
+    if 'message' in value:
+        return {'state': 'conflicting-inline-fields', 'fields': ['message']}
+    trace = value.get('trace')
+    if (not isinstance(trace, dict) or not 0 < len(trace) <= 40 or
+            any(type(item) not in (type(None), bool, str) and
+                (type(item) is not int or not -(1 << 53) < item < 1 << 53) for item in trace.values())):
+        return {'state': 'unsupported-trace'}
+    try:
+        message = json.dumps(trace, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+        if len(message.encode('utf-8')) > 8192:
+            return {'state': 'unsupported-trace'}
+    except UnicodeError:
+        return {'state': 'unsupported-trace'}
+    return {'state': 'restorable', 'restoredFields': {'message': message}}
+
+
+def _frontend_preview_trace_value(trace):
+    if (not isinstance(trace, dict) or type(trace.get('schemaVersion')) is not int or
+            trace['schemaVersion'] != 1 or trace.get('stage') != 'window' or
+            trace.get('policy') != 'VC-PREVIEW-TRACE-20261024-R1'):
+        return False
+    nodes = 0
+
+    def bounded(value, depth):
+        nonlocal nodes
+        nodes += 1
+        if depth > 10 or nodes > 512:
+            return False
+        if isinstance(value, dict):
+            for key in value:
+                key.encode('utf-8')
+            return all(bounded(item, depth + 1) for item in value.values())
+        if isinstance(value, list):
+            return all(bounded(item, depth + 1) for item in value)
+        if isinstance(value, str):
+            value.encode('utf-8')
+            return True
+        if type(value) in (int, float):
+            return -(1 << 53) < value < 1 << 53
+        return value is None or type(value) is bool
+
+    return bounded(trace, 0)
+
+
+def frontend_trace_message_projection(value):
+    if not isinstance(value, dict):
+        return None
+    gamepad = 'frontendTraceFromMessageV1' in value
+    preview = 'frontendPreviewTraceFromMessageV1' in value
+    if not gamepad and not preview:
+        return None
+    marker = 'frontendPreviewTraceFromMessageV1' if preview else 'frontendTraceFromMessageV1'
+    where = 'controller-preview' if preview else 'gamepad-admission'
+    if ((gamepad and preview) or value[marker] is not True or value.get('event') != 'frontend-trace' or
+            value.get('where') != where or (preview and value.get('lane') != 'event') or
+            value.get('traceParseStatus') != 'parsed' or
+            value.get('messageTruncated') is not False or 'frontendMessageFromTraceV1' in value):
+        return {'state': 'invalid-envelope'}
+    if 'trace' in value:
+        return {'state': 'conflicting-inline-fields', 'fields': ['trace']}
+    message = value.get('message')
+    if not isinstance(message, str) or not message.startswith('{') or len(message) > 8192:
+        return {'state': 'unsupported-message'}
+    try:
+        if len(message.encode('utf-8')) > 8192:
+            return {'state': 'unsupported-message'}
+        trace = evidence_json_loads(message)
+        if preview:
+            return ({'state': 'restorable', 'restoredFields': {'trace': trace}} if _frontend_preview_trace_value(trace)
+                    else {'state': 'unsupported-message'})
+        if (not isinstance(trace, dict) or not 6 <= len(trace) <= 40 or
+                any(type(item) not in (type(None), bool, str) and
+                    (type(item) is not int or not -(1 << 53) < item < 1 << 53) for item in trace.values())):
+            return {'state': 'unsupported-message'}
+        # An escaped lone surrogate is valid to Python's parser but cannot
+        # have passed the Native parser. Check strings including object keys.
+        for key, item in trace.items():
+            key.encode('utf-8')
+            if isinstance(item, str):
+                item.encode('utf-8')
+    except (ValueError, UnicodeError, RecursionError):
+        return {'state': 'unsupported-message'}
+    return {'state': 'restorable', 'restoredFields': {'trace': trace}}
+
+
+NATIVE_FILE_PROJECTION_MEMBER = re.compile(r'native-(?:lifecycle|detail)(?:\.log(?:\.(?:prev|previous|[0-9]+))?|\.(?:prev|previous|[0-9]+)\.log)')
+GYRO_FILE_PROJECTION_MEMBER = re.compile(r'gyro-motion(?:\.log(?:\.(?:prev|previous|[0-9]+))?|\.(?:prev|previous|[0-9]+)\.log)')
+
+
+STEAM_LIGHT_LEASE_RECEIPT_MARKER = 'lightLeaseReceiptV1'
+STEAM_LIGHT_LEASE_RECEIPT_CONSTANTS = {
+    'scope': 'steam-gamepad-navigation', 'leaseMs': 3000, 'renewalMs': 750, 'deviceVisibilityChanged': False,
+}
+
+
+def steam_light_lease_receipt_projection(value):
+    marker = STEAM_LIGHT_LEASE_RECEIPT_MARKER
+    if not isinstance(value, dict) or value.get('event') != 'summon-light-gamepad' or marker not in value:
+        return None
+    ack = value.get('acknowledged')
+    if type(value[marker]) is not int or value[marker] != 1 or type(ack) is not bool:
+        return {'state': 'invalid-envelope'}
+    fields = {**STEAM_LIGHT_LEASE_RECEIPT_CONSTANTS, 'result': 'acknowledged' if ack else 'unconfirmed'}
+    conflicts = sorted(fields.keys() & value.keys())
+    if conflicts:
+        return {'state': 'conflicting-inline-fields', 'fields': conflicts}
+    return {'state': 'restorable', 'restoredFields': fields}
+
+
+TARGET_RETURN_RECORD_SCOPE_MARKER = 'returnRecordScopeV1'
+TARGET_RETURN_MIRROR_MEMBER = re.compile(r'virtual-gamepad(?:\.log(?:\.(?:prev|previous|[0-9]+))?|\.(?:prev|previous|[0-9]+)\.log)')
+TARGET_RETURN_RECORD_SCOPE = {
+    'scope': 'target-and-owned-physical-write-ahead;current-owner-settlement;R3-bounded-cold-return',
+    'historyOnly': True, 'currentAdmission': False, 'gameInputVerified': False,
+}
+
+
+def target_return_record_scope_projection(value):
+    marker = TARGET_RETURN_RECORD_SCOPE_MARKER
+    if not isinstance(value, dict) or value.get('event') != 'input-host-target-return-record' or marker not in value:
+        return None
+    if type(value[marker]) is not int or value[marker] != 1:
+        return {'state': 'invalid-envelope'}
+    conflicts = sorted(TARGET_RETURN_RECORD_SCOPE.keys() & value.keys())
+    if conflicts:
+        return {'state': 'conflicting-inline-fields', 'fields': conflicts}
+    return {'state': 'restorable', 'restoredFields': dict(TARGET_RETURN_RECORD_SCOPE)}
+
+
+OEM_HID_READ_FLAGS_MARKER = 'hidReadFlagsV1'
+OEM_HID_READ_FLAGS = {
+    'cancel-requested': {'readPending': True, 'resourceTerminal': False},
+    'retained': {'readPending': True, 'resourceTerminal': False},
+    'drain-complete': {'resourceTerminal': True},
+    'closed': {'readPending': False, 'resourceTerminal': True},
+}
+
+
+def oem_hid_read_flags_projection(value):
+    marker = OEM_HID_READ_FLAGS_MARKER
+    if not isinstance(value, dict) or value.get('event') != 'oem-hid-read-lifecycle' or marker not in value:
+        return None
+    status = value.get('status')
+    if type(value[marker]) is not int or value[marker] != 1 or not isinstance(status, str) or status not in OEM_HID_READ_FLAGS:
+        return {'state': 'invalid-envelope'}
+    conflicts = [key for key in ('readPending', 'resourceTerminal') if key in value]
+    if conflicts:
+        return {'state': 'conflicting-inline-fields', 'fields': conflicts}
+    return {'state': 'restorable', 'restoredFields': dict(OEM_HID_READ_FLAGS[status])}
+
+
+LATE_HIDE_STAGE_DEFAULTS_MARKER = 'lateHideStageDefaultsV1'
+LATE_HIDE_STAGE_DEFAULTS = {
+    'late-hide-dequeue': {'reason': 'physical-source-returned-after-skip', 'owner': 'capture-lifecycle-thread'},
+    'late-hide-exec-decision': {'reason': 'physical-source-returned-after-skip'},
+}
+
+
+def late_hide_stage_defaults_projection(value):
+    marker = LATE_HIDE_STAGE_DEFAULTS_MARKER
+    if not isinstance(value, dict) or marker not in value or not isinstance(value.get('event'), str):
+        return None
+    defaults = LATE_HIDE_STAGE_DEFAULTS.get(value['event'])
+    if defaults is None:
+        return None
+    if type(value[marker]) is not int or value[marker] != 1:
+        return {'state': 'invalid-envelope'}
+    conflicts = sorted(defaults.keys() & value.keys())
+    if conflicts:
+        return {'state': 'conflicting-inline-fields', 'fields': conflicts}
+    return {'state': 'restorable', 'restoredFields': dict(defaults)}
+
+
+COMMON_FRAME_COPIES_MARKER = 'frameCopiesV1'
+
+
+def common_frame_copies_projection(value):
+    marker = COMMON_FRAME_COPIES_MARKER
+    if not isinstance(value, dict) or value.get('event') != 'input-host-frame-evidence' or marker not in value:
+        return None
+    mask, version = value[marker], value.get('formatVersion')
+    if (type(mask) is not int or mask not in (1, 2, 3) or type(version) is not int or version != 2 or
+            value.get('snapshotReason') not in ('periodic', 'state-change')):
+        return {'state': 'invalid-envelope'}
+
+    def uint64(number):
+        return type(number) is int and 0 <= number < 2**64
+
+    restored = {}
+    if mask & 1:
+        source = value.get('source')
+        if not isinstance(source, dict) or not uint64(source.get('readStartedTick')):
+            return {'state': 'invalid-copy-source'}
+        if 'readCompletedTick' in source:
+            return {'state': 'conflicting-inline-fields'}
+        restored['source'] = {'readCompletedTick': source['readStartedTick']}
+    if mask & 2:
+        proof = value.get('frameProof')
+        receipt = proof.get('hostReceipt') if isinstance(proof, dict) else None
+        if not isinstance(receipt, dict) or not uint64(proof.get('sampleSequence')):
+            return {'state': 'invalid-copy-source'}
+        if 'sampleSequence' in receipt:
+            return {'state': 'conflicting-inline-fields'}
+        restored['frameProof'] = {'hostReceipt': {'sampleSequence': proof['sampleSequence']}}
+    return {'state': 'restorable', 'restoredFields': restored}
+
+
+def gyro_calibration_storage_projection(value):
+    marker = 'gyroStorageDefaultsV1'
+    if not isinstance(value, dict) or value.get('event') != 'gyro-calibration-result' or marker not in value:
+        return None
+    if (type(value[marker]) is not int or value[marker] != 1 or value.get('sourceQualified') is not True or
+            value.get('saved') is not False or value.get('storageReason') != 'not-attempted'):
+        return {'state': 'invalid-envelope'}
+    restored = {'storageReplaced': False, 'storageReadbackVerified': False, 'storageError': 0, 'recoveryPath': ''}
+    conflicts = sorted(restored.keys() & value.keys())
+    if conflicts:
+        return {'state': 'conflicting-inline-fields', 'fields': conflicts}
+    return {'state': 'restorable', 'restoredFields': restored}
+OEM_KEY_CATALOG_COLUMNS = ('keyId', 'label', 'backIndex', 'triggerCapability', 'physicalForm', 'captureImplemented')
+
+
+def oem_key_catalog_projection(value):
+    if not isinstance(value, dict) or value.get('event') != 'oem-key-usage-query' or 'oemKeyCatalogV1' not in value:
+        return None
+    if 'keys' in value:
+        return {'state': 'conflicting-inline-fields', 'fields': ['keys']}
+    packed = value['oemKeyCatalogV1']
+    version = value.get('schemaVersion')
+    if type(version) is not int or version != 1 or not isinstance(packed, list) or not 1 <= len(packed) <= 32:
+        return {'state': 'invalid-envelope'}
+    keys = []
+    for entry in packed:
+        if (not isinstance(entry, list) or len(entry) != len(OEM_KEY_CATALOG_COLUMNS) or
+                any(not isinstance(entry[i], str) for i in (0, 1, 3, 4)) or
+                type(entry[2]) is not int or not 0 <= entry[2] <= 255 or type(entry[5]) is not bool):
+            return {'state': 'invalid-descriptor'}
+        keys.append(dict(zip(OEM_KEY_CATALOG_COLUMNS, entry)))
+    return {'state': 'restorable', 'restoredFields': {'keys': keys}}
+
+
+UI_OUTPUT_SCOPE_MARKER = 'uiOutputScopeV1'
+UI_OUTPUT_VERIFICATION_SCOPES = {'virtual-ui-output': 'final-virtual-output-only', 'dsu-ui-output': 'dsu-feed-only'}
+
+
+def ui_output_scope_projection(value):
+    if not isinstance(value, dict) or UI_OUTPUT_SCOPE_MARKER not in value:
+        return None
+    event = value.get('event')
+    if not isinstance(event, str) or event not in UI_OUTPUT_VERIFICATION_SCOPES:
+        return None
+    encoded = value[UI_OUTPUT_SCOPE_MARKER]
+    if type(encoded) is not int or encoded != 1:
+        return {'state': 'invalid-envelope'}
+    restored = {'verificationScope': UI_OUTPUT_VERIFICATION_SCOPES[event], 'diagnosticRecoveryReoffer': False}
+    if conflicts := sorted(key for key in restored if key in value):
+        return {'state': 'conflicting-inline-fields', 'fields': conflicts}
+    return {'state': 'restorable', 'restoredFields': restored}
+
+
+CONNECTION_TRUTH_SCOPE_MARKER = 'connectionTruthScopeV1'
+CONNECTION_TRUTH_SCOPE = 'current-connection-truth;not-input-edge-or-device-recovery'
+
+
+def connection_truth_scope_projection(value):
+    if (not isinstance(value, dict) or value.get('event') != 'domain-pad-truth' or
+            CONNECTION_TRUTH_SCOPE_MARKER not in value):
+        return None
+    marker = value[CONNECTION_TRUTH_SCOPE_MARKER]
+    if type(marker) is not int or marker != 1 or type(value.get('diagnosticRecoveryReoffer')) is not bool:
+        return {'state': 'invalid-envelope'}
+    if 'observationScope' in value:
+        return {'state': 'conflicting-inline-fields', 'fields': ['observationScope']}
+    return {'state': 'restorable', 'restoredFields': {'observationScope': CONNECTION_TRUTH_SCOPE}}
+
+
+PHYSICAL_IDENTITY_EVENT = 'physical-controller-identity'
+PHYSICAL_IDENTITY_SCOPE_MARKER = 'physicalIdentityScopeV1'
+PHYSICAL_IDENTITY_SCOPE_FIELDS = {'source': 'raw-input-pnp-resolution',
+                                 'observationScope': 'per-interface-identity;selected-interface-trajectory-in-detail'}
+
+
+def physical_identity_scope_projection(value):
+    if (not isinstance(value, dict) or value.get('event') != PHYSICAL_IDENTITY_EVENT or
+            PHYSICAL_IDENTITY_SCOPE_MARKER not in value):
+        return None
+    marker = value[PHYSICAL_IDENTITY_SCOPE_MARKER]
+    if type(marker) is not int or marker != 1 or value.get('snapshotReason') not in ('state-change', 'repeat'):
+        return {'state': 'invalid-envelope'}
+    if conflicts := sorted(PHYSICAL_IDENTITY_SCOPE_FIELDS.keys() & value.keys()):
+        return {'state': 'conflicting-inline-fields', 'fields': conflicts}
+    return {'state': 'restorable', 'restoredFields': dict(PHYSICAL_IDENTITY_SCOPE_FIELDS)}
+
+
+def rog_discovery_scope_projection(value):
+    marker = 'rogDiscoveryScopeV1'
+    if not isinstance(value, dict) or value.get('event') != 'rog.hid-discovery-summary' or marker not in value:
+        return None
+    schema = value.get('schema')
+    if type(schema) is not int or schema != 2 or type(value[marker]) is not int or value[marker] != 1:
+        return {'state': 'invalid-envelope'}
+    restored = {'interfaceInspectionCoverage': 'not-measured', 'physicalAbsenceProven': False}
+    if conflicts := sorted(restored.keys() & value.keys()):
+        return {'state': 'conflicting-inline-fields', 'fields': conflicts}
+    return {'state': 'restorable', 'restoredFields': restored}
+
+
+SUMMON_PREFLIGHT_DEFAULTS = {
+    'authority': 'unique-game-observation', 'phase': 'before-window-show',
+    'foregroundIsGameAuthority': False, 'deviceWorkIssued': False,
+}
+
+
+def summon_preflight_defaults_projection(value):
+    marker = 'summonPreflightDefaultsV1'
+    if not isinstance(value, dict) or value.get('event') != 'summon-isolation-preflight' or marker not in value:
+        return None
+    if type(value[marker]) is not int or value[marker] != 1:
+        return {'state': 'invalid-envelope'}
+    if conflicts := sorted(SUMMON_PREFLIGHT_DEFAULTS.keys() & value.keys()):
+        return {'state': 'conflicting-inline-fields', 'fields': conflicts}
+    return {'state': 'restorable', 'restoredFields': dict(SUMMON_PREFLIGHT_DEFAULTS)}
+
+
+SUMMON_SELECTION_DEFAULTS = 'summonSelectionDefaultsV1'
+
+
+def summon_selection_defaults_projection(value):
+    if (not isinstance(value, dict) or value.get('event') != 'summon-isolation-selected' or
+            SUMMON_SELECTION_DEFAULTS not in value):
+        return None
+    marker, mode = value[SUMMON_SELECTION_DEFAULTS], value.get('mode')
+    if type(marker) is not int or marker != 1 or mode not in ('light-no-game', 'original'):
+        return {'state': 'invalid-envelope'}
+    light = mode == 'light-no-game'
+    restored = {'authority': 'unique-game-observation', 'nativeBorrowExemptionRequested': light,
+                'physicalIsolationPolicy': 'keep-device-steam-navigation-lease' if light else 'original-owner'}
+    if conflicts := sorted(key for key in restored if key in value):
+        return {'state': 'conflicting-inline-fields', 'fields': conflicts}
+    return {'state': 'restorable', 'restoredFields': restored}
+
+
+SCREEN_MENU_ORIGIN_POWER = 'screenMenuOriginPowerV1'
+
+
+def screen_menu_origin_projection(value):
+    marker = SCREEN_MENU_ORIGIN_POWER
+    if not isinstance(value, dict) or value.get('event') != 'screen-standalone-special' or marker not in value:
+        return None
+    if 'menuActionOrigin' in value:
+        return {'state': 'conflicting-inline-fields', 'fields': ['menuActionOrigin']}
+    power = value[marker]
+    ids = ('requestId', 'generation')
+    if (value.get('phase') != 'completed' or not isinstance(power, str) or
+            not re.fullmatch(r'0|[1-9][0-9]{0,19}', power) or int(power) >= 1 << 64 or
+            any(type(value.get(k)) is not int or not 0 < value[k] < 1 << 64 for k in ids)):
+        return {'state': 'invalid-envelope'}
+    origin = {'schema': 1, 'channel': 'screen', 'powerGeneration': power, 'powerSource': 'native-before-action-queue',
+              **{k: str(value[k]) for k in ids}}
+    return {'state': 'restorable', 'restoredFields': {'menuActionOrigin': origin}}
+
+
+HIDHIDE_TARGET_LISTS = ('physicalTargets', 'gameInputTargets', 'excludedNonGameTargets')
+
+
+def hidhide_target_inventory_projection(value):
+    marker = 'targetInventoryCopiesV1'
+    if not isinstance(value, dict) or value.get('event') != 'hidhide.visibility-snapshot' or marker not in value:
+        return None
+    lists, inventory = value[marker], value.get('targetInventory')
+    if (not isinstance(lists, dict) or not lists or not set(lists).issubset(HIDHIDE_TARGET_LISTS) or
+            not isinstance(inventory, list) or not 1 <= len(inventory) <= 64):
+        return {'state': 'invalid-envelope'}
+    if conflicts := sorted(set(value) & set(lists)):
+        return {'state': 'conflicting-inline-fields', 'fields': conflicts}
+    instances = [entry.get('instance') if isinstance(entry, dict) else None for entry in inventory]
+    restored = {}
+    for field, entries in lists.items():
+        if not isinstance(entries, list) or not 1 <= len(entries) <= 64:
+            return {'state': 'invalid-list'}
+        physical = field == 'physicalTargets'
+        expanded = []
+        references = 0
+        for entry in entries:
+            if physical and (not isinstance(entry, dict) or type(entry.get('hidden')) is not bool):
+                return {'state': 'invalid-list'}
+            target = entry.get('instance') if physical else entry
+            if isinstance(target, str):
+                expanded.append(entry)
+            else:
+                if type(target) is not int or not 0 <= target < len(instances):
+                    return {'state': 'invalid-index'}
+                instance = instances[target]
+                if not isinstance(instance, str) or not instance or instances.count(instance) != 1:
+                    return {'state': 'invalid-index'}
+                expanded.append({**entry, 'instance': instance} if physical else instance)
+                references += 1
+        if not references:
+            return {'state': 'invalid-list'}
+        restored[field] = expanded
+    return {'state': 'restorable', 'restoredFields': restored}
+
+
+BATTERY_CLIENT_IDENTITY_MEMBER = re.compile(r'battery-charge-client\.log(?:\.(?:prev|previous|[0-9]+))?')
+BATTERY_CLIENT_IDENTITY_FIELDS = {
+    'assemblyPath': 'componentPath', 'processPath': 'nativePath', 'execution': 'execution',
+    'implementation': 'implementation', 'sourceId': 'sourceId', 'protocol': 'protocol',
+    'pollingIntervalMs': 'pollingIntervalMs',
+}
+
+
+def battery_client_identity_projection(value):
+    detail = value.get('detail') if isinstance(value, dict) else None
+    if not isinstance(detail, dict) or 'hostIdentitySharesRuntimeV1' not in detail:
+        return None
+    host, runtime = detail.get('hostIdentity'), detail.get('runtime')
+    if (detail['hostIdentitySharesRuntimeV1'] is not True or value.get('event') != 'request-result' or
+            type(value.get('schema')) is not int or value['schema'] != 1 or not isinstance(host, dict) or
+            not isinstance(runtime, dict) or runtime.get('execution') != 'in-process'):
+        return {'state': 'invalid-envelope'}
+    present = sorted(BATTERY_CLIENT_IDENTITY_FIELDS.keys() & host.keys())
+    if present:
+        return {'state': 'conflicting-inline-fields', 'fields': present}
+    restored = {}
+    for host_key, runtime_key in BATTERY_CLIENT_IDENTITY_FIELDS.items():
+        field = runtime.get(runtime_key)
+        if host_key in ('protocol', 'pollingIntervalMs'):
+            valid = type(field) is int and 0 < field < 1 << 53
+        else:
+            valid = isinstance(field, str)
+        if not valid:
+            return {'state': 'unsupported-runtime', 'field': runtime_key}
+        restored[host_key] = field
+    return {'state': 'restorable', 'restoredHostIdentityFields': restored}
+
+
+VIRTUAL_JOURNAL_WRITER_COPIES_MARKER = 'journalWriterCopiesV1'
+
+
+def virtual_journal_writer_copies(value):
+    if (not isinstance(value, dict) or value.get('event') != 'virtual-adaptation-witness' or
+            value.get('schema') != 'ymcc.model-adaptation/1' or VIRTUAL_JOURNAL_WRITER_COPIES_MARKER not in value):
+        return None
+    marker = value[VIRTUAL_JOURNAL_WRITER_COPIES_MARKER]
+    pid, birth = value.get('writerPid'), value.get('writerProcessCreation100ns')
+    if (type(marker) is not int or marker != 1 or type(pid) is not int or not 0 < pid < 1 << 32 or
+            not isinstance(birth, str) or not 0 < len(birth) <= 20 or birth[0] == '0' or
+            not birth.isascii() or not birth.isdecimal() or int(birth) >= 1 << 64):
+        return {'state': 'invalid-envelope'}
+    restored = {'writerInstanceId': f'native:{pid}:{birth}', 'writerIdentityStatus': 'pid-and-process-creation-known'}
+    if conflicts := sorted(key for key in restored if key in value):
+        return {'state': 'conflicting-inline-fields', 'fields': conflicts}
+    return {'state': 'restorable', 'restoredFields': restored}
+
+
+VIRTUAL_PRODUCER_COPIES_MARKER = 'producerIdentityCopiesV1'
+VIRTUAL_PRODUCER_COPY_FIELDS = ('runId', 'epoch', 'phase', 'hostInstanceId', 'reason', 'requestId',
+    'sourceGeneration', 'sourcePath', 'ok', 'command', 'powerGeneration', 'stage', 'hostEpoch', 'status', 'policy',
+    'persona', 'wakeSerial', 'generation', 'candidateOutcome', 'outcome', 'currentBindingValid')
+
+
+def virtual_step_producer_copies(value):
+    if not isinstance(value, dict):
+        return None
+    mask, key, sample = (value.get(k) for k in (VIRTUAL_PRODUCER_COPIES_MARKER, 'uniqueKey', 'firstSample'))
+    if (type(mask) is not int or not 0 < mask < 1 << len(VIRTUAL_PRODUCER_COPY_FIELDS) or
+            value.get('schema') != 'ymcc.model-adaptation/1' or value.get('event') != 'virtual-adaptation-witness' or
+            'virtualFrameSampleSchema' in value or
+            value.get('category') != 'virtual-step-witness' or not isinstance(key, dict) or
+            type(key.get('schema')) is not int or key['schema'] != 1 or key.get('category') != 'virtual-step-witness' or
+            not isinstance(key.get('identity'), dict) or not isinstance(sample, dict) or
+            not isinstance(sample.get('producer'), dict)):
+        return None
+    identity, producer = key['identity'], sample['producer']
+    copies = {}
+    for bit, field in enumerate(VIRTUAL_PRODUCER_COPY_FIELDS):
+        if not mask & (1 << bit):
+            continue
+        source = identity.get(field)
+        if (field in producer or type(source) not in (str, bool, int) or
+                (type(source) is int and not -(1 << 63) <= source < 1 << 64)):
+            return None
+        copies[field] = source
+    return copies
+
+
 def payload_records(name, data, file_id, fmt):
     if fmt == 'json-document':
         try:
@@ -301,6 +839,14 @@ def payload_records(name, data, file_id, fmt):
         except (ValueError, UnicodeError) as ex:
             yield {'record': 'parse_notice', 'fileId': file_id, 'error': str(ex), 'rawBytesRetained': True,**json_rejection_evidence(ex)}
     stream = io.BytesIO(data)
+    tdp_stream = not any(separator in name for separator in ('/', '!', '\\')) and canonical_name(name) in ('tdp.log', 'tdp-detail.log')
+    tdp_helper_start_stream = TDP_HELPER_START_ROOT_MEMBER.fullmatch(name) is not None
+    frontend_stream = FRONTEND_CANONICAL_MESSAGE_MEMBER.fullmatch(name) is not None
+    native_projection_stream = NATIVE_FILE_PROJECTION_MEMBER.fullmatch(name) is not None
+    target_return_stream = native_projection_stream or TARGET_RETURN_MIRROR_MEMBER.fullmatch(name) is not None
+    gyro_storage_stream = native_projection_stream or GYRO_FILE_PROJECTION_MEMBER.fullmatch(name) is not None
+    virtual_journal_stream = name == 'virtual-adaptation.log'
+    battery_client_stream = BATTERY_CLIENT_IDENTITY_MEMBER.fullmatch(name) is not None
     line, offset, continued = 1, 0, False
     while True:
         raw = stream.readline(LINE_BYTES)
@@ -320,6 +866,80 @@ def payload_records(name, data, file_id, fmt):
                 try:
                     row['value'] = evidence_json_loads(text.removeprefix('\ufeff') if offset == 0 else text)
                     row['record'] = 'json_record'
+                    if tdp_helper_start_stream:
+                        projection = tdp_helper_start_context_projection(row['value'])
+                        if projection is not None:
+                            row['tdpHelperStartContext'] = projection
+                    if tdp_stream:
+                        projection = msi_wmi_call_defaults_projection(row['value'])
+                        if projection is not None:
+                            row['msiWmiCallDefaults'] = projection
+                    if frontend_stream:
+                        projection = frontend_canonical_message_projection(row['value'])
+                        if projection is not None:
+                            row['frontendCanonicalMessage'] = projection
+                        projection = frontend_trace_message_projection(row['value'])
+                        if projection is not None:
+                            row['frontendTraceFromMessage'] = projection
+                    if battery_client_stream:
+                        projection = battery_client_identity_projection(row['value'])
+                        if projection is not None:
+                            row['batteryChargeClientIdentity'] = projection
+                    if gyro_storage_stream:
+                        projection = gyro_calibration_storage_projection(row['value'])
+                        if projection is not None:
+                            row['gyroCalibrationStorage'] = projection
+                    if target_return_stream:
+                        projection = target_return_record_scope_projection(row['value'])
+                        if projection is not None:
+                            row['targetReturnRecordScope'] = projection
+                    if native_projection_stream:
+                        projection = common_frame_copies_projection(row['value'])
+                        if projection is not None:
+                            row['commonFrameCopies'] = projection
+                        projection = steam_light_lease_receipt_projection(row['value'])
+                        if projection is not None:
+                            row['steamLightLeaseReceipt'] = projection
+                        projection = oem_hid_read_flags_projection(row['value'])
+                        if projection is not None:
+                            row['oemHidReadFlags'] = projection
+                        projection = late_hide_stage_defaults_projection(row['value'])
+                        if projection is not None:
+                            row['lateHideStageDefaults'] = projection
+                        projection = oem_key_catalog_projection(row['value'])
+                        if projection is not None:
+                            row['oemKeyCatalog'] = projection
+                        projection = hidhide_target_inventory_projection(row['value'])
+                        if projection is not None:
+                            row['hidHideTargetInventoryCopies'] = projection
+                        projection = screen_menu_origin_projection(row['value'])
+                        if projection is not None:
+                            row['screenMenuOrigin'] = projection
+                        projection = ui_output_scope_projection(row['value'])
+                        if projection is not None:
+                            row['uiOutputScope'] = projection
+                        projection = summon_selection_defaults_projection(row['value'])
+                        if projection is not None:
+                            row['summonSelectionDefaults'] = projection
+                        projection = summon_preflight_defaults_projection(row['value'])
+                        if projection is not None:
+                            row['summonPreflightDefaults'] = projection
+                        projection = connection_truth_scope_projection(row['value'])
+                        if projection is not None:
+                            row['connectionTruthScope'] = projection
+                        projection = physical_identity_scope_projection(row['value'])
+                        if projection is not None:
+                            row['physicalIdentityScope'] = projection
+                        projection = rog_discovery_scope_projection(row['value'])
+                        if projection is not None:
+                            row['rogDiscoveryScope'] = projection
+                    if virtual_journal_stream:
+                        projection = virtual_journal_writer_copies(row['value'])
+                        if projection is not None:
+                            row['virtualJournalWriterCopies'] = projection
+                        projection = virtual_step_producer_copies(row['value'])
+                        if projection is not None:
+                            row['virtualStepProducerCopies'] = projection
                 except ValueError as ex:
                     row.update(raw=text, parseError=str(ex), record='invalid_json_line')
                     row.update(json_rejection_evidence(ex))

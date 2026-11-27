@@ -6,7 +6,7 @@ $fanProject=Split-Path -Parent $PSScriptRoot
 if(-not $NativeSource){$NativeSource=Join-Path $fanProject 'native\main.cpp'}
 $fanSourceHash=(Get-FileHash -LiteralPath $NativeSource).Hash
 $fanHeaderHashes=@{}
-foreach($fanHeaderName in @('http_request_deadline.h','fan_response_contract.h','fan_http_body_contract.h','sleep_power_state.h','sleep_power_observation.h','sleep_power_revocation.h')){$fanHeaderHashes[$fanHeaderName]=(Get-FileHash -LiteralPath (Join-Path $fanProject ('native\'+$fanHeaderName))).Hash}
+foreach($fanHeaderName in @('http_request_deadline.h','fan_response_contract.h','fan_http_body_contract.h','sleep_power_state.h','sleep_power_observation.h','sleep_power_revocation.h','sleep_power_remote_provider.h','sleep_power_remote_transport.h','log_snapshot_state.h')){$fanHeaderHashes[$fanHeaderName]=(Get-FileHash -LiteralPath (Join-Path $fanProject ('native\'+$fanHeaderName))).Hash}
 $fanRaw=[IO.File]::ReadAllText($NativeSource).Replace("`r`n","`n")
 $fanStart=$fanRaw.IndexOf('static bool crackHttpUrl(',[StringComparison]::Ordinal)
 $fanRegStart=$fanRaw.IndexOf('static void reg_http() {',$fanStart,[StringComparison]::Ordinal)
@@ -64,7 +64,7 @@ if "%WindowsSDKVersion%"=="\" set "WindowsSDKVersion=10.0.26100.0\"
 if not defined WindowsSDKVersion set "WindowsSDKVersion=10.0.26100.0\"
 set "INCLUDE=%WindowsSdkDir%Include\%WindowsSDKVersion%um;%WindowsSdkDir%Include\%WindowsSDKVersion%shared;%WindowsSdkDir%Include\%WindowsSDKVersion%ucrt;%INCLUDE%"
 set "LIB=%WindowsSdkDir%Lib\%WindowsSDKVersion%um\x64;%WindowsSdkDir%Lib\%WindowsSDKVersion%ucrt\x64;%LIB%"
-cl /nologo /W4 /WX $fanSharedDefine /std:c++20 /EHsc /utf-8 /MT /I"$fanProject\native" /I"$fanEvidence" "$PSScriptRoot\fan_renderer_http_transport_selftest.cpp" /Fo"$fanEvidence\fixture.obj" /Fe"$fanEvidence\fixture.exe"
+cl /nologo /W4 /WX $fanSharedDefine /std:c++20 /EHsc /utf-8 /MT /I"$fanProject\native" /I"$fanProject\deps\json" /I"$fanEvidence" "$PSScriptRoot\fan_renderer_http_transport_selftest.cpp" /Fo"$fanEvidence\fixture.obj" /Fe"$fanEvidence\fixture.exe"
 "@ | Set-Content -LiteralPath $fanBuild -Encoding ascii
 & $fanBuild *> (Join-Path $fanEvidence 'compile.txt')
 if($LASTEXITCODE -ne 0){Get-Content -LiteralPath (Join-Path $fanEvidence 'compile.txt') -Tail 12;throw 'HTTP fixture compile failed'}

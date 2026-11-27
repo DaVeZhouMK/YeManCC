@@ -1,6 +1,8 @@
 #pragma once
 // Export-only historical diagnostics. No Windows calls, timers or power actions.
 #include "json.hpp"
+#include "sleep_kernel_cycle.h"
+#include "sleep_timeout_policy.h"
 #include <algorithm>
 #include <cstdint>
 #include <functional>
@@ -13,6 +15,7 @@
 namespace ymcc { namespace sleepexport {
 using Json=nlohmann::json;
 inline constexpr std::uint32_t timeoutMs=10000;
+inline constexpr unsigned defaultHistoryDays=1,maxHistoryDays=3;
 inline constexpr std::uint32_t deadlineCooldownMs=60000;
 inline constexpr std::uint32_t deadlineStreakWindowMs=300000;
 inline constexpr unsigned maxDeadlineStreak=3;
@@ -140,12 +143,59 @@ inline bool unsignedNumber(const Json& value,std::uint64_t& out) {
     else return false;
     return out!=(std::numeric_limits<std::uint64_t>::max)();
 }
+inline bool longScreenOffEvent(const Json& event) {
+    return event=="s0-long-screen-off-not-entered"||event=="s0-long-screen-off-ac-segment-not-entered"||
+           event==ymcc::sleeppower::briefSleepScreenOffEvent;
+}
+inline bool longScreenOffFact(const Json& d,bool continuingAcSegment) {
+    if(d.value("source",Json{})!="Microsoft-Windows-Kernel-Power/506+507"||
+       d.value("windowsSleepEntered",Json{})!=false||d.value("powerActionAuthorized",Json{})!=false)return false;
+    const auto number=[&](const char* key,std::uint64_t& out){
+        const auto field=d.find(key);
+        return field!=d.end()&&unsignedNumber(*field,out);
+    };
+    std::uint64_t entry=0,exit=0,entryReason=0,exitReason=0,generation=0,total=0,off=0;
+    constexpr std::uint64_t minimumUs=ymcc::sleeptimeout::Window::delayMs*1000ULL;
+    constexpr std::uint64_t toleranceUs=5000000;
+    if(!number("entryFileTime100ns",entry)||!entry||!number("exitFileTime100ns",exit)||exit<=entry||
+       !number("entryReason",entryReason)||entryReason>(std::numeric_limits<int>::max)()||
+       !ymcc::sleeppower::longScreenOffEntryReason(static_cast<int>(entryReason),continuingAcSegment)||!number("exitReason",exitReason)||
+       exitReason==20||exitReason>(std::numeric_limits<int>::max)()||!number("generation",generation)||!generation||
+       !number("sessionUs",total)||!number("screenOffUs",off)||off<minimumUs||off>total||total-off>toleranceUs)return false;
+    if(continuingAcSegment){
+        if(exitReason!=28||d.value("sessionContinues",Json{})!=true||
+           d.value("windowsPowerStateAc",Json{})!=true)return false;
+    }else if(d.contains("sessionContinues")&&d["sessionContinues"]!=false)return false;
+    const auto elapsedUs=(exit-entry)/10;
+    return (elapsedUs>total?elapsedUs-total:total-elapsedUs)<=toleranceUs;
+}
+inline bool briefSleepScreenOffFact(const Json& d) {
+    using namespace ymcc::sleeppower;
+    if(d.value("source",Json{})!="Microsoft-Windows-Kernel-Power/506+507"||
+       d.value("windowsSleepEntered",Json{})!=true||d.value("windowsPowerStateAc",Json{})!=true||
+       d.value("sessionContinues",Json{})!=true||d.value("powerActionAuthorized",Json{})!=false||
+       d.value("exitReason",Json{})!=briefSleepSegmentReason)return false;
+    const auto number=[&](const char* key,std::uint64_t& out){
+        const auto field=d.find(key);
+        return field!=d.end()&&unsignedNumber(*field,out);
+    };
+    std::uint64_t entry=0,exit=0,total=0,off=0,sleep=0,generation=0,reason=0;
+    return number("generation",generation)&&generation&&number("entryFileTime100ns",entry)&&
+        number("entryReason",reason)&&reason<=(std::numeric_limits<int>::max)()&&briefSleepScreenOffEntryReason(static_cast<int>(reason))&&
+        number("exitFileTime100ns",exit)&&number("sessionUs",total)&&number("screenOffUs",off)&&number("sleepUs",sleep)&&
+        briefSleepScreenOffCounters(total,off,sleep)&&briefSleepScreenOffTimes(entry,exit,total);
+}
 inline Json anomalyFromLine(std::string_view line) {
     if(line.empty()||line.size()>maxFactBytes)return nullptr;
     auto fact=Json::parse(line.begin(),line.end(),nullptr,false);
-    if(!fact.is_object()||!fact.contains("event")||fact["event"]!="s0-low-power-residency"||
+    if(!fact.is_object()||!fact.contains("event")||
         !fact.contains("details")||!fact["details"].is_object())return nullptr;
     const auto& d=fact["details"];
+    if(fact["event"]==ymcc::sleeppower::briefSleepScreenOffEvent)
+        return briefSleepScreenOffFact(d)?std::move(fact):Json(nullptr);
+    if(longScreenOffEvent(fact["event"]))
+        return longScreenOffFact(d,fact["event"]=="s0-long-screen-off-ac-segment-not-entered")?std::move(fact):Json(nullptr);
+    if(fact["event"]!="s0-low-power-residency")return nullptr;
     if(!d.contains("source")||d["source"]!="Microsoft-Windows-Kernel-Power/507"||
         !d.contains("timing")||d["timing"]!="after-standby-exit"||
         !d.contains("assessment")||d["assessment"]!="no-software-drips-recorded"||
@@ -180,6 +230,21 @@ inline Json selectAnomaly(const std::vector<std::string>& facts) {
     }
     return nullptr;
 }
+inline constexpr std::uint64_t reportDay100ns=864000000000ULL;
+inline bool reportExitWithinHistory(std::uint64_t exit,std::uint64_t exportFileTime) {
+    return exit&&exit<=exportFileTime&&exportFileTime-exit<reportDay100ns*maxHistoryDays;
+}
+inline unsigned reportHistoryDays(const Json& selected,std::uint64_t exportFileTime) {
+    if(!selected.is_object()||!longScreenOffEvent(selected.value("event",Json{})))return defaultHistoryDays;
+    const auto details=selected.find("details");
+    if(details==selected.end()||!details->is_object())return defaultHistoryDays;
+    std::uint64_t entry=0,exit=0;
+    if(!unsignedNumber(details->value("entryFileTime100ns",Json{}),entry)||!entry||
+       !unsignedNumber(details->value("exitFileTime100ns",Json{}),exit)||
+       exit<=entry||!reportExitWithinHistory(exit,exportFileTime))return defaultHistoryDays;
+    // Include a day boundary itself; powercfg starts after this export snapshot.
+    return static_cast<unsigned>((std::min<std::uint64_t>)(maxHistoryDays,1+(exportFileTime-entry)/reportDay100ns));
+}
 inline Json selectAnomalyFromFileTail(std::string_view bytes,bool skipFirstLine) {
     if(skipFirstLine) {
         const auto first=bytes.find('\n');
@@ -199,6 +264,18 @@ inline Json selectAnomalyFromFileTail(std::string_view bytes,bool skipFirstLine)
             if(!selected.is_null())return selected;
         }
         if(delimiter==std::string_view::npos)break;
+        end=delimiter;
+    }
+    return nullptr;
+}
+inline Json selectRotatedPairedAnomaly(std::string_view bytes,std::uint64_t exportFileTime) {
+    // The bounded prefix starts on a record boundary. Ignore an unterminated final row.
+    for(auto end=bytes.rfind('\n');end!=std::string_view::npos;) {
+        const auto delimiter=end?bytes.rfind('\n',end-1):std::string_view::npos;
+        const auto start=delimiter==std::string_view::npos?0:delimiter+1;
+        auto selected=anomalyFromLine(bytes.substr(start,end-start));
+        if(!selected.is_null()&&longScreenOffEvent(selected["event"])&&
+           reportExitWithinHistory(selected["details"]["exitFileTime100ns"].get<std::uint64_t>(),exportFileTime))return selected;
         end=delimiter;
     }
     return nullptr;
@@ -249,6 +326,8 @@ inline Json collectWithAnomaly(SelectAnomaly select,const std::function<bool()>&
         if(selected.is_object())for(const char* key:{"time","timestampUtc","timestampLocal","utcEpochMs","writerInstanceId","writerPid",
             "writerProcessCreation100ns","writerSequence","writerPowerGeneration"})if(selected.contains(key))identity[key]=selected[key];
         if(selected.is_object()&&selected["details"].contains("fileTime"))identity["originalEventFileTime"]=selected["details"]["fileTime"];
+        if(selected.is_object()&&longScreenOffEvent(selected["event"]))
+            identity["originalEventFileTime100ns"]=selected["details"]["exitFileTime100ns"];
         if(!identity.empty())receipt["selectedEvidenceIdentity"]=std::move(identity);
         receipt["selectedEvidence"]=std::move(selected);
         if(!current||!current()){receipt["reason"]="export-context-not-current";return receipt;}

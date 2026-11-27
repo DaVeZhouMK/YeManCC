@@ -58,4 +58,43 @@ public:
             {"userWakeProven",false},{"sleepSuccessProven",false},{"powerActionAuthorized",false}};
     }
 };
+
+// The System event subscription is independent of PBT notifications and the
+// historical export query. A healthy receipt cannot prove Windows coverage.
+class KernelSubscriptionEvidence {
+    using U64=std::uint64_t;
+    static constexpr U64 attemptedBit=U64{1}<<32, acceptedBit=U64{1}<<33;
+    std::atomic<U64> registration_{0}, notificationErrors_{0}, renderFailures_{0};
+    std::atomic<DWORD> lastNotificationError_{0}, lastRenderError_{0};
+public:
+    void registered(bool accepted,DWORD error) noexcept {
+        registration_.store(attemptedBit|(accepted?acceptedBit:0)|error,std::memory_order_relaxed);
+    }
+    void subscriptionError(DWORD error) noexcept {
+        lastNotificationError_.store(error,std::memory_order_relaxed);
+        notificationErrors_.fetch_add(1,std::memory_order_relaxed);
+    }
+    bool renderFailed(DWORD error) noexcept {
+        lastRenderError_.store(error,std::memory_order_relaxed);
+        renderFailures_.fetch_add(1,std::memory_order_relaxed);
+        return false;
+    }
+    nlohmann::json snapshot() const {
+        using Json=nlohmann::json;
+        const auto registration=registration_.load(std::memory_order_relaxed);
+        const auto notificationErrors=notificationErrors_.load(std::memory_order_relaxed);
+        const auto renderFailures=renderFailures_.load(std::memory_order_relaxed);
+        return {{"schemaVersion",1},{"channel","System"},{"provider","Microsoft-Windows-Kernel-Power"},
+            {"registrationAttempted",(registration&attemptedBit)!=0},
+            {"lastRegistrationAccepted",registration?Json((registration&acceptedBit)!=0):Json(nullptr)},
+            {"lastRegistrationWin32Error",registration?Json(static_cast<DWORD>(registration)):Json(nullptr)},
+            {"subscriptionErrorNotifications",notificationErrors},
+            {"lastSubscriptionError",notificationErrors?Json(lastNotificationError_.load(std::memory_order_relaxed)):Json(nullptr)},
+            {"liveRenderFailures",renderFailures},
+            {"lastLiveRenderError",renderFailures?Json(lastRenderError_.load(std::memory_order_relaxed)):Json(nullptr)},
+            {"scope","current-process;live-subscription-only;excludes-historical-query-and-replay"},
+            {"snapshotAtomic",false},{"completeWindowsCoverageProven",false},
+            {"detailLogsRequired",false},{"powerActionAuthorized",false}};
+    }
+};
 } // namespace ymcc::sleepnotifications

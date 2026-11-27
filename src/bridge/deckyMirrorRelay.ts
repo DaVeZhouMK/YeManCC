@@ -2,13 +2,17 @@
 // private per-snapshot admission never enters the public/client wire model.
 import { validSteamObservation, type SteamRunningObservation } from '../../decky-plugin/src/steamRunningContext';
 import type { MirrorSnapshot } from '../../decky-plugin/src/mirrorClient';
-import type { GameMirrorAdmission } from './deckyGameActions';
+import type { GameMirrorAdmission } from './deckyGameActions';import type { MirrorMutationContext } from './deckyFanActions';
+import type { PowerLifecycleState } from './api';
+
 import type { ContinuousPerformanceReadStage, GameCustomDisplayReadStage } from './performanceSchedule';
 export interface MirrorControlAdmission {audioOptimization?:string;performance?:string;frames?:string;touchpads?:string;global?:string;monitor?:string;trainer?:string;}
-export type RelayReadSnapshot = Omit<MirrorSnapshot,'runId'|'revision'> & {gameAdmission?:GameMirrorAdmission;controlAdmission?:MirrorControlAdmission};
+export type RelayReadSnapshot = Omit<MirrorSnapshot,'runId'|'revision'> & {gameAdmission?:GameMirrorAdmission;controlAdmission?:MirrorControlAdmission;powerAdmission?:string};
+export const mirrorPowerScope=(power:{generation:number;suspendSerial?:number;observedNotificationSequence?:number})=>
+  JSON.stringify([power.generation,power.suspendSerial,power.observedNotificationSequence]);
 export interface MirrorPeer { connection: string; runId: string; connected?: boolean; revision?: number; connectionRevision?:number; }
 export interface MirrorRequest extends MirrorPeer { request: { command: string; runId: string; id?: string; clientId?: string; [key: string]: unknown }; }
-export interface RelayMutationContext { nativePeer?:{connection:string;runId:string;connectionRevision:number}; generation:number; revision:number; gameIdentity?:string; gameAdmission?:GameMirrorAdmission; controlAdmission?:MirrorControlAdmission; checkpoint:() => void; }
+export interface RelayMutationContext extends MirrorMutationContext { nativePeer?:{connection:string;runId:string;connectionRevision:number}; revision:number; gameIdentity?:string; gameAdmission?:GameMirrorAdmission; controlAdmission?:MirrorControlAdmission; }
 export type MirrorReadStage = 'audio'|'profile'|'power'|'powerSource'|'schedule'|'performance'|'topology'|'gyro'|'frames'|'touchpads'|'global'|'monitor'|'input';
 const invalidationSources=["audio","monitor","input","touchpads","frames","schedule","profile","game","power","fan","controller","steam","trainer","speed","lossless","action","unspecified","steam-observation","snapshot-request","peer-revision"] as const;
 export type MirrorInvalidationSource=typeof invalidationSources[number];
@@ -29,6 +33,7 @@ export interface RelayDeps {
   reply: (connection: string, message: unknown) => Promise<boolean>;
   // Borrowed for this synchronous call; the observer owns any retained values.
   observeSteam?: (observation:Readonly<SteamRunningObservation>) => boolean;
+  readMutationPower?: (load:()=>Promise<PowerLifecycleState>)=>Promise<PowerLifecycleState>;
   execute?: (command:string,args:Record<string,unknown>,context:RelayMutationContext) => Promise<{saved:boolean;applied:boolean;pending?:boolean;notice:string}>;
 }
 export class ReadOnlyMirrorRelay {
@@ -50,6 +55,7 @@ export class ReadOnlyMirrorRelay {
   private offeredSnapshots = new Map<number,{snapshot:MirrorSnapshot;pending:number;delivered:boolean}>();
   private controlAdmissions = new WeakMap<MirrorSnapshot,MirrorControlAdmission>();
   private gameAdmissions = new WeakMap<MirrorSnapshot,GameMirrorAdmission>();
+  private powerAdmissions = new WeakMap<MirrorSnapshot,string>();
   private recoveryTimer:ReturnType<typeof setTimeout>|null=null;
   private recoveryLease:object|null=null;
   private recoveryAttempt=0;
@@ -65,6 +71,7 @@ export class ReadOnlyMirrorRelay {
   private snapshotRetry: {snapshot:MirrorSnapshot;probeId?:string;timer:ReturnType<typeof setTimeout>} | null = null;
   private disposed = false;
   private mutationBusy = false;
+  private mutationPower:{controller:AbortController;fan:boolean}|null=null;
   private clients = new Map<string,{highest:number;receipts:Map<number,{signature:string;response:Promise<Record<string,unknown>>}>}>();
   private clientRun = '';
   private transportRevision = -1;
@@ -136,6 +143,7 @@ export class ReadOnlyMirrorRelay {
   private pauseDemand(): void {
     this.snapshotDemandPaused = true;
     if (this.requested || this.stopObserve) {
+      this.revokeMutationPowerRead(true);
       this.requested = false; this.demandEpoch++; this.dirty = true; this.sourceEpoch++;
       this.pendingDisplay=null; this.deliveries.clear();
       this.stopObserving();
@@ -149,6 +157,11 @@ export class ReadOnlyMirrorRelay {
   invalidateFresh(contextChanged=false,source:MirrorInvalidationSource='unspecified'):void {
     if(contextChanged){this.stopRecovery();this.recoveryAttempt=0;this.deferredSnapshot=null;}
     this.freshReadRequested=true;this.invalidate(source);
+  }
+  revokeMutationPowerRead(fanOnly=false):void {
+    // Abort the read only. The executing action still owns its slot through
+    // settlement, including any save or device write it already dispatched.
+    if(this.mutationPower&&(!fanOnly||this.mutationPower.fan))this.mutationPower.controller.abort();
   }
   advancePowerScope():void {
     this.powerEpoch++;
@@ -205,6 +218,7 @@ export class ReadOnlyMirrorRelay {
     },delay);
   }
   private detach(): void {
+    this.revokeMutationPowerRead();
     this.stopRecovery();this.recoveryAttempt=0;this.readFault=false;
     this.stopSnapshotRetry();
     this.epoch++; this.sourceEpoch++; this.demandEpoch++; this.stopObserving(); this.deliveries.clear(); this.offeredSnapshots.clear();
@@ -281,12 +295,13 @@ export class ReadOnlyMirrorRelay {
         if (retired || this.disposed || epoch !== this.epoch || !this.matches(peer)) return null;
         if (sourceEpoch !== this.sourceEpoch) { if (!this.requested) return null; continue; }
         this.readFault=fault;
-        const {gameAdmission,controlAdmission,...publicData}=data;
+        const {gameAdmission,controlAdmission,powerAdmission,...publicData}=data;
         this.deferredSnapshot=null;
         this.cache = { ...structuredClone(publicData), runId: peer.runId, revision: ++this.revision };
         this.cacheSourceEpoch=sourceEpoch;
         if(controlAdmission)this.controlAdmissions.set(this.cache,structuredClone(controlAdmission));
         if(gameAdmission)this.gameAdmissions.set(this.cache,structuredClone(gameAdmission));
+        if(powerAdmission)this.powerAdmissions.set(this.cache,powerAdmission);
         // Keep a returned partial view usable for unaffected controls. The one
         // recovery lease, not each mutation, forces its next fresh observation.
         // An error or native-not-ready result is not recovery completion.
@@ -310,6 +325,7 @@ export class ReadOnlyMirrorRelay {
     const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
     if(command==='fan.setChoice')return previous.actions?.fan===true && current.actions?.fan===true &&
       previous.fan.canToggle===true && current.fan.canToggle===true && same(previous.fan,current.fan);
+    if(this.powerAdmissions.get(previous)!==this.powerAdmissions.get(current))return false;
     const field=command==='performance.setControls'?'performance':command==='frame.setField'?'frames':null;
     if(!field || previous.actions?.[field]!==true || current.actions?.[field]!==true || !previous[field] || !current[field] || !same(previous[field],current[field]))return false;
     const source=this.controlAdmissions.get(previous)?.[field],fresh=this.controlAdmissions.get(current)?.[field];
@@ -401,6 +417,18 @@ export class ReadOnlyMirrorRelay {
       if(probeId&&read===this.readTask&&(this.probeRead?.id!==probeId||this.probeRead.sourceEpoch!==this.sourceEpoch||this.probeRead.demandEpoch!==demandEpoch))
         this.probeRead={id:probeId,sourceEpoch:this.sourceEpoch,demandEpoch};
       snapshot=await read;
+      // A power edge can retire the old read while the same sidebar still
+      // wants this probe. Join its replacement without sending a stale reply
+      // or starting another read. A paused/replaced peer never follows it.
+      let previous=read;
+      while(!snapshot&&probeId&&this.requested&&demandEpoch===this.demandEpoch&&epoch===this.epoch){
+        const next=this.readTask;
+        if(!next||next===previous)break;
+        if(this.probeRead?.sourceEpoch!==this.sourceEpoch||this.probeRead.demandEpoch!==demandEpoch)
+          this.probeRead={id:probeId,sourceEpoch:this.sourceEpoch,demandEpoch};
+        previous=next;
+        snapshot=await next;
+      }
     }
     if (!snapshot && probeId && this.requested && demandEpoch===this.demandEpoch && epoch===this.epoch)
       snapshot=!this.dirty&&this.cacheSourceEpoch===this.sourceEpoch?this.cache:this.deferredView();
@@ -542,8 +570,8 @@ export class ReadOnlyMirrorRelay {
     if (!this.matches(event) || epoch !== this.epoch) return;
     if (powerEpoch!==this.powerEpoch) { await failure('状态已变化，请重新读取后操作'); return; }
     if (!snapshot) return;
-    const independentFan = (command === 'fan.setEnabled' || command === 'fan.setPreset' || command === 'fan.setChoice')
-      && snapshot.actions?.fan === true && snapshot.fan.canToggle === true;
+    const fanMutation = command === 'fan.setEnabled' || command === 'fan.setPreset' || command === 'fan.setChoice';
+    const independentFan = fanMutation && snapshot.actions?.fan === true && snapshot.fan.canToggle === true;
     if ((!snapshot.ready && !independentFan) || !Number.isSafeInteger(request.generation) || request.generation !== snapshot.generation ||
         !Number.isSafeInteger(request.revision) || (request.revision !== snapshot.revision && !this.sameSliderSource(this.offeredSnapshots.get(request.revision as number)?.snapshot,snapshot,command))) {
       await failure('状态已变化，请重新读取后操作'); return;
@@ -570,15 +598,32 @@ export class ReadOnlyMirrorRelay {
     if (this.mutationBusy) { await failure('已有镜像操作正在执行，请稍候'); return; }
     client ??= {highest:0,receipts:new Map()}; this.clients.set(clientId,client);
     const nativePeer=peerRevision>=0?{connection:event.connection,runId:event.runId,connectionRevision:peerRevision}:undefined;
+    const mutationPower=new AbortController();
     const checkpoint = () => {
       if (this.disposed || epoch !== this.epoch || peerRevision!==this.transportRevision || !this.matches(event)) throw new Error('MIRROR_CONTEXT_EXPIRED');
+      if (mutationPower.signal.aborted) throw new Error(fanMutation?'FAN_MIRROR_POWER_NOT_READY':'MIRROR_POWER_SCOPE_CHANGED');
+      // A coalesced suspend can keep the generation while retiring the public
+      // admission. Fan requests keep their dedicated power checks above.
+      if(!fanMutation&&powerEpoch!==this.powerEpoch)throw new Error('MIRROR_POWER_SCOPE_CHANGED');
     };
+    const powerAdmission=this.powerAdmissions.get(snapshot);
+    const readPower:RelayMutationContext['readPower']=load=>{
+      checkpoint();
+      const read=()=>load(mutationPower.signal);
+      if(fanMutation)return read();
+      return (this.deps.readMutationPower?this.deps.readMutationPower(read):read()).then(power=>{
+        checkpoint();
+        if(powerAdmission!==undefined&&mirrorPowerScope(power)!==powerAdmission)throw Error('MIRROR_POWER_SCOPE_CHANGED');
+        return power;
+      });
+    };
+    this.mutationPower = {controller:mutationPower,fan:fanMutation};
     this.mutationBusy = true; client.highest = sequence;
     const receipt = Promise.resolve().then(async () => {
       try {
         checkpoint();
         const result = await this.deps.execute!(command,structuredClone(args) as Record<string,unknown>,
-          {generation:snapshot.generation,revision:snapshot.revision,gameIdentity:command === 'performance.setControls'||command === 'game.setField'||command === 'frame.setField'||command === 'global.setField' ? snapshot.game?.identity??'' : undefined,gameAdmission:command === 'game.setField' ? this.gameAdmissions.get(snapshot) : undefined,controlAdmission:this.controlAdmissions.get(snapshot),nativePeer,checkpoint});
+          {generation:snapshot.generation,revision:snapshot.revision,gameIdentity:command === 'performance.setControls'||command === 'game.setField'||command === 'frame.setField'||command === 'global.setField' ? snapshot.game?.identity??'' : undefined,gameAdmission:command === 'game.setField' ? this.gameAdmissions.get(snapshot) : undefined,controlAdmission:this.controlAdmissions.get(snapshot),nativePeer,checkpoint,readPower});
         return {type:'reply',runId:event.runId,id:request.id,ok:true,result,notice:result.notice};
       } catch(error) {
         const sourceChanged=['GAME_MIRROR_SOURCE_CHANGED','PERFORMANCE_MIRROR_SOURCE_CHANGED'].includes(String((error as {message?:unknown})?.message));
@@ -586,6 +631,7 @@ export class ReadOnlyMirrorRelay {
           ? 'YMCC 原方案已变化；未保存，请查看更新后的侧栏再选择，不自动重试'
           : '镜像操作未确认；请查看 YMCC 当前状态，不自动重放'};
       } finally {
+        this.mutationPower = null;
         this.mutationBusy = false;
         // The accepted owner may settle after a new peer read the old facts.
         // Refresh only the current observation; never route the retired reply

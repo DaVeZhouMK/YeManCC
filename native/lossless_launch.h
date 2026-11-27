@@ -83,6 +83,7 @@ public:
         startup.dwFlags = STARTF_USESHOWWINDOW;
         startup.wShowWindow = SW_SHOWMINNOACTIVE;
         PROCESS_INFORMATION process{};
+        if (!ready()) { result.reason = "context-unavailable"; return result; }
         if (!creator_(executable_.c_str(), writable.data(), nullptr, nullptr, FALSE,
                 NORMAL_PRIORITY_CLASS, nullptr, directory.c_str(), &startup, &process)) {
             result.reason = "create-process-failed"; result.error = GetLastError(); return result;

@@ -118,7 +118,7 @@ internal static class Program
         string op=root.GetProperty("op").GetString()??"";
         Snapshot result=op switch
         {
-            "get"=>controller.Read(),"refresh"=>controller.Acknowledge(),"release"=>controller.Release(),
+            "get"=>controller.ReadForGet(),"refresh"=>controller.Acknowledge(),"release"=>controller.Release(),
             "set"=>controller.Apply(root.GetProperty("fence").GetString()??"",root.GetProperty("target").GetInt32()),
             "restore"=>Restore(controller),_=>throw new IOException("未知电池操作")
         };

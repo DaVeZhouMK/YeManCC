@@ -49,31 +49,53 @@ inline bool shortcutFeedbackText(const ShortcutActionJson& value,size_t max) {
 // At most 16 pending one-shot requests. No worker, hook or timer. Only the
 // original serial dispatcher issues requests; claims and results recheck its guard.
 class ShortcutActionMailbox {
+public:
+    struct PowerScope {
+        uint64_t generation=0,suspendSerial=0,notificationSequence=0;
+        bool operator==(const PowerScope&) const = default;
+    };
+private:
     struct Entry { ShortcutActionJson wire; uint64_t deadline=0; std::function<bool()> current; bool claimed=false; };
     std::mutex mutex_;
     std::unordered_map<std::string,Entry> pending_;
     uint64_t sequence_=0;
+    PowerScope power_;
     std::string session_;
 public:
     explicit ShortcutActionMailbox(std::string session):session_(std::move(session)){}
 private:
-    ShortcutActionJson issueNormalized(const std::string& action,ShortcutActionJson params,uint64_t generation,uint64_t revision,uint64_t tick,int64_t unixMs,std::function<bool()> current) {
+    ShortcutActionJson issueNormalized(const std::string& action,ShortcutActionJson params,PowerScope power,uint64_t revision,uint64_t tick,int64_t unixMs,std::function<bool()> current,bool publishPowerScope) {
         std::lock_guard<std::mutex> lock(mutex_);
+        if(power!=power_) {
+            // An older issuer that passed its guard before the boundary must
+            // not evict tickets already issued in the newer public scope.
+            if(power.generation<power_.generation||power.suspendSerial<power_.suspendSerial||
+               power.notificationSequence<power_.notificationSequence)return {};
+            pending_.clear();
+            power_=power;
+        }
         for(auto it=pending_.begin();it!=pending_.end();)if(it->second.deadline<=tick)it=pending_.erase(it);else ++it;
         if(pending_.size()>=16)return {};
         const std::string id=session_+":"+std::to_string(++sequence_);
         ShortcutActionJson wire={{"schemaVersion",1},{"id",id},{"actionId",action},{"params",std::move(params)},
-            {"powerGeneration",generation},{"inputRevision",revision},{"issuedAtUnixMs",unixMs},{"expiresAtUnixMs",unixMs+30000}};
+            {"powerGeneration",power.generation},{"inputRevision",revision},{"issuedAtUnixMs",unixMs},{"expiresAtUnixMs",unixMs+30000}};
+        if(publishPowerScope)wire["powerScope"]=ShortcutActionJson::array({power.generation,power.suspendSerial,power.notificationSequence});
         pending_.emplace(id,Entry{wire,tick+30000,std::move(current),false});return wire;
     }
-public:
-    ShortcutActionJson issue(const std::string& action,const ShortcutActionJson& raw,uint64_t generation,uint64_t revision,uint64_t tick,int64_t unixMs,std::function<bool()> current) {
+    ShortcutActionJson issueUi(const std::string& action,const ShortcutActionJson& raw,PowerScope power,uint64_t revision,uint64_t tick,int64_t unixMs,std::function<bool()> current,bool publishPowerScope) {
         ShortcutActionJson params;if(!shortcutUiParams(action,raw,params))return {};
-        return issueNormalized(action,std::move(params),generation,revision,tick,unixMs,std::move(current));
+        return issueNormalized(action,std::move(params),power,revision,tick,unixMs,std::move(current),publishPowerScope);
     }
-    ShortcutActionJson issueResultTicket(const std::string& action,uint64_t generation,uint64_t revision,uint64_t tick,int64_t unixMs,std::function<bool()> current) {
+public:
+    ShortcutActionJson issue(const std::string& action,const ShortcutActionJson& raw,PowerScope power,uint64_t revision,uint64_t tick,int64_t unixMs,std::function<bool()> current) {
+        return issueUi(action,raw,power,revision,tick,unixMs,std::move(current),true);
+    }
+    ShortcutActionJson issue(const std::string& action,const ShortcutActionJson& raw,uint64_t generation,uint64_t revision,uint64_t tick,int64_t unixMs,std::function<bool()> current) {
+        return issueUi(action,raw,PowerScope{generation},revision,tick,unixMs,std::move(current),false);
+    }
+    ShortcutActionJson issueResultTicket(const std::string& action,PowerScope power,uint64_t revision,uint64_t tick,int64_t unixMs,std::function<bool()> current) {
         if(action!="power.tdpAdjust")return {};
-        return issueNormalized(action,ShortcutActionJson::object(),generation,revision,tick,unixMs,std::move(current));
+        return issueNormalized(action,ShortcutActionJson::object(),power,revision,tick,unixMs,std::move(current),true);
     }
     ShortcutActionJson claim(const std::string& id,uint64_t tick) {
         std::function<bool()> current;

@@ -121,7 +121,7 @@ function packageMaintenanceFixture(){
  const authority={compiler,manifestSha256:hash(manifest),files:[compilerPin,pin(manifest)]},environment=packageMaintenanceEnvironment({...process.env,SystemRoot:systemRoot});
  f.parent.toolArtifacts.push(executable,...authority.files);
  const ordinaryNames=[...inertPackageMutations.map(row=>row.expectedCase),...Array.from({length:29},(_,i)=>'INERT ordinary assertion '+(i+4))];
- const result={fixtureKind:'INERT_METADATA_ONLY',pass:true,status:'PASS',complete:true,totalBudgetMs:30000,runBudgetMs:25000,cleanupReserveMs:5000,executionScope:'full-original-ordinary-suite',selectedMutation:'',selectedCase:null,realSteamActions:0,hardwareWrites:0,productProcessesLaunched:0,productionGlobalMutexAccessed:false,fixtureMutexNamespaceRemapped:true,declaredOrdinaryCaseCount:32,executedOrdinaryCaseCount:32,omittedOrdinaryCases:[],count:33,passed:33,cases:[...ordinaryNames.map(name=>({name,pass:true,executed:true,fixtureKind:'INERT_METADATA_ONLY'})),{name:'INERT mutation summary',pass:true,executed:true,fixtureKind:'INERT_METADATA_ONLY'}],mutations:Object.fromEntries(inertPackageMutations.map(row=>[row.name,'EXPECTED_NONZERO'])),mutationRetirement:[],sourceSha256:hash(path.join(f.project,sourceNames[1])),embeddedSha256:hash(path.join(f.project,sourceNames[2]))};
+ const result={fixtureKind:'INERT_METADATA_ONLY',pass:true,status:'PASS',complete:true,totalBudgetMs:45000,runBudgetMs:40000,cleanupReserveMs:5000,executionScope:'full-original-ordinary-suite',selectedMutation:'',selectedCase:null,realSteamActions:0,hardwareWrites:0,productProcessesLaunched:0,productionGlobalMutexAccessed:false,fixtureMutexNamespaceRemapped:true,declaredOrdinaryCaseCount:32,executedOrdinaryCaseCount:32,omittedOrdinaryCases:[],count:33,passed:33,cases:[...ordinaryNames.map(name=>({name,pass:true,executed:true,fixtureKind:'INERT_METADATA_ONLY'})),{name:'INERT mutation summary',pass:true,executed:true,fixtureKind:'INERT_METADATA_ONLY'}],mutations:Object.fromEntries(inertPackageMutations.map(row=>[row.name,'EXPECTED_NONZERO'])),mutationRetirement:[],sourceSha256:hash(path.join(f.project,sourceNames[1])),embeddedSha256:hash(path.join(f.project,sourceNames[2]))};
  const negativeResults=inertPackageMutations.map(def=>{
   const independentRoot=path.join(packageRoot,'mutation-'+def.name),file=path.join(independentRoot,'evidence/result.json');
   const raw={fixtureKind:'INERT_METADATA_ONLY',complete:true,status:'FAIL',pass:false,executionScope:'selected-original-mutation-assertion',selectedMutation:def.name,selectedCase:def.expectedCase,count:1,passed:0,declaredOrdinaryCaseCount:32,executedOrdinaryCaseCount:1,omittedOrdinaryCases:ordinaryNames.filter(name=>name!==def.expectedCase),cases:[{name:def.expectedCase,pass:false,executed:true,error:def.expectedFailure,fixtureKind:'INERT_METADATA_ONLY'}]};
@@ -130,7 +130,7 @@ function packageMaintenanceFixture(){
   return {name:def.name,result:pin(file)};
  });
  const stdout=put(path.join(base,'package-maintenance.stdout.raw'),'INERT captured package stdout\n'),stderr=put(path.join(base,'package-maintenance.stderr.raw'),'');
- const packageProcess={fixtureKind:'INERT_METADATA_ONLY',executable,source:pin(path.join(f.project,sourceNames[0])),sourceSha256After:hash(path.join(f.project,sourceNames[0])),toolSha256After:executable.sha256,sourceReadErrorAfter:null,toolReadErrorAfter:null,cwd:fs.realpathSync(f.project),environment,args:['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(f.project,sourceNames[0]),'-EvidenceDir',packageRoot,'-TotalBudgetMs','30000','-RunBudgetMs','25000','-CleanupReserveMs','5000'],status:0,signal:null,error:null,timedOut:false,stageBudgetMs:30000,innerTotalBudgetMs:30000,runBudgetMs:25000,cleanupReserveMs:5000,registeredAdapterBudgetMs:240000,startedAt:new Date(Date.parse(f.processProof.startedAt)+10).toISOString(),finishedAt:new Date(Date.parse(f.processProof.startedAt)+20).toISOString(),elapsedMs:10,stdoutBytes:stdout.bytes,stderrBytes:stderr.bytes,fixtureCompilerAuthority:{...authority,inputs:authority.files.length}};
+ const packageProcess={fixtureKind:'INERT_METADATA_ONLY',executable,source:pin(path.join(f.project,sourceNames[0])),sourceSha256After:hash(path.join(f.project,sourceNames[0])),toolSha256After:executable.sha256,sourceReadErrorAfter:null,toolReadErrorAfter:null,cwd:fs.realpathSync(f.project),environment,args:['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',path.join(f.project,sourceNames[0]),'-EvidenceDir',packageRoot,'-TotalBudgetMs','45000','-RunBudgetMs','40000','-CleanupReserveMs','5000'],status:0,signal:null,error:null,timedOut:false,stageBudgetMs:45000,innerTotalBudgetMs:45000,runBudgetMs:40000,cleanupReserveMs:5000,registeredAdapterBudgetMs:240000,startedAt:new Date(Date.parse(f.processProof.startedAt)+10).toISOString(),finishedAt:new Date(Date.parse(f.processProof.startedAt)+20).toISOString(),elapsedMs:10,stdoutBytes:stdout.bytes,stderrBytes:stderr.bytes,fixtureCompilerAuthority:{...authority,inputs:authority.files.length}};
  const packageProcessFile=path.join(base,'package-maintenance-process.json'),resultFile=path.join(packageRoot,'result.json');
  const refresh=()=>{
   write(packageProcessFile,packageProcess);write(resultFile,result);
@@ -144,7 +144,7 @@ function packageMaintenanceFixture(){
 }
 test('INERT complete package receipt shares 32 ordinary assertions and three retired negatives with zero producers',()=>{
  const f=packageMaintenanceFixture(),r=f.verify(),parent=f.verifyParent();
- assert.equal(f.result.count,33);assert.equal(f.result.cases.length,33);assert.equal(r.status,'SHARED_REFERENCE');assert.equal(r.ordinaryCases,32);assert.equal(r.semanticNegativeMutations,3);assert.equal(r.originalProducerExecutionsWithinParent,1);assert.equal(r.originalProducerExecutionsByThisReference,0);assert.equal(r.originalBudgetMs,30000);assert.deepEqual(r.originalArguments,f.packageProcess.args);assert.equal(r.cached,false);assert.equal(r.fullProductAcceptance,false);assert.deepEqual(parent.packageMaintenance,r);
+ assert.equal(f.result.count,33);assert.equal(f.result.cases.length,33);assert.equal(r.status,'SHARED_REFERENCE');assert.equal(r.ordinaryCases,32);assert.equal(r.semanticNegativeMutations,3);assert.equal(r.originalProducerExecutionsWithinParent,1);assert.equal(r.originalProducerExecutionsByThisReference,0);assert.equal(r.originalBudgetMs,45000);assert.deepEqual(r.originalArguments,f.packageProcess.args);assert.equal(r.cached,false);assert.equal(r.fullProductAcceptance,false);assert.deepEqual(parent.packageMaintenance,r);
  assert.equal(f.result.selectedMutation,'');f.result.selectedMutation=null;f.refresh();assert.equal(f.verify().status,'SHARED_REFERENCE');
  for(const row of f.negativeResults){const raw=JSON.parse(fs.readFileSync(row.result.path,'utf8'));assert.equal(raw.fixtureKind,'INERT_METADATA_ONLY');assert.equal(raw.status,'FAIL');assert.equal(raw.pass,false);}
 });
@@ -177,13 +177,20 @@ test('INERT incomplete ordinary coverage and unexecuted or failed assertions can
  for(const edit of edits){const f=packageMaintenanceFixture();edit(f.result);f.refresh();assert.throws(f.verify,/PACKAGE_REFERENCE_/);}
 });
 test('INERT package timeout, failed process and exhausted deadline cannot share',()=>{
- for(const [field,value] of Object.entries({timedOut:true,status:1,signal:'SIGTERM',error:'INERT timeout',elapsedMs:30001})){const f=packageMaintenanceFixture();f.packageProcess[field]=value;f.refresh();assert.throws(f.verify,/PACKAGE_REFERENCE_/,field);}
+ for(const [field,value] of Object.entries({timedOut:true,status:1,signal:'SIGTERM',error:'INERT timeout',elapsedMs:45001})){const f=packageMaintenanceFixture();f.packageProcess[field]=value;f.refresh();assert.throws(f.verify,/PACKAGE_REFERENCE_/,field);}
 });
 test('INERT package filtered arguments and altered original budget partitions are rejected',()=>{
  for(const extra of [['-SkipMutationProof'],['-MutationCase','no-rollback'],['-Case','INERT selected']]){const f=packageMaintenanceFixture();f.packageProcess.args.push(...extra);f.refresh();assert.throws(f.verify,/ORIGINAL_ARGUMENTS/);}
  for(const field of ['stageBudgetMs','innerTotalBudgetMs','runBudgetMs','cleanupReserveMs','registeredAdapterBudgetMs']){const f=packageMaintenanceFixture();f.packageProcess[field]--;f.refresh();assert.throws(f.verify,/PACKAGE_REFERENCE_PROCESS_/,field);}
  for(const field of ['totalBudgetMs','runBudgetMs','cleanupReserveMs']){const f=packageMaintenanceFixture();f.result[field]--;f.refresh();assert.throws(f.verify,/PACKAGE_REFERENCE_RESULT_/,field);}
- const f=packageMaintenanceFixture();f.packageProcess.args[f.packageProcess.args.indexOf('30000')]='29999';f.refresh();assert.throws(f.verify,/ORIGINAL_ARGUMENTS/);
+ const f=packageMaintenanceFixture();f.packageProcess.args[f.packageProcess.args.indexOf('45000')]='44999';f.refresh();assert.throws(f.verify,/ORIGINAL_ARGUMENTS/);
+});
+test('INERT package reference cannot reuse the earlier shorter partition',()=>{
+ const f=packageMaintenanceFixture();
+ f.packageProcess.args.splice(-6,6,'-TotalBudgetMs','30000','-RunBudgetMs','25000','-CleanupReserveMs','5000');
+ Object.assign(f.packageProcess,{stageBudgetMs:30000,innerTotalBudgetMs:30000,runBudgetMs:25000});
+ Object.assign(f.result,{totalBudgetMs:30000,runBudgetMs:25000});
+ f.refresh();assert.throws(f.verify,/ORIGINAL_ARGUMENTS/);
 });
 test('INERT package execution must remain within the current original parent process interval',()=>{
  for(const edit of [f=>{f.packageProcess.startedAt=new Date(Date.parse(f.processProof.startedAt)-1).toISOString();},f=>{f.packageProcess.finishedAt=new Date(Date.parse(f.processProof.finishedAt)+1).toISOString();},f=>{f.packageProcess.finishedAt=f.processProof.startedAt;},f=>{f.packageProcess.startedAt='INERT invalid timestamp';}]){const f=packageMaintenanceFixture();edit(f);f.refresh();assert.throws(f.verify,/NOT_CURRENT/);}

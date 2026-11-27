@@ -5,8 +5,10 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <set>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -243,13 +245,16 @@ public:
             if(!doc["protectedSoftware"].is_array()){error_="invalid-journal-software-protection";return;}
             if(!doc.contains("scanInProgress"))doc["scanInProgress"]=false;
             if(!doc["scanInProgress"].is_boolean()){error_="invalid-journal-scan-marker";return;}
-            std::set<std::string> keys;
+            static constexpr std::string_view stages[]={"observed","prepared","applied","preexisting",
+                "retry-pending","external-change","restore-prepared","restored"};
+            // The loaded document owns these keys until validation finishes.
+            std::set<std::string_view> keys;
             for(const auto& r:doc["entries"]) {
                 if(!itemValid(r)||!r.contains("baseline")||!valueValid(r,r["baseline"])||!r.contains("owned")||!r["owned"].is_boolean()||
                     !r.contains("stage")||!r["stage"].is_string()||
                     (r.contains("everApplied")&&!r["everApplied"].is_boolean())||
-                    !std::set<std::string>{"observed","prepared","applied","preexisting","retry-pending","external-change","restore-prepared","restored"}.count(r["stage"].get<std::string>())||!r.contains("error")||!r["error"].is_string()||
-                    !keys.insert(r["key"].get<std::string>()).second){error_="invalid-journal-entry";return;}
+                    std::find(std::begin(stages),std::end(stages),r["stage"].get_ref<const std::string&>())==std::end(stages)||!r.contains("error")||!r["error"].is_string()||
+                    !keys.insert(r["key"].get_ref<const std::string&>()).second){error_="invalid-journal-entry";return;}
             }
             j_=std::move(doc);loaded_=true;
         }catch(const std::exception& e){error_=std::string("journal-exception: ")+e.what();}

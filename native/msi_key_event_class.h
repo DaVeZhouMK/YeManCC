@@ -15,6 +15,33 @@ inline bool classObjectAdmitted(int32_t status,bool object) {
 inline bool classDefinitelyAbsent(int32_t status) {
     return uint32_t(status)==0x80041010u || uint32_t(status)==0x80041002u;
 }
+
+// Only the serial watcher writes this log state. Retry decisions never read it.
+struct EventClassRetryLogState {
+    struct Selection { bool detail=false; unsigned sameRetries=0; };
+    uint64_t generation=0,power=0,tick=0,deliveryEpoch=0;
+    int32_t beginStatus=0,waitStatus=0;
+    unsigned sameRetries=0;
+
+    Selection observe(const EventClassProbe& probe,uint64_t source,uint64_t readyPower,uint64_t now,
+                      uint64_t failedAt,uint64_t backoff,uint64_t epoch,bool deliveryUncertain) noexcept {
+        if(!source||!readyPower||!probe.requestIssued||probe.classObject||
+            probe.state!=EventClassState::Absent||!classDefinitelyAbsent(probe.waitStatus)) {
+            *this={};return {};
+        }
+        const auto age=now>=failedAt?now-failedAt:0;
+        const bool same=!deliveryUncertain&&generation&&source>generation&&source-generation==1&&
+            power==readyPower&&epoch==deliveryEpoch&&failedAt&&failedAt>=tick&&
+            age>=backoff&&age-backoff<=backoff&&beginStatus==probe.beginStatus&&waitStatus==probe.waitStatus;
+        generation=source;power=readyPower;tick=now;deliveryEpoch=epoch;
+        beginStatus=probe.beginStatus;waitStatus=probe.waitStatus;
+        sameRetries=same?sameRetries+1:0;
+        const Selection selection{sameRetries!=0&&sameRetries<10,sameRetries};
+        if(!selection.detail)sameRetries=0;
+        return selection;
+    }
+};
+
 template<class Reader,class Current> EventClassProbe probeEventClass(Reader& reader,Current current) {
     EventClassProbe r;
     if(!current()){r.state=EventClassState::Cancelled;return r;}

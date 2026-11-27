@@ -13,6 +13,32 @@ check(downloadInterruptionReason('media-staging-budget-full').includes('暂存')
 check(calls[0].args.catalog===false,'loaded production settings never request popular discovery');check(!downloadDescription({enabled:true,catalogStatus:'fetching'}).includes('热门榜'),'legacy catalog status does not display retired discovery');check(!downloadDescription({enabled:true,phase:'deferred',catalogStatus:'deferred'}).includes('热门榜'),'legacy catalog failure cannot block the local queue');
 check(downloadInterruptionReason('media-video-selection-expired').includes('重新搜索'),'expired chosen video has an actionable status reason');check(downloadDescription({enabled:false,reason:'media-video-selection-expired',phase:'deferred'}).includes('重新搜索'),'auto-off does not hide selected video failure');check(downloadDescription({enabled:false,manualUntil:Date.now()+60000,manualTotal:1,manualCompleted:0,total:30,completed:20}).includes('0 / 1'),'selected request counts only its own target');
 check(downloadDescription({enabled:true,pauseReason:'game-running',reason:'media-video-selection-expired',manualState:'deferred'}).includes('重新搜索'),'game pause does not hide a failed chosen-video request');
+// Startup restores the persisted queue; its first count is not a completion.
+{
+ const owner=new MediaDownloads();let refreshes=0;
+ const stopWatching=owner.watchCompleted(()=>{++refreshes;});
+ owner.accept({statusRevision:1,completed:14});
+ check(refreshes===0,'first persisted completion count only establishes the baseline');
+ owner.accept({statusRevision:2,completed:14});
+ owner.accept({statusRevision:3,checkpointReadable:false,completed:0});
+ check(refreshes===0,'unchanged or unreadable status cannot refresh media');
+ owner.accept({statusRevision:3,completed:15});
+ check(refreshes===1,'a real completion after an unreadable status still refreshes media');
+ owner.accept({statusRevision:4,completed:0});
+ check(refreshes===2,'queue reset still refreshes media');
+ stopWatching();owner.accept({statusRevision:5,completed:1});
+ check(refreshes===2,'stopped observer does not refresh media');
+ const stopLate=owner.watchCompleted(()=>{++refreshes;});
+ owner.accept({statusRevision:6,completed:2});
+ check(refreshes===3,'existing authoritative state is the baseline for a late observer');
+ stopLate();
+ const recovered=new MediaDownloads();let recoveryRefreshes=0;
+ const stopRecovery=recovered.watchCompleted(()=>{++recoveryRefreshes;});
+ recovered.accept({statusRevision:1,checkpointReadable:false});
+ recovered.accept({statusRevision:1,completed:14});
+ check(recoveryRefreshes===1,'recovery from an initially unreadable queue retains its reconciliation');
+ stopRecovery();
+}
 // The existing coordinator must stop its actual deferred work, not just relabel it.
 {
  let allowed=true,id=0;const timers=new Map<number,()=>void>(),submitted:any[]=[],returns:((v:any)=>void)[]=[];
@@ -86,12 +112,15 @@ async function publicMediaPowerCases():Promise<void>{
     await publish({publicationRevision:3,inputReady:false});
     await publish({publicationRevision:4,suspendSerial:7});
     assert.equal(downloads,before+1,'duplicate and delayed pre-suspend Ready must not start another read');
-   }else {hold=false;await publish({publicationRevision:2,observedNotificationSequence:2});assert.equal(downloads,before+1,'same-generation notification must retire the held read before its return');}
-   if(name==='startup-sequence'){assert.equal(timers.size,1,'one original startup observation timer');assert([...timers.values()][0].at<=startupDue!+1,'sequence change extended original startup deadline');}
+   }else if(name==='late-failure'){
+    hold=false;await publish({publicationRevision:2,observedNotificationSequence:2,suspendSerial:8});
+    assert.equal(downloads,before+1,'new suspend scope must replace the read that will fail late');
+   }else {hold=false;await publish({publicationRevision:2,observedNotificationSequence:2});assert.equal(downloads,before,'notification sequence alone must preserve a healthy status read');}
+   if(name==='startup-sequence'){assert.equal(timers.size,1,'one original startup observation timer');assert.equal([...timers.values()][0].at,startupDue,'sequence change moved the original startup deadline');}
    assert.equal(calls.filter(x=>x.command==='gameMedia.background'&&!x.args.recheck).length,writes,'power observation must not replay background policy writes');
    if(!['metadata-only','stop'].includes(name))assert.equal(owner.state.completed,2,'current read must publish before old return');
-   for(const held of holds.splice(0)){if(name==='late-failure')held.reject(Error('retired read failed'));else held.resolve({statusRevision:99,enabled:true,phase:'downloading',completed:99});}await flush();
-   if(!['metadata-only','stop'].includes(name))assert.equal(owner.state.completed,2,'late old result/failure must not overwrite current snapshot');
+   for(const held of holds.splice(0)){if(name==='late-failure')held.reject(Error('retired read failed'));else held.resolve({statusRevision:99,enabled:true,phase:'downloading',completed:name==='sequence-held-read'?3:99});}await flush();
+   if(!['metadata-only','stop'].includes(name))assert.equal(owner.state.completed,name==='sequence-held-read'?3:2,'healthy read must publish, and retired replies must not overwrite current state');
    if(name==='held-recheck'){await owner.recheck();assert.equal(rechecks,2,'new explicit recheck must not retain previous checking promise');}
    results.push({name,passed:true,downloads,rechecks,backgroundWrites:writes});
   }catch(e){error=e;results.push({name,passed:false,error:String(e),downloads,rechecks});}
@@ -119,7 +148,15 @@ async function publicMediaIpcCase(name:any,f:any){
   check(f.service.state.enabled===true,'current saved preference did not recover through original sync owner');
   f.reply(f.heldPolicy,{result:{statusRevision:99,enabled:false,pauseReason:'obsolete',cpuThreshold:5}});await f.flush();check(f.service.state.enabled===true,'late retired policy receipt overwrote current state');
  }else if(name==='policy-retry-deadline'){
-  f.reply(f.heldPolicy,{error:'current original failure'});await f.flush();await f.advance(100);await f.publish({publicationRevision:2,observedNotificationSequence:2});await f.advance(999);check(writes().length===1,'notification shortened original retry');await f.advance(1000);check(writes().length===2,'notification reset original retry deadline');
+  f.reply(f.heldPolicy,{error:'current original failure'});await f.flush();await f.advance(100);await f.publish({publicationRevision:2,observedNotificationSequence:2});
+  await f.advance(600);await f.publish({publicationRevision:3,observedNotificationSequence:3});
+  await f.advance(999);check(writes().length===1,'notification shortened original retry');await f.advance(1000);check(writes().length===2,'notification reset original retry deadline');
+ }else if(name==='policy-retry-revoked-by-sleep'){
+  f.reply(f.heldPolicy,{error:'current original failure'});await f.flush();await f.advance(100);
+  await f.publish({phase:'suspended',notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2,suspendSerial:1});
+  await f.advance(1000);check(writes().length===1,'sleep failed to cancel the pending retry');
+  await f.publish({phase:'ready',notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3,observedNotificationSequence:2,suspendSerial:1});
+  check(writes().length===2&&f.service.state.enabled===true,'current Ready could not recover the original saved policy');
  }else if(name==='policy-denied-terminal'){
   await f.publish({notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});await f.advance(5000);check(writes().length===1,'denied public scope automatically reasserted configuration');await f.publish({notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});check(writes().length===2&&f.service.state.enabled===true,'Ready after old terminal did not recover saved configuration');
  }else if(name==='policy-read-confirms-same-intent'){
@@ -129,6 +166,25 @@ async function publicMediaIpcCase(name:any,f:any){
   f.enabled=false;f.bus.dispatchEvent(new Event('ui-settings:changed'));await f.flush();await f.publish({publicationRevision:2,observedNotificationSequence:2});
   check(writes().length===1,'latest OFF bypassed the original unknown-completion wait');await f.advance(5000);
   check(writes().length===2&&writes()[1].args.enabled===false,'latest OFF was lost behind old ON transaction');check(f.service.state.enabled===false,'latest saved OFF did not win');
+ }else if(name==='policy-confirmed-then-queued-notice'||name==='policy-confirmed-then-queued-sleep'){
+  const asleep=name.endsWith('-sleep');
+  f.native.enabled=true;f.native.statusRevision++;
+  await f.publish({publicationRevision:2,observedNotificationSequence:2});
+  check(f.service.state.enabled===true&&writes().length===1,'Native read must acknowledge the original ON while its IPC is held');
+  f.enabled=false;f.bus.dispatchEvent(new Event('ui-settings:changed'));await f.flush();
+  check(writes().length===1,'queued OFF must wait for the original IPC');
+  await f.publish({publicationRevision:3,observedNotificationSequence:3,...(asleep?{phase:'suspended',hardwareWritesAllowed:false,notificationPending:true,suspendSerial:1}:{})});
+  await f.advance(4999);check(writes().length===1,'public invalidation cannot bypass the original IPC deadline');
+  await f.advance(5000);
+  if(asleep){
+   check(writes().length===1,'ending the old wait while suspended must not post OFF');
+   await f.publish({publicationRevision:4,phase:'ready',hardwareWritesAllowed:true,notificationPending:false});
+  }
+  check(writes().length===2&&writes()[1].args.enabled===false,'latest queued OFF must survive the public boundary');
+  check(f.service.state.enabled===false,'only the current configuration may publish after handoff');
+  f.reply(f.heldPolicy,{result:{...f.native,statusRevision:99,enabled:true}});await f.flush();
+  await f.publish({publicationRevision:5,observedNotificationSequence:4});await f.advance(60000);
+  check(writes().length===2&&f.service.state.enabled===false&&manual().length===0,'a retired reply and healthy notice must not replay config or manual work');
  }else if(name==='manual-timeout'){
   const old=f.service.requestNow().then((v:any)=>({v}),(error:any)=>({error}));await f.flush();const request=manual()[0];await f.publish({publicationRevision:2,observedNotificationSequence:2});
   await f.advance(7999);check(manual().length===1,'manual action replayed before original8s expiry');await f.advance(8000);const ended=await old;

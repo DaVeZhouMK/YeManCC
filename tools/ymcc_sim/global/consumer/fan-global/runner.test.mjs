@@ -19,6 +19,21 @@ function clone() {
 }
 const directory = path.dirname(fileURLToPath(import.meta.url));
 
+test('registration ownership audit finds no direct duplicate of the original fan suites', {
+  skip: process.env.YMCC_FAN_GLOBAL_AUDIT_OWNERS !== '1',
+}, async t => {
+  const repoRoot = path.resolve(directory, '../../../../..');
+  const { getAdapters } = await import('../../adapters.mjs');
+  const { getExtraAdapters } = await import('../../extra-adapters.mjs');
+  const adapters = [...getAdapters(repoRoot), ...getExtraAdapters(repoRoot)];
+  assert.equal(adapters.filter(adapter => adapter.id === 'fan.lifecycle-wake-display').length, 1);
+  for (const { source } of FAN_GLOBAL_TESTS) {
+    const directOwners = adapters.filter(adapter => adapter.path === source || adapter.args?.includes(source)).map(adapter => adapter.id);
+    assert.deepEqual(directOwners, [], `unexpected direct execution owners for ${source}`);
+  }
+  t.diagnostic(`Reviewed ${adapters.length} registrations; no test producers were run by this audit.`);
+});
+
 test('all registered original tests executed actual bundled product logic', () => {
   const receipt = originalReceipt();
   assert.equal(receipt.status, 'PASS');

@@ -5,7 +5,7 @@
   if (!/^[a-f0-9]{64}$/.test(expected || '')) return;
   // Official import scans the same registry before replacing a plugin row.
   const completeRegistry = rows => Array.isArray(rows) && rows.findIndex(row => row == null) === -1;
-  // Official v3.3.0 loadPlugins waits for a future UI-mode callback. After a
+  // Official v3.3.0/v3.3.1 loadPlugins waits for a UI-mode callback. After a
   // SharedJSContext replacement that callback may already have fired. Consume
   // the public backend list/import API once; leave official Loader bytes alone.
   function recoverFirstLoad() {
@@ -55,8 +55,21 @@
       // The official router may reconnect in place, replacing only its socket.
       const samePageOwner = () => current() && host.DeckyPluginLoader===loader && host.DeckyBackend===backend;
       const sameOwner = () => samePageOwner() && backend?.ws===socket && socket?.readyState===1;
-      const valid = () => sameOwner() &&
-        loader?.deckyState?.publicState?.()?.versionInfo?.current===value.loaderVersion && completeRegistry(loader?.plugins);
+      const readBlock = () => {
+        if(!loader||!backend)return 'official-loader-unavailable';
+        if(!sameOwner())return 'official-socket-unavailable';
+        const version=loader.deckyState?.publicState?.()?.versionInfo?.current;
+        if(version!==value.loaderVersion)return version?'official-version-mismatch':'official-version-pending';
+        if(!completeRegistry(loader.plugins))return 'official-registry-incomplete';
+        if(typeof loader.getPluginsFromBackend!=='function'||typeof loader.importPlugin!=='function')return 'official-contract-unavailable';
+        return null;
+      };
+      let probeReported=false;
+      const reportProbe = outcome => {
+        if(probeReported||!current())return;
+        probeReported=true;
+        try { host.console?.info('[YMCC:DeckyHealth] '+JSON.stringify({schema:1,stage:'frontend-fallback-probe',probe:state.probes,outcome})); } catch {}
+      };
       // A retired socket cannot authorize an import. Only the same page and
       // router may use a remaining probe to read the enabled list again.
       const waitForSocket = () => {state.phase='waiting-loader';retry(samePageOwner);};
@@ -66,19 +79,31 @@
       const waitForOfficialLock = () => {state.phase='official-load-in-progress';retry(owner);};
       try {
         // A transient official-state read failure is still before any import.
-        if(!valid()||typeof loader.getPluginsFromBackend!=='function'||typeof loader.importPlugin!=='function')return retry(owner);
-        if(officialOwns())return stop('official-load-in-progress');
-        if(loader.reloadLock)return waitForOfficialLock();
+        const blocked=readBlock();
+        if(blocked){reportProbe(blocked);return retry(owner);}
+        if(officialOwns()){reportProbe('official-owns-plugin');return stop('official-load-in-progress');}
+        if(loader.reloadLock){reportProbe('official-slot-busy');return waitForOfficialLock();}
         state.phase='reading-enabled-plugin';
-        const rows=await Promise.race([Promise.resolve().then(()=>{if(!valid()||state.phase!=='reading-enabled-plugin')return;return loader.getPluginsFromBackend();}),new Promise((_,reject)=>{rejectRead=reject;deadline=host.setTimeout(()=>reject(new Error('plugin-list-timeout')),3000);})]);
+        let readSent=false;
+        const rows=await Promise.race([Promise.resolve().then(()=>{
+          if(!current()||state.phase!=='reading-enabled-plugin')return;
+          // Official work can arrive between the timer and this microtask.
+          // A skipped read must not be mistaken for an absent/disabled plugin.
+          const blocked=readBlock()||(fresh()?'frontend-already-ready':officialOwns()?'official-owns-plugin':loader.reloadLock?'official-slot-busy':null);
+          if(blocked){reportProbe(blocked);return;}
+          reportProbe('reading-enabled-plugin');
+          readSent=true;
+          return loader.getPluginsFromBackend();
+        }),new Promise((_,reject)=>{rejectRead=reject;deadline=host.setTimeout(()=>reject(new Error('plugin-list-timeout')),3000);})]);
         if(deadline!==null)host.clearTimeout(deadline);deadline=null;rejectRead=null;
         if(state.phase==='current')return;
         if(!samePageOwner())return stop('canceled');
         if(!sameOwner())return waitForSocket();
-        if(!valid())return stop('canceled');
+        if(readBlock())return stop('canceled');
         if(fresh())return stop('current');
         if(officialOwns())return stop('official-load-in-progress');
         if(loader.reloadLock)return waitForOfficialLock();
+        if(!readSent){state.phase='waiting-loader';return retry(owner);}
         const own=Array.isArray(rows)?rows.filter(p=>p?.name==='ymcc-sidebar'):[];
         if(own.length!==1||own[0].disabled!==false)return stop('absent-or-disabled');
         const plugin=own[0];
@@ -101,13 +126,15 @@
         if(deadline!==null)host.clearTimeout(deadline);deadline=null;rejectRead=null;
         if(!current())return stop('canceled');
         if(state.phase==='current')return;
+        reportProbe('official-probe-error');
         if(state.dispatched)return stop('failed');
         if(!samePageOwner())return stop('canceled');
         if(!sameOwner())return waitForSocket();
         retry(owner);
       }
     };
-    // Bounded startup grace allows normal official loading to finish first.
+    // v3.3.1's startup import passes useQueue=false. An empty registry and an
+    // idle reloadLock before this grace expires do not prove startup is idle.
     timer=host.setTimeout(()=>{void probe();},12000);
   }
   const key = '__YMCC_DECKY_FRONTEND_UPDATE__';

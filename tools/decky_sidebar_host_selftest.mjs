@@ -7,8 +7,28 @@ async function fixture(initial=seed(),options={}){const f=await createMirrorHost
  f.read=async()=>{f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId}});await flush();return f.replies.filter(x=>x.message.type==='snapshot').at(-1)?.message.snapshot;};
  f.request=async(command,args,snapshot)=>{const before=f.replies.length,s=snapshot??await f.read();sequence++;f.emit('deckySidebar.mirrorRequest',{...peer,request:{command,runId,id:'host:'+sequence,clientId:'host',sequence,generation:s.generation,revision:s.revision,identity:command==='performance.setControls'?s.game?.identity??'':s.game?.identity??'',args}});await flush();return f.replies.slice(before).find(x=>x.message.type==='reply')?.message;};
  return f;}
-const selected=new Set();
-for(let i=2;i<process.argv.length;i+=2){const name=process.argv[i+1];assert(process.argv[i]==='--case'&&name&&!selected.has(name),'Use --case with a unique exact name');selected.add(name);}
+const selected=new Set(),caseArgs=process.argv.slice(2);
+const globalInputCase='unknown versus confirmed empty target cannot authorize a global input write from an old receipt';
+const freshUnknownFlag='--global-input-receipt=fresh-notified-unknown';
+const freshUnknownReceipt=caseArgs.includes(freshUnknownFlag);
+if(freshUnknownReceipt){
+ assert.deepEqual(caseArgs,['--case',globalInputCase,freshUnknownFlag],'A fresh UNKNOWN receipt diagnostic requires the original global input case');
+ caseArgs.pop();
+}
+const readinessCase='readiness-only failure and same-target recovery repaint once per edge without repeated reads or writes';
+const readinessTailFlag='--diagnose-readiness-tail';
+const diagnoseReadinessTail=caseArgs.includes(readinessTailFlag);
+if(diagnoseReadinessTail){
+ assert.deepEqual(caseArgs,['--case',readinessCase,'--readiness-target=confirmed-empty',readinessTailFlag],'Tail diagnostics require the original confirmed-empty readiness case');
+ caseArgs.pop();
+}
+const readinessVariants=caseArgs.filter(arg=>arg==='--readiness-target'||arg.startsWith('--readiness-target='));
+const confirmedEmptyOnly=readinessVariants.length>0;
+if(confirmedEmptyOnly){
+ assert.deepEqual(caseArgs,['--case',readinessCase,'--readiness-target=confirmed-empty'],'The readiness target requires the exact original readiness case');
+ caseArgs.pop();
+}
+for(let i=0;i<caseArgs.length;i+=2){const name=caseArgs[i+1];assert(caseArgs[i]==='--case'&&name&&!selected.has(name),'Use --case with a unique exact name');selected.add(name);}
 const registered=new Set();
 async function check(name,fn){assert(!registered.has(name),name);registered.add(name);if(selected.size&&!selected.has(name))return;try{await fn();cases.push(name);}catch(error){console.error(JSON.stringify({failedCase:name,passedBeforeFailure:cases.length,error:String(error)},null,2));throw error;}}
 await check('ready lifecycle has no eager reads or saves',async()=>{const f=await fixture();assert.equal(f.counts.power,0);assert.equal(f.counts.saves,0);f.ready();await flush();assert.equal(f.counts.power,0);assert.equal(f.counts.saves,0);f.stop();});
@@ -55,6 +75,49 @@ await check('wake held by native power stays connected read-only then recovers a
  assert.deepEqual(inputOnly,steady,'input-only recovery must not read or publish the entire Decky sidebar');
  assert.equal(f.counts.performanceUpdates??0,0);
  }finally{f.stop();}
+ const merged=await fixture();
+ try{
+  Object.assign(merged.state.power,{suspendSerial:3,observedNotificationSequence:21,publicationRevision:10,notificationPending:false});
+  merged.ready();const before=await merged.read();assert.equal(before.ready,true);
+  const until=merged.replies.length,priorReads=merged.counts.schedule;
+  // The coordinator knows a newer scope is pending, while both Native reads still return old Ready.
+  merged.emit('power.resumed',{generation:1,readbackScope:{suspendSerial:4,notificationSequence:22}});
+  const held=await merged.read();
+  assert.equal(held.ready,false,'scoped public readback must fence a stale direct Ready');
+  assert.equal(held.actions.performance,false);
+  assert.equal(merged.counts.schedule,priorReads,'a fenced snapshot must not start business reads');
+  assert.equal(merged.replies.slice(until).some(x=>x.message.type==='snapshot'&&x.message.snapshot.ready),false);
+  assert.notEqual((await merged.request('performance.setControls',{patch:{tdp:25}},before))?.ok,true);
+  assert.equal(merged.counts.performanceUpdates??0,0);
+  Object.assign(merged.state.power,{suspendSerial:4,observedNotificationSequence:22,publicationRevision:11});
+  const resumed=merged.replies.length;
+  merged.emit('power.lifecycleChanged',{known:true,...merged.state.power});await flush();
+  assert.equal(merged.replies.slice(resumed).filter(x=>x.message.type==='snapshot').at(-1)?.message.snapshot.ready,true,
+    'current public Ready should restore the sidebar without a new request');
+ }finally{merged.stop();}
+ let hold=false,releaseRead;
+ const delayed=await fixture(seed(),{readHooks:{power:()=>{
+  if(!hold)return;hold=false;return new Promise(resolve=>{releaseRead=resolve;});
+ }}});
+ try{
+  Object.assign(delayed.state.power,{suspendSerial:3,observedNotificationSequence:21,publicationRevision:10,notificationPending:false});
+  const before=structuredClone(delayed.state.power);
+  delayed.ready();assert.equal((await delayed.read()).ready,true);
+  const first=delayed.replies.length,priorReads=delayed.counts.schedule;
+  hold=true;delayed.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,probeId:'probe:late-power:1'}});
+  await flush();assert.equal(typeof releaseRead,'function');
+  delayed.emit('power.resumed',{generation:1,readbackScope:{suspendSerial:3,notificationSequence:22}});await flush();
+  Object.assign(delayed.state.power,{phase:'resuming',hardwareWritesAllowed:false,observedNotificationSequence:22,publicationRevision:11});
+  delayed.emit('power.lifecycleChanged',{known:true,...delayed.state.power});await flush();
+  releaseRead(before);await flush();
+  const held=delayed.replies.slice(first).filter(x=>x.message.type==='snapshot').at(-1)?.message.snapshot;
+  assert.equal(held?.ready,false,'a late direct Ready cannot replace the confirmed current non-Ready fact');
+  assert.equal(delayed.counts.schedule,priorReads,'a superseded in-flight read must not start business reads');
+  Object.assign(delayed.state.power,{phase:'ready',hardwareWritesAllowed:true,publicationRevision:12});
+  const resumed=delayed.replies.length;
+  delayed.emit('power.lifecycleChanged',{known:true,...delayed.state.power});await flush();
+  assert.equal(delayed.replies.slice(resumed).filter(x=>x.message.type==='snapshot').at(-1)?.message.snapshot.ready,true);
+ }finally{releaseRead?.();delayed.stop();}
 });
 await check('global performance owner is exposed when no game is confirmed',async()=>{const f=await fixture();f.state.game=null;f.ready();const s=await f.read();assert.equal(s.game,null);assert.equal(s.performance.scope,'global');assert.equal(s.actions.performance,true);f.stop();});
 await check('stop removes observers and late requests cannot save',async()=>{const f=await fixture();f.ready();const s=await f.read();f.stop();assert.equal(f.observerStats().watchers,0);const r=await f.request('performance.setControls',{patch:{tdp:25}},s);assert.equal(r,undefined);assert.equal(f.counts.performanceUpdates??0,0);});
@@ -114,10 +177,304 @@ await check('pending shared recognition rejects game-dependent controls while pu
  const monitor=await f.request('monitor.setEnabled',{enabled:false},pending);assert.equal(monitor.ok,true);assert.equal(f.counts.monitorSaves,1);
  const audio=await f.request('audioOptimization.setEnabled',{enabled:true},await f.read());assert.equal(audio.ok,true);assert.equal(f.counts.fxSoundWrites,1);f.stop();
 });
-await check('unknown versus confirmed empty target cannot authorize a global input write from an old receipt',async()=>{
- const f=await fixture();f.state.game=null;f.ready();const old=await f.read();assert.equal(old.actions.global,true);f.state.gameCurrent=false;
- const r=await f.request('global.setField',{field:'padPersona',value:'elite'},old);assert.equal(r.ok,false);assert.equal(f.counts.inputSaves,0);assert.equal((await f.read()).actions.global,false);f.stop();
+await check(globalInputCase,async()=>{
+ const f=await fixture();
+ try{
+  f.state.game=null;f.ready();const old=await f.read();assert.equal(old.actions.global,true);
+  if(freshUnknownReceipt){
+   const snapshots=()=>f.replies.filter(row=>row.message.type==='snapshot'&&row.message.displayOnly!==true);
+   const start=snapshots().length;
+   assert(f.state.gameCurrent&&old.ready&&old.game===null);
+   f.setGameReadiness(false);await flush();
+   assert.equal(f.state.gameCurrent,false);
+   assert.equal(snapshots().length,start+1,'Expected one actionable snapshot pushed by the UNKNOWN edge');
+   const {snapshot}=snapshots().at(-1).message;
+   assert(snapshot.ready&&snapshot.game===null&&snapshot.generation===old.generation&&snapshot.revision>old.revision,'Require a newly issued receipt in the same generation');
+   const state=()=>({inputSaves:f.counts.inputSaves,gameSaves:f.counts.saves,inputRevision:f.state.input.revision,persona:f.state.input.outputTarget.persona,shortcutClears:f.counts.shortcutClears??0});
+   const before=state();
+   const reply=await f.request('global.setField',{field:'padPersona',value:'elite'},snapshot);
+   const replyFacts=value=>({ok:value?.ok??null,saved:value?.result?.saved??null,applied:value?.result?.applied??null,pending:value?.result?.pending??null});
+   const receiptFacts=value=>({generation:value.generation,revision:value.revision,globalAllowed:value.actions.global});
+   const after=state(),result=replyFacts(reply);
+   console.log(JSON.stringify({freshUnknownGlobalInput:{old:{generation:old.generation,revision:old.revision},receipt:receiptFacts(snapshot),
+    targetCurrent:f.state.gameCurrent,before,after,reply:result}}));
+   // Observe the recovery arm even when the unknown arm has a known failure.
+   const beforeRecovery=snapshots().length;
+   f.setGameReadiness(true);await flush();
+   const recovered=snapshots().at(-1)?.message.snapshot,recoveredState=state();
+   assert.equal(snapshots().length,beforeRecovery+1,'Confirmed empty recovery must publish exactly one actionable receipt');
+   assert(recovered?.ready&&recovered.game===null&&recovered.generation===snapshot.generation&&recovered.revision>snapshot.revision,
+    'Recovery must re-authorize the same generation with a fresh confirmed-empty receipt');
+   const persona=after.persona==='elite'?'steamdeck':'elite';
+   const patch={field:'padPersona',value:persona};
+   const stale=replyFacts(await f.request('global.setField',patch,snapshot)),staleState=state();
+   const positive=replyFacts(await f.request('global.setField',patch,recovered)),positiveState=state();
+   console.log(JSON.stringify({confirmedEmptyGlobalInputRecovery:{receipt:receiptFacts(recovered),targetCurrent:f.state.gameCurrent,
+    persona,recoveredState,stale:{reply:stale,after:staleState},current:{reply:positive,after:positiveState}}}));
+   assert.deepEqual(recoveredState,after,'Target readiness itself must not persist or invoke the input runtime');
+   assert.equal(stale.ok,false,'The UNKNOWN receipt must not regain write authority after recovery');
+   assert.deepEqual(staleState,after,'A stale receipt must not persist or invoke the input runtime');
+   assert.equal(recovered.actions.global,true,'Confirmed empty must restore global input admission');
+   assert.deepEqual(positive,{ok:true,saved:true,applied:false,pending:true});
+   assert.deepEqual(positiveState,{...after,inputSaves:after.inputSaves+1,inputRevision:after.inputRevision+1,persona,shortcutClears:after.shortcutClears+1},
+    'The current recovered receipt must save exactly once through the original owner without claiming hardware application');
+   assert.deepEqual({globalAllowed:snapshot.actions.global,ok:result.ok,after},{globalAllowed:false,ok:false,after:before},'Fresh UNKNOWN receipt must not advertise or save global input under the original fixture contract');
+   return;
+  }
+  f.state.gameCurrent=false;
+  const inputState=()=>({inputSaves:f.counts.inputSaves,gameSaves:f.counts.saves,inputRevision:f.state.input.revision,persona:f.state.input.outputTarget.persona});
+  const before=inputState();
+  const r=await f.request('global.setField',{field:'padPersona',value:'elite'},old);
+  const after=inputState(),fresh=await f.read();
+  // The unfiltered parent consumes stdout as one JSON document.
+  const logObservation=selected.size?console.log:console.error;
+  logObservation(JSON.stringify({staleGlobalInput:{receipt:{generation:old.generation,revision:old.revision},targetCurrent:f.state.gameCurrent,
+   before,after,reply:{ok:r?.ok??null,saved:r?.result?.saved??null,applied:r?.result?.applied??null,pending:r?.result?.pending??null},
+   fresh:{generation:fresh?.generation??null,revision:fresh?.revision??null,globalAllowed:fresh?.actions?.global??null}}}));
+  assert.deepEqual({ok:r?.ok,inputSaves:after.inputSaves,globalAllowed:fresh?.actions?.global},{ok:false,inputSaves:0,globalAllowed:false});
+ }finally{f.stop();}
 });
+await check('global input refuses a stale power receipt across a new public suspend scope',async()=>{
+ for(const [boundary,hasGame] of [['readback-pending',false],['coalesced-ready',false],['coalesced-ready',true]]){
+  let release,reads=0,holdAt=0;
+  const gate=new Promise(resolve=>release=resolve);
+  const f=await fixture(seed(),{readHooks:{power:()=>holdAt&&++reads===holdAt?gate:undefined}});
+  try{
+   if(!hasGame)f.state.game=null;
+   Object.assign(f.state.power,{suspendSerial:3,observedNotificationSequence:21,publicationRevision:10,notificationPending:false});
+   const original=structuredClone(f.state.power),before=f.replies.length;
+   f.ready();const old=await f.read();assert.equal(old.actions.global,!hasGame);assert.equal(old.actions.game,hasGame);
+   holdAt=boundary==='coalesced-ready'?2:1;
+   const command=hasGame?'game.setField':'global.setField',patch={field:'padPersona',value:'elite'};
+   assert.equal(await f.request(command,patch,old),undefined);
+   assert.equal(reads,holdAt,'The original input owner must be waiting on its power read');
+   assert.equal(f.counts.inputSaves,0);
+   f.emit('power.resumed',{generation:old.generation,readbackScope:{suspendSerial:4,notificationSequence:22}});
+   const current={...original,suspendSerial:4,observedNotificationSequence:22,publicationRevision:11};
+   if(boundary==='coalesced-ready'){
+    Object.assign(f.state.power,current);
+    f.emit('power.lifecycleChanged',{known:true,...current});
+   }
+   await flush();holdAt=0;release(original);await flush();
+   const reply=f.replies.slice(before).find(x=>x.message.type==='reply')?.message;
+   console.log(JSON.stringify({globalInputPowerBoundary:boundary,hasGame,ok:reply?.ok,inputSaves:f.counts.inputSaves}));
+   assert.equal(reply?.ok,false,boundary);assert.equal(f.counts.inputSaves,0);
+   if(boundary==='readback-pending'){
+    Object.assign(f.state.power,current);
+    f.emit('power.lifecycleChanged',{known:true,...current});await flush();
+   }
+   const fresh=f.replies.filter(x=>x.message.type==='snapshot').at(-1)?.message.snapshot;
+   assert(fresh?.ready&&(hasGame?fresh.actions.game:fresh.actions.global)&&fresh.revision>old.revision);
+   assert.equal((await f.request(command,patch,old))?.ok,false);
+   assert.equal(f.counts.inputSaves,0);
+   assert.equal((await f.request(command,patch,fresh))?.ok,true);
+   assert.equal(f.counts.inputSaves,1);
+  }finally{release();f.stop();}
+ }
+ // The input owner may already have performed its durable CAS. Finish that
+ // request without replaying its save or clearing InputHost in the new scope.
+ let releaseCommit;
+ const commitGate=new Promise(resolve=>releaseCommit=resolve);
+ const f=await fixture(seed(),{readHooks:{inputCommit:()=>commitGate}});
+ try{
+  f.state.game=null;
+  Object.assign(f.state.power,{suspendSerial:3,observedNotificationSequence:21,publicationRevision:10,notificationPending:false});
+  f.ready();const old=await f.read(),before=f.replies.length;
+  const request={command:'global.setField',args:{field:'padPersona',value:'elite'},runId,id:'committed:1',clientId:'committed',sequence:1,generation:old.generation,revision:old.revision,identity:''};
+  const send=()=>f.emit('deckySidebar.mirrorRequest',{...peer,request});
+  send();await flush();assert.equal(f.counts.inputSaves,1);assert.equal(f.counts.shortcutClears??0,0);
+  Object.assign(f.state.power,{suspendSerial:4,observedNotificationSequence:22,publicationRevision:11});
+  f.emit('power.lifecycleChanged',{known:true,...f.state.power});
+  await flush();releaseCommit();await flush();
+  const replies=()=>f.replies.slice(before).filter(x=>x.message.type==='reply').map(x=>x.message);
+  assert.equal(replies().length,1);
+  const settled=replies()[0];
+  assert.equal(settled.ok,true);assert.equal(settled.result.saved,true);assert.equal(settled.result.applied,false);
+  send();await flush();assert.deepEqual(replies(),[settled,settled]);
+  assert.equal(f.counts.inputSaves,1);assert.equal(f.counts.shortcutClears??0,0);
+ }finally{releaseCommit();f.stop();}
+});
+
+for(const edge of ['coalesced suspend','same-suspend notification'])await check(edge==='coalesced suspend'?
+ 'sidebar writes require the public scope that admitted the request':'same-suspend notification retires old sidebar writes',async()=>{
+ const outcomes=[];
+ for(const [command,args,action,count] of [
+  ['performance.setControls',{patch:{tdp:25}},'performance','performanceUpdates'],
+  ['frame.setField',{field:'acFps',value:'45'},'frames','saves'],
+  ['touchpad.setField',{field:'layout',value:'single'},'touchpads','touchpadSaves'],
+  ['monitor.setEnabled',{enabled:false},'monitor','monitorSaves'],
+  ['audioOptimization.setEnabled',{enabled:true},'audioOptimization','fxSoundWrites'],
+ ]){
+  let release,hold=false,entered=false;
+  const gate=new Promise(resolve=>release=resolve);
+  const f=await fixture(seed(),{readHooks:{power:()=>{if(hold&&!entered){entered=true;return gate;}}}});
+  try{
+   Object.assign(f.state.power,{suspendSerial:3,observedNotificationSequence:21,publicationRevision:10,notificationPending:false});
+   const original=structuredClone(f.state.power);
+   f.ready();const old=await f.read();assert.equal(old.actions[action],true,command);
+   const start=f.replies.length;
+   hold=true;assert.equal(await f.request(command,args,old),undefined);assert(entered);
+   assert.equal(f.counts[count]??0,0);
+   // Publication metadata alone should neither retire work nor repaint.
+   const snapshots=()=>f.replies.filter(x=>x.message.type==='snapshot').length;
+   const offered=snapshots();
+   Object.assign(f.state.power,{publicationRevision:11});
+   f.emit('power.lifecycleChanged',{known:true,...f.state.power});await flush();
+   assert.equal(snapshots(),offered);
+   assert.equal(f.counts[count]??0,0);
+   const nextPower={suspendSerial:edge==='coalesced suspend'?4:3,observedNotificationSequence:22,publicationRevision:12};
+   if(edge==='coalesced suspend')f.emit('power.resumed',{generation:old.generation,readbackScope:{suspendSerial:4,notificationSequence:22}});
+   else {
+    Object.assign(f.state.power,nextPower);
+    f.emit('power.lifecycleChanged',{known:true,...f.state.power});
+   }
+   await flush();hold=false;release(original);await flush();
+   const settled=f.replies.slice(start).find(x=>x.message.type==='reply')?.message;
+   const oldWrites=f.counts[count]??0;
+   Object.assign(f.state.power,nextPower);
+   f.emit('power.lifecycleChanged',{known:true,...f.state.power});await flush();
+   const fresh=f.replies.filter(x=>x.message.type==='snapshot').at(-1)?.message.snapshot;
+   assert(fresh?.ready&&fresh.actions[action]&&fresh.revision>old.revision,command);
+   const next=await f.request(command,args,fresh);
+   outcomes.push({command,oldOk:settled?.ok,oldWrites,newOk:next?.ok,newWrites:(f.counts[count]??0)-oldWrites});
+  }finally{release();f.stop();}
+ }
+ (selected.size?console.log:console.error)(JSON.stringify({edge,sidebarPublicMutationScopes:outcomes}));
+ assert.deepEqual(outcomes,outcomes.map(({command})=>({command,oldOk:false,oldWrites:0,newOk:true,newWrites:1})));
+});
+
+await check('direct native readback retires the old sidebar scope without a public broadcast',async()=>{
+ const outcomes=[];
+ for(const [command,args,nextArgs,action,count,suspendSerial] of [
+  ['performance.setControls',{patch:{tdp:25}},{patch:{tdp:26}},'performance','performanceUpdates',3],
+  ['frame.setField',{field:'acFps',value:'45'},{field:'acFps',value:'50'},'frames','saves',4],
+  ['touchpad.setField',{field:'layout',value:'single'},{field:'layout',value:'single'},'touchpads','touchpadSaves',3],
+  ['monitor.setEnabled',{enabled:false},{enabled:false},'monitor','monitorSaves',4],
+  ['audioOptimization.setEnabled',{enabled:true},{enabled:true},'audioOptimization','fxSoundWrites',3],
+ ]){
+  let armed=false,hold=false,release;
+  const pending=new Promise(resolve=>release=resolve);
+  const f=await fixture(seed(),{readHooks:{power:signal=>{if(signal&&armed){armed=false;return hold?pending:next;}},sharedPower:()=>hold?pending:undefined}});
+  const oldPower={...f.state.power,known:true,suspendSerial:3,observedNotificationSequence:21,publicationRevision:10,notificationPending:false};
+  const next={...oldPower,suspendSerial,observedNotificationSequence:22,publicationRevision:11};
+  try{
+   Object.assign(f.state.power,oldPower);f.ready();const old=await f.read();assert.equal(old.actions[action],true,command);
+   Object.assign(f.state.power,next);armed=true;
+   const stale=await f.request(command,args,old),oldWrites=f.counts[count]??0;
+   const shared=f.sharedPowerDiagnostics().snapshot?.observedNotificationSequence;
+   const fresh=await f.read();
+   assert.equal('powerAdmission' in fresh,false,'sidebar wire must not export private power admission');
+   // The old read/publication can arrive after the direct current receipt.
+   f.emit('power.lifecycleChanged',{...oldPower,publicationRevision:11});await flush();
+   const afterLate=f.sharedPowerDiagnostics().snapshot?.observedNotificationSequence;
+   const observed=f.replies.filter(x=>x.message.type==='snapshot').length;
+   if(action==='frames'){
+    armed=true;hold=true;assert.equal(await f.request(command,nextArgs,fresh),undefined);
+    f.emit('power.lifecycleChanged',next);await flush();
+    assert.equal(f.replies.filter(x=>x.message.type==='snapshot').length,observed);
+    hold=false;release(next);await flush();
+   }else await f.request(command,nextArgs,fresh);
+   const recovered=f.replies.filter(x=>x.message.type==='reply').at(-1)?.message.ok===true;
+   outcomes.push({action,stale:stale?.ok,oldWrites,shared,afterLate,recovered,newWrites:(f.counts[count]??0)-oldWrites});
+  }finally{release(next);f.stop();}
+ }
+ console.log(JSON.stringify({nativePowerReadbackBeforeBroadcast:outcomes}));
+ assert.deepEqual(outcomes,outcomes.map(({action})=>({action,stale:false,oldWrites:0,shared:22,afterLate:22,recovered:true,newWrites:1})));
+});
+
+await check('a direct pending receipt fences old Ready until current Native admission',async()=>{
+ let override;
+ const f=await fixture(seed(),{readHooks:{power:()=>override}});
+ const old={...f.state.power,known:true,suspendSerial:3,observedNotificationSequence:21,publicationRevision:10,notificationPending:false};
+ const pending={...old,suspendSerial:4,observedNotificationSequence:22,phase:'suspending',notificationPending:true,hardwareWritesAllowed:false};
+ try{
+  Object.assign(f.state.power,old);f.ready();const snapshot=await f.read();
+  Object.assign(f.state.power,pending);
+  const result=await f.request('frame.setField',{field:'acFps',value:'45'},snapshot);
+  assert.equal(result?.ok,false);assert.equal(f.counts.saves,0);
+  const observed=f.sharedPowerDiagnostics().snapshot;
+  assert.equal(observed.observedNotificationSequence,22);assert.equal(observed.notificationPending,true);
+  // Even an old-cohort receipt with a matching publication revision cannot reopen the view.
+  override=old;f.emit('power.lifecycleChanged',old);await flush();
+  const denied=await f.read();assert.equal(denied.ready,false);
+  assert.equal(f.counts.saves,0);assert.equal(f.memory.lock.isQuickActionBusy(),false);
+  override=undefined;
+  Object.assign(f.state.power,old,{suspendSerial:4,observedNotificationSequence:22,publicationRevision:11});
+  f.advanceSharedPower(1000);await flush();
+  const current=await f.read();assert.equal(current.ready,true);
+  const next=await f.request('frame.setField',{field:'acFps',value:'50'},current);
+  assert.equal(next?.result?.saved,true);assert.equal(f.counts.saves,1);assert.equal(f.counts.frameApplies,1);
+  assert.equal(f.sharedPowerDiagnostics().snapshot?.notificationPending,false);
+ }finally{f.stop();}
+});
+
+await check('retired power reads release the sidebar action and original frame lock before a late reply',async()=>{
+ let armed=false,held,release,aborts=0;
+ const late=new Promise(resolve=>release=resolve);
+ const f=await fixture(seed(),{readHooks:{power:signal=>{
+  if(!armed)return;
+  armed=false;held=structuredClone(f.state.power);
+  return new Promise((resolve,reject)=>{
+   const abort=()=>{aborts++;reject(Error('fixture power IPC retired'));};
+   signal?.addEventListener('abort',abort,{once:true});
+   void late.then(()=>{signal?.removeEventListener('abort',abort);resolve(held);});
+  });
+ }}});
+ try{
+  Object.assign(f.state.power,{suspendSerial:3,observedNotificationSequence:21,publicationRevision:10});
+  f.ready();const old=await f.read();assert.equal(old.actions.frames,true);
+  armed=true;assert.equal(await f.request('frame.setField',{field:'acFps',value:'45'},old),undefined);
+  assert(held&&f.memory.lock.isQuickActionBusy());
+  const replies=()=>f.replies.filter(x=>x.message.type==='reply').map(({message})=>[message.id,message.ok]);
+  Object.assign(f.state.power,{observedNotificationSequence:22,publicationRevision:11});
+  f.emit('power.lifecycleChanged',{known:true,...f.state.power});await flush();
+  const oldSettled=replies().some(([id,ok])=>id==='host:1'&&ok===false),locked=f.memory.lock.isQuickActionBusy();
+  const fresh=await f.read();
+  const next=await f.request('frame.setField',{field:'acFps',value:'50'},fresh);
+  const beforeLate={aborts,oldSettled,locked,newSaved:next?.result?.saved===true,saves:f.counts.saves,applies:f.counts.frameApplies};
+  release();await flush();
+  (selected.size?console.log:console.error)(JSON.stringify({retiredFramePowerRead:beforeLate,replies:replies(),saves:f.counts.saves}));
+  assert.deepEqual(beforeLate,{aborts:1,oldSettled:true,locked:false,newSaved:true,saves:1,applies:1});
+  assert.deepEqual(replies(),[['host:1',false],['host:2',true]]);
+  assert.equal(f.counts.saves,1);
+ }finally{release();f.stop();}
+});
+
+await check('saved monitor switch waits for the current public scope before applying',async()=>{
+ const outcomes=[];
+ for(const [enabled,ending,expected] of [[false,'ready',1],[true,'ready',1],[true,'hide',1],[true,'superseded',0],[true,'stop',0]]){
+  let release,entered=false;
+  const gate=new Promise(resolve=>release=resolve);
+  const f=await fixture(seed(),{readHooks:{monitor:()=>{if(f.counts.monitorSaves===1&&!entered){entered=true;return gate;}}}});
+  try{
+   f.state.monitor.enabled=!enabled;
+   Object.assign(f.state.power,{suspendSerial:3,observedNotificationSequence:21,publicationRevision:10,notificationPending:false});
+   f.ready();const old=await f.read();assert.equal(old.actions.monitor,true);
+   const start=f.replies.length;
+   assert.equal(await f.request('monitor.setEnabled',{enabled},old),undefined);assert(entered);
+   assert.equal(f.counts.monitorSaves,1);
+   f.emit('power.resumed',{generation:old.generation,readbackScope:{suspendSerial:4,notificationSequence:22}});
+   await flush();release();await flush();
+   const reply=f.replies.slice(start).find(x=>x.message.type==='reply')?.message;
+   const beforeReady=f.counts.monitorApplies;
+   if(ending==='hide')f.emit('deckySidebar.mirrorPeer',{...peer,connected:false});
+   if(ending==='superseded'){f.state.monitor.enabled=false;f.monitorChanged();}
+   if(ending==='stop')f.stop();
+   Object.assign(f.state.power,{suspendSerial:4,observedNotificationSequence:22,publicationRevision:11});
+   f.emit('power.lifecycleChanged',{known:true,...f.state.power});await flush();
+   f.emit('power.lifecycleChanged',{known:true,...f.state.power});await flush();
+   outcomes.push({enabled,ending,saved:reply?.result?.saved,pending:reply?.result?.pending,beforeReady,afterReady:f.counts.monitorApplies,saves:f.counts.monitorSaves});
+   assert.equal(f.counts.monitorApplies,expected,ending);
+  }finally{release();f.stop();}
+ }
+ (selected.size?console.log:console.error)(JSON.stringify({monitorAfterSave:outcomes}));
+ assert.deepEqual(outcomes.map(({enabled,ending,afterReady})=>({enabled,ending,afterReady})),[
+  {enabled:false,ending:'ready',afterReady:1},{enabled:true,ending:'ready',afterReady:1},{enabled:true,ending:'hide',afterReady:1},
+  {enabled:true,ending:'superseded',afterReady:0},{enabled:true,ending:'stop',afterReady:0},
+ ]);
+ for(const row of outcomes)assert.deepEqual([row.saved,row.pending,row.beforeReady,row.saves],[true,true,0,1],row.ending);
+});
+
 await check('native target becomes pending during an awaited power read and cancels before the performance write',async()=>{
  let blocking=false,release;const f=await fixture(seed(),{readHooks:{power:async()=>{if(blocking)await new Promise(resolve=>release=resolve);}}});f.ready();const old=await f.read(),before=f.replies.length;blocking=true;
  await f.request('performance.setControls',{patch:{tdp:25}},old);assert.equal(typeof release,'function');f.state.gameCurrent=false;blocking=false;release();await flush();
@@ -125,21 +482,40 @@ await check('native target becomes pending during an awaited power read and canc
 });
 
 
-await check('readiness-only failure and same-target recovery repaint once per edge without repeated reads or writes',async()=>{
- for(const hasGame of [true,false]){
-  const f=await fixture();if(!hasGame)f.state.game=null;f.ready();const healthy=await f.read();await flush();
+await check(readinessCase,async()=>{
+ for(const hasGame of confirmedEmptyOnly?[false]:[true,false]){
+  const f=await fixture();
+  const diagnostic=diagnoseReadinessTail?{checkpoints:[],globalAdmissionFailure:null,tailError:null}:null;
+  let admissionError;
+  try{
+  if(!hasGame)f.state.game=null;f.ready();const healthy=await f.read();await flush();
   const latest=()=>f.replies.filter(x=>x.message.type==='snapshot').at(-1)?.message.snapshot;
   const snapshotCount=()=>f.replies.filter(x=>x.message.type==='snapshot').length;
-  const identity=healthy.game?.identity??null;assert.equal(f.readinessSubscriberCount(),1);assert.equal(healthy.actions.performance,true);assert.equal(healthy.actions.frames,true);assert.equal(healthy.actions.game,hasGame);assert.equal(healthy.actions.global,!hasGame);
+  const identity=healthy.game?.identity??null;assert.equal(f.readinessSubscriberCount(),1);assert.equal(healthy.actions.performance,true);assert.equal(healthy.actions.frames,true);assert.equal(healthy.actions.game,hasGame);assert.equal(healthy.actions.global,!hasGame,'Healthy initial global admission must match the original target case');
   let counts=structuredClone(f.counts),snapshots=snapshotCount();for(let i=0;i<1000;i++)f.setGameReadiness(true);await flush();assert.deepEqual(f.counts,counts);assert.equal(snapshotCount(),snapshots);
-  f.setGameReadiness(false);await flush();const failed=latest();assert.equal(snapshotCount(),snapshots+1);assert.equal(failed.game?.identity??null,identity);assert.equal(failed.actions.performance,false);assert.equal(failed.actions.frames,false);assert.equal(failed.actions.game,false);assert.equal(failed.actions.global,false);assert.equal(failed.actions.monitor,true);assert.equal(failed.actions.audioOptimization,true);assert.equal(f.counts.power,counts.power+1);
+  f.setGameReadiness(false);await flush();const failed=latest();assert.equal(snapshotCount(),snapshots+1);assert.equal(failed.game?.identity??null,identity);assert.equal(failed.actions.performance,false);assert.equal(failed.actions.frames,false);assert.equal(failed.actions.game,false);
+  try{assert.equal(failed.actions.global,false,'Notified unknown target must withdraw global admission under the original fixture contract');}
+  catch(error){if(!diagnostic)throw error;admissionError=error;diagnostic.globalAdmissionFailure={actual:failed.actions.global,expected:false,error:String(error)};}
+  assert.equal(failed.actions.monitor,true);assert.equal(failed.actions.audioOptimization,true);assert.equal(f.counts.power,counts.power+1);
+  diagnostic?.checkpoints.push('unknown-withdraws-game-actions-and-keeps-unrelated-actions');
   counts=structuredClone(f.counts);snapshots=snapshotCount();for(let i=0;i<1000;i++)f.setGameReadiness(false);await flush();assert.deepEqual(f.counts,counts);assert.equal(snapshotCount(),snapshots);
+  diagnostic?.checkpoints.push('duplicate-unknown-does-not-read-or-repaint');
   // No gameChanged call: the same PID/birth/native lease simply becomes usable.
   f.setGameReadiness(true);await flush();const recovered=latest();assert.equal(snapshotCount(),snapshots+1,'Same-target readiness recovery must push a refreshed snapshot');assert.equal(recovered.game?.identity??null,identity);assert.equal(recovered.actions.performance,true);assert.equal(recovered.actions.frames,true);assert.equal(recovered.actions.game,hasGame);assert.equal(recovered.actions.global,!hasGame);assert.equal(f.counts.power,counts.power+1);
+  diagnostic?.checkpoints.push('same-target-recovers-with-one-snapshot-and-read');
   assert.equal(f.counts.gameReconciles,1);assert.equal(f.counts.saves,0);assert.equal(f.counts.inputSaves,0);assert.equal(f.counts.performanceUpdates??0,0);assert.equal(f.counts.globalFrameSaves,0);assert.equal(f.counts.frameApplies,0);assert.equal(f.counts.monitorSaves,0);assert.equal(f.counts.fxSoundWrites,0);
+  diagnostic?.checkpoints.push('recovery-performs-no-writes');
   counts=structuredClone(f.counts);snapshots=snapshotCount();for(let i=0;i<1000;i++)f.setGameReadiness(true);await flush();assert.deepEqual(f.counts,counts);assert.equal(snapshotCount(),snapshots);
+  diagnostic?.checkpoints.push('duplicate-ready-does-not-read-or-repaint');
   f.stop();assert.equal(f.readinessSubscriberCount(),0);assert.equal(f.observerStats().game,0);assert.equal(f.observerStats().watchers,0);const replies=f.replies.length;counts=structuredClone(f.counts);
   for(let i=0;i<1000;i++){f.setGameReadiness(false);f.setGameReadiness(true);}await flush();assert.equal(f.replies.length,replies);assert.deepEqual(f.counts,counts);
+  diagnostic?.checkpoints.push('stop-unsubscribes-and-late-edges-stay-quiet');
+  }catch(error){if(diagnostic)diagnostic.tailError=String(error);throw error;}
+  finally{
+   f.stop();
+   if(diagnostic)console.error(JSON.stringify({readinessTailDiagnostic:diagnostic}));
+  }
+  if(admissionError)throw admissionError;
  }
 });
 
@@ -257,21 +633,21 @@ for(const boundary of ['ordinary','source-change','manual-probe','reopen'])await
   if(boundary==='manual-probe'){
    assert.ok(delivered.some(x=>x.probeId==='probe:host-storm:1'&&x.snapshot.ready));
    const probe=id=>f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,probeId:'probe:host-storm:'+id}});
-   for(const mode of ['same-nonce','new-nonce','source-changed']){
+   for(const mode of ['source-changed-no-resend','same-nonce','new-nonce','source-changed']){
     let unlock;const gate=new Promise(resolve=>unlock=resolve);
     const count=f.counts.inputReads,start=f.replies.length;
     // Hold a new probe's owner read until after a second packet arrives.
     blockedInput=gate;probe(2);await flush();
     try{
      assert.equal(f.counts.inputReads,count+1);
-     if(mode==='source-changed'){f.state.power.generation++;f.powerChanged();}
-     for(let i=0;i<(mode==='same-nonce'?64:1);i++)probe(mode==='new-nonce'?3:2);
+     if(mode.startsWith('source-changed')){f.state.power.generation++;f.powerChanged();}
+     if(mode!=='source-changed-no-resend')for(let i=0;i<(mode==='same-nonce'?64:1);i++)probe(mode==='new-nonce'?3:2);
     }finally{blockedInput=null;unlock();}
     await flush();
     const packets=f.replies.slice(start).map(x=>x.message).filter(x=>x.type==='snapshot'&&x.probeId);
     const actual=f.counts.inputReads-count,expected=mode==='same-nonce'?1:2;
     demandStormMeasurements.push({probeOverlap:mode,businessReads:actual,expected,correlatedReplies:packets.length});
-    assert.deepEqual(packets.map(x=>x.probeId).sort(),(mode==='new-nonce'?[2,3]:[2]).map(x=>'probe:host-storm:'+x));
+    assert.deepEqual(packets.map(x=>x.probeId).sort(),(mode==='new-nonce'?[2,3]:[2]).map(x=>'probe:host-storm:'+x),JSON.stringify({mode,actual,expected,packets:packets.map(({probeId,snapshot})=>({probeId,ready:snapshot.ready,generation:snapshot.generation,revision:snapshot.revision}))}));
     assert(packets.every(x=>x.snapshot.ready&&x.snapshot.generation===f.state.power.generation));
     assert.equal(actual,expected,JSON.stringify(demandStormMeasurements.at(-1)));
    }
@@ -488,12 +864,24 @@ async function checkRetiredInitialReads(){
     f.state.power={...originalPower,generation:2,phase:'suspended',inputReady:false,resumeReady:false,hardwareWritesAllowed:false};
     f.powerChanged(true);
    }
-   await flush();assert.equal(f.counts.power,1,'Invalidation must not run concurrent snapshot reads');
+   const earlySuspend=stage==='powerSource'&&edge==='pending';
+   await flush();
+   assert.equal(f.counts.power,earlySuspend?2:1,'Only the public power boundary can displace the blocked batch');
+   assert.equal(packets().length,earlySuspend?1:0);
+   if(earlySuspend){
+    const held=packets()[0].message.snapshot;
+    assert.equal(held.generation,2);assert.equal(held.ready,false);assert.equal(held.actions.global,false);
+    assert.equal(f.counts.schedule,0);
+   }
    release();await demand;await flush();
    const view=packets().at(-1)?.message.snapshot;
    const row={stage,edge,power:f.counts.power,source:sourceCalls-sourceBefore,audio:f.counts.fxSoundReads-audioBefore,schedule:f.counts.schedule,packets:packets().length};
    rows.push(row);
-   const retired=edge==='steam'||edge==='pending';
+   // Before the first power receipt, a confirmed newer public suspend can
+   // replace the stale direct result in the same read. Once business reads
+   // have started, the old batch must still be retired and read again.
+   const adoptedSuspend=stage==='power'&&edge==='pending';
+   const retired=edge==='steam'||edge==='pending'&&!adoptedSuspend;
    const currentReads=edge==='pending'||(stage==='powerSource'&&!retired)?0:1;
    expected.push({stage,edge,power:retired?2:1,source:currentReads,audio:currentReads,schedule:edge==='pending'?0:1,packets:1});
    const discarded=f.diagnostics.filter(x=>x.event==='snapshot-read-finished'&&x.discardReason==='source-changed');
@@ -587,7 +975,12 @@ async function checkRetiredProfileAssembly(){
    if(ending==='monitor'){f.state.monitor={...f.state.monitor,enabled:false};f.monitorChanged();}
    if(ending==='hide'||ending==='reopen')demand(false);
    if(ending==='reopen'){f.state.power.generation++;demand(true);}
-   await flush();assert.equal(returned,1,'one in-flight snapshot keeps its normal ownership');
+   await flush();assert.equal(returned,ending==='reopen'?2:1,'Only reopened demand with new public power can bypass the old profile read');
+   if(ending==='reopen'){
+    assert.equal(packets().length,1,'The reopened sidebar must recover before the old owner returns');
+    assert.equal(packets()[0].message.snapshot.generation,2);
+    assert.equal(packets()[0].message.snapshot.ready,true);
+   }else assert.equal(packets().length,0);
    release();await flush();
    const view=packets().at(-1)?.message.snapshot;
    const row={ending,profileReturns:returned,serializations,revisionChecks,packets:packets().length,generation:view?.generation??null};
@@ -663,6 +1056,73 @@ await check('late bridge owner confirmation establishes current native health wi
   assert.equal(f.counts.saves,0);assert.equal(f.counts.performanceUpdates??0,0);
  }finally{for(const release of releases)release();off();f.stop();await flush();}
  assert.equal(f.observerStats().ipc,0);assert.equal(f.memory.stats().pendingDeadlineTimers,0);
+});
+
+async function fanPowerFixture({active=false}={}){
+ let enabled=active,preset='balanced',armed=false,held=null,holdApply=null,holdStart=null;
+ const saves=[],writes=[],starts=[];
+ const lifecycle={get hasControlIntent(){return active||starts.length>0;},controlReady:true,state:active?'ready':'closed',recoveryActive:false,
+  async start(){starts.push('start');if(holdStart)await holdStart.promise;return {allowed:true,writeReady:true};},
+  async apply(){writes.push(preset);},async applyPreset(name){writes.push(name);if(holdApply)await holdApply.promise;}};
+ const defer=()=>{let release;const promise=new Promise(resolve=>{release=resolve;});return {promise,release};};
+ const fanOwner={lifecycle,featureBindings:{FAN_IMPORT_ENABLED:true,FAN_FORCE_PREVIEW:false,fanFeatureEnabled:{value:true},
+  fanControlActive:{get value(){return enabled;}},getFanSelectedPreset:()=>preset,getFanPresetCurve:()=>[],
+  saveFanCurve:async(_nodes,name)=>{saves.push(name);preset=name;},setFanControlActive:value=>{enabled=value;},
+  setFanNavigationDuty:()=>{},recordFanHandshake:async()=>{}}};
+ const f=await fixture(seed(),{fanOwner,readHooks:{power:signal=>{
+  if(!armed)return;armed=false;
+  const source=structuredClone(f.state.power),io=defer();
+  held={release:io.release,aborts:0};const read=held;
+  return new Promise((resolve,reject)=>{
+   const abort=()=>{read.aborts++;reject(Error('fixture power IPC observer aborted'));};
+   signal?.addEventListener('abort',abort,{once:true});
+   void io.promise.then(()=>{signal?.removeEventListener('abort',abort);resolve(source);});
+  });
+ }}});
+ Object.assign(f.state.power,{publicationRevision:1,observedNotificationSequence:1,suspendSerial:1,notificationPending:false});
+ f.ready();const snapshot=await f.read();assert.equal(snapshot.actions.fan,true);
+ const publish=async patch=>{Object.assign(f.state.power,patch);f.emit('power.lifecycleChanged',{known:true,...f.state.power});await flush();};
+ const replies=()=>f.replies.filter(x=>x.message.type==='reply').map(x=>x.message);
+ return {f,snapshot,publish,replies,saves,writes,starts,arm:()=>{armed=true;},held:()=>held,
+  holdApply:()=>holdApply=defer(),holdStart:()=>holdStart=defer()};
+}
+for(const boundary of ['same-generation notification','coalesced suspend and ready'])await check('fan releases a held power read on '+boundary,async()=>{
+ const x=await fanPowerFixture({active:true});const {f,snapshot,publish,replies,saves}=x;
+ try{
+  x.arm();assert.equal(await f.request('fan.setPreset',{preset:'soft'},snapshot),undefined);assert(x.held());
+  const powerReads=f.counts.power;
+  await publish({publicationRevision:2});assert.equal(x.held().aborts,0);assert.equal(f.counts.power,powerReads);assert.equal(replies().length,0);
+  assert.equal((await f.request('fan.setPreset',{preset:'aggressive'},snapshot)).ok,false,'the original request still owns the slot');
+  await publish({publicationRevision:3,observedNotificationSequence:2,...(boundary==='coalesced suspend and ready'?{generation:2,suspendSerial:2}:{})});
+  const fresh=await f.read();assert.equal(fresh.generation,f.state.power.generation);
+  const current=await f.request('fan.setPreset',{preset:'aggressive'},fresh);
+  assert.equal(current?.result?.saved,true,'a new selection must save before the old power reply returns');
+  assert.equal(x.held().aborts,1);assert.deepEqual(saves,['aggressive']);
+  assert.deepEqual(replies().map(r=>[r.id,r.ok]),[['host:2',false],['host:1',false],['host:3',true]]);
+  x.held().release();await flush();assert.deepEqual(saves,['aggressive']);assert.deepEqual(x.writes,['aggressive']);assert.equal(replies().length,3);
+ }finally{x.held()?.release();f.stop();await flush();}
+ assert.equal(f.observerStats().ipc,0);assert.equal(f.sharedPowerTimerCount(),0);
+});
+await check('fan write already sent retains the mirror operation slot across a wake',async()=>{
+ const x=await fanPowerFixture({active:true});const {f,snapshot,publish,replies,saves,writes}=x;const write=x.holdApply();
+ try{
+  assert.equal(await f.request('fan.setPreset',{preset:'soft'},snapshot),undefined);assert.deepEqual(writes,['soft']);
+  await publish({publicationRevision:2,observedNotificationSequence:2,generation:2,suspendSerial:2});
+  const fresh=await f.read();assert.equal(fresh.generation,2);
+  assert.equal((await f.request('fan.setPreset',{preset:'aggressive'},fresh)).ok,false);
+  assert.deepEqual(saves,['soft']);assert.deepEqual(writes,['soft']);assert(!replies().some(r=>r.id==='host:1'));
+  write.release();await flush();assert.equal((await f.request('fan.setPreset',{preset:'aggressive'}))?.result?.applied,true);
+  assert.deepEqual(writes,['soft','aggressive']);
+ }finally{write.release();f.stop();await flush();}
+});
+await check('fan intent accepted by the owner continues across a same-generation notification',async()=>{
+ const x=await fanPowerFixture();const {f,snapshot,publish,writes,starts}=x;const start=x.holdStart();
+ try{
+  const accepted=await f.request('fan.setEnabled',{enabled:true},snapshot);
+  assert.equal(accepted?.result?.pending,true);assert.deepEqual(starts,['start']);assert.deepEqual(writes,[]);
+  await publish({publicationRevision:2,observedNotificationSequence:2});
+  start.release();await flush();assert.deepEqual(starts,['start']);assert.deepEqual(writes,['balanced']);
+ }finally{start.release();f.stop();await flush();}
 });
 
 for(const name of selected)assert(registered.has(name),'Unknown Host case: '+name);

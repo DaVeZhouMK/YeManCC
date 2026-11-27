@@ -17,19 +17,20 @@ $fanPortCall='connectionOwner.connect(8765, fanKeepaliveProcessSelection().revis
 if($fanExtract.Split($fanPortCall).Count -ne 2){throw 'Fan heartbeat fixture expects one production loopback port'}
 $fanFixture=$fanExtract.Replace($fanPortCall,'connectionOwner.connect(fixturePort, fanKeepaliveProcessSelection().revision())')
 if($fanRaw.Contains('struct FanHttpPowerAdmission {')){
- $a=$fanRaw.IndexOf('struct FanHttpPowerAdmission {',[StringComparison]::Ordinal);$b=$fanRaw.IndexOf('static void reg_http() {',$a,[StringComparison]::Ordinal)
+ $a=$fanRaw.IndexOf('struct FanHttpPowerAdmission {',[StringComparison]::Ordinal);$b=$fanRaw.IndexOf('// This is the original Fan operation/lease lifetime',$a,[StringComparison]::Ordinal)
  if($a -lt 0 -or $b -le $a){throw 'Shared Fan admission source missing'}
- $fanFixture=$fanRaw.Substring($a,$b-$a)+[Environment]::NewLine+$fanFixture
+ $fanAdmission=$fanRaw.Substring($a,$b-$a)
 }
 $fanEvidence=[IO.Path]::GetFullPath($EvidenceRoot)
 $fanControl=Join-Path $fanEvidence 'CONTROL'
 New-Item -ItemType Directory -Path $fanControl -Force | Out-Null
+[IO.File]::WriteAllText((Join-Path $fanControl 'KeepaliveAdmissionExtract.inc'),$fanAdmission,[Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllText((Join-Path $fanControl 'KeepaliveExtract.inc'),$fanFixture,[Text.UTF8Encoding]::new($false))
 $fanExtractHash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($fanExtract))).ToLowerInvariant()
 @{
     sourceSha256=$fanSourceHash; functionSha256=$fanExtractHash; transportHeaderSha256=$fanHeaderHash; additionalHeaders=$fanAdditionalHeaders
-    replacement='loopback port only; process/credential/display/native mode hooks in C++ fixture'
-    scope='real WinHTTP/ephemeral loopback fixture; no FanHost, HC, device writes, installation or CPU benchmark'
+    replacement='loopback port only; local FixtureWriteGrant substitutes the remote envelope and peer, retaining actual public observation and revocation'
+    scope='real WinHTTP/ephemeral loopback fixture; credential, peer, display and mode hooks inert; no FanHost, HC, device writes, installation or CPU benchmark'
 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $fanEvidence 'source-binding.json') -Encoding utf8
 $fanBuildFile=Join-Path $fanEvidence 'compile.cmd'
 @"

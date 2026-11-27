@@ -18,6 +18,7 @@ PRE=r'''
 #include <algorithm>
 #include "json.hpp"
 #include "msi_physical_name_evidence.h"
+#include "msi_dinput_reprobe_log.h"
 using json=nlohmann::json;
 static std::vector<std::string> apiCalls;
 static bool failOpen=false,failPreparsed=false,failCaps=false,failProduct=false,nonTerminated=false;static wchar_t productUnit=0x0409;
@@ -36,10 +37,10 @@ static BOOL fakeClose(HANDLE h){apiCalls.push_back("close:"+fakeHandle(h));retur
 #define HidD_GetProductString fakeProduct
 #define CloseHandle fakeClose
 struct FakeDevice{
- DIDEVICEINSTANCEW instance{};std::wstring path;DWORD vid=0x0db0,pid=0x1902;bool pathFails=false,capsFails=false;
+ DIDEVICEINSTANCEW instance{};std::wstring path;DWORD vid=0x0db0,pid=0x1902;bool pathFails=false,capsFails=false,vidPidFails=false,createFails=false;
  HRESULT GetProperty(REFGUID prop,LPDIPROPHEADER out){
   const auto arguments=":"+std::to_string(out->dwSize)+":"+std::to_string(out->dwHeaderSize)+":"+std::to_string(out->dwObj)+":"+std::to_string(out->dwHow);
-  if(reinterpret_cast<uintptr_t>(&prop)==reinterpret_cast<uintptr_t>(&DIPROP_VIDPID)){apiCalls.push_back("dinput-vidpid"+arguments);reinterpret_cast<DIPROPDWORD*>(out)->dwData=MAKELONG(vid,pid);return S_OK;}
+  if(reinterpret_cast<uintptr_t>(&prop)==reinterpret_cast<uintptr_t>(&DIPROP_VIDPID)){apiCalls.push_back("dinput-vidpid"+arguments);if(vidPidFails)return E_FAIL;reinterpret_cast<DIPROPDWORD*>(out)->dwData=MAKELONG(vid,pid);return S_OK;}
   apiCalls.push_back("dinput-path"+arguments);if(pathFails)return E_FAIL;auto* p=reinterpret_cast<DIPROPGUIDANDPATH*>(out);wcsncpy_s(p->wszPath,path.c_str(),_TRUNCATE);return S_OK;
  }
  HRESULT GetCapabilities(LPDIDEVCAPS caps){apiCalls.push_back("dinput-caps:"+std::to_string(caps->dwSize));if(capsFails)return E_FAIL;caps->dwAxes=6;caps->dwButtons=17;caps->dwPOVs=1;return S_OK;}
@@ -47,14 +48,14 @@ struct FakeDevice{
 };
 struct FakeDI{
  std::vector<FakeDevice> devices;HRESULT enumerationResult=S_OK;
- HRESULT CreateDevice(REFGUID guid,FakeDevice** out,LPUNKNOWN){apiCalls.push_back("dinput-create");for(auto& d:devices)if(d.instance.guidInstance.Data1==guid.Data1){*out=&d;return S_OK;}*out=nullptr;return E_FAIL;}
+ HRESULT CreateDevice(REFGUID guid,FakeDevice** out,LPUNKNOWN){apiCalls.push_back("dinput-create");for(auto& d:devices)if(d.instance.guidInstance.Data1==guid.Data1&&!d.createFails){*out=&d;return S_OK;}*out=nullptr;return E_FAIL;}
  HRESULT EnumDevices(DWORD cls,LPDIENUMDEVICESCALLBACKW callback,LPVOID context,DWORD flags){apiCalls.push_back("dinput-enum:"+std::to_string(cls)+":"+std::to_string(flags));for(auto& d:devices)if(callback(&d.instance,context)==DIENUM_STOP)break;return enumerationResult;}
 };
 static HRESULT fakeDIcreate(HINSTANCE,DWORD,REFIID,LPVOID*,LPUNKNOWN){throw std::runtime_error("fixture-forbids-real-DirectInput-construction");}
 #define DirectInput8Create fakeDIcreate
 #define IDirectInput8W FakeDI
 #define IDirectInputDevice8W FakeDevice
-struct State{FakeDevice* pad=nullptr;FakeDI* di=nullptr;int openAttempts=0,vendorCandidates=0,dinputPidCandidates=0,otherPidCandidates=0,rejectedNonMainInterface=0,rejectedPath=0;};static State g_msiDinput;
+struct State{FakeDevice* pad=nullptr;FakeDI* di=nullptr;int openAttempts=0,vendorCandidates=0,dinputPidCandidates=0,otherPidCandidates=0,rejectedNonMainInterface=0,rejectedPath=0;ymcc::msi::DinputReprobeObservation reprobeObservation;};static State g_msiDinput;
 struct Capability{DWORD vendorId=0x0db0,pidDInput=0x1902;const char* mainInterfaceToken="&mi_00&col01";};static Capability kMsiClawCapability;
 static std::atomic<bool> g_msiDinputRouteDinputArmed{true};static bool detailed=true,msiBoard=true;static bool msiClawKnownBoardAuthority(){return msiBoard;}static bool domainLogEnabled(const char*){return detailed;}
 static unsigned long long currentPowerGeneration(){return 7;}static unsigned long long inputHostEpochToken(){return 5;}
@@ -92,6 +93,7 @@ int main(){
   check("capture-ID-native-PID-and-independent-API-windows",proof["nativePid"]==GetCurrentProcessId()&&proof["metadataSchemaVersion"]==2&&!proof["crossApiAtomicSnapshot"].get<bool>()&&proof["candidates"][0]["metadataCaptureId"]==proof["metadataCaptureId"]&&proof["candidates"][0].contains("pathObservation")&&proof["candidates"][0].contains("capsObservation"));
  }
  reset(false,0);di.enumerationResult=E_FAIL;msiDinputEnumerateObserved();auto enumFail=msiDinputTakeEnumerationReceipt();
+ check("only-a-complete-successful-no-match-may-be-deduplicated",g_msiDinput.reprobeObservation.enumerated&&!g_msiDinput.reprobeObservation.completeNoMatch);
  check("failed-EnumDevices-return-is-not-missing-return-or-success",enumFail["enumerationReturned"]==true&&enumFail["enumerationHresultSuccess"]==false&&enumFail["enumerationHresult"]==E_FAIL&&enumFail["mainCandidateSelected"]==false&&enumFail["candidates"].empty());di.enumerationResult=S_OK;
  reset(false,18);msiDinputEnumerateObserved();auto capped=msiDinputTakeEnumerationReceipt();check("bounded-catalogue-16-records-explicit-two-omitted",capped["candidates"].size()==16&&capped["unrecordedDinputCandidates"]==2);
  detailed=false;reset(true,3);msiDinputEnumerateObserved();check("detail-off-produces-no-catalogue-or-HID-metadata-I-O",msiDinputTakeEnumerationReceipt().is_null()&&std::find_if(apiCalls.begin(),apiCalls.end(),[](const auto& s){return s.starts_with("open:")||s.starts_with("product:");})==apiCalls.end());
@@ -99,6 +101,10 @@ int main(){
  g_msiDinputRouteDinputArmed.store(false);reset(true,3);msiDinputEnumerateObserved();check("DInput-route-off-does-not-expand-metadata",msiDinputTakeEnumerationReceipt().is_null()&&std::none_of(apiCalls.begin(),apiCalls.end(),[](const auto& call){return call.starts_with("open:");}));g_msiDinputRouteDinputArmed.store(true);
  reset(true,4);di.devices[1].pid=0x1901;di.devices[2].pid=0x1903;di.devices[3].vid=0xabcd;msiDinputEnumerateObserved();auto pidScope=msiDinputTakeEnumerationReceipt();check("other-PID-and-vendor-do-not-gain-HID-metadata-reads",pidScope["candidates"].size()==1&&pidScope["dinputPidCandidates"]==1&&pidScope["otherPidCandidates"]==2);
  reset(true,2);di.devices[0].pathFails=true;msiDinputEnumerateObserved();const auto pathFail=msiDinputTakeEnumerationReceipt();check("failed-existing-path-return-recorded-not-guessed-main",pathFail["mainCandidateSelected"]==false&&pathFail["rejectedPath"]==1&&pathFail["candidates"][0]["pathStatus"]=="read-error"&&!pathFail["candidates"][0]["selectedMain"].get<bool>());
+ check("unreadable-main-candidate-is-unknown",!g_msiDinput.reprobeObservation.completeNoMatch&&g_msiDinput.reprobeObservation.rejectedPath==1);
+ reset(false,2);msiDinputEnumerateObserved();check("complete-scan-knows-no-matching-main-interface",g_msiDinput.reprobeObservation.completeNoMatch&&g_msiDinput.reprobeObservation.rejectedNonMainInterface==2);
+ reset(false,2);di.devices[0].vidPidFails=true;di.devices[1].createFails=true;msiDinputEnumerateObserved();check("unreadable-candidates-do-not-prove-absence",!g_msiDinput.reprobeObservation.completeNoMatch&&g_msiDinput.reprobeObservation.unreadableCandidates==2);
+ reset(true,1);msiDinputEnumerateObserved();check("selected-main-is-never-a-no-match",!g_msiDinput.reprobeObservation.completeNoMatch);
  const auto emission=ymcc::msi::nameEvidence::logEmissionWitness(1234,json(1200));
  check("emission-delay-uses-emission-clock-not-audit-start",emission["emittedTick"]==1234&&emission["logEmissionDelayMs"]==34&&emission["logEmissionDelayStatus"]=="observed-monotonic-delay");
  check("emission-before-capture-not-invented-zero-delay",ymcc::msi::nameEvidence::logEmissionWitness(1200,json(1234))["logEmissionDelayMs"]=="not-observed");
@@ -112,7 +118,7 @@ int main(){
 '''
 def main():
  p=argparse.ArgumentParser();p.add_argument('--output-dir',type=pathlib.Path,required=True);a=p.parse_args();run=a.output_dir/('run-'+datetime.datetime.now().strftime('%Y%m%d-%H%M%S'));run.mkdir(parents=True);source_bytes=(ROOT/'native/main.cpp').read_bytes();baseline_bytes=(a.output_dir.parent/'pre-edit/native/main.cpp').read_bytes();header_bytes=(ROOT/'native/msi_physical_name_evidence.h').read_bytes();source=source_bytes.decode('utf-8-sig').replace('\r\n','\n');old=baseline_bytes.decode('utf-8-sig').replace('\r\n','\n');(run/'msi_physical_name_evidence.h').write_bytes(header_bytes)
- signatures=['static std::string msiGuidToString(const GUID& g) {','static bool msiPathMentionsAsciiToken(const wchar_t* hay, const char* needleAscii) {','static std::string msiPhysicalNameRunId() {','static std::string msiPhysicalNameUtc100ns() {','static json msiPhysicalNameCaptureContext() noexcept {','static void msiDinputStageEnumerationReceipt(json row) {','static json msiDinputTakeEnumerationReceipt() {','static json msiDinputEnumerationReceipt(const DIDEVICEINSTANCEW& inst,DWORD vid,DWORD pid,','static void msiDinputEnumerationHidMetadata(json& row,const std::wstring& path) {']
+ signatures=['static std::string msiGuidToString(const GUID& g) {','static bool msiPathMentionsAsciiToken(const wchar_t* hay, const char* needleAscii) {','static std::string msiPhysicalNameRunId() {','static std::string msiPhysicalNameUtc100ns() {','static json msiPhysicalNameCaptureContext() noexcept {','static void msiDinputStageEnumerationReceipt(json row) {','static json msiDinputTakeEnumerationReceipt() {','static json msiDinputEnumerationReceipt(const DIDEVICEINSTANCEW& inst,DWORD vid,DWORD pid,','static void msiDinputEnumerationHidMetadata(json& row,const std::wstring& path)']
  parts='\n'.join(extract(source,s)for s in signatures);oldHid=extract(old,signatures[-1]).replace('msiDinputEnumerationHidMetadata(','msiDinputEnumerationHidMetadataBaseline(',1)
  def prefix(text,name,hid):
   f=extract(text,'static bool msiDinputOpen() {');f=f[:f.index('    IDirectInputDevice8W* pad = ctx.pad;')];return f.replace('msiDinputOpen()',name+'()',1).replace('msiDinputEnumerationHidMetadata(',hid+'(')+'    return true;\n}'

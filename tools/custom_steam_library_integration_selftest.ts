@@ -11,6 +11,8 @@ function assert(condition: boolean, message: string): void {
 }
 
 const root = process.cwd();
+const args = process.argv.slice(2);
+const sessionOnly = args.includes('--session-only');
 const native = fs.readFileSync(path.join(root, 'native', 'main.cpp'), 'utf8');
 const controllerUiOutput = fs.readFileSync(path.join(root, 'native', 'virtual_controller_ui_output_runtime.h'), 'utf8');
 const bridge = fs.readFileSync(path.join(root, 'src', 'bridge', 'customSteamLibrary.ts'), 'utf8');
@@ -20,6 +22,9 @@ const customLibraryHtml = fs.readFileSync(path.join(root, 'CustomSteamLibrary', 
 const customLibraryCss = fs.readFileSync(path.join(root, 'CustomSteamLibrary', 'workspace-ui', 'styles.css'), 'utf8');
 const customLibraryWorker = fs.readFileSync(path.join(root, 'native', 'custom-steam-library', 'steam_artwork_lab.cpp'), 'utf8');
 
+if (!sessionOnly) checkStaticContracts();
+
+function checkStaticContracts(): void {
 assert(customLibraryWorker.includes('prepareSteamRecentSignalUpdate('), 'worker must prepare optional recent metadata without requiring localconfig.vdf');
 assert(customLibraryWorker.includes('const bool injectSimulatedRecent = recentUpdate.enabled;'), 'recent metadata must only enter the transaction after successful preparation');
 
@@ -55,7 +60,10 @@ for (const gate of ['steamDeckUiOwnsInput', 'ps5UiOwnsInput', 'msiUiOwnsInput', 
   assert(body.includes('return gamepadUiOutputIsolationEligible();'), gate + ' must reuse native UI output isolation admission');
   assert(!body.includes('CustomSteamLibraryInputPhase'), gate + ' must not bypass child foreground ownership');
 }
-assert(native.includes('const bool dsuUiNeutral = g_realStickTest.enabled && g_realStickTest.virtualTargetEnabled && focusPlan.virtualUiPersona[0] ? virtualUiNeutral : gamepadUiOutputIsolationEligible();'), 'native DSU fallback must reuse UI output isolation admission');
+assert(/const auto dsuDemand\s*=\s*dsu_frame_demand\(\)\s*;/.test(native), 'native DSU isolation must use the current subscriber demand');
+assert(/const bool dsuUiNeutral\s*=\s*dsuDemand\s*&&\s*\(\s*g_realStickTest\.enabled\s*&&\s*g_realStickTest\.virtualTargetEnabled\s*&&\s*focusPlan\.virtualUiPersona\[0\]\s*\?\s*virtualUiNeutral\s*:\s*gamepadUiOutputIsolationEligible\(\)\s*\)\s*;/.test(native), 'native DSU fallback must reuse UI output isolation admission when demanded');
+assert(/const bool dsuSubmitNeutral\s*=\s*submitNeutral\s*\|\|\s*dsuUiNeutral\s*;/.test(native) &&
+  /dsuFrame\.semanticNeutral\s*=\s*dsuSubmitNeutral\s*;/.test(native), 'native DSU wire output must carry the combined neutral decision');
 // Import eligibility is not Steam identity verification. Exact production
 // helpers are exercised below, including waiting shortcuts without IDs/images.
 assert(!customLibraryUi.includes('hasMinimumSteamArtwork(game)'), 'artwork must not be a prerequisite for shortcut import');
@@ -80,6 +88,7 @@ for (const action of [
 ]) {
   assert(native.includes(`"${action}"`), `native semantic action is missing: ${action}`);
 }
+}
 
 
 // Execute production helpers with mocked filesystem/IPC. No fixture can start
@@ -98,12 +107,14 @@ interface BridgeRuntime {
   initialize(context: vm.Context): void;
   invoke(command: string, args?: object, options?: object): Promise<any>;
   on(event: string, handler: (data: unknown) => void): () => void;
+  ipc(): any;
+  power(): any;
 }
 function bridgeFixture(exeDir: string, existing: string[] = [], files: Record<string, string> = {}, denied: string[] = [], runtime?: BridgeRuntime) {
   const existsCalls: string[] = [], readCalls: string[] = [];
   const unexpected = () => { throw new Error('Unexpected process/window/IPC operation in read-only fixture'); };
   const api = {
-    app: { exeDir: async () => exeDir, pid: runtime ? () => runtime.invoke('app.pid') : unexpected },
+    app: { exeDir: async () => exeDir, pid: runtime ? (timeoutMs?: number, signal?: AbortSignal) => runtime.invoke('app.pid', {}, { timeoutMs, signal }) : unexpected },
     fs: {
       exists: async (file: string) => {
         existsCalls.push(file);
@@ -116,7 +127,9 @@ function bridgeFixture(exeDir: string, existing: string[] = [], files: Record<st
         return files[file];
       },
     },
-    shell: { hidden: runtime ? (program: string, args: string[]) => runtime.invoke('shell.hidden', { program, args }) : unexpected },
+    shell: { hidden: runtime ? (program: string, args: string[], timeoutMs?: number, _creationReceipt?: boolean,
+      options?: { powerScope?: readonly number[]; mutationTicket?: number }) =>
+      runtime.invoke('shell.hidden', { program, args, ...options }, { timeoutMs }) : unexpected },
     windowApi: { minimize: runtime ? () => runtime.invoke('window.minimize') : unexpected,
       show: runtime ? () => runtime.invoke('window.show') : unexpected },
   };
@@ -125,7 +138,8 @@ function bridgeFixture(exeDir: string, existing: string[] = [], files: Record<st
     module, exports: module.exports,
     require: (name: string) => {
       if (name === '@/bridge/api') return api;
-      if (name === '@/bridge/ipc') return { invoke: runtime ? runtime.invoke : unexpected, on: runtime ? runtime.on : unexpected };
+      if (name === '@/bridge/ipc') return runtime?.ipc() ?? { invoke: unexpected, on: unexpected };
+      if (name === './powerLifecycleState') return runtime?.power() ?? {};
       throw new Error(`Unexpected dependency: ${name}`);
     },
     setTimeout: unexpected, setInterval: unexpected, clearTimeout: unexpected, clearInterval: unexpected,
@@ -138,6 +152,7 @@ function bridgeFixture(exeDir: string, existing: string[] = [], files: Record<st
     summary: () => vm.runInContext('readCustomSteamLibrarySummary()', context, { timeout: 1000 }) as Promise<any>,
     launch: () => vm.runInContext('launchCustomSteamLibrary()', context, { timeout: 1000 }) as Promise<any>,
     stop: () => vm.runInContext('stopCustomSteamLibrarySession()', context, { timeout: 1000 }) as Promise<void>,
+    hasStatusTimer: () => vm.runInContext('sessionWatch?.timer != null', context, { timeout: 1000 }) as boolean,
   };
 }
 
@@ -151,10 +166,16 @@ function sessionFixture() {
   const events: { type: string; detail?: any }[] = [];
   const hold = new Set<string>(['status']);
   const faults = new Set<string>();
+  const queued = new Set<string>();
+  let ticket = 0;
+  const receipts = new Map<number, { state: string; outcome?: object }>();
   let nativeEnabled = false, launchOk = true;
   let status: any = { configured: true, present: true, foreground: false, compatible: true, inputOwner: 'parent', pid: 77 };
+  const initialPower = { phase: 'ready', known: true, generation: 3, suspendSerial: 1,
+    hardwareWritesAllowed: true, observedNotificationSequence: 2, publicationRevision: 10 };
+  let power = { ...initialPower };
   let receiver: ((event: any) => void) | undefined;
-  let ipc: any, pendingIds: () => number[];
+  let ipc: any, powerApi: any, pendingIds: () => number[];
   const flush = async () => { for (let i = 0; i < 48; ++i) await Promise.resolve(); };
   const setTimer = (callback: () => void, delay: number, repeat = 0) => {
     const id = nextTimer++; timers.set(id, { at: now + delay, repeat, handoff: delay === 800, callback }); return id;
@@ -162,14 +183,27 @@ function sessionFixture() {
   const key = (message: { cmd: string; args: any }) => message.cmd === 'customSteamLibrary.status' ? 'status'
     : message.cmd === 'customSteamLibrary.setIntegrationSession' ? message.args.enabled ? 'enable' : 'disable'
     : message.cmd === 'shell.hidden' ? 'launch' : message.cmd === 'app.pid' ? 'pid' : message.cmd;
-  const reply = (message: typeof messages[number], value?: any, error?: string) => {
+  const reply = (message: typeof messages[number], value?: any, error?: string, deliver = true) => {
     if (message.answered) throw new Error('Fixture response already delivered');
     message.answered = true;
     const kind = key(message);
+    const mutationTicket = message.args?.mutationTicket;
+    const tracked = ['enable', 'disable', 'launch'].includes(kind) && mutationTicket > 0;
+    if (tracked && receipts.get(mutationTicket)?.state === 'retired') error = 'mutation retired';
     if (!error && kind === 'enable') nativeEnabled = true;
     if (!error && kind === 'disable') nativeEnabled = false;
     const result = value !== undefined ? value : (() => {
       switch (message.cmd) {
+        case 'customSteamLibrary.mutationTicket':
+          if ([...receipts.values()].some(r => r.state === 'running' || r.state === 'queued')) return 0;
+          receipts.set(++ticket, { state: 'reserved' });
+          return ticket;
+        case 'customSteamLibrary.settleMutation': {
+          const current = receipts.get(mutationTicket);
+          if (current?.state === 'reserved' || current?.state === 'queued') current.state = 'retired';
+          return { ticket: mutationTicket, ...(current ?? { state: 'unknown' }) };
+        }
+        case 'power.lifecycle': return { ...power };
         case 'customSteamLibrary.status': return { ...status };
         case 'app.pid': return 12;
         case 'shell.hidden': return { ok: launchOk, pid: 77 };
@@ -179,7 +213,9 @@ function sessionFixture() {
         default: throw new Error('Unexpected session fixture IPC: ' + message.cmd);
       }
     })();
-    receiver!({ data: error ? { id: message.id, error } : { id: message.id, result } });
+    if (tracked && receipts.get(mutationTicket)?.state !== 'retired')
+      receipts.set(mutationTicket, { state: 'completed', outcome: error ? { error } : { result } });
+    if (deliver) receiver!({ data: error ? { id: message.id, error } : { id: message.id, result } });
   };
   const pendingStatus = () => {
     const ids = new Set(pendingIds()); return messages.filter(m => ids.has(m.id) && key(m) === 'status').length;
@@ -188,12 +224,15 @@ function sessionFixture() {
     addEventListener: (_type: string, listener: (event: any) => void) => { receiver = listener; },
     postMessage: (message: any) => {
       if (!['customSteamLibrary.status', 'customSteamLibrary.setIntegrationSession', 'app.pid',
-        'shell.hidden', 'window.minimize', 'window.show'].includes(message.cmd)) {
+        'customSteamLibrary.mutationTicket', 'customSteamLibrary.settleMutation',
+        'shell.hidden', 'window.minimize', 'window.show', 'power.lifecycle'].includes(message.cmd)) {
         throw new Error('Unexpected session fixture IPC: ' + message.cmd);
       }
       const owned = { ...message, answered: false }; messages.push(owned);
       peakPendingStatus = Math.max(peakPendingStatus, pendingStatus());
       const kind = key(owned);
+      if (['enable', 'disable', 'launch'].includes(kind) && owned.args.mutationTicket > 0)
+        receipts.set(owned.args.mutationTicket, { state: queued.has(kind) ? 'queued' : 'running' });
       if (!hold.has(kind)) queueMicrotask(() => {
         if (!owned.answered) reply(owned, undefined, faults.has(kind) ? 'fixture native rejection: ' + kind : undefined);
       });
@@ -203,7 +242,7 @@ function sessionFixture() {
   const browserDocument = Object.assign(new EventTarget(), { visibilityState: 'hidden' });
   const runtime: BridgeRuntime = {
     globals: {
-      Date: { now: () => now }, AbortController,
+      Date: { now: () => now }, AbortController, queueMicrotask,
       CustomEvent,
       window: { chrome: { webview }, addEventListener: browserWindow.addEventListener.bind(browserWindow),
         removeEventListener: browserWindow.removeEventListener.bind(browserWindow), dispatchEvent: (event: CustomEvent) => {
@@ -222,16 +261,25 @@ function sessionFixture() {
       const actual = vm.runInContext('(function(){ const module={exports:{}}; const exports=module.exports;\n' + code +
         '\nreturn {api:module.exports,ids:()=>Array.from(pending.keys())}; })()', context, { timeout: 1000 });
       ipc = actual.api; pendingIds = actual.ids;
+      const powerSource = fs.readFileSync(path.join(root, 'src/bridge/powerLifecycleState.ts'), 'utf8');
+      const powerCode = transformSync(powerSource, { loader: 'ts', format: 'cjs', target: 'es2020' }).code;
+      const loadPower = vm.runInContext('(ipc=>{ const module={exports:{}}; const exports=module.exports; ' +
+        'const require=name=>{if(name!=="./ipc")throw Error(name);return ipc;};\n' + powerCode + '\nreturn module.exports; })',context);
+      powerApi = loadPower(ipc);
     },
     invoke: (command, args, options) => ipc.invoke(command, args, options),
     on: (event, handler) => ipc.on(event, handler),
+    power: () => powerApi,
+    ipc: () => ipc,
   };
   const exeDir = windowsPath('G:', 'Fixture', 'Session');
   const bridge = bridgeFixture(exeDir, [windowsPath(exeDir, 'CustomSteamLibrary', 'CustomSteamLibrary.exe')], {}, [], runtime);
+  let stopParentPower: (() => void) | undefined;
   const requests = (kind: string) => messages.filter(m => key(m) === kind);
   const outstanding = (kind: string) => requests(kind).filter(m => !m.answered);
   const snapshot = () => ({ statusRequests: requests('status').length, peakPendingStatus, pendingStatus: pendingStatus(),
     localPending: pendingIds().length, intervalCallbacks, timers: [...timers.values()].filter(t => !t.handoff).length,
+    statusTimer: bridge.hasStatusTimer(),
     enables: requests('enable').length, disables: requests('disable').length, launches: requests('launch').length,
     shows: requests('window.show').length, minimizes: requests('window.minimize').length,
     closed: events.filter(e => e.type === 'customSteamLibrary:closed').length,
@@ -253,22 +301,35 @@ function sessionFixture() {
   // Harness recovery between subcases; never counted as product cleanup proof.
   const reset = async () => {
     hold.clear(); faults.clear(); launchOk = true;
+    queued.clear();
     for (let i = 0; i < 4; ++i) {
       for (const message of messages) if (!message.answered) reply(message);
       await flush();
     }
     const stopped = bridge.stop(); await flush(); await stopped;
+    stopParentPower?.(); stopParentPower = undefined;
     ipc.rejectAllPending('fixture teardown'); await flush();
     timers.clear(); messages.length = 0; events.length = 0; intervalCallbacks = 0; peakPendingStatus = 0;
+    receipts.clear();
     browserDocument.visibilityState = 'hidden';
     now += 20000; hold.add('status');
+    power = { ...initialPower };
     status = { configured: true, present: true, foreground: false, compatible: true, inputOwner: 'parent', pid: 77 };
   };
-  return { bridge, flush, advance, reset, hold, faults, reply, requests, outstanding, pendingStatus, snapshot,
+  return { bridge, flush, advance, reset, hold, faults, queued, reply, requests, outstanding, pendingStatus, snapshot,
+    completion: (receipt: number) => receiver!({ data: { event: 'customSteamLibrary.mutationCompleted', data: { ticket: receipt } } }),
+    async startParentPower() {
+      stopParentPower = powerApi.onSharedPowerLifecycle(() => {});
+      await flush();
+    },
     status: (value: any) => { status = { ...status, ...value }; }, launchOk: (value: boolean) => { launchOk = value; },
     focus: () => browserWindow.dispatchEvent(new Event('focus')),
     visibility: (state: string) => { browserDocument.visibilityState = state; browserDocument.dispatchEvent(new Event('visibilitychange')); },
     owner: (owner: string) => receiver!({ data: { event: 'gamepad.input-owner', data: { owner } } }),
+    power: (next: Partial<typeof initialPower>) => {
+      power = { ...power, ...next, publicationRevision: power.publicationRevision + 1 };
+      receiver!({ data: { event: 'power.lifecycleChanged', data: { ...power } } });
+    },
     activeStatus: () => { const ids = new Set(pendingIds()); return requests('status').filter(m => ids.has(m.id)); },
     unexpected: () => ipc.invoke('fixture.unexpected-session-command'),
     pending: () => pendingIds().length };
@@ -279,6 +340,7 @@ async function checkSessionContracts(): Promise<void> {
   const f = sessionFixture(); // one real-IPC combination, one VM, virtual time only
   const check = async (name: string, run: () => Promise<void>) => {
     await f.reset();
+    await f.startParentPower();
     let error: string | undefined;
     try { await run(); } catch (failure) {
       error = failure instanceof Error ? failure.message : String(failure);
@@ -321,19 +383,19 @@ async function checkSessionContracts(): Promise<void> {
     assert(f.snapshot().statusRequests === 2 && f.snapshot().peakPendingStatus === 1, 'settled compatible read arms one audit');
   });
   await check('stop-cleans-real-pending-late-response', async () => {
-    await f.bridge.launch(); const old = f.outstanding('status')[0];
+    await f.bridge.launch(); await f.flush(); const old = f.outstanding('status')[0];
     await f.bridge.stop(); await f.flush();
     assert(f.pending() === 0, 'stop aborts the status through the actual invoke third argument');
     f.reply(old, { present: true, compatible: false, inputOwner: 'host' }); await f.flush();
     assert(f.snapshot().shows === 0 && f.snapshot().conflicts === 0 && f.snapshot().disables === 1, 'late transport response after stop has no side effects');
   });
   await check('resolved-before-stop-continuation', async () => {
-    await f.bridge.launch(); f.reply(f.outstanding('status')[0], { present: true, compatible: false, inputOwner: 'host' });
+    await f.bridge.launch(); await f.flush(); f.reply(f.outstanding('status')[0], { present: true, compatible: false, inputOwner: 'host' });
     const stopped = f.bridge.stop(); await f.flush(); await stopped;
     assert(f.snapshot().shows === 0 && f.snapshot().conflicts === 0 && f.snapshot().disables === 1, 'already resolved old status cannot publish or disable again after stop');
   });
   await check('replace-pending-watch', async () => {
-    await f.bridge.launch(); const old = f.outstanding('status')[0]; await f.bridge.launch();
+    await f.bridge.launch(); await f.flush(); const old = f.outstanding('status')[0]; await f.bridge.launch(); await f.flush();
     assert(f.pendingStatus() === 1 && f.snapshot().timers === 1, 'replacement aborts old pending before installing one new watch');
     f.reply(old, { present: true, compatible: false, inputOwner: 'host' }); await f.flush();
     assert(f.snapshot().shows === 0 && f.snapshot().disables === 0 && f.snapshot().conflicts === 0, 'old status cannot disable the replacement session');
@@ -392,6 +454,52 @@ async function checkSessionContracts(): Promise<void> {
     assert(f.snapshot().statusRequests === 1 && f.snapshot().closed === 1, 'lost status response expires once at ten seconds without accumulating requests');
     assert(f.pending() === 0 && f.snapshot().timers === 0, 'real IPC timeout and session close retire all pending and timers');
   });
+  await check('coalesced-ready-retires-old-window-status', async () => {
+    await f.bridge.launch(); await f.flush();
+    const old = f.activeStatus()[0]; assert(!!old, 'old window status read is held');
+    f.power({ suspendSerial: 2, observedNotificationSequence: 4 }); await f.advance(0);
+    const successor = f.activeStatus()[0];
+    const retired = !!successor && successor !== old;
+    f.reply(old, { present: false }); await f.flush();
+    const state = f.snapshot();
+    assert(retired && state.statusRequests === 2 && state.pendingStatus === 1 && state.peakPendingStatus === 1,
+      'coalesced Ready retires the old IPC and starts one present-scope read');
+    assert(state.shows === 0 && state.disables === 0 && state.closed === 0, 'late absence cannot close the window session');
+    f.reply(successor!); await f.flush();
+    f.hold.delete('status'); f.status({ present: false }); await f.advance(2000);
+    const ended = f.snapshot();
+    assert(ended.closed === 1 && ended.disables === 1 && ended.shows === 1, 'fresh absence still returns the parent window once');
+  });
+  await check('suspend-retires-audit-until-confirmed-ready', async () => {
+    await f.bridge.launch(); await f.flush(); f.reply(f.activeStatus()[0]);
+    await f.advance(2000); const held = f.activeStatus()[0];
+    assert(!!held, 'there is an established child and one held audit');
+    f.power({ phase: 'suspending', hardwareWritesAllowed: false, suspendSerial: 2, observedNotificationSequence: 3 });
+    f.focus(); f.visibility('visible'); f.owner('yemancc'); await f.advance(11000);
+    const heldState = f.snapshot();
+    assert(heldState.pendingStatus === 0 && !heldState.statusTimer && heldState.statusRequests === 2 && heldState.disables === 0,
+      'no status timer, IPC, or disable survives the closed power gate');
+    f.power({ phase: 'ready', hardwareWritesAllowed: true, generation: 4, observedNotificationSequence: 4 }); await f.advance(0);
+    f.reply(held, { present: true, compatible: false, inputOwner: 'host' }); await f.flush();
+    const state = f.snapshot();
+    assert(state.statusRequests === 3 && state.pendingStatus === 1 && state.conflicts === 0 && state.disables === 0,
+      'Ready starts one new audit and ignores the old conflict');
+  });
+  await check('wake-transport-failure-is-not-child-exit', async () => {
+    await f.bridge.launch(); await f.flush();
+    const old = f.activeStatus()[0]; assert(!!old, 'startup observation was interrupted before the first reply');
+    f.power({ phase: 'suspended', hardwareWritesAllowed: false, suspendSerial: 2, observedNotificationSequence: 3 });
+    await f.advance(12000);
+    f.hold.delete('status'); f.faults.add('status');
+    f.power({ phase: 'ready', hardwareWritesAllowed: true, generation: 4, observedNotificationSequence: 4 }); await f.advance(0);
+    const failed = f.snapshot();
+    assert(failed.statusRequests === 2 && failed.closed === 0 && failed.disables === 0 && failed.shows === 0 && failed.timers === 1,
+      'failed post-wake startup observation is unknown even after the original deadline');
+    f.faults.delete('status'); await f.advance(2000);
+    const recovered = f.snapshot();
+    assert(recovered.statusRequests === 3 && recovered.closed === 0 && recovered.nativeEnabled && recovered.timers === 1,
+      'startup observation recovers on the existing audit cadence');
+  });
   for (const reason of ['stop', 'closed', 'conflict']) {
     await check('reopen-during-' + reason + '-disable', async () => {
       f.hold.delete('status'); await f.bridge.launch(); await f.flush(); f.hold.add('disable');
@@ -434,6 +542,126 @@ async function checkSessionContracts(): Promise<void> {
     assert(f.snapshot().enables === 1 && f.snapshot().launches === 1, 'replacement waits for an already dispatched shell launch receipt');
     f.hold.delete('launch'); f.reply(launch); await f.flush();
     assert(!(await old).ok && (await current).ok && f.snapshot().minimizes === 1, 'old shell receipt cannot publish success or minimize the replacement');
+  });
+  await check('power-advance-retires-queued-enable', async () => {
+    f.hold.add('enable');
+    const first = f.bridge.launch(); await f.flush();
+    const enable = f.outstanding('enable')[0];
+    assert(enable?.args.powerScope?.join(':') === '3:1:2', 'dispatched enable carries the original public scope');
+    const queued = f.bridge.launch(); await f.flush();
+    f.power({ suspendSerial: 2, observedNotificationSequence: 4 }); await f.flush();
+    f.hold.delete('enable'); f.reply(enable, undefined, 'power policy write scope expired'); await f.flush();
+    assert(!(await first).ok && !(await queued).ok && f.snapshot().enables === 1 && f.snapshot().launches === 0,
+      'a new boundary retires the queued old click without sending either mutation');
+    f.hold.add('launch'); const fresh = f.bridge.launch(); await f.flush();
+    const launch = f.outstanding('launch')[0];
+    assert(launch?.args.powerScope?.join(':') === '3:2:4', 'fresh explicit launch carries the new public scope');
+    f.hold.delete('launch'); f.reply(launch); await f.flush();
+    assert((await fresh).ok && f.snapshot().launches === 1 && f.snapshot().minimizes === 1,
+      'settled old enable leaves the current launch path usable');
+  });
+  await check('power-advance-retires-parent-pid-read-before-launch', async () => {
+    f.hold.add('pid');
+    let oldDone = false;
+    const old = f.bridge.launch().then(result => { oldDone = true; return result; });
+    await f.flush(); const pid = f.outstanding('pid')[0];
+    assert(!!pid && f.snapshot().enables === 1 && f.snapshot().launches === 0, 'PID lookup begins after one accepted enable');
+    f.power({ suspendSerial: 2, observedNotificationSequence: 4 }); await f.flush();
+    const beforeLateReply = { settled: oldDone, pending: f.pending(), disables: f.snapshot().disables };
+    f.reply(pid, 12); await f.flush(); const result = await old;
+    assert(beforeLateReply.settled && beforeLateReply.pending === 0 && beforeLateReply.disables === 1 && !result.ok &&
+      f.snapshot().launches === 0 && f.snapshot().minimizes === 0, 'old PID wait retires before the late response with zero shell dispatch');
+    f.hold.delete('pid'); const fresh = await f.bridge.launch(); await f.flush();
+    assert(fresh.ok && f.snapshot().launches === 1 && f.snapshot().minimizes === 1, 'new explicit launch succeeds once in the current scope');
+  });
+  await check('power-advance-does-not-replay-an-issued-child-launch', async () => {
+    f.hold.add('launch'); const old = f.bridge.launch(); await f.flush(); const issued = f.outstanding('launch')[0];
+    assert(!!issued && f.snapshot().launches === 1, 'one child launch is already dispatched before power changes');
+    f.power({ suspendSerial: 2, observedNotificationSequence: 4 }); await f.flush();
+    f.reply(issued); const result = await old; await f.flush();
+    const current = f.snapshot();
+    assert(result.ok && current.launches === 1 && current.disables === 0 && current.minimizes === 0 && current.pendingStatus === 1,
+      'issued child receipt establishes observation without replay or stale parent minimize');
+  });
+  await check('power-advance-lost-launch-reply-does-not-lock-renderer', async () => {
+    f.hold.add('launch');
+    let done = false;
+    const first = f.bridge.launch().then(() => { done = true; }, () => { done = true; });
+    await f.flush();
+    assert(f.snapshot().launches === 1, 'one launch has been posted');
+    f.power({ suspendSerial: 2, observedNotificationSequence: 4 });
+    await f.advance(10000);
+    const bounded = done;
+    const sends = f.snapshot();
+    // Let the old fixture tear down even when the production queue is locked.
+    const outstanding = f.outstanding('launch')[0];
+    if (outstanding) f.reply(outstanding);
+    f.hold.delete('launch'); await first; await f.flush();
+    assert(bounded && sends.launches === 1 && sends.minimizes === 0,
+      'loss of a launch acknowledgement cannot lock the renderer or replay the launch');
+  });
+  await check('power-advance-lost-disable-reply-does-not-lock-renderer', async () => {
+    await f.bridge.launch(); await f.flush(); f.hold.add('disable');
+    let done = false;
+    const stopping = f.bridge.stop().then(() => { done = true; }, () => { done = true; });
+    await f.flush();
+    assert(f.snapshot().disables === 1, 'one stop has been posted');
+    f.power({ suspendSerial: 2, observedNotificationSequence: 4 });
+    await f.advance(10000);
+    const bounded = done;
+    const outstanding = f.outstanding('disable')[0];
+    if (outstanding) f.reply(outstanding);
+    f.hold.delete('disable'); await stopping; await f.flush();
+    assert(bounded, 'loss of a stop acknowledgement cannot keep the session queue locked');
+  });
+  await check('read-back-executed-launch-after-wake', async () => {
+    f.hold.add('launch');
+    const first = f.bridge.launch(); await f.flush();
+    const launch = f.outstanding('launch')[0];
+    f.reply(launch, { ok: true, pid: 77 }, undefined, false);
+    f.power({ suspendSerial: 2, observedNotificationSequence: 4 });
+    await f.advance(4000);
+    const result = await first;
+    assert(result.ok && result.pid === 77 && f.snapshot().launches === 1 && f.snapshot().minimizes === 0 && f.pendingStatus() === 1,
+      'retained completion rejoins the original child in the new scope without replay or focus handoff');
+  });
+  await check('late-completion-during-first-receipt-read', async () => {
+    f.hold.add('launch'); f.hold.add('customSteamLibrary.settleMutation');
+    const first = f.bridge.launch(); await f.flush();
+    const launch = f.outstanding('launch')[0]; const mutationTicket = launch.args.mutationTicket;
+    f.power({ suspendSerial: 2, observedNotificationSequence: 4 });
+    await f.advance(4000);
+    const read = f.outstanding('customSteamLibrary.settleMutation')[0];
+    assert(!!read, 'first bounded receipt read is in flight');
+    f.reply(launch, { ok: true, pid: 77 }, undefined, false);
+    f.completion(mutationTicket); await f.flush();
+    f.hold.delete('customSteamLibrary.settleMutation');
+    f.reply(read, { ticket: mutationTicket, state: 'running' });
+    await first; await f.flush();
+    assert(f.requests('customSteamLibrary.settleMutation').length === 2 && f.snapshot().launches === 1 &&
+      f.snapshot().minimizes === 0 && f.pendingStatus() === 1, 'completion owns one follow-up after the stale running response');
+  });
+  await check('read-back-retires-queued-launch-before-reopen', async () => {
+    f.queued.add('launch'); f.hold.add('launch');
+    const first = f.bridge.launch(); await f.flush(); const old = f.outstanding('launch')[0];
+    f.power({ suspendSerial: 2, observedNotificationSequence: 4 }); await f.advance(4000);
+    assert(!(await first).ok && f.snapshot().minimizes === 0 && f.snapshot().disables === 1,
+      'a queued ticket is retired and the already enabled session is cleaned up');
+    f.queued.delete('launch'); f.hold.delete('launch');
+    const second = await f.bridge.launch(); f.reply(old); await f.flush();
+    assert(second.ok && f.snapshot().launches === 2 && f.snapshot().minimizes === 1 && f.pendingStatus() === 1,
+      'fresh launch after queued retirement survives the late old reply');
+  });
+  await check('stop-wins-over-late-recovered-launch', async () => {
+    f.hold.add('launch');
+    const first = f.bridge.launch(); await f.flush(); const launch = f.outstanding('launch')[0];
+    f.power({ suspendSerial: 2, observedNotificationSequence: 4 }); await f.advance(4000);
+    assert(!(await first).ok && f.snapshot().launches === 1, 'running launch leaves a bounded unconfirmed result');
+    await f.bridge.stop(); await f.flush();
+    assert(f.snapshot().disables === 0, 'stop does not race unknown native execution');
+    f.reply(launch, { ok: true, pid: 77 }, undefined, false); f.completion(launch.args.mutationTicket); await f.flush();
+    assert(f.snapshot().disables === 1 && f.pendingStatus() === 0 && f.snapshot().minimizes === 0,
+      'confirmed completion resumes stop only, without reattaching the child');
   });
   for (const failure of ['enable', 'launch', 'launch-false']) {
     await check('launch-fault-' + failure, async () => {
@@ -623,8 +851,6 @@ async function checkCurrentContracts(): Promise<void> {
   }
 }
 
-const args = process.argv.slice(2);
-const sessionOnly = args.includes('--session-only');
 const outputArg = args.find(arg => arg !== '--session-only');
 void (sessionOnly ? Promise.resolve() : checkCurrentContracts()).then(checkSessionContracts).then(() => {
   const output = path.resolve(outputArg || path.join(root, '../../Build/Validation/SelfTests', sessionOnly
@@ -636,7 +862,7 @@ void (sessionOnly ? Promise.resolve() : checkCurrentContracts()).then(checkSessi
   fs.mkdirSync(path.dirname(output), { recursive: true });
   fs.writeFileSync(output, JSON.stringify({
     allPassed: cases.every(entry => entry.passed), caseCount: cases.length, failedCount: cases.filter(entry => !entry.passed).length, cases,
-    sessionIpcCombination: { actualBridgeAndIpc: true, sameVm: true, virtualClock: true, subcases: sessionResults },
+    sessionIpcCombination: { actualBridgeAndIpc: true, actualSharedPowerSource: true, sameVm: true, virtualClock: true, subcases: sessionResults },
     contract: sessionOnly ? 'session-notifications-and-audit' : 'nested-child-only; optional-shortcut-metadata; independent-artwork-slots',
     filesystemAndIpcMocked: true, liveNetworkUsed: false,
     realSteamFilesModified: false, steamStoppedOrLaunched: false,

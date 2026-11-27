@@ -14954,6 +14954,7 @@ internal sealed partial class FanHostEngine : IDisposable
         RejectUserControlDuringTransitionLockFree("acquire-control");
         lock (gate)
         {
+            RequireCurrentControlRequest();
             RetireResumeBusinessForManualLocked("new-manual-device-owner");
             EnsureNotStopped();
             EnsureControlAvailable();
@@ -14996,6 +14997,7 @@ internal sealed partial class FanHostEngine : IDisposable
                 if (state.OpenCalled) RecoverAfterHardwareFailure(ex);
                 throw;
             }
+            RequireCurrentControlRequest();
             var now = MonoMs();
             var prefix = realBackend is null ? "safe" : "real";
             var lease = new FanLease($"{prefix}-{Guid.NewGuid():N}", ++generation, now + 15000, "YeManCC");
@@ -15227,6 +15229,7 @@ internal sealed partial class FanHostEngine : IDisposable
         RejectUserControlDuringTransitionLockFree("enable");
         lock (gate)
         {
+            RequireCurrentControlRequest();
             RetireResumeBusinessForManualLocked("new-manual-curve-owner");
             var admittedGateEpoch = realBackend?.SuspendGateEpochForResume;
             diagnostics.Write("api.enable.begin", new { state = state.State, hasLease = state.Lease is not null });
@@ -15257,6 +15260,7 @@ internal sealed partial class FanHostEngine : IDisposable
                 RecoverAfterHardwareFailure(ex);
                 throw;
             }
+            RequireCurrentControlRequest();
             // A real curve write is the only transition into active software
             // control. Opening HC prepares the device but does not itself
             // prove that a fan command was issued.  Clear a previous OEM
@@ -17224,6 +17228,14 @@ internal sealed partial class FanHostEngine : IDisposable
         if (stopped) throw new FanApiException(409, "HOST_STOPPED", "Fan Host 已停止");
     }
 
+    private void RequireCurrentControlRequest()
+    {
+        // The HTTP import may have waited for gate. Only its own scope can
+        // authorize the request; a newer resident control scope cannot.
+        if (SharedPowerContext.Required && SharedPowerContext.Borrowed?.IsCurrent != true)
+            throw FanRemotePowerContext.Superseded();
+    }
+
     private void EnsureControlAvailable()
     {
         if (Volatile.Read(ref closeWriteBlocked) != 0)
@@ -18114,7 +18126,8 @@ internal sealed partial class FanHostEngine : IDisposable
     {
         "not-applicable-no-write-history" => OemReleaseAction.NotApplicable,
         "proven-by-scope-receipts" or "proven-by-host-hc-acpi-fallback" or "proven-by-msi-structured-release" or
-            "proven-by-source-auto-register-and-terminal-close" or "proven-by-onex-ec-release" => OemReleaseAction.Proven,
+            "proven-by-source-auto-register-and-terminal-close" or "proven-by-source-duty-zero-commands-and-terminal-close" or
+            "proven-by-onex-ec-release" => OemReleaseAction.Proven,
         "failed-release-action" => OemReleaseAction.Failed,
         "compat-route-without-scope" => OemReleaseAction.CompatRouteWithoutScope,
         "unknown-release-action" => OemReleaseAction.Unknown,
@@ -20751,7 +20764,9 @@ internal sealed partial class LocalFanHostServer : IDisposable
             snapshot.OemReleaseActionKind);
         var cleanupEvidence = snapshot.SourceFanMode
             ? !snapshot.SourceFanClosePending && (!snapshot.SourceFanOwnerEntered || snapshot.SourceFanClosed)
-                && (!snapshot.HardwareWritesObserved || snapshot.SourceFanAutomaticReturned)
+                && (!snapshot.HardwareWritesObserved || (snapshot.SourceFanAutomaticReturned
+                    ? snapshot.OemReleaseActionKind == "proven-by-source-auto-register-and-terminal-close"
+                    : snapshot.OemReleaseActionKind == "proven-by-source-duty-zero-commands-and-terminal-close"))
             : hcCloseComplete || !snapshot.HcVirtualCloseReturned;
         return snapshot.State == "Stopped" &&
             !snapshot.UnknownState &&

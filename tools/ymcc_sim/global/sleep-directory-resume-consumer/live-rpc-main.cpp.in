@@ -17,7 +17,9 @@ int main(){
     else if(reason!="success")throw std::runtime_error("unexpected memory setup reason");
    }else if(command=="recover"){
     procs[100].queryKnown=true;procs[100].allowResume=true;procs[100].nativeFail=false;existsErrors.clear();iteratorErrors.clear();readDenied.clear();readFailsPartway.clear();
-   }else if(command=="resume")result=memoryResumeHandler(request.at("args"));
+   }else if(command=="resume"){
+    result=dispatchMemoryResume(request.at("args"));
+   }else if(command=="resume-status")result=memoryResumeStatus(request.at("args"));
    else if(command!="snapshot")throw std::runtime_error("unexpected memory command");
    std::cout<<json({{"id",id},{"result",result},{"state",{{"markerRetained",files.count(key(SG_MANUAL_DIR))>0},{"depth",procs[100].depth},{"birth",procs[100].birth},{"manualOwner",g_manualPausedPid.load()},{"ntAttempts",ntAttempts},{"ntSuccesses",ntSuccesses}}},{"trace",operations},{"resumeReceipts",resumeReceipts}}).dump()<<std::endl;
   }catch(const std::exception& e){std::cout<<json({{"protocolError",e.what()}}).dump()<<std::endl;return 23;}

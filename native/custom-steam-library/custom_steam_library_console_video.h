@@ -19,7 +19,12 @@ inline constexpr Game botw{"The Legend of Zelda: Breath of the Wild", "switch-or
     {"Zelda: Breath of the Wild", "Breath of the Wild", "\u585e\u5c14\u8fbe\u4f20\u8bf4\uff1a\u65f7\u91ce\u4e4b\u606f"}, {"botw", "zeldabotw"}};
 inline constexpr Game sentinels{"13 Sentinels: Aegis Rim", "switch-or-ps4",
     {"\u5341\u4e09\u673a\u5175\u9632\u536b\u5708", "\u5341\u4e09\u6a5f\u5175\u9632\u885b\u570f", "\u5341\u4e09\u6a5f\u5175\u9632\u885b\u5708", "13\u673a\u5175", "\u5341\u4e09\u673a\u5175"}};
-inline constexpr std::array games{&totk,&botw,&sentinels};
+inline constexpr Game unicornOverlord{"Unicorn Overlord", "switch-or-playstation-or-xbox",
+    {"Unicorn Overlord PC", "\u5723\u517d\u4e4b\u738b", "\u8056\u7378\u4e4b\u738b"}};
+inline constexpr Game animalCrossing{"Animal Crossing: New Horizons", "switch",
+    {"\u96c6\u5408\u5566\uff01\u52a8\u7269\u68ee\u53cb\u4f1a", "\u96c6\u5408\u5566\uff01\u52d5\u7269\u68ee\u53cb\u6703",
+     "\u52a8\u7269\u68ee\u53cb\u4f1a", "\u52d5\u7269\u68ee\u53cb\u6703"}, {"acnh"}};
+inline constexpr std::array games{&totk,&botw,&sentinels,&unicornOverlord,&animalCrossing};
 struct Offer {
     const Game& game;
     std::string_view id, provider, url, poster, quality, sha256;
@@ -38,6 +43,13 @@ inline constexpr std::array offers{
     Offer{botw, "zelda-botw-nintendo", "nintendo",
           botwPreviewUrl, "https://www.nintendo.com/jp/zelda/botw/assets/movie/top_trailer.jpg", "MP4",
           "c79f11c06c274e93f6b5aa3ed5da01d5ba069a4f8284e4f7b9fcae9ab9fe0cbe", 6406940, true},
+    Offer{unicornOverlord, "unicorn-overlord-atlus", "atlus",
+          "https://unicornoverlord.atlus.com/media/video/hero_loop.mp4",
+          "https://unicornoverlord.atlus.com/media/img/og_img.jpg", "MP4",
+          "4977ff843f5080e58af4505acb22b40632f357be26259f9a200b41113a7bb502", 5238500},
+    Offer{animalCrossing, "animal-crossing-new-horizons-island-tour", "nookipedia",
+          "https://dodo.ac/np/images/0/02/Island_Tour_Creator_Trailer.mp4", "", "MP4",
+          "58837e3cda940238cc0cb93ef544e2819f3d883300351abd7a9b07de827fd7d0", 4074926},
     Offer{totk, "zelda-totk", "motionbgs",
           "https://motionbgs.com/dl/hd/6361/", "https://motionbgs.com/media/6361/zelda-tears-of-the-kingdom.jpg", "1080p MP4",
           "ca0761667d3f386d914b5784d85e416b3ce5df2a77216c2afbb750360b97ee1e", 3237371},

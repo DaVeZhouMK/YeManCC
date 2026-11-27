@@ -114,7 +114,8 @@ try {
     $duplicateProcess = Start-Process -FilePath $hostExe -ArgumentList @(
         '--port', [string]($port + 1),
         '--protocol-version', '2',
-        '--session-token', $session
+        '--session-token', $session,
+        '--mock-handshake'
     ) -PassThru -WindowStyle Hidden
     if (-not $duplicateProcess.WaitForExit(3000) -or $duplicateProcess.ExitCode -ne 2) {
         throw 'second Host was not rejected by the process-lifetime mutex'

@@ -3,6 +3,9 @@
 // Same UI owner as the pads: SD/disabled menu keys use direct actions; other keys use BUS.
 // No hook, periodic timer or dedicated worker.
 inline std::array<HWND,7> buttonWindows{},buttonOutlines{};
+// UI-thread only, single use by an admitted direct QAM click.
+struct QuickAccessActivation { HWND button=nullptr, previous=nullptr; DWORD previousPid=0; ULONGLONG tick=0, edgeTime=0; };
+inline QuickAccessActivation quickAccessActivation;
 inline UINT64 buttonRefreshEpoch=0; // Invalidates a refresh superseded during dispatcher work.
 struct ButtonInputRecovery {unsigned long long aborts=0,retries=0,recovered=0,failed=0;DWORD lastError=0;int lastIndex=-1;};
 inline ButtonInputRecovery buttonInputRecovery;
@@ -287,6 +290,17 @@ inline LRESULT CALLBACK buttonProc(HWND h,UINT m,WPARAM w,LPARAM lp) {
     if(inputTeardown&&(m==WM_POINTERDOWN||m==WM_POINTERUPDATE||m==WM_POINTERUP||m==WM_POINTERCAPTURECHANGED||
        m==WM_CANCELMODE||m==WM_STYLECHANGED||m==WM_ENABLE))return 0;
     const int index=(int)GetWindowLongPtrW(h,GWLP_USERDATA);
+    if(index==2&&(m==WM_ACTIVATE||m==WM_NCDESTROY)){
+        quickAccessActivation={};
+        if(m==WM_ACTIVATE&&!inputTeardown&&LOWORD(w)!=WA_INACTIVE&&!HIWORD(w)&&lp&&h==buttonWindows[2]){
+            const HWND previous=reinterpret_cast<HWND>(lp);DWORD pid=0;
+            if(previous!=h&&GetWindowThreadProcessId(previous,&pid)&&pid){
+                FILETIME time{};GetSystemTimePreciseAsFileTime(&time);
+                quickAccessActivation={h,previous,pid,GetTickCount64(),
+                    (static_cast<ULONGLONG>(time.dwHighDateTime)<<32)|time.dwLowDateTime};
+            }
+        }
+    }
     if(m==WM_STYLECHANGED||m==WM_ENABLE){
 #ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE
         if(index>=0&&index<7&&nativeButtonSurfaces[index].root()==h&&nativeButtonSurfaces[index].policyEnabled()&&
@@ -380,7 +394,13 @@ inline bool renderButton(int index,int transparency,bool force,DWORD* submission
         const double fontHeight=index==0?height*.66*.70/.72:index==1?height*.66*.30/.72:height*.52*.80;
         HFONT font=CreateFontW(std::max(1,(int)std::lround(fontHeight)),0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,ANTIALIASED_QUALITY,DEFAULT_PITCH,L"Segoe UI");
         const auto previousFont=SelectObject(memory,font);SetTextColor(memory,RGB(255,255,255));SetBkMode(memory,TRANSPARENT);
-        RECT text{0,0,width,height};DrawTextW(memory,names[index],-1,&text,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
+        RECT text{0,0,width,height};SIZE extent{};
+        const int length=lstrlenW(names[index]);
+        // The fixed ASCII labels need no layout when the measured text fits
+        // with room for overhang. Keep DrawText's clipping for tight buttons.
+        if(!GetTextExtentPoint32W(memory,names[index],length,&extent)||extent.cx>width-4||extent.cy>height-4||
+           !ExtTextOutW(memory,(width-extent.cx)/2,(height-extent.cy)/2,ETO_CLIPPED,&text,names[index],length,nullptr))
+            DrawTextW(memory,names[index],-1,&text,DT_CENTER|DT_VCENTER|DT_SINGLELINE|DT_NOPREFIX);
         SelectObject(memory,previousFont);DeleteObject(font);GdiFlush();
         int left=width,top=height,right=0,bottom=0;
         for(int y=0;y<height;y++)for(int x=0;x<width;x++)if(pixels[y*width+x]&0xFFFFFF){left=std::min(left,x);top=std::min(top,y);right=std::max(right,x+1);bottom=std::max(bottom,y+1);}
@@ -408,8 +428,8 @@ inline bool renderButton(int index,int transparency,bool force,DWORD* submission
     }
     buttonArtwork[index]=upload;
     }
-    if(!buildPressFrame(art,buttonFrames[index][0],padding,false) || !buildPressFrame(art,buttonFrames[index][1],padding,true))return false;
     auto& frame=buttonFrames[index][pressed?1:0];
+    if(!buildPressFrame(art,frame,padding,pressed))return false;
     const BYTE alpha=outlineAlpha(transparency);
     if(dryRun && !buttonArtTestPrefix.empty() && buttonPermitted(getConfig(),index)) {
         const auto file=buttonArtTestPrefix.wstring()+L"-"+std::to_wstring(index)+L".bgra";
@@ -450,8 +470,9 @@ inline bool buttonsRefresh(const Config& cfg,const RECT& monitor,const RECT& wor
             continue;
         }
         const auto r=rects[i];const int width=r.right-r.left,height=r.bottom-r.top;
-        if(!buttonWindows[i]) {
-            buttonWindows[i]=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_NOREDIRECTIONBITMAP,L"YeManScreenButton",L"YeManCC Screen Button",WS_POPUP,0,0,width,height,nullptr,nullptr,instance,(void*)(INT_PTR)i);
+        const bool creating=!buttonWindows[i];
+        if(creating) {
+            buttonWindows[i]=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_NOREDIRECTIONBITMAP,L"YeManScreenButton",L"YeManCC Screen Button",WS_POPUP,r.left,r.top,width,height,nullptr,nullptr,instance,(void*)(INT_PTR)i);
             if(!buttonWindows[i])windowError=GetLastError();
         }
         if(!current())return false;
@@ -460,7 +481,7 @@ inline bool buttonsRefresh(const Config& cfg,const RECT& monitor,const RECT& wor
             if(!buttonOutlines[i])windowError=GetLastError();
         }
         if(!current())return false;
-        const bool positioned=buttonWindows[i] && SetWindowPos(buttonWindows[i],HWND_TOPMOST,r.left,r.top,width,height,SWP_NOACTIVATE);
+        const bool positioned=buttonWindows[i] && (creating||SetWindowPos(buttonWindows[i],HWND_TOPMOST,r.left,r.top,width,height,SWP_NOACTIVATE));
         if(!current())return false;
         if(buttonWindows[i] && !positioned)windowError=GetLastError();
         const bool inputReady=positioned&&buttonNativeInputSync(i,true,force);

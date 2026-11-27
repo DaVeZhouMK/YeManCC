@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
 import OverflowGameName from './OverflowGameName.vue';
 import AppIcon from '@/components/AppIcon.vue';
-import GameQuickActions from '@/components/GameQuickActions.vue';
 import {
   getCurrentGame,
   refreshGameStatus,
@@ -36,6 +35,8 @@ const game = ref<DetectedGame | null>(null);
 const summonCandidate = ref<SummonCandidate | null>(null);
 const gameIdentifying = ref(false);
 const gameRuleMenu = ref<'quick' | null>(null);
+const quickActions = shallowRef<typeof import('@/components/GameQuickActions.vue')['default'] | null>(null);
+const quickLoadFailed = ref(false);
 const gameRuleTriggerEl = ref<HTMLElement | null>(null);
 const gameRulePanelEl = ref<HTMLElement | null>(null);
 const statusMsg = ref('');
@@ -50,6 +51,7 @@ let activeSummonGeneration = 0;
 let blockedSummonPid = 0;
 let refreshAfterIdentification = false;
 let menuResizeObserver: ResizeObserver | null = null;
+let quickRefreshPending = false;
 
 function updateGameMenuViewport(): void {
   const panel = gameRulePanelEl.value;
@@ -158,17 +160,34 @@ async function refreshGameRecognition(): Promise<void> {
   }
 }
 
-watch(gameRuleMenu, (menu) => {
+watch(gameRuleMenu, (menu, _previous, onCleanup) => {
   menuResizeObserver?.disconnect();
   menuResizeObserver = null;
   if (!menu) return;
+  let current = true;
+  onCleanup(() => { current = false; quickRefreshPending = false; });
+  quickLoadFailed.value = false;
   nextTick(() => {
-    if (!gameRuleMenu.value || !gameRulePanelEl.value) return;
+    if (!current || !gameRulePanelEl.value) return;
     updateGameMenuViewport();
     menuResizeObserver = new ResizeObserver(updateGameMenuViewport);
     menuResizeObserver.observe(gameRulePanelEl.value);
     if (gameRuleTriggerEl.value) menuResizeObserver.observe(gameRuleTriggerEl.value);
+  });
+  const ready = () => {
     focusGameRulePanel();
+    if (quickRefreshPending) {
+      quickRefreshPending = false;
+      void nextTick(() => { if (current && gameRuleMenu.value) window.dispatchEvent(new CustomEvent('game-quick-refresh')); });
+    }
+  };
+  if (quickActions.value) ready();
+  else void import('@/components/GameQuickActions.vue').then(({ default: panel }) => {
+    if (!current || !gameRuleMenu.value) return;
+    quickActions.value = panel;
+    ready();
+  }).catch(() => {
+    if (current && gameRuleMenu.value) quickLoadFailed.value = true;
   });
 });
 
@@ -336,8 +355,10 @@ function onGamepadEdit(e: Event): void {
   e.preventDefault();
   if (!gameRuleMenu.value) {
     openGameRuleRoot();
-  } else if (gameRuleMenu.value === 'quick') {
+  } else if (quickActions.value) {
     window.dispatchEvent(new CustomEvent('game-quick-refresh'));
+  } else if (!quickLoadFailed.value) {
+    quickRefreshPending = true;
   }
 }
 
@@ -388,12 +409,16 @@ onUnmounted(() => {
 
     <div v-if="gameRuleMenu" ref="gameRulePanelEl" class="game-recognition-popover" data-gp-modal>
       <div v-if="gameRuleMenu === 'quick'" class="game-rule-panel game-quick-panel">
-        <GameQuickActions
+        <component
+          :is="quickActions"
+          v-if="quickActions"
           :game="game"
           :open="gameRuleMenu === 'quick'"
           @status="({ message, error }) => { statusMsg = message || ''; errMsg = error || ''; }"
           @close-request="closeQuickMenu"
         />
+        <p v-else-if="quickLoadFailed" class="game-recognition-message error" role="alert">游戏菜单加载失败</p>
+        <p v-else class="game-recognition-message" role="status">加载中…</p>
       </div>
 
       <div v-if="statusMsg || errMsg" class="game-recognition-message" :class="{ error: !!errMsg }">

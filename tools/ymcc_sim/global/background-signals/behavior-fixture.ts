@@ -8,11 +8,13 @@ import {onSharedPowerLifecycle,isSharedPowerLifecycleAdmitted} from '../../../..
 const rows:any[]=[];let events:any[]=[];let calls:any[]=[];let subscriptions=0;
 const game={pid:4242,processCreated:'133700000000000001',path:'X:/YMCC-FIXTURE/game.exe',title:'Synthetic Fixture',name:'Synthetic Fixture'};
 const media=()=>({key:'exe-fixture',ready:true,dynamicReady:true,staticReady:true,deleted:false,identityVerified:true,bindingRevision:7,status:'ready',appId:123,name:'Synthetic Fixture',url:'https://game-media.localhost/fixture.mp4',localUrl:'https://game-media.localhost/fixture.mp4',asset:{id:'asset-fixture',revision:'v1',kind:'video',mime:'video/mp4',extension:'mp4',bytes:32},playback:{start:1,end:5,fit:'cover'}});
-const power={phase:'ready',generation:1,known:true,inputReady:true,hardwareWritesAllowed:true,publicationRevision:1,observedNotificationSequence:1,notificationPending:false};
-const allowed=new Set(['power.lifecycle','game.detect','gameMedia.resolve','gameMedia.background','background.get','background.install','background.clear','dynamicBackground.get','dynamicBackground.installUrl','dynamicBackground.installOnline','dynamicBackground.clear']);
+const power={phase:'ready',generation:1,suspendSerial:0,known:true,inputReady:true,hardwareWritesAllowed:true,publicationRevision:1,observedNotificationSequence:1,notificationPending:false};
+const lifecycleListeners=new Set<(value:unknown)=>void>();
+const allowed=new Set(['power.lifecycle','game.detect','gameMedia.resolve','gameMedia.identity','gameMedia.legacy','gameMedia.background','background.get','background.install','background.clear','dynamicBackground.get','dynamicBackground.installUrl','dynamicBackground.installOnline','dynamicBackground.clear']);
 let native:(op:string,args:any)=>any;
 const fixture:any={settings:{dynamicBackgroundEnabled:true,steamDynamicWallpaperEnabled:true,steamWallpaperBackgroundDownload:false,backgroundOpacity:0.64,backgroundBlur:0},forbidden:[],get subscriptions(){return subscriptions;},set subscriptions(value:number){subscriptions=value;},
  async invoke(op:string,args:any,options:any){calls.push({op,args,options});if(!allowed.has(op)){this.forbidden.push(op);throw Error('FORBIDDEN_REAL_IO:'+op);}if(op==='power.lifecycle')return {...power};return native(op,args);},
+ listen(name:string,listener:(value:unknown)=>void){if(name!=='power.lifecycleChanged')return; lifecycleListeners.add(listener);return()=>lifecycleListeners.delete(listener);},
  async writeSettings(patch:any){Object.assign(this.settings,patch);}};
 (globalThis as any).__backgroundFixture=fixture;
 (globalThis as any).window=new EventTarget();
@@ -40,6 +42,32 @@ await row('bridge.native-io-failure',{nativeRejects:true},'background.ts backgro
 await row('dynamic.cached-media',{game,entry:'ready cached synthetic media'},'dynamicBackground.refresh -> real SharedGameMedia.lookup -> fresh game.detect -> loaded event',async()=>{const result=await refreshDynamicBackground({...game});assert.equal(result?.state.enabled,true);assert.equal(result?.state.processCreated,game.processCreated);assert.equal(result?.state.mediaBindingRevision,7);assert.equal(events[0].name,'dynamic-background:loaded');assert.deepEqual(calls.map(x=>x.op),['gameMedia.resolve','gameMedia.resolve','game.detect']);const detection=calls.at(-1);assert.equal(detection.args.expectedPowerGeneration,power.generation);assert.equal(detection.args.expectedPowerNotificationSequence,power.observedNotificationSequence);return result?.state;});
 await row('dynamic.disabled-no-io',{enabled:false},'dynamicBackground.refresh/get',async()=>{fixture.settings.dynamicBackgroundEnabled=false;assert.equal(await refreshDynamicBackground({...game}),null);assert.deepEqual(await getDynamicBackgroundState(),{enabled:false,url:''});assert.equal(calls.length,0);noLoaded();return {disabled:true};});
 await row('dynamic.duplicate-inflight',{samePidAndCreation:true},'dynamicBackground.backgroundInFlight map',async()=>{const gate=deferred<any>();native=(op)=>op==='gameMedia.resolve'?gate.promise:op==='game.detect'?{...game}:{queued:0};const first=refreshDynamicBackground({...game}),second=refreshDynamicBackground({...game});assert.equal(calls.length,1);gate.resolve(media());assert.deepEqual(await first,await second);assert.equal(events.filter(x=>x.name==='dynamic-background:loaded').length,1);return {oneInputLookup:true,oneLoadedEvent:true};});
+await row('dynamic.coalesced-ready',{sameGame:true,sameGeneration:true,suspendSerialChanged:true,oldLegacyHeld:true},'public power -> dynamicBackground refresh and legacy migration',async()=>{
+ const oldReply=deferred<any>(),oldEntered=deferred<void>();let legacy=0;
+ native=(op)=>{
+  if(op==='gameMedia.resolve')return {...media(),ready:false};
+  if(op==='gameMedia.identity')return {appId:123,verified:true};
+  if(op==='gameMedia.legacy'){if(++legacy===1){oldEntered.resolve();return oldReply.promise;}return {...media(),bindingRevision:8,currentGameWallpaperFallback:true};}
+  if(op==='game.detect')return {...game};
+  throw Error('UNEXPECTED_IO_OPERATION:'+op);
+ };
+ const old=refreshDynamicBackground({...game});
+ try{
+  await Promise.race([oldEntered.promise,old.then(()=>assert.fail('Old legacy migration was not reached'))]);
+  const oldSignal=calls.find(call=>call.op==='gameMedia.legacy')?.options?.signal;
+  ++power.suspendSerial;++power.publicationRevision;++power.observedNotificationSequence;
+  for(const listener of lifecycleListeners)listener({...power});
+  const fresh=refreshDynamicBackground({...game});
+  assert.equal(calls.filter(call=>call.op==='gameMedia.resolve').length,2,'New Ready must not join the old Promise');
+  assert.equal((await fresh)?.state.mediaBindingRevision,8);
+  assert.equal(await old,null,'Old caller must settle before its transport reply');
+  assert.equal(oldSignal?.aborted,true);
+  oldReply.resolve({...media(),currentGameWallpaperFallback:true});
+  await new Promise<void>(resolve=>setImmediate(resolve));
+  assert.deepEqual(events.filter(x=>x.name==='dynamic-background:loaded').map(x=>x.detail.mediaBindingRevision),[8]);
+  return {oldRetiredBeforeReply:true,newRevision:8,legacyCalls:legacy};
+ }finally{oldReply.resolve(null);await old.catch(()=>{});}
+});
 await row('dynamic.pid-reuse',{samePid:true,newProcessCreated:'133700000000000002'},'dynamicBackground fresh process valve',async()=>{native=(op)=>op==='game.detect'?{...game,processCreated:'133700000000000002'}:media();assert.equal(await refreshDynamicBackground({...game}),null);noLoaded();return {rejectedStaleIdentity:true};});
 await row('dynamic.missing-process-identity',{processCreated:''},'dynamicBackground process admission',async()=>{await assert.rejects(refreshDynamicBackground({...game,processCreated:''}),/进程身份/);assert.equal(calls.length,0);noLoaded();return {rejectedBeforeIo:true};});
 await row('dynamic.disabled-during-request',{settingsChangedWhilePending:true},'dynamicBackground refresh final admission',async()=>{const gate=deferred<any>();native=(op)=>op==='gameMedia.resolve'?gate.promise:op==='game.detect'?{...game}:{queued:0};const pending=refreshDynamicBackground({...game});fixture.settings.dynamicBackgroundEnabled=false;gate.resolve(media());assert.equal(await pending,null);noLoaded();return {ignoredLateReply:true};});
@@ -49,7 +77,7 @@ await row('dynamic.invalid-entry',{ready:'true',kind:'script',url:{unsafe:true}}
 await row('dynamic.revision-invalidated',{newRevision:8,replyRevision:7},'dynamicBackground + real GameMediaRevisionFence',async()=>{native=(op)=>{if(op==='game.detect'){gameMediaRevisions.observe('exe-fixture',8);return {...game};}return media();};assert.equal(await refreshDynamicBackground({...game}),null);assert.deepEqual(await getDynamicBackgroundState(),{enabled:false,url:''});noLoaded();return {outdatedRevisionNotRendered:true};});
 await row('dynamic.native-io-failure',{op:'game.detect',rejects:true},'dynamicBackground actual admission IO failure',async()=>{native=(op)=>{if(op==='game.detect')throw Error('FIXTURE_DETECT_FAILED');return {...media(),bindingRevision:9};};await assert.rejects(refreshDynamicBackground({...game}),/FIXTURE_DETECT_FAILED/);noLoaded();return {failurePreserved:true};});
 await row('dynamic.missing-ack',{op:'game.detect',reply:null},'dynamicBackground exact process receipt',async()=>{native=(op)=>op==='game.detect'?null:{...media(),bindingRevision:9};assert.equal(await refreshDynamicBackground({...game}),null);assert.deepEqual(await getDynamicBackgroundState(),{enabled:false,url:''});noLoaded();return {noFalseLoadedEvent:true};});
-await row('dynamic.pending-without-ack',{op:'gameMedia.resolve',neverReplies:true},'dynamicBackground pending transport',async()=>{native=()=>new Promise(()=>{});let settled=false;void refreshDynamicBackground({...game,pid:4343}).then(()=>{settled=true;},()=>{settled=true;});await Promise.resolve();await Promise.resolve();assert.equal(settled,false);noLoaded();return {completed:false,successReceipt:false,scope:'pending itself is not accepted as success; outer runner enforces timeout'};});
+await row('dynamic.pending-without-ack',{op:'gameMedia.resolve',heldReply:true},'dynamicBackground pending transport',async()=>{const gate=deferred<any>();native=()=>gate.promise;let settled=false;const pending=refreshDynamicBackground({...game,pid:4343}).finally(()=>{settled=true;});try{await Promise.resolve();await Promise.resolve();assert.equal(settled,false);noLoaded();return {completedBeforeReply:false,successReceipt:false};}finally{gate.resolve(null);await pending.catch(()=>{});}});
 }finally{releasePower();}
 assert.deepEqual(fixture.forbidden,[]);assert.equal(subscriptions,0);
 console.log('BACKGROUND_BEHAVIOR_RECEIPT '+JSON.stringify({schemaVersion:1,status:rows.every(x=>x.status==='PASS')?'PASS':'FAIL',checks:rows,executedProductModules:['src/bridge/background.ts','src/bridge/backgroundPolicy.ts','src/bridge/dynamicBackground.ts','src/bridge/sharedGameMedia.ts','src/bridge/gameMediaRevisionFence.ts','src/bridge/steamMediaSource.ts'],safety:{realNativeCalls:0,userStorageReads:0,wallpaperChanged:false,hostStarted:false,appStarted:false,forbiddenCalls:fixture.forbidden,subscriptions}}));

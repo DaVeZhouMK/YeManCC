@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {createCompositionEnvironment} from './navigation.mjs';
+const {profiles: splitRegistrationProfiles}=JSON.parse(readFileSync(new URL('./ds2-split-registration-field.json',import.meta.url),'utf8'));
 export function registerCompositionCases(environment){
- const {cacheFocusMethods,actualActivation,check,checks,cases,plain,compositionMethods,equalMethod,getState,promiseVariant}=environment;
+ const {identityFixture,cacheFocusMethods,actualActivation,check,checks,cases,plain,compositionMethods,equalMethod,getState,promiseVariant}=environment;
  const allCases=[],contextReads=[];let activeCase=null;
 async function execute(name,fn){activeCase=name;await fn();cases.push(name);activeCase=null;}
 function model(options={}){
@@ -72,6 +74,108 @@ function supplement(f,r){
  check('native-submit-receipt',r.menuTarget.composition?.nativeRequestSubmitted===true);
 }
 const add=(name,fn,tag='affected')=>allCases.push({name,fn,tag});
+function missingReceiver({healthy=true, mode='repair'}={}) {
+ const f=identityFixture({healthy}),windows=f.window.SteamUIStore.WindowStore;
+ const row=f.rows[0],cache=f.window.overlayStore.m_mapBrowserInfo;
+ Object.assign(row,{nScreenWidth:842,nScreenHeight:474,flDisplayScale:1.14});
+ Object.assign(f.window.overlayStore,{m_eUIMode:4,m_bVRMode:false});
+ f.window.SteamUIStore.MainInstanceUIMode=mode==='desktop-main'?7:4;
+ if(mode==='main-mode-change'){
+  const values=cache.values.bind(cache);
+  cache.values=()=>{f.window.SteamUIStore.MainInstanceUIMode=7;return values();};
+ }
+ windows.BHasVRMainWindow=()=>false;
+ windows.GamepadUIMainWindowInstance.IsAnyVRWindow=()=>false;
+ let receiver=mode==='existing'?f.overlay:undefined;
+ const created=[];
+ windows.GetInstanceForPID=pid=>pid===row.unPID?receiver:undefined;
+ windows.OnOverlayBrowserCreated=function(info,width,height,scale){
+  created.push({info:plain(info),width,height,scale});
+  if(mode==='uncertain')return {then(){}};
+  if(mode!=='no-receiver')receiver=f.overlay;
+ };
+ if(mode==='cache-mismatch')cache.set('host',{...f.overlay.params.browserInfo,m_nBrowserID:row.nBrowserID+1});
+ if(mode==='cache-missing')cache.clear();
+ if(mode==='duplicate')f.rows.push({...row,nBrowserID:row.nBrowserID+1,gameID:'9'});
+ if(mode==='vr')f.window.overlayStore.m_bVRMode=true;
+ if(mode==='account-change')f.onRead=()=>{f.window.settingsStore.m_CMInterface.steamid={GetAccountID:()=>43};};
+ return {f,created,row};
+}
+add('explicit QAM repairs only the missing registered receiver then sends its original key',async()=>{
+ const {f,created,row}=missingReceiver(),r=await f.send();
+ check('missing-creation-once',created.length===1&&created[0].info.m_unPID===row.unPID&&created[0].info.m_nBrowserID===row.nBrowserID&&created[0].width===842&&created[0].height===474);
+ check('missing-routed-to-overlay',r.ok&&r.mutated&&r.runtimeAccepted&&r.menuTarget.source==='steam-proven-game-overlay'&&r.menuTarget.routing.overlayRepair==='created-missing-receiver'&&f.keyCalls.length===1&&f.keyCalls[0][0]==='overlay');
+},'missing-receiver');
+add('explicit QAM recovers a full shortcut ID reported by Steam as the stored ID',async()=>{
+ const {f,created,row}=missingReceiver({healthy:false});
+ const id=String(f.proof.appid),app=f.proof.appid&0xffffff;f.proof.registeredGameid64=id;
+ f.proof.registeredAppid=app;row.appID=app;f.overlay.params.appid=app;f.overlay.params.browserInfo.m_unAppID=app;
+ row.gameID=id;f.overlay.params.gameid=id;f.overlay.params.browserInfo.m_gameID=id;
+ const r=await f.send();
+ check('missing-stored-registration',r.ok&&r.menuTarget.routing.overlayRepair==='created-missing-receiver'&&created[0].info.m_gameID===id&&f.keyCalls.length===1&&f.keyCalls[0][0]==='overlay');
+},'missing-receiver');
+add('existing receiver and non-button operations do not create an overlay',async()=>{
+ const {f,created}=missingReceiver({mode:'existing'});const r=await f.send();
+ check('missing-existing-untouched',r.ok&&f.keyCalls.length===1&&created.length===0);
+ for(const [operation,menu] of [['menu.inspect','quick-access'],['menu.button','main'],['menu.qam.retry','quick-access']]){
+  const {f,created}=missingReceiver(),r=await f.fn({operation,menu,menuGame:f.proof});
+  check('missing-non-owner-'+operation+menu,!r.ok&&!r.mutated&&created.length===0&&f.keyCalls.length===0);
+ }
+},'missing-receiver');
+add('stale or ambiguous missing receiver is refused before any key or creation',async()=>{
+ for(const mode of ['cache-mismatch','cache-missing','duplicate','vr','account-change','desktop-main','main-mode-change']){
+  const {f,created}=missingReceiver({mode}),r=await f.send();
+  check('missing-reject-'+mode,!r.ok&&!r.mutated&&created.length===0&&f.keyCalls.length===0);
+ }
+},'missing-receiver');
+add('unconfirmed receiver creation is marked mutated with zero key replay',async()=>{
+ for(const mode of ['uncertain','no-receiver']){
+  const {f,created}=missingReceiver({mode}),r=await f.send();
+  check('missing-uncertain-'+mode,!r.ok&&r.mutated&&created.length===1&&f.keyCalls.length===0);
+ }
+},'missing-receiver');
+function provenFollowup(){
+ const options={ignore:true},f=identityFixture({healthy:true}),original=f.overlay.OnQuickAccessButtonPressed;
+ f.overlay.OnQuickAccessButtonPressed=function(){
+  if(!options.ignore)return original.call(this);
+  f.keyCalls.push(['overlay','OnQuickAccessButtonPressed']);
+ };
+ // The explicit proof targets the game even while the generic route is the main window.
+ f.window.FocusedAppWindowStore.GetFocusedOverlayAppID=()=>0;
+ const ticket={id:'proven-qam',startedAt:f.now};
+ const send=(operation,menuGame=f.proof)=>f.fn({operation,menu:'quick-access',menuGame,qamFollowup:ticket});
+ return {f,options,ticket,send};
+}
+add('proven game QAM retries on its original receiver while generic context is main',async()=>{
+ const {f,options,send}=provenFollowup();
+ const r=await send('menu.button');
+ check('proof-first-edge',r.ok&&r.keyDelivered&&r.qamRecovery?.status==='awaiting-menu'&&f.keyCalls.length===1);
+ options.ignore=false;f.advance(750);
+ const retry=await send('menu.qam.retry');
+ check('proof-same-overlay',retry.ok&&retry.mutated&&retry.qamRecovery?.status==='menu-open'&&f.overlayMenu===2&&f.menu===0&&f.keyCalls.length===2&&f.keyCalls.every(x=>x[0]==='overlay'));
+},'proven-followup');
+add('proven game QAM rejects reborrowed tickets and changed identities without retry',async()=>{
+ for(const variant of ['no-original','no-proof','game-birth','host-birth','steam-birth','browser','new-receiver','recorder-replaced']){
+  const {f,send,ticket}=provenFollowup();
+  if(variant!=='no-original')assert((await send('menu.button')).ok);
+  const rows=f.rows[0],info=f.overlay.params.browserInfo,windows=f.window.SteamUIStore.WindowStore;
+  let proof={...f.proof};
+  if(variant==='no-proof')proof=undefined;
+  if(variant==='game-birth')proof.gameCreated='10';
+  if(variant==='host-birth')proof.hostCreated='10';
+  if(variant==='steam-birth')proof.steamCreated='10';
+  if(variant==='browser')rows.nBrowserID=info.m_nBrowserID=proof.browserId=proof.browserId+1;
+  if(variant==='new-receiver'){
+   const replacement={...f.overlay};
+   windows.GetInstanceForPID=()=>replacement;
+  }
+  if(variant==='recorder-replaced')f.window.__ymccQamFollowup.dispose();
+  f.advance(750);
+  const retry=await f.fn({operation:'menu.qam.retry',menu:'quick-access',menuGame:proof,qamFollowup:ticket});
+  check('proof-no-replay-'+variant,retry.ok&&!retry.mutated&&retry.qamRecovery?.status==='context-changed'&&
+   f.keyCalls.length===(variant==='no-original'?0:1)&&f.menu===0&&f.overlayMenu===0);
+ }
+},'proven-followup');
 add('global B real Ensure sends B then selected A once',async()=>{
  const f=model(),r=await f.send();base(f,r);
  check('real-ensure-original-native-B',originalCalls(f).length===1&&originalCalls(f)[0].queue[0]===730&&originalCalls(f)[0].windowID===0xdef);
@@ -620,6 +724,54 @@ add('exact games inspection and unavailable diagnostic API preserve original beh
  check('activation-missing-api-does-not-block-menu',normal.ok&&normal.keyDelivered&&h.activationSnapshot().reason==='registration-api-unavailable'&&h.nativePort.registrations.length===0);
 },'activation-observation');
 
+
+function splitRegistrationGame(profile=splitRegistrationProfiles.win5){
+ const f=identityFixture({registration:{logical:profile.originalAppId,full:profile.originalGameId64,
+  registered:profile.registeredGameId64,app:profile.registeredAppId}});
+ const original=f.window.appStore.m_mapApps.get(f.proof.appid);
+ f.window.SteamUIStore.m_runningAppIDs=[f.proof.appid|0];
+ f.window.appStore.m_mapApps=new Map([[f.proof.appid|0,{...original,appid:f.proof.appid|0}]]);
+ return f;
+}
+add('split shortcut registration opens and closes only the matching browser',async()=>{
+ const {win5,local}=splitRegistrationProfiles;
+ check('different-original-cards-share-registered-id',win5.originalAppId!==local.originalAppId&&
+  win5.originalGameId64!==local.originalGameId64&&win5.registeredGameId64===local.registeredGameId64);
+ for(const [name,profile] of Object.entries({win5,local})){
+  const f=splitRegistrationGame(profile);
+  const expected=profile.replayExpectedMenuStates;
+  for(const [i,state] of expected.entries()){
+   const r=await f.send();
+   check(`split-${name}-overlay-${i+1}`,r.ok&&r.keyDelivered&&r.menuTarget.source==='steam-proven-game-overlay'&&f.overlayMenu===state);
+  }
+  check(`split-${name}-no-main-fallback`,f.keyCalls.length===expected.length&&f.keyCalls.every(([target])=>target==='overlay')&&f.menu===0);
+  const mirrored=f.states.filter(([id])=>id!==profile.originalGameId64);
+  check(`split-${name}-only-registered-menu-state`,JSON.stringify(mirrored)===JSON.stringify(expected.map(state=>[profile.registeredGameId64,state])));
+ }
+},'base-registration');
+add('split shortcut registration refuses a separately running base app',async()=>{
+ for(const when of ['before-lookup','during-lookup']){
+  const f=splitRegistrationGame(),addBase=()=>f.window.SteamUIStore.m_runningAppIDs.push(f.proof.registeredAppid);
+  if(when==='before-lookup')addBase();else f.onRead=addBase;
+  const r=await f.send();
+  check('split-base-running-'+when,!r.ok&&!r.mutated&&f.keyCalls.length===0&&f.states.length===0&&!f.window.__ymccMenuGameAlias);
+ }
+},'base-registration');
+add('split shortcut alias cleanup does not close a now independently running base app',async()=>{
+ const f=splitRegistrationGame();
+ check('split-before-contested-dispose',(await f.send()).ok&&f.window.__ymccMenuGameAlias);
+ f.window.SteamUIStore.m_runningAppIDs.push(f.proof.registeredAppid);
+ const writes=f.states.length,keys=f.keyCalls.length;
+ const r=await f.fn({operation:'menu.qam.dispose',menuGameDisposeOnly:true});
+ check('split-contested-dispose-without-write',r.ok&&!f.window.__ymccMenuGameAlias&&f.states.length===writes&&f.keyCalls.length===keys);
+},'base-registration');
+add('split shortcut registration refuses the wrong or duplicate browser',async()=>{
+ for(const change of [f=>++f.rows[0].nBrowserID,f=>f.rows.push({...f.rows[0],unPID:902})]){
+  const f=splitRegistrationGame();change(f);
+  const r=await f.send();
+  check('split-browser-fail-closed',!r.ok&&!r.mutated&&f.keyCalls.length===0&&f.states.length===0);
+ }
+},'base-registration');
 
 add('short registration reasserts same held tuple after original Ensure',async()=>{
  for(const observableParams of [false,true]){
@@ -1439,9 +1591,9 @@ return {allCases,execute,contextReads,get activeCase(){return activeCase}};
 }
 const filters=['popup-native-decky-lifetime','popup-native-decky-wrapper','popup-native-depth-path','popup-native-depth','popup-native-pair-guard','popup-native-shared-return','popup-native-shared-child','popup-native-focus','popup-native-focus-control','popup-previous-control','popup-mount-control','popup-mount-successor','popup-late-control','popup-final','popup-activation-remainder','popup-activation','popup-activation-control','focus-coordinator-scope-r2','focus-scope-incomplete-control','focus-scope-row-control','focus-coordinator-scope','focus-coordinator-control','focus-handoff-final','focus-handoff','focus-handoff-control','short-registration-home','short-registration-reassert','short-registration-control','assemble','affected','stale-global','late-browser','native-owner','guide','owner-successor','owner-window-control','review-final','review-control','promise-final','promise-rejected','throw-sync','focus-diagnostic','focus-shadow-control','context-diagnostic','context-leaf-control','context-health-control','native-route-trace','native-route-control','native-route-remainder','activation-observation','activation-control','activation-cleanup-result'];
 export async function runCompositionSelection({fixture,identityFixture,source,filter}){
- assert(filters.includes(filter),'UNKNOWN_OR_EMPTY_COMPOSITION_SELECTOR');
+ assert(filters.includes(filter)||['missing-receiver','proven-followup','base-registration'].includes(filter),'UNKNOWN_OR_EMPTY_COMPOSITION_SELECTOR');
  const environment=createCompositionEnvironment({fixture,identityFixture,source});
- const registered=registerCompositionCases({...environment,promiseVariant:['promise-final','promise-rejected'].includes(filter)?'rejected':'fulfilled'});
+ const registered=registerCompositionCases({...environment,identityFixture,promiseVariant:['promise-final','promise-rejected'].includes(filter)?'rejected':'fulfilled'});
  const selected=registered.allCases.filter(x=>filter==='popup-native-decky-lifetime'?x.tag==='popup-native-focus-decky-lifetime':filter==='popup-native-decky-wrapper'?x.tag==='popup-native-focus-decky-wrapper':filter==='popup-native-depth-path'?x.tag==='popup-native-focus-depth-path':filter==='popup-native-depth'?x.tag==='popup-native-focus-depth':filter==='popup-native-pair-guard'?x.tag==='popup-native-focus-pair-guard':filter==='popup-native-shared-return'?x.tag==='popup-native-focus-shared-return':filter==='popup-native-shared-child'?x.tag==='popup-native-focus-shared-child':filter==='popup-native-focus'?x.tag.startsWith('popup-native-focus-'):filter==='popup-native-focus-control'?x.tag==='popup-native-focus-lifetime':filter==='popup-previous-control'?x.tag==='popup-previous':filter==='popup-mount-control'?x.tag==='popup-mount-final':filter==='popup-mount-successor'?x.tag==='popup-mount-final'||x.name==='unregistered held QAM popup invokes its original tree activation once'||x.name==='uncertain popup activation is not retried or converted into key replay':filter==='popup-late-control'?x.tag==='popup-late':filter==='popup-final'?x.tag==='popup-late'||x.name==='final popup current source revocation refuses activation'||x.name==='uncertain popup activation is not retried or converted into key replay':filter==='popup-activation-remainder'?x.tag==='popup-activation'&&x.name!=='unregistered held QAM popup invokes its original tree activation once':filter==='popup-activation-control'?x.name==='unregistered held QAM popup invokes its original tree activation once':filter==='focus-coordinator-scope-r2'?['focus-coordinator-scope','focus-scope-r2'].includes(x.tag):filter==='focus-scope-incomplete-control'?x.name==='present unverified coordinator cannot be omitted from held-window uniqueness':filter==='focus-scope-row-control'?x.name==='final selected own-data row cannot be replaced by accessor and equal match count':filter==='focus-coordinator-scope'?['focus-coordinator-scope','focus-handoff'].includes(x.tag):filter==='focus-coordinator-control'?x.name==='held root or active popup coordinator owns the original registered tree':filter==='focus-handoff-final'?['registered original focus callback selects the held root or popup once','final registered owner revocation prevents the pending focus action','uncertain original focus callback is never retried or converted to key replay','exact multiple inspect no-op base alias and uncertain composition never enter focus action'].includes(x.name):filter==='focus-handoff-control'?x.name==='registered original focus callback selects the held root or popup once':filter==='short-registration-home'?(x.tag==='short-registration-home'||x.tag==='guide'):filter==='short-registration-control'?x.name==='short registration reasserts same held tuple after original Ensure':filter==='activation-cleanup-result'?x.name==='synchronous activation delivery defers disposal until the original token returns':filter==='activation-control'?x.name==='passive activation records exact native primitives without replacing the original action':filter==='native-route-remainder'?['inspect and exact registrations add no native observation','plural result accessor is never invoked by native diagnostics'].includes(x.name):filter==='native-route-control'?x.name==='original activation lookup is observed for the exact held Host':filter==='context-leaf-control'?x.name==='stopped game overview reports first false leaf without later reads':filter==='context-health-control'?x.name==='healthy menu context getters and original input route stay unchanged':filter==='focus-shadow-control'?x.name==='official public readers never invoke unqualified underlying field getters':filter==='promise-final'?(x.name==='promise native API remains uncertain and is not replayed'||x.name==='throwing supplementary native API is uncertain once without cache commit'):filter==='promise-rejected'?x.name==='promise native API remains uncertain and is not replayed':filter==='throw-sync'?x.name==='throwing supplementary native API is uncertain once without cache commit':filter==='review-final'?x.tag==='review-final':filter==='review-control'?x.name==='final focused-window read changes queue element in place':filter==='owner-successor'?(x.tag==='owner-successor'||x.tag==='native-owner'||x.tag==='late-browser'||x.name==='healthy A real Ensure native one and no duplicate'):filter==='owner-window-control'?x.name==='post-key Window API replacement is not adopted':(filter==='affected'&&!x.tag.startsWith('popup-native-focus-')&&x.tag!=='popup-previous'&&x.tag!=='popup-mount-final'&&x.tag!=='popup-late'&&x.tag!=='popup-activation'&&x.tag!=='focus-scope-r2'&&x.tag!=='focus-coordinator-scope'&&x.tag!=='focus-handoff'&&x.tag!=='native-owner'&&x.tag!=='guide'&&x.tag!=='owner-successor'&&x.tag!=='review-final'&&x.tag!=='focus-diagnostic'&&x.tag!=='context-diagnostic'&&x.tag!=='native-route-trace'&&x.tag!=='activation-observation')||x.tag===filter);
  assert.equal(new Set(registered.allCases.map(x=>x.name)).size,registered.allCases.length);
  if(filter==='assemble'){

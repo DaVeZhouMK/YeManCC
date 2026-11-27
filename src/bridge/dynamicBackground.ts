@@ -34,7 +34,7 @@ function backgroundReadAdmitted(state:DynamicBackgroundState):boolean {
 const backgroundInFlight=new Map<string,{pending:Promise<DynamicBackgroundResult|null>;signal:AbortSignal}>();
 function sameBackgroundSleep(captured:SharedPowerLifecycleSnapshot,state:SharedPowerLifecycleSnapshot|null):boolean {
   return !!state&&isSharedPowerLifecycleAdmitted(state)&&captured.generation===state.generation&&
-    captured.suspendSerial===state.suspendSerial;
+    captured.suspendSerial===state.suspendSerial&&captured.observedNotificationSequence===state.observedNotificationSequence;
 }
 async function withBackgroundPower<T>(sleep:SharedPowerLifecycleSnapshot,acdc:number,fallback:T,
     run:(current:()=>boolean,signal:AbortSignal)=>Promise<T>,cancellation=new AbortController()):Promise<T>{
@@ -42,7 +42,7 @@ async function withBackgroundPower<T>(sleep:SharedPowerLifecycleSnapshot,acdc:nu
     wallpaperPowerCurrent(acdc)&&getDynamicBackgroundConfig().enabled;
   const stop=onSharedPowerLifecycle(state=>{
     if(!sameBackgroundSleep(sleep,state))cancellation.abort();
-  },{observeSuspendSerial:true});
+  },{observeSuspendSerial:true,observeNotificationSequence:true});
   try{
     if(!current())return fallback;
     const retired=new Promise<T>(resolve=>cancellation.signal.addEventListener('abort',()=>resolve(fallback),{once:true}));
@@ -56,7 +56,7 @@ export async function refreshDynamicBackground(game:DetectedGame|null,fallback?:
   if(!sleep||!isSharedPowerLifecycleAdmitted(sleep))return null;
   const acdc=captureWallpaperPower();
   if(fallback&&(fallback.pid!==game.pid||fallback.processCreated!==game.processCreated))fallback=undefined;
-  const key=JSON.stringify([acdc,sleep.generation,sleep.suspendSerial,game.pid,game.processCreated,game.path.split('/').join(String.fromCharCode(92)).toLowerCase(),fallback?.assetId,fallback?.bindingRevision]);
+  const key=JSON.stringify([acdc,sleep.generation,sleep.suspendSerial,sleep.observedNotificationSequence,game.pid,game.processCreated,game.path.split('/').join(String.fromCharCode(92)).toLowerCase(),fallback?.assetId,fallback?.bindingRevision]);
   const previous=backgroundInFlight.get(key);if(previous&&!previous.signal.aborted)return previous.pending;
   const cancellation=new AbortController();
   const pending=withBackgroundPower<DynamicBackgroundResult|null>(sleep,acdc,null,

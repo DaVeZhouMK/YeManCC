@@ -173,6 +173,14 @@ if(file){const r=read(file),fixed=r.schemaVersion===2,ctx={repo:REPO,sources:r.s
  ['READY during retained debt',x=>x.profiles[0].scenarios[2].result.beforeFixtureFaultRelief.readyPosts=1,/NATIVE_EXIT_PARENT_RETENTION/],
  ['repeat force budget',x=>x.profiles[0].scenarios[1].result.productionResourceProof.forceAttempts=2,/NATIVE_EXIT_PARENT_KERNEL_RETURN/],
  ])test('fresh full native owner rejects '+name,()=>{const x=structuredClone(p);change(x);assert.throws(()=>validateParent(x,ctx,r.children.parent.output),expected);});
+ if(fixed)for(const [name,change] of [
+  ['false execution marker',row=>{row.executedThisRun=false;}],
+  ['missing execution marker',row=>{delete row.executedThisRun;}],
+ ])test('fresh fixed native parent rejects '+name,()=>{
+  const x=structuredClone(p),row=x.profiles.find(profile=>profile.name==='Release').scenarios.find(s=>s.name==='healthy-ordinary');
+  change(row);
+  assert.throws(()=>validateParent(x,ctx,r.children.parent.output),/NATIVE_EXIT_PARENT_CASE_NOT_EXECUTED:Release\/healthy-ordinary/);
+ });
  for(const [name,change,expected] of [
  ['lost negative route',x=>x.profiles.pop(),/NATIVE_EXIT_GATES_EIGHT_BUILDS/],
  ['uncaught old completion gate',x=>x.profiles.find(p=>p.route==='historical-before-host-gate').failures=0,/NATIVE_EXIT_GATES_SPECIFIED_ASSERTIONS/],

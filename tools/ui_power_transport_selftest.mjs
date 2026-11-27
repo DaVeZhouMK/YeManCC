@@ -6,6 +6,14 @@ import {createHash} from 'node:crypto';
 import {observeUiPowerBuilds} from './fixtures/ui_power_build_receipt.mjs';
 const root=path.resolve(import.meta.dirname,'..');
 const arg=process.argv.indexOf('--out-dir'),out=arg>=0?path.resolve(process.argv[arg+1]):null;
+const scopeArg=process.argv.indexOf('--scope');
+if(scopeArg>=0){
+ const args=process.argv.slice(2);
+ assert(args.length===4&&args.filter(x=>x==='--scope').length===1&&args.filter(x=>x==='--out-dir').length===1&&out&&
+  process.argv[scopeArg+1]==='monitor-notice-recovery','Expected --scope monitor-notice-recovery --out-dir <new directory>');
+ const {runMonitorNoticeRecovery}=await import('./fixtures/ui_power_transport_notice.mjs');
+ process.exitCode=await runMonitorNoticeRecovery(root,out);
+}else{
 const {build,receipt}=observeUiPowerBuilds(root);
 const compiled=(await build({stdin:{contents:"import * as life from './src/bridge/uiLifecycle';import {powerLifecycle} from './src/bridge/api';import {getSharedPowerLifecycle} from './src/bridge/powerLifecycleState';export {life,powerLifecycle,getSharedPowerLifecycle};",resolveDir:root,loader:'ts'},bundle:true,write:false,platform:'node',format:'cjs',metafile:true}));
 const flush=async()=>{for(let i=0;i<35;i++)await Promise.resolve();};
@@ -70,3 +78,4 @@ await test('root disposal invalidates held IPC result and prevents subsequent na
  const count=f.sent.length;await f.event('window.shown');await f.event('window.focus');assert.equal(f.sent.length,count);assert.equal(f.timers.size,0);
 });
 const hashes=Object.keys(compiled.metafile.inputs).filter(f=>f!=='<stdin>').map(f=>path.resolve(root,f));const result={pass:true,scope:'Production uiLifecycle + api + ipc, inert WebView message boundary only; no installed application or hardware',cases:checks.length,checks,sourceHashes:Object.fromEntries(hashes.map(f=>[path.relative(root,f),createHash('sha256').update(fs.readFileSync(f)).digest('hex')])),observedBuilds:receipt()};if(out){fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'ui-power-transport.json'),JSON.stringify(result,null,2),{flag:'wx'});}console.log(JSON.stringify(result));
+}

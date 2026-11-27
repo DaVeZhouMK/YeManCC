@@ -8,6 +8,8 @@
 #include <mutex>
 #include <map>
 #include <thread>
+#include "sleep_power_remote_transport.h"
+#include "log_snapshot_state.h"
 #include "http_request_deadline.h"
 #include "sleep_power_revocation.h"
 #include "fan_response_contract.h"
@@ -15,10 +17,13 @@
 #include "fan_http_body_contract.h"
 #endif
 #pragma comment(lib,"winhttp.lib")
+#pragma comment(lib,"bcrypt.lib")
+#pragma comment(lib,"advapi32.lib")
 using json=nlohmann::json;
 INTERNET_PORT fixturePort=0;
 int displayObserved=0,activityAccepted=0,armed=0,disarmed=0,authRejected=0,headerConversions=0;
 std::atomic<bool> g_poolCancel{false};
+std::atomic<bool> g_exitRequested{false};
 std::atomic<bool> sharedPowerKnown{true},sharedPowerPending{false};
 std::atomic<std::uint64_t> sharedSerial{1},sharedSequence{1},sharedPublication{1};
 ymcc::sleeppower::RevocationMirrors g_sharedPowerRevocations;
@@ -49,13 +54,21 @@ std::string fanHeaderRequestIdFromRawHeaders(const std::string&){return "fixture
 std::string fanErrorCodeFromBody(const std::string& s){const auto j=json::parse(s,nullptr,false);return j.is_object()&&j.contains("error")&&j["error"].is_object()?j["error"].value("code",std::string{}):std::string{};}
 std::string fanRequestId(const char*){return "fixture-request";}
 template<class...Args>void fanHostNoteAuthRejected(Args&&...){authRejected++;}
-std::string parseFanLeaseIdText(const std::string& s){const auto j=json::parse(s,nullptr,false);return j.is_object()?j.value("leaseId",std::string{}):std::string{};}
+static std::string parseFanLeaseIdText(const std::string& s){const auto j=json::parse(s,nullptr,false);return j.is_object()?j.value("leaseId",std::string{}):std::string{};}
 bool isFanLeaseIdValid(const std::string& s){return ymcc::fan_response::leaseIdValid(s);}
 void fanLeaseKeepaliveArm(const std::string&,const char*,ULONGLONG){armed++;}
 void fanLeaseKeepaliveDisarm(const char*){disarmed++;}
 void fanActivityObserve(const std::string& path,const std::string&,DWORD status,const std::string& body,const json* supplied,ULONGLONG){json fallback;const json* value=supplied;if(!value){fallback=json::parse(body,nullptr,false);value=&fallback;}if(ymcc::fan_response::accepted(path,status,*value))activityAccepted++;}
 static std::string fanApiPathFromObject(const std::wstring& p){auto s=W2U(p);const auto q=s.find('?');if(q!=std::string::npos)s.resize(q);return s;}
-static void fanLeaseKeepaliveObserveHttp(const std::string&,const wchar_t*,unsigned short,const std::wstring&,const std::string&,DWORD,const std::string&,bool,const std::string&,const std::string&,const json*,ULONGLONG);
+struct FanWritePowerOffer;
+static void fanLeaseKeepaliveObserveHttp(const std::string&,const wchar_t*,unsigned short,const std::wstring&,const std::string&,DWORD,const std::string&,bool,const std::string&,const std::string&,const json*,ULONGLONG,const std::shared_ptr<FanWritePowerOffer>&);
+using namespace ymcc::sleeppower::remote;
+static NativeRemoteTransport* fixtureTransport=nullptr;
+static NativeRemoteTransport* sharedNativeRemotePowerTransport() noexcept {return fixtureTransport;}
+static bool fanHostExactProcessCurrent(HANDLE peer,const ProcessIdentityV1& identity) noexcept {ProcessIdentityV1 actual;return processIdentity(peer,actual)&&sameProcess(identity,actual);}
+static bool fanHostRetainExactProcess(ProcessHold& peer,ProcessIdentityV1& identity) noexcept {return peer.bind(GetCurrentProcess())&&processIdentity(peer.get(),identity);}
+static bool fanManualActivityRevision(std::uint64_t&) noexcept {return false;}
+static bool fanResumeActivityRevision(std::uint64_t&) noexcept {return false;}
 std::atomic<unsigned long long> g_fanMsiModeRevision{0},g_fanMsiModePowerGeneration{1};
 std::atomic<bool> g_fanLeaseKeepaliveArmed{false};
 std::mutex g_fanLeaseKeepaliveMx;std::string g_fanLeaseId="fixture-lease-0001";
@@ -71,18 +84,31 @@ std::map<std::string,IpcFn> fixtureHandlers;std::function<void()> fixtureQueued;
 bool fixtureAsync=true;int g_ipcResultMailbox=0;std::atomic<bool> g_traceOn{false};
 bool ipc_cmd_async(const std::string&){return fixtureAsync;}
 bool poolSubmit(std::function<void()> fn){fixtureQueued=std::move(fn);return true;}
-void ipc_complete_async(int,unsigned long long,int,json reply,std::string){fixtureReceiverReply=std::move(reply);}
+void ipc_complete_async(int,unsigned long long,int,json reply,std::string={}){fixtureReceiverReply=std::move(reply);}
 void ipc_post_json(int,const json& reply){fixtureReceiverReply=reply;}
 void appendNativeLifecycleLog(const char*,const json&){}
 template<class...Args>void traceLog(Args&&...){}
+void captureUpdateManifestAdmission(json&){}
+void captureUpdateDownloadAdmission(json&){}
+struct {std::uint64_t begin(const std::string&,ULONGLONG,ULONGLONG){return 0;}bool start(std::uint64_t,ULONGLONG){return false;}bool finish(std::uint64_t,const json&,bool=false){return false;}} g_manualResumeReceipts;
+constexpr ULONGLONG kManualResumeQueueMs=1;
+void sgFinishManualResumeFeedback(const json&,const json&,ULONGLONG,ULONGLONG){}
+std::uint64_t taskViewNewFocusToken=0;
+std::atomic<std::uint64_t> g_taskViewFocusToken{0};
+void taskViewInvalidateHandover(){}
 #include "HttpExtract.inc"
 int main(int argc,char** argv){
  if(argc!=4)return 9;
  const auto actualPort=static_cast<INTERNET_PORT>(std::stoi(argv[1]));const std::string kind=argv[2],mode=argv[3];
  fixturePort=mode=="nonfan"?1:actualPort;fixtureKind=kind;reg_http();std::thread stop;
+ NativeProvider provider(&readSharedSystemPower,g_sharedPowerRevocations);NativeRemoteTransport transport(provider);fixtureTransport=&transport;
+ (void)&fanWritePowerTrackResume; // This entry does not queue a resume producer.
+ // Positive writes have the same lease prerequisite as the real transport.
+ g_fanWritePowerLease="fixture-lease-0001";
+ if(mode=="heartbeat"||mode=="repeat") { FanHttpPowerAdmission seed; if(!seed.captureCurrent()||!fanWritePowerPrepare(seed,"/api/acquire-control",{}))return 8; }
  if(kind=="cancel-body")stop=std::thread([]{Sleep(80);g_poolCancel=true;});
  if(kind=="shared-revoke-body")stop=std::thread([]{Sleep(80);g_sharedPowerRevocations.revoke();});
- const std::string endpoint=mode=="close"?"close":mode=="get"?"state":(mode=="heartbeat"||mode=="repeat")?"heartbeat":"enable";
+ const std::string endpoint=mode=="close"?"close":mode=="get"?"state":mode=="acquire"?"acquire-control":(mode=="heartbeat"||mode=="repeat")?"heartbeat":"enable";
  json args{{"url","http://127.0.0.1:"+std::to_string(actualPort)+"/api/"+endpoint+"?kind="+kind},{"method",mode=="head"?"HEAD":mode=="get"?"GET":"POST"},{"headers",{{"X-YeMan-Fan-Session","fixture-session"}}},{"body",R"({"leaseId":"fixture-lease-0001","nodes":[{"tempC":0,"dutyPercent":100},{"tempC":100,"dutyPercent":100}]})"},{"timeoutMs",600}};
  if(kind=="missing-headers")args.erase("headers");
  if(kind=="null-headers")args["headers"]=nullptr;
@@ -102,7 +128,7 @@ int main(int argc,char** argv){
  const auto before=args;const auto begin=GetTickCount64();json result;int calls=0;
  try{
 #ifdef YMCC_FAN_RECEIVER_FRAGMENT
- if(receiver){fixtureReceive(args);if(fixtureQueued){if(kind=="receiver-async-queue")++sharedSerial;fixtureQueued();}result=fixtureReceiverReply.contains("result")?fixtureReceiverReply["result"]:fixtureReceiverReply;}
+ if(receiver){fixtureReceive(args);if(fixtureQueued){if(kind=="receiver-async-queue"||kind.starts_with("receiver-async-write-retired")){g_sharedPowerRevocations.revoke();++sharedSerial;}fixtureQueued();}result=fixtureReceiverReply.contains("result")?fixtureReceiverReply["result"]:fixtureReceiverReply;}
  else
 #endif
  {const int count=mode=="repeat"?3:1;for(int i=0;i<count;++i){result=fixtureHandler(args);++calls;}}}
@@ -110,5 +136,6 @@ int main(int argc,char** argv){
  if(stop.joinable())stop.join();
  result["elapsed"]=GetTickCount64()-begin;result["headerConversions"]=headerConversions;result["displayObserved"]=displayObserved;result["activityAccepted"]=activityAccepted;result["armed"]=armed;result["disarmed"]=disarmed;result["authRejected"]=authRejected;
  result["headerAliasReads"]=headerAliasReads;result["responseBodyMoves"]=responseBodyMoves;result["responseHeaderMoves"]=responseHeaderMoves;result["calls"]=calls;result["inputUnchanged"]=args==before;
+ fanWritePowerCancel();transport.stop();provider.close();fixtureTransport=nullptr;
  std::cout<<result.dump()<<'\n';
 }

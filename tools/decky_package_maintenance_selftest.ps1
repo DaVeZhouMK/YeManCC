@@ -1,7 +1,7 @@
 ﻿[CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$EvidenceDir,[switch]$SkipMutationProof,
- [ValidateRange(1,30000)][int]$TotalBudgetMs=30000,
- [ValidateRange(1,25000)][int]$RunBudgetMs=25000,
+ [ValidateRange(1,45000)][int]$TotalBudgetMs=30000,
+ [ValidateRange(1,40000)][int]$RunBudgetMs=25000,
  [ValidateRange(0,5000)][int]$CleanupReserveMs=5000,
  [ValidateSet('no-rollback','skip-incoming-integrity','stale-rollback-snapshot')][string]$MutationCase)
 $ErrorActionPreference='Stop'
@@ -601,11 +601,46 @@ Check 'native updater includes production transaction and excludes generic merge
   Need ((Snapshot $pcDir) -ceq $before) 'Actual ordinary rollback did not preserve Decky and restore the original ordinary preimage'
 }
 
+# These cases start from the same clean installation. Recreate only that
+# preimage; each corrupted-receipt transaction below still runs independently.
+$taskReceiptStormPreimage=$null
+$taskReceiptStormSeedCount=0;$taskReceiptStormCloneCount=0
+function Initialize-ReceiptStorm($Case,[string]$ManifestJson) {
+  $watch=[Diagnostics.Stopwatch]::StartNew()
+  if($null -eq $script:taskReceiptStormPreimage){
+    $seed=Seed $Case
+    Assert-IncomingPackage $Case
+    $expected=@($Case.manifest.files | ForEach-Object {$_.path})+@('.ymcc-managed.receipt')
+    $installed=@(Get-ChildItem -LiteralPath $Case.target -File -Recurse -Force)
+    Need ($installed.Count -eq $expected.Count -and $seed.applied.Count -eq $expected.Count) 'Receipt storm seed membership changed'
+    $rows=@(foreach($relative in $expected){
+      $file=Resolve-YmccDeckyPath $Case.target $relative
+      [pscustomobject]@{path=$relative;bytes=[IO.File]::ReadAllBytes($file)}
+    })
+    $script:taskReceiptStormPreimage=[pscustomobject]@{manifest=$ManifestJson;files=$rows}
+    $script:taskReceiptStormSeedCount++
+    $mode='original-seed'
+  }else{
+    Need ($ManifestJson -ceq $script:taskReceiptStormPreimage.manifest) 'Receipt storm preimage manifest changed'
+    Need (@([IO.Directory]::EnumerateFileSystemEntries($Case.target)).Count -eq 0) 'Receipt storm target is not fresh'
+    foreach($row in $script:taskReceiptStormPreimage.files){
+      $file=Resolve-YmccDeckyPath $Case.target $row.path
+      [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($file))|Out-Null
+      $stream=[IO.File]::Open($file,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+      try{$stream.Write($row.bytes,0,$row.bytes.Length)}finally{$stream.Dispose()}
+    }
+    $script:taskReceiptStormCloneCount++
+    $mode='isolated-preimage'
+  }
+  Write-TaskPackageProgress 'receipt-storm-preimage' @{mode=$mode;home=$Case.home;files=$script:taskReceiptStormPreimage.files.Count;elapsedMs=$watch.Elapsed.TotalMilliseconds;seedCount=$script:taskReceiptStormSeedCount;cloneCount=$script:taskReceiptStormCloneCount}
+}
+
 # Configuration storms stay on the original embedded transaction consumer.
 foreach($kind in @('empty','truncated','duplicate','escaped-duplicate','case-duplicate','array','future','schema-string','schema-float','owner-type','bytes-string','bytes-bool','oversize','trailing')) {
  Check ('storm installed receipt '+$kind+' quarantines old bytes and restores incoming ownership') {
-  $c=New-Case 'storm-receipt';Seed $c|Out-Null
+  $c=New-Case 'storm-receipt'
   $good=$c.manifest|ConvertTo-Json -Depth 12 -Compress
+  Initialize-ReceiptStorm $c $good
   $bad=$good
   switch($kind){
    'empty'{$bad=''}

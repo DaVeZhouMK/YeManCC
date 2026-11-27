@@ -56,8 +56,9 @@ const preferenceArgs = (options: BootPreferenceWrite) => {
   return { ...(submitted.origin ? { origin: submitted.origin } : {}),
     ...(submitted.bootContext === undefined ? {} : { bootContext: submitted.bootContext }) };
 };
+export type BatteryChargeReadSource = 'settings-edge' | 'settings-poll' | 'settings-retry' | 'boot-capture' | 'boot-preflight';
 export const batteryCharge = {
-  get: (signal?: AbortSignal) => request('get', {}, signal), refresh: () => request('refresh'),
+  get: (signal?: AbortSignal, readSource?: BatteryChargeReadSource) => request('get', readSource ? { readSource } : {}, signal), refresh: () => request('refresh'),
   set: (fence: string, target: number, options: BootPreferenceWrite = {}) => request('set', { fence, target, ...preferenceArgs(options) }),
   release: (options: BootPreferenceWrite = {}) => request('release', preferenceArgs(options)),
 };

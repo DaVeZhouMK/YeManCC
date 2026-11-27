@@ -281,7 +281,7 @@ export function getExtraFactories(_repoRoot,{selectedIds}={}) {
 ()=>[getMonitorFeedbackAdapter()],
 ()=>[...getSignalAdapters(undefined,{selectedIds})],
 ()=>[...getBatterySignalAdapters()],
-()=>[getFanGlobalAdapter()],
+()=>[getFanGlobalAdapter(_repoRoot)],
 ()=>[getInputFollowupAdapter()],
 ()=>[...getBackgroundAdapters()],
 ()=>[...getMonitorAdapters()],
@@ -310,7 +310,7 @@ export function getExtraFactories(_repoRoot,{selectedIds}={}) {
 
 const extraIndexBytes=fs.readFileSync(new URL('./extra-adapter-index.json',import.meta.url));
 // Refresh this raw-byte pin with the source pins; registration-only plans do not load this module.
-if(createHash('sha256').update(extraIndexBytes).digest('hex')!=='2185ddfa242624ec7d328feb516f4fe9b50e6f97a8b3ef93fbadfd8e905a4242')throw Error('EXTRA_REGISTRATION_INDEX_IDENTITY_CHANGED');
+if(createHash('sha256').update(extraIndexBytes).digest('hex')!=='74bc04a6d41c474d856b67b42913b6b547fa8f81907d233ecf986f1e4de1e22d')throw Error('EXTRA_REGISTRATION_INDEX_IDENTITY_CHANGED');
 const extraIndex=JSON.parse(extraIndexBytes);
 export function getExtraAdapters(repoRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..'),{selectedIds,auditReceiptIds}={}){
  const current=registrationIndexCurrent(extraIndex,repoRoot);

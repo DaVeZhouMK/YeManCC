@@ -2084,10 +2084,15 @@ void joinKernelDeliveryOrder(const std::string& kind){
   check(observeEntry(0)==0,"missing original entry time cannot revoke a Ready scan");
   check(observeEntry(nowFile+1)==0,"future entry cannot revoke a Ready scan");
   check(observeEntry(closed+1)==1,"a fresh original entry still revokes inventory before window work");
-  const auto sendFanFact=[](int id,ULONGLONG stamp){
-   const auto before=joinKernelFanPosts;
-   joinKernelXml=timeoutXml(id,20,stamp);
+  const auto sendFanFact=[](int id,ULONGLONG stamp,int reason=12,bool inProgress=false){
+   const auto before=joinKernelFanPosts, beforeS0=joinKernelS0Posts;
+   joinKernelXml=timeoutXml(id,reason,stamp);
+   if(inProgress)joinKernelXml.insert(joinKernelXml.find("</EventData>"),"<Data Name=\"IsCsSessionInProgressOnExit\">true</Data>");
    sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(0xb01));
+   if(id==507){
+    check(joinKernelFanPosts==before,"507 must not use a second Fan window post");
+    return joinKernelS0Posts>beforeS0&&joinLastS0At!=0 ? 1u : 0u;
+   }
    return joinKernelFanPosts-before;
   };
   check(sendFanFact(506,nowFile+1)==0,"future original 506 cannot create a Fan Close boundary");
@@ -2097,10 +2102,12 @@ void joinKernelDeliveryOrder(const std::string& kind){
   check(!joinKernelBeforeJournal&&nowFile>futureWake,"Fan future receipt control advanced the clock before posting");
   check(sendFanFact(506,0)==0&&sendFanFact(507,0)==0,"missing original time cannot change Fan ordering");
   const auto validEntry=futureWake-1,validWake=futureWake;
-  check(sendFanFact(506,validEntry)==1&&joinLastFanFact.eventId==506&&joinLastFanFact.fileTime==validEntry,
+  check(sendFanFact(506,validEntry)==1&&joinLastFanFact==validEntry,
         "valid original 506 still reaches Fan with its exact timestamp");
-  check(sendFanFact(507,validWake)==1&&joinLastFanFact.eventId==507&&joinLastFanFact.fileTime==validWake,
-        "valid original 507 still reaches Fan with its exact timestamp");
+  check(sendFanFact(507,validWake,55,true)==0,
+        "continuing 507 must not reach Fan as a completed wake");
+  check(sendFanFact(507,validWake)==1&&joinLastS0At==validWake,
+        "valid original 507 reaches the common window with its exact timestamp");
  }
  baseCycle(true,false);joinInjectSuspendOnDispatch=joinInjectManualOnDispatch=false;
  const auto observed=nowFile,start=nowTick,from=generation;
@@ -2139,7 +2146,36 @@ static std::string completedWin5Session(ULONGLONG stamp){
  xml.insert(xml.find("</EventData>"),"<Data Name=\"SleepEntered\">true</Data><Data Name=\"DurationInUs\">3286870421</Data><Data Name=\"SleepDurationInUs\">3286825339</Data><Data Name=\"IsCsSessionInProgressOnExit\">false</Data>");
  return xml;
 }
+static void joinWin5DelayedCompletedClear();
 static void joinWin5CompletedTimeout(){
+ {
+  baseCycle(false,false);const auto origin=nowFile,start=nowTick;
+  originalEntry(origin);sgSleepTimeoutRecordKernel(506,1,origin,generation);handle506(1,origin);
+  check(g_sgSleepTimeoutWindow.waiting,"Win5 101742: original timeout must be armed");
+  at(start+708160);sgSleepTimeoutTick();if(timerDue)dispatch();
+  check(!requestCount&&!g_sgAutomaticSleepBudget.requests()&&!sgSleepRetryActive()&&
+        !g_sgSleepTimeoutWindow.active(),"Win5 101742: stale deadline requested sleep before delayed Windows accounting");
+  const auto continued=origin+7130283970ULL;at(start+714028);
+  joinKernelXml=timeoutXml(507,20,continued);
+  joinKernelXml.insert(joinKernelXml.find("</EventData>"),
+   "<Data Name='SleepEntered'>true</Data><Data Name='DurationInUs'>713028397</Data>"
+   "<Data Name='SleepDurationInUs'>709940669</Data><Data Name='IsCsSessionInProgressOnExit'>true</Data>");
+  sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(0xb01));
+  check(sgSleepTimeoutSuccessAfter(origin)&&!requestCount,"Win5 101742: later Windows sleep evidence must still be preserved");
+ }
+ for(int mode:{0,1,2}){
+  baseCycle(false,false);const auto origin=nowFile,start=nowTick;
+  originalEntry(origin);handle506(1,origin);
+  at(start+240000);sgSleepTimeoutTick();
+  check(sgSleepRetryActive()&&timerDue,"a fresh 240-second timeout must enter the shared scheduler");
+  at(start+(mode==0?269999:270000));
+  if(mode==2){at(start+269998);joinDispatchHook=[]{at(nowTick+2);};}
+  dispatch();
+  check(requestCount==(mode==0?1U:0U)&&!joinDispatchHook,
+        "timeout dispatch must respect the same boundary in the scheduler and in the Windows sender");
+  if(mode==1)check(!g_sgAutomaticSleepBudget.requests()&&!g_sgSleepTimeoutWindow.active(),
+                    "expiry before dispatch must not spend an automatic request");
+ }
  baseCycle(false,false);const auto origin=nowFile,entryTick=nowTick;
  joinKernelXml=timeoutXml(506,1,origin);sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(0xb01));
  at(entryTick+3286869);resumeAutomatic();resumeInteractive();drainActualWake();handle506(1,origin);
@@ -2190,7 +2226,383 @@ static void joinWin5CompletedTimeout(){
   check(superseded ? sgSleepRetryActive() : !sgSleepRetryActive()&&!g_sgSleepTimeoutWindow.active(),
         "completed retry cycle: only the current exit can retire the old timeout owner");
  }
+ joinWin5DelayedCompletedClear();
  passed("win5-001301-completed-session-retires-callback-and-query-timeout");
+}
+static void joinWin5DelayedCompletedClear(){
+ // Win5 150201: callbacks arrive near resume; Windows times retain the full standby interval.
+ baseCycle(false,false);
+ const auto origin=nowFile,start=nowTick,gen=generation;
+ const auto began=beginCount;
+ const auto deliver=[](int id,ULONGLONG stamp,const std::string& fields={}){
+  joinKernelXml=timeoutXml(id,1,stamp);
+  joinKernelXml.insert(joinKernelXml.find("</EventData>"),fields);
+  sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(0xb01));
+ };
+ at(start+561062);deliver(506,origin);
+ at(start+561207);resumeAutomatic();resumeInteractive();drainActualWake();
+ at(start+561228);handle506(1,origin);
+ check(generation==gen&&beginCount==began&&sgSleepTimeoutOriginalIntent()==origin&&classificationTimerDue,
+       "Win5 150201: delayed original entry must join the existing resume without a second pause");
+ at(start+561457);sgObserveEntryFailureDisplay(1,"win5-150201-display-on");
+ at(start+561744);sgSleepTimeoutTick();
+ check(!requestCount&&!timerDue&&!sgSleepRetryActive()&&classificationTimerDue,
+       "Win5 150201: overdue timer or display alone must not issue a request before the original exit");
+ const auto exit=origin+5614115240ULL;
+ at(start+562066);deliver(507,exit,"<Data Name='IsCsSessionInProgressOnExit'>false</Data>"
+  "<Data Name='SleepEntered'>true</Data><Data Name='SleepDurationInUs'>561325647</Data>"
+  "<Data Name='DurationInUs'>561412457</Data><Data Name='ScreenOffDurationInUs'>86267</Data>");
+ check(sgSleepTimeoutSuccessAfter(origin),"Win5 150201: Windows completion must cancel pending timeout before GUI delivery");
+ at(start+562072);handle507Native(1,exit);drainActualWake();
+ at(start+565000);sgResumeClassificationTick();sgSleepTimeoutTick();if(timerDue)dispatch();
+ check(generation==gen&&beginCount==began&&!requestCount&&!g_sgAutomaticSleepBudget.requests()&&
+       !sgSleepRetryActive()&&!g_sgSleepTimeoutWindow.active()&&!classificationTimerDue,
+       "Win5 150201: normal completion reopened a pause, timeout, or retry");
+ check(std::none_of(facts.begin(),facts.end(),[](const auto& f){return f.first=="s0-long-screen-off-not-entered";}),
+       "Win5 150201: Windows-recorded Sleep triggered a long screen-off diagnostic");
+}
+static void joinWin5LongScreenOff(){
+ const auto deliver=[](int id,int reason,ULONGLONG stamp,const std::string& fields={}){
+  joinKernelXml=timeoutXml(id,reason,stamp);
+  joinKernelXml.insert(joinKernelXml.find("</EventData>"),fields);
+  sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(0xb01));
+ };
+ const auto count=[](){return std::count_if(facts.begin(),facts.end(),[](const auto& f){return f.first=="s0-long-screen-off-not-entered";});};
+ const std::string ended="<Data Name='IsCsSessionInProgressOnExit'>false</Data>";
+ const std::string entered="<Data Name='SleepEntered'>false</Data>";
+ const std::string zero="<Data Name='SleepDurationInUs'>0</Data>";
+ const std::string total="<Data Name='DurationInUs'>8661077406</Data>";
+ const std::string off="<Data Name='ScreenOffDurationInUs'>8661077336</Data>";
+ for(int control:{0,1,2,3,4,5,6,7,8,9,10,11}){
+  baseCycle(false,false);const auto origin=nowFile,start=nowTick;
+  sgSleepTimeoutStop("fixture-no-human-origin");
+  if(control!=1)deliver(506,control==2?1:12,origin);
+  if(control==9)++generation;
+  if(control==10)generation+=2;
+  at(start+8663936);
+  if(control==3)deliver(506,28,nowFile-10000);
+  if(control==4)sgSleepTimeoutRecordSystemSuccess(nowFile-10000);
+  std::string fields=control==5?"":ended;
+  fields+=control==6?"<Data Name='SleepEntered'>true</Data>":entered;
+  if(control!=7)fields+=zero;
+  fields+=total+(control==8?"<Data Name='ScreenOffDurationInUs'>1</Data>":off);
+  if(control==11)fields+=ended;
+  deliver(507,1,nowFile,fields);deliver(507,1,nowFile,fields);
+  check(count()==(control==0||control==9?1:0),"Win5 055735: wrong long screen-off attribution or duplicate record");
+  if(count()){
+   const auto found=std::find_if(facts.begin(),facts.end(),[](const auto& f){return f.first=="s0-long-screen-off-not-entered";});
+   const auto& d=found->second;
+   check(d.at("screenOffUs")==8661077336ULL&&d.at("entryFileTime100ns")==origin&&d.at("exitFileTime100ns")==nowFile&&
+         d.at("detailLogsRequired")==false&&d.at("powerActionAuthorized")==false,"Win5 055735: evidence changed the source fact or granted action");
+  }
+  check(!requestCount&&!sgSleepRetryActive()&&!g_sgAutomaticSleepBudget.requests(),"Win5 055735: observation changed automatic sleep authority");
+ }
+ passed("win5-055735-long-screen-off-windows-evidence-only");
+}
+static void joinG3ELongScreenOffAfterPowerChange(){
+ const auto deliver=[](int id,int reason,ULONGLONG stamp,const std::string& fields={}){
+  joinKernelXml=timeoutXml(id,reason,stamp);
+  joinKernelXml.insert(joinKernelXml.find("</EventData>"),fields);
+  sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(0xb01));
+ };
+ const auto count=[](){return std::count_if(facts.begin(),facts.end(),[](const auto& f){return f.first=="s0-long-screen-off-not-entered";});};
+ const auto early=[](){return std::find_if(facts.begin(),facts.end(),[](const auto& f){return f.first=="s0-long-screen-off-ac-segment-not-entered";});};
+ const std::string acFields="<Data Name='IsCsSessionInProgressOnExit'>true</Data>"
+  "<Data Name='SleepEntered'>false</Data><Data Name='SleepDurationInUs'>0</Data>"
+  "<Data Name='DurationInUs'>66445945042</Data><Data Name='ScreenOffDurationInUs'>66445944305</Data>";
+ baseCycle(false,false);const auto origin=nowFile,start=nowTick;
+ sgSleepTimeoutStop("fixture-no-human-origin");
+ deliver(506,12,origin);
+ at(start+66445944);
+ const auto acExit=nowFile-10000;
+ const auto acAccounting=acFields+"<Data Name='PowerStateAc'>true</Data>";
+ deliver(507,28,acExit,acAccounting);deliver(507,28,acExit,acAccounting);
+ check(count()==0,"G3E 140347: continuing AC segment was treated as a final exit");
+ check(std::count_if(facts.begin(),facts.end(),[](const auto& f){return f.first=="s0-long-screen-off-ac-segment-not-entered";})==1,
+       "G3E 140347: missing or duplicate no-Sleep evidence before display relight");
+ const auto& a=early()->second;
+ check(a.at("entryFileTime100ns")==origin&&a.at("exitFileTime100ns")==acExit&&a.at("entryReason")==12&&
+       a.at("exitReason")==28&&a.at("sessionContinues")==true&&a.at("windowsPowerStateAc")==true&&
+       a.at("screenOffUs")==66445944305ULL&&a.at("powerActionAuthorized")==false,
+       "G3E 140347: early diagnostic used the wrong interval or grants power authority");
+ check(!requestCount&&!sgSleepRetryActive()&&!g_sgAutomaticSleepBudget.requests(),"G3E 140347: AC segment changed sleep authority");
+ const auto batteryEntry=nowFile;
+ deliver(506,28,batteryEntry);
+ at(start+66445944+31179314);
+ const std::string finalFields="<Data Name='IsCsSessionInProgressOnExit'>false</Data>"
+  "<Data Name='SleepEntered'>false</Data><Data Name='SleepDurationInUs'>0</Data>"
+  "<Data Name='DurationInUs'>31179314305</Data><Data Name='ScreenOffDurationInUs'>31179313981</Data>";
+ deliver(507,1,nowFile,finalFields);deliver(507,1,nowFile,finalFields);
+ check(count()==1,"G3E 140347: missing or duplicate battery segment with no sleep");
+ const auto result=std::find_if(facts.begin(),facts.end(),[](const auto& f){return f.first=="s0-long-screen-off-not-entered";});
+ const auto& d=result->second;
+ check(d.at("entryReason")==28&&d.at("entryFileTime100ns")==batteryEntry&&d.at("exitFileTime100ns")==nowFile&&
+       d.at("screenOffUs")==31179313981ULL&&d.at("powerActionAuthorized")==false,"G3E 140347: wrong segment or action authority");
+ check(!requestCount&&!sgSleepRetryActive()&&!g_sgAutomaticSleepBudget.requests(),"G3E 140347: observation changed sleep authority");
+ for(int variant:{0,1,2,3,4,5,6,7,8}){
+  baseCycle(false,false);const auto begin=nowFile,tick=nowTick;
+  sgSleepTimeoutStop("fixture-no-human-origin");
+  if(variant!=4)deliver(506,variant==3?1:12,begin);
+  at(tick+66445944);const auto close=nowFile-10000;
+  if(variant==0)deliver(506,28,nowFile); // The successor notification may be delivered first.
+  if(variant==5)sgSleepTimeoutRecordSystemSuccess(close-10000);
+  auto fields=variant==1?acFields:acAccounting;
+  if(variant==2)fields.replace(fields.find("PowerStateAc'>true"),18,"PowerStateAc'>false");
+  if(variant==6){
+   fields.replace(fields.find("SleepEntered'>false"),19,"SleepEntered'>true");
+   fields.replace(fields.find("SleepDurationInUs'>0"),20,"SleepDurationInUs'>600000000");
+  }
+  if(variant==8)fields+="<Data Name='PowerStateAc'>true</Data>";
+  deliver(507,variant==7?55:28,close,fields);
+  check((early()!=facts.end())==(variant==0),"G3E 140347: continuing AC segment association or veto failed");
+  check(count()==0&&!requestCount&&!sgSleepRetryActive()&&!g_sgAutomaticSleepBudget.requests(),
+        "G3E 140347: a continuing segment emitted a final diagnostic or retried sleep");
+ }
+ passed("g3e-140347-screen-off-after-power-change");
+}
+static void joinWin5ReasonFiveScreenOff(){
+ const auto deliver=[](int id,int reason,ULONGLONG stamp,const std::string& fields={}){
+  joinKernelXml=timeoutXml(id,reason,stamp);
+  joinKernelXml.insert(joinKernelXml.find("</EventData>"),fields);
+  sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(0xb01));
+ };
+ const auto accounting=[](bool ac,bool continuing,ULONGLONG total,ULONGLONG off){
+  return std::string("<Data Name='SleepEntered'>false</Data><Data Name='SleepDurationInUs'>0</Data><Data Name='BootId'>42</Data>")+
+   "<Data Name='PowerStateAc'>"+(ac?"true":"false")+"</Data><Data Name='IsCsSessionInProgressOnExit'>"+
+   (continuing?"true":"false")+"</Data><Data Name='DurationInUs'>"+std::to_string(total)+
+   "</Data><Data Name='ScreenOffDurationInUs'>"+std::to_string(off)+"</Data>";
+ };
+ const auto expectSegment=[](const char* event,ULONGLONG entry,ULONGLONG exit,int exitReason,ULONGLONG screenOff){
+  unsigned matches=0;
+  for(const auto& [name,d]:facts)if(name==event){
+   ++matches;
+   check(d.at("entryFileTime100ns")==entry&&d.at("exitFileTime100ns")==exit&&d.at("entryReason")==5&&
+         d.at("exitReason")==exitReason&&d.at("screenOffUs")==screenOff&&d.at("powerActionAuthorized")==false,
+         "Win5 111424: diagnostic is bound to its own Reason 5 segment and has no action authority");
+  }
+  check(matches==1,"Win5 111424: exactly one diagnostic for the selected segment");
+ };
+ for(const bool reversed:{false,true}){
+  baseCycle(false,false);const auto first=nowFile,start=nowTick;
+  sgSleepTimeoutStop("fixture-no-human-origin");
+  deliver(506,5,first);
+  at(start+15331009);const auto handoff=nowFile;
+  if(reversed)deliver(506,28,handoff);
+  deliver(507,28,handoff,accounting(true,true,15331011509ULL,15331010340ULL));
+  if(!reversed)deliver(506,28,handoff);
+  deliver(507,28,handoff,accounting(true,true,15331011509ULL,15331010340ULL));
+  at(start+15332125);deliver(507,5,nowFile,accounting(false,false,1117720ULL,1116664ULL));
+  at(start+15337249);const auto second=nowFile;deliver(506,5,second);
+  at(start+18410194);deliver(507,8,nowFile,accounting(true,false,3072946969ULL,3072946045ULL));
+  expectSegment("s0-long-screen-off-ac-segment-not-entered",first,handoff,28,15331010340ULL);
+  expectSegment("s0-long-screen-off-not-entered",second,nowFile,8,3072946045ULL);
+  check(!requestCount&&!sgSleepRetryActive()&&!g_sgAutomaticSleepBudget.requests(),"Reason 5 diagnostics never request sleep or consume the budget");
+ }
+ const auto interval=[](ULONGLONG gap,int successorReason,ULONGLONG successorGeneration,
+                        bool interveningExit,ULONGLONG systemWake,bool shortAccounting){
+  ymcc::sleeppower::KernelCycleObservations observations;
+  constexpr ULONGLONG entry=100,spanUs=600000000,exit=entry+spanUs*10;
+  observations.record(506,{entry,42,5});
+  if(interveningExit)observations.record(507,{entry+10,42,1,0,false,true});
+  observations.record(506,{exit+gap,successorGeneration,successorReason});
+  observations.record(507,{exit,42,28,0,true,false});
+  return observations.claimLongScreenOffExit(exit,42,28,shortAccounting?spanUs-5000001:spanUs,systemWake,true).at;
+ };
+ check(interval(20000000,28,42,false,0,false)==100,"AC successor at two seconds retains the prior segment");
+ check(!interval(20000001,28,42,false,0,false)&&!interval(0,12,42,false,0,false)&&
+       !interval(0,28,43,false,0,false),"too late, wrong reason or different generation cannot select the prior segment");
+ check(!interval(0,28,42,true,0,false)&&!interval(0,28,42,false,100,false)&&
+       !interval(0,28,42,false,0,true),"intervening exit, S4 witness and incompatible accounting veto a match");
+ passed("win5-111424-reason5-diagnostic");
+}
+static void joinWin5BriefSleepScreenOff(bool deadlineHold=false){
+ // Original System 5148/5152/5154/5160/5162/5166/5168/5174.
+ constexpr int continued=16777220;
+ const auto deliver=[](int id,int reason,ULONGLONG stamp,ULONGLONG total=0,ULONGLONG off=0,ULONGLONG slept=0,bool continuing=true,bool ac=true){
+  joinKernelXml=timeoutXml(id,reason,stamp);
+  if(id==507)joinKernelXml.insert(joinKernelXml.find("</EventData>"),
+   std::string("<Data Name='IsCsSessionInProgressOnExit'>")+(continuing?"true":"false")+"</Data><Data Name='SleepEntered'>true</Data>"
+   "<Data Name='PowerStateAc'>"+(ac?std::string("true"):std::string("false"))+"</Data><Data Name='BootId'>1</Data>"
+   "<Data Name='DurationInUs'>"+std::to_string(total)+"</Data><Data Name='ScreenOffDurationInUs'>"+
+   std::to_string(off)+"</Data><Data Name='SleepDurationInUs'>"+std::to_string(slept)+"</Data>");
+  sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(0xb01));
+ };
+ if(deadlineHold){
+  for(unsigned mode=0;mode<10;++mode){
+   baseCycle(false,false);g_sgOriginalHibernateIngress={};
+   const auto origin=nowFile,start=nowTick;
+   const auto first=origin+11034825ULL,tail=origin+195624044ULL,third=origin+2422762806ULL;
+   deliver(506,1,origin);handle506(1,origin);
+   at(start+1105);
+   if(mode!=2)deliver(507,continued,first,1104303,30269,mode==3?0:1073547);
+   deliver(506,continued,origin+11041431ULL);
+   at(start+19564);
+   deliver(507,continued,origin+195617623ULL,18458336,17450897,1007398);
+   deliver(506,mode==4?12:continued,tail);
+   at(start+240026);
+   if(mode==5)deliver(507,1,tail+50000,1,0,1,false);
+   if(mode==6)deliver(507,20,tail+50000,1,0,1,false);
+   if(mode==7)deliver(507,8,tail+2000000000ULL,200000000,150000000,50000000,false);
+   if(mode==8)g_sleepPowerDispatch.window(PBT_APMSUSPEND,nowTick,nowFile);
+   sgSleepTimeoutTick();
+   check(requestCount==0&&!sgSleepTimeoutDispatchPermitted(),"continued standby is never a timeout send permit");
+   if(mode>1&&mode<9){
+    check(!g_sgSleepTimeoutWindow.active(),"missing lineage or a newer/manual/system/final boundary must stop the old deadline");
+    continue;
+   }
+   check(g_sgSleepTimeoutWindow.waiting&&g_sgSleepTimeoutWindow.origin==origin&&
+         g_sgSleepTimeoutWindow.lastOrigin==origin&&!g_sgSleepTimeoutWindow.requested,
+    "Win5 180812: proved continuing entries must preserve the original deadline for evidence only");
+   check(std::count_if(facts.begin(),facts.end(),[](const auto& f){return f.first=="sleep-timeout-armed";})==1,
+    "brief continuing Sleep must not rearm or restart the original deadline");
+   at(start+242279);
+   deliver(507,mode==1?1:continued,third,222714334,221710008,1004539,mode!=1);
+   if(mode==0)deliver(506,continued,origin+2422781025ULL);
+   if(mode==9)deliver(506,12,origin+2422781025ULL);
+   sgSleepTimeoutTick();
+   check(requestCount==0&&!sgSleepTimeoutDispatchPermitted()&&g_sgSleepTimeoutWindow.active()==(mode==0),
+    "same-cycle continuation keeps only the original timer; late manual wake and unrelated entry retire it");
+   at(start+270000);sgSleepTimeoutTick();
+   check(!requestCount&&!g_sgSleepTimeoutWindow.active()&&!g_sgAutomaticSleepBudget.requests(),
+    "original dispatch grace expires once with zero dispatch or retry budget");
+  }
+  passed("win5-180812-original-deadline-evidence-only");
+  return;
+ }
+ for(int mode=0;mode<3;++mode){
+  baseCycle(false,false);g_sgOriginalHibernateIngress={};
+  const auto origin=nowFile,start=nowTick;
+  deliver(506,1,origin); handle506(1,origin);
+  check(g_sgSleepTimeoutWindow.waiting,"field timer did not arm");
+  const auto firstExit=origin+11034825ULL;
+  at(start+1105);
+  if(mode!=1)deliver(507,continued,firstExit,1104303,30269,1073547);
+  if(mode!=2){
+   deliver(506,continued,origin+11041431ULL);handle506(continued,origin+11041431ULL);
+   at(start+19564);
+   if(mode!=1)deliver(507,continued,origin+195617623ULL,18458336,17450897,1007398);
+   deliver(506,continued,origin+195624044ULL);handle506(continued,origin+195624044ULL);
+  }
+  at(start+240026);
+  const auto success=sgSleepTimeoutSuccessAfter(origin);
+  const auto entryAdvanced=g_sgLatestSleepEntryFileTime.load()>origin;
+  const auto current=sgSleepTimeoutCurrent();
+  sgSleepTimeoutTick();
+  check(success==(mode!=1),"short continuing Sleep did not reproduce the success fence independently");
+  check(entryAdvanced==(mode!=2),"continued 506 did not reproduce the entry fence independently");
+  check(!current&&g_sgSleepTimeoutWindow.active()==(mode==0)&&requestCount==0,"evidence-only hold must not admit a timeout dispatch");
+  check(std::any_of(facts.begin(),facts.end(),[&](const auto& f){return mode==0?f.first=="sleep-timeout-continuation-evidence-wait":
+    f.first=="sleep-timeout-deadline-blocked"&&f.second.at("newerOriginalEntry")==entryAdvanced&&
+    f.second.at("originalEntryHadSleep")==success;}),"wait or independent deadline stop evidence is missing");
+  std::cout<<"WIN5_180812_FENCE "<<json{{"mode",mode},{"shortSleepVeto",success},
+   {"newerEntryVeto",entryAdvanced},{"requests",requestCount}}.dump()<<"\n";
+  if(mode==0){
+   at(start+242278);
+   deliver(507,continued,origin+2422762806ULL,222714334,221710008,1004539);
+   check(std::none_of(facts.begin(),facts.end(),[](const auto& f){return f.first=="s0-long-screen-off-not-entered"||
+    f.first=="s0-long-screen-off-ac-segment-not-entered";}),"short Sleep was misclassified as zero Sleep");
+   check(requestCount==0,"late continuation issued power request");
+  }
+ }
+ const auto count=[](){return std::count_if(facts.begin(),facts.end(),[](const auto& f){
+  return f.first=="s0-long-screen-off-brief-sleep-continuing";
+ });};
+ for(unsigned mode=0;mode<13;++mode){
+  baseCycle(false,false);g_sgOriginalHibernateIngress={};
+  const auto origin=nowFile,start=nowTick;
+  const bool g3e=mode==12;
+  const ULONGLONG entry=origin+195624044ULL,exit=g3e?entry+2401080000ULL:origin+2422762806ULL;
+  at(start+19564);
+  if(mode!=2)deliver(506,continued,entry);
+  at(start+(g3e?259781:242390));
+  if(mode==1)deliver(506,continued,origin+2422781025ULL); // Matching successor arrives first.
+  if(mode==3)deliver(506,1,exit+10000); // Later human intent is a barrier.
+  if(mode==4)deliver(506,continued,exit+1000001); // Not the adjacent successor.
+  if(mode==5)deliver(507,1,exit+10000,1,0,1,false);
+  if(mode==6)deliver(507,20,exit+10000,1,0,1,false);
+  if(mode==10)deliver(506,continued,0); // Unattributed boundary.
+  if(mode==11)sgSleepTimeoutRecordSystemSuccess(exit+10000); // Original 107/S4 fence.
+  const ULONGLONG total=g3e?240110118:222714334,off=g3e?239049770:mode==8?170000000:221710008;
+  const ULONGLONG sleep=g3e?1060826:mode==7?57913729:1004539;
+  deliver(507,continued,exit,total,off,sleep,true,mode!=9);
+  deliver(507,continued,exit,total,off,sleep,true,mode!=9);
+  if(mode==0){
+   deliver(506,continued,origin+2422781025ULL);
+   at(start+539235);
+   deliver(507,1,origin+5392340000ULL,296957128,239043454,57913729,false);
+  }
+  check(count()==(mode<2||g3e?1:0),"Win5 / G3E: original continuing segment must emit one brief-Sleep diagnostic only when paired");
+  for(const auto& [name,d]:facts)if(name=="s0-long-screen-off-brief-sleep-continuing"){
+   check(d.at("entryFileTime100ns")==entry&&d.at("exitFileTime100ns")==exit&&
+    d.at("entryReason")==continued&&d.at("exitReason")==continued&&d.at("sleepUs")==sleep&&
+    d.at("screenOffUs")==off&&d.at("sessionUs")==total&&d.at("powerActionAuthorized")==false,
+    "Win5 180812: diagnostic must preserve original times and all three accounted durations");
+   std::cout<<"WIN5_BRIEF_SLEEP_FACT "<<json{{"event",name},{"details",d}}.dump()<<"\n";
+  }
+  check(!requestCount&&!sgSleepRetryActive()&&!g_sgAutomaticSleepBudget.requests(),
+   "Win5 180812: diagnostic must not start a retry, spend budget or request sleep");
+ }
+ passed("win5-180812-brief-sleep-long-screen-off-diagnostic");
+}
+static void joinWin5RelightAfterSleepSplit(){
+ const auto deliver=[](int id,int reason,ULONGLONG stamp,const std::string& fields={}){
+  joinKernelXml=timeoutXml(id,reason,stamp);
+  joinKernelXml.insert(joinKernelXml.find("</EventData>"),fields);
+  sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(0xb01));
+ };
+ for(int control:{0,1,2,3}){
+  const bool hasAccounting=control!=0;
+  baseCycle(hasAccounting,control>=2);const auto origin=nowFile,start=nowTick;
+  joinInjectSuspendOnDispatch=joinInjectManualOnDispatch=false;
+  if(!hasAccounting)sgSleepTimeoutStop("fixture-no-human-origin");
+  at(start+15);sgObserveSleepSessionDisplay(1,0);
+  if(hasAccounting){
+   at(start+7237083);deliver(506,1,origin);
+   at(start+7237173);resumeAutomatic();resumeInteractive();drainActualWake();
+   at(start+7237187);handle506(1,origin);
+  }
+  at(start+7237570);sgObserveSleepSessionDisplay(0,1);
+  check(!requestCount&&!sgSleepRetryActive(),"Win5 162101: display relight alone authorized sleep");
+  if(hasAccounting){
+   // Win5 162101: accounting arrived after relight; only the last half-second segment had zero Sleep time.
+   at(start+7237983);
+   deliver(507,55,origin+72370750146ULL,"<Data Name='IsCsSessionInProgressOnExit'>true</Data>"
+    "<Data Name='SleepEntered'>true</Data><Data Name='SleepDurationInUs'>7237001006</Data>"
+    "<Data Name='DurationInUs'>7237075015</Data><Data Name='ScreenOffDurationInUs'>73683</Data>");
+   const auto reentry=origin+72370763420ULL,finalExit=origin+72375481187ULL;
+   at(start+7237986);deliver(506,55,reentry);handle506(55,reentry);
+   check(sgSleepTimeoutSuccessAfter(origin)&&!requestCount&&!sgSleepRetryActive(),
+         "Win5 162101: continuing phase lost confirmed Sleep or authorized a retry");
+   at(start+7237987);
+   deliver(507,32,finalExit,"<Data Name='IsCsSessionInProgressOnExit'>false</Data>"
+    "<Data Name='SleepEntered'>false</Data><Data Name='SleepDurationInUs'>0</Data>"
+    "<Data Name='DurationInUs'>472521</Data><Data Name='ScreenOffDurationInUs'>473570</Data>");
+   at(start+7237989);handle507Native(32,finalExit);
+   check(!requestCount&&sgSleepRetryActive()==(control>=2),
+         "Win5 162101: final exit did not apply the non-user wake setting");
+  }
+  std::vector<json> accounting;
+  for(const auto& [name,detail]:facts){
+   check(name!="s0-long-screen-off-not-entered","Win5 162101: display span or zero-length tail was treated as a long interval without Sleep");
+   if(name=="s0-low-power-residency")accounting.push_back(detail.at("values"));
+  }
+  check(accounting.size()==(hasAccounting?2u:0u),"Win5 162101: display alone fabricated Windows Sleep accounting or a segment was lost");
+  if(hasAccounting){
+   check(accounting[0].at("IsCsSessionInProgressOnExit")==true&&accounting[0].at("SleepEntered")==true&&
+         accounting[0].at("SleepDurationInUs")==7237001006ULL&&accounting[1].at("IsCsSessionInProgressOnExit")==false&&
+         accounting[1].at("SleepEntered")==false&&accounting[1].at("SleepDurationInUs")==0,
+         "Win5 162101: positive Sleep accounting and the final no-Sleep segment must remain distinct");
+  }
+  if(control==3){
+   at(start+7238000);deliver(507,1,nowFile,"<Data Name='IsCsSessionInProgressOnExit'>false</Data>");
+  }
+  if(timerDue)dispatch();
+  if(classificationTimerDue){at((std::max)(classificationTimerDue,nowTick));sgResumeClassificationTick();}
+  drainActualWake();
+  check(requestCount==(control==2?1:0),"Win5 162101: final sender ignored the setting or a newer button-wake veto");
+  if(control!=2)check(!sgSleepRetryActive()&&!frozen,"Win5 162101: canceled wake retained the old recovery or repair");
+ }
+ passed("win5-162101-relight-after-sleep-split");
 }
 static void joinWin5ManualWithoutResidency(){
  const auto deliver=[](int id,int reason,ULONGLONG stamp){
@@ -2228,6 +2640,112 @@ static void joinWin5ManualWithoutResidency(){
        !sgSleepTimeoutSuccessAfter(next),"manual future stamp: bad evidence leaked to successor");
  passed("win5-223310-manual-exit-without-residency");
 }
+static void joinG3EFiveSecondWakeTail(){
+ const auto deliver=[](int id,int reason,ULONGLONG stamp,const std::string& fields={}){
+  joinKernelXml=timeoutXml(id,reason,stamp);
+  joinKernelXml.insert(joinKernelXml.find("</EventData>"),fields);
+  sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(0xb01));
+ };
+ // Original FILETIME offsets from 134397503457067747, journal lines 831, 850, 871.
+ constexpr ULONGLONG continuedOffset=72203914185ULL,reentryOffset=72203925308ULL,exitOffset=72254754019ULL;
+ bool admissionContract=true,dispatchContract=true;
+ enum Control { Off, On, ManualAfter, NoCounters, NoSleepProof, MissingTail, DistantTail,
+                NewEntry, NewSuspend, LateManualAtDispatch, NewEntryAtDispatch, S4After, UnknownEntry, ReorderedTail };
+ for(const auto control:{Off,On,ManualAfter,NoCounters,NoSleepProof,MissingTail,DistantTail,
+                       NewEntry,NewSuspend,LateManualAtDispatch,NewEntryAtDispatch,S4After,UnknownEntry,ReorderedTail}){
+  const bool enabled=control!=Off, optionalMissing=control==NoCounters;
+  baseCycle(true,enabled);const auto origin=nowFile,start=nowTick;
+  g_sgOriginalHibernateIngress={}; // Each archive replay represents a separate Native process.
+  joinInjectSuspendOnDispatch=joinInjectManualOnDispatch=false;
+  at(start+16);if(control!=ReorderedTail)sgObserveSleepSessionDisplay(1,0);
+  at(start+7220410);deliver(506,1,origin);
+  at(start+7220563);resumeAutomatic();resumeInteractive();drainActualWake();
+  at(start+7220588);handle506(1,origin);
+  const std::string optional=optionalMissing?"":
+    "<Data Name='DripsResidencyInUs'>7175642600</Data><Data Name='HwDripsResidencyInUs'>7171192509</Data>"
+    "<Data Name='EnergyDrain'>201</Data>";
+  at(start+7221380);
+  const auto tail=origin+reentryOffset+(control==DistantTail?2000000ULL:0);
+  if(control==ReorderedTail){deliver(506,55,tail);handle506(55,tail);}
+  const std::string sleep=control==NoSleepProof?
+    "<Data Name='SleepEntered'>false</Data><Data Name='SleepDurationInUs'>0</Data>":
+    "<Data Name='SleepEntered'>true</Data><Data Name='SleepDurationInUs'>7220340182</Data>";
+  deliver(507,55,origin+continuedOffset,
+    "<Data Name='PowerStateAc'>false</Data><Data Name='IsCsSessionInProgressOnExit'>true</Data>"+sleep+
+    "<Data Name='DurationInUs'>7220391475</Data><Data Name='ScreenOffDurationInUs'>51057</Data>"+optional);
+  at(start+7221383);
+  if(control!=MissingTail&&control!=ReorderedTail){deliver(506,55,tail);handle506(55,tail);}
+  if(control==UnknownEntry)deliver(506,-1,0);
+  if(classificationTimerDue){at((std::max)(classificationTimerDue,nowTick));sgResumeClassificationTick();drainActualWake();}
+  check(sgSleepTimeoutSuccessAfter(origin)==(control!=NoSleepProof)&&!requestCount&&!sgSleepRetryActive(),
+        "G3E: continuing phase lost actual Sleep or queued a request");
+  at(start+7225420);handleSuspendAdmission();
+  at(start+7225731);if(control!=ReorderedTail)sgObserveSleepSessionDisplay(0,1);
+  resumeAutomatic();resumeInteractive();drainActualWake();
+  check(!requestCount&&!sgSleepRetryActive(),"G3E: relight or PBT alone authorized retry");
+  at(start+7226452);deliver(507,32,origin+exitOffset,
+    "<Data Name='PowerStateAc'>false</Data><Data Name='IsCsSessionInProgressOnExit'>false</Data>"
+    "<Data Name='SleepEntered'>false</Data><Data Name='SleepDurationInUs'>0</Data>"
+    "<Data Name='DurationInUs'>5083507</Data><Data Name='ScreenOffDurationInUs'>5084586</Data>");
+  at(start+7226454);
+  if(control==NewEntry)deliver(506,3,origin+exitOffset+1);
+  handle507Native(32,origin+exitOffset);
+  const bool admitted=sgSleepRetryActive();
+  const bool qualifies=enabled&&control!=NoSleepProof&&control!=MissingTail&&control!=DistantTail&&
+     control!=NewEntry&&control!=UnknownEntry;
+  admissionContract=admissionContract&&!requestCount&&admitted==qualifies;
+  ULONGLONG suppressedAgeMs=0;
+  unsigned accounting=0,matchedRelights=0;
+  for(const auto& [name,detail]:facts){
+   check(name!="s0-long-screen-off-not-entered"&&name!="s0-long-screen-off-ac-segment-not-entered",
+         "G3E: five-second tail replaced the preceding two hours of Sleep");
+   if(name=="external-device-wake-suppressed")suppressedAgeMs=detail.at("intentAgeMs").get<ULONGLONG>();
+   if(name=="s0-session-display-relit"){
+    check(detail.at("powerActionAuthorized")==false&&detail.at("userWakeProvenByDisplay")==false,
+          "G3E: display evidence supplied power authority");
+    if(detail.at("kernelExitObserved")==true){
+     check(detail.at("originalHumanIntent100ns")==origin&&detail.at("kernelExitFileTime100ns")==origin+exitOffset&&
+           detail.at("kernelExitReason")==32,"G3E: relight attached to the wrong original sleep or final exit");
+     ++matchedRelights;
+    }
+   }
+   if(name=="s0-low-power-residency"){
+    const auto& values=detail.at("values");
+    const bool entered=!accounting&&control!=NoSleepProof;
+    check(values.at("SleepEntered")==entered&&values.at("SleepDurationInUs")== (entered?7220340182ULL:0ULL),
+          "G3E: initial Sleep and short tail were not preserved independently");
+    check(!values.contains("BatteryRemainingCapacityOnExit"),"G3E: missing battery capacity was fabricated");
+    if(optionalMissing)check(!values.contains("DripsResidencyInUs")&&!values.contains("EnergyDrain"),"G3E: absent optional counters were fabricated");
+    ++accounting;
+   }
+  }
+  check(accounting==2&&matchedRelights<=1,"G3E: expected separate Windows accounting and at most one matched display relight");
+  if(control==ReorderedTail)check(!matchedRelights,"G3E: proof without display input fabricated a relight");
+  else if(control==Off||qualifies)check(matchedRelights==1,"G3E: valid chain lost its independent display evidence");
+  if(control==ManualAfter){at(start+7226460);deliver(507,1,nowFile,"<Data Name='IsCsSessionInProgressOnExit'>false</Data>");}
+  if(control==S4After){at(start+7226460);deliver(107,5,nowFile,"<Data Name='TargetState'>5</Data>");}
+  if(control==NewSuspend)joinInjectSuspendOnDispatch=true;
+  if(control==LateManualAtDispatch)joinDispatchHook=[] {
+   joinKernelXml=timeoutXml(507,1,g_sgLatestUserSleepEntryFileTime.load()+100000ULL);
+   sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(0xb01));
+  };
+  if(control==NewEntryAtDispatch)joinDispatchHook=[] {
+   joinKernelXml=timeoutXml(506,3,g_sgLastKernel507EventFileTime.load()+1);
+   sgKernelPowerEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(0xb01));
+  };
+  if(timerDue)dispatch();
+  if(classificationTimerDue){at((std::max)(classificationTimerDue,nowTick));sgResumeClassificationTick();}
+  drainActualWake();
+  const unsigned expected=control==On||control==NoCounters||control==ReorderedTail?1:0;
+  dispatchContract=dispatchContract&&requestCount==expected;
+  std::cout<<"G3E_FIELD_CONTROL "<<json{{"control",static_cast<int>(control)},{"enabled",enabled},{"laterButtonWake",control==ManualAfter},
+    {"omittedOptionalCounters",optionalMissing},{"admitted",admitted},{"suppressedAgeMs",suppressedAgeMs},
+    {"matchedRelights",matchedRelights},{"requests",requestCount},{"expectedRequests",expected}}.dump()<<"\n";
+ }
+ check(admissionContract,"G3E: second PBT cycle changed non-user wake admission");
+ check(dispatchContract,"G3E: wrong public dispatch count after final policy/veto");
+ passed("g3e-142742-real-sleep-five-second-final-tail");
+}
 int main(int argc,char** argv){try{
  if(argc>2||(argc==2&&argv[1][0]==0)){std::cerr<<"unknown or empty joined selector\n";return 3;}
  const std::string selected=argc==2?argv[1]:"";const bool suffix=selected.rfind("from:",0)==0;
@@ -2236,6 +2754,13 @@ int main(int argc,char** argv){try{
  const auto run=[&](const char* name,const std::function<void()>& body){if(exact==name)reached=true;if(!selected.empty()&&(suffix?!reached:exact!=name))return;++selectedCount;const auto before=resumeCases.size();body();check(resumeCases.size()==before+1,"joined selection must produce one original case");selectedNames.emplace_back(name);joinedCaseBindings.push_back(json{{"selector",name},{"case",resumeCases.back()}});};
  run("retry-timer-failure",joinRetryTimerFailure);
  run("completed-s0-timeout",joinWin5CompletedTimeout);
+ run("win5-long-screen-off",joinWin5LongScreenOff);
+ run("g3e-long-screen-off",joinG3ELongScreenOffAfterPowerChange);
+ run("g3e-142742",joinG3EFiveSecondWakeTail);
+ run("win5-111424-reason5",joinWin5ReasonFiveScreenOff);
+ run("win5-180812-brief-sleep",[]{joinWin5BriefSleepScreenOff();});
+ run("win5-180812-deadline-hold",[]{joinWin5BriefSleepScreenOff(true);});
+ run("win5-relight-after-sleep-split",joinWin5RelightAfterSleepSplit);
  run("manual-s0-without-residency",joinWin5ManualWithoutResidency);
  run("field074830-timeout-reentry",joinField074830ReentryTimeout);
  run("field074830-new-suspend-veto",joinField074830NewBoundaryVeto);

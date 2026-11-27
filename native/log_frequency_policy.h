@@ -11,6 +11,62 @@ constexpr NativeLane nativeLane(bool baseEvent, bool streamingRecord, bool detai
     return detailedEnabled ? NativeLane::detail : NativeLane::suppressed;
 }
 
+// The timer may repeat only the edge that actually published its cached state.
+struct ControllerConnectionEdge {
+    unsigned long long sequence=0,tick=0,power=0;
+    std::string_view powerPhase;
+    bool connected=false,written=false;
+    const char* event() const noexcept {return connected?"gamepad-controller-wake":"gamepad-controller-sleep";}
+    constexpr unsigned long long confirmedDisconnectSequence(bool currentEdge, unsigned long long currentPower,
+                                                              std::string_view currentPhase) const noexcept {
+        return currentEdge && !connected && written && power && power == currentPower && powerPhase == currentPhase
+            ? sequence : 0;
+    }
+    const char* timerEvidence(bool state,unsigned long long now,unsigned long long currentPower,
+                             std::string_view currentPhase) const noexcept {
+        if(!sequence||connected!=state)return "no-matching-edge";
+        if(!written)return "edge-write-unconfirmed";
+        if(!power||currentPower!=power||currentPhase!=powerPhase)return "edge-context-changed";
+        if(now<tick||now-tick>150)return "edge-outside-recent-window";
+        return nullptr;
+    }
+};
+struct ControllerConnectionAppendScope {
+    static inline thread_local ControllerConnectionEdge* pending=nullptr;
+    ControllerConnectionEdge* previous;
+    explicit ControllerConnectionAppendScope(ControllerConnectionEdge& edge) noexcept:previous(pending){pending=&edge;}
+    ~ControllerConnectionAppendScope(){pending=previous;}
+    ControllerConnectionAppendScope(const ControllerConnectionAppendScope&)=delete;
+    ControllerConnectionAppendScope& operator=(const ControllerConnectionAppendScope&)=delete;
+};
+
+class ResidentAppendScope {
+    static inline thread_local ResidentAppendScope* pending=nullptr;
+    ResidentAppendScope* previous;
+    std::string_view event;
+    bool& flushed;
+public:
+    ResidentAppendScope(std::string_view eventName,bool& confirmed) noexcept
+        :previous(pending),event(eventName),flushed(confirmed){pending=this;}
+    ~ResidentAppendScope(){pending=previous;}
+    ResidentAppendScope(const ResidentAppendScope&)=delete;
+    ResidentAppendScope& operator=(const ResidentAppendScope&)=delete;
+    static void confirm(const char* name) noexcept {
+        if (pending && name && pending->event==name) pending->flushed=true;
+    }
+};
+
+struct HidHideDisconnectLogMemo {
+    struct Context {
+        unsigned long long power=0,host=0,delivery=0;
+        unsigned long previousAdmittedMask=0;
+        std::string_view phase;
+        bool operator==(const Context&) const = default;
+    };
+    Context last;
+    bool known=false;
+};
+
 // Both records are streaming samples; neither may force a flush per BUS frame.
 constexpr bool inputSampleKind(std::string_view kind) noexcept {
     return kind == "sample" || kind == "controller-family-imu";
@@ -58,7 +114,26 @@ constexpr bool detailNeedsImmediateFlush(std::string_view event, bool explicitFa
 
 // Only category edges belong to the always-on lane; window values stay detailed.
 struct BusRateLogState {
+    static constexpr unsigned maxComparableWindowMs=2000;
+    struct Window {
+        const char* interruption=nullptr;
+        bool firstInterrupted=false;
+        unsigned long long startReadyPower=0;
+        bool transition=false;
+    };
     unsigned flags = 0;
+    unsigned long long startReadyPower=0;
+    bool interrupted=false;
+    void beginWindow(unsigned long long readyPower) noexcept {startReadyPower=readyPower;}
+    Window closeWindow(unsigned long long elapsedMs,unsigned long long readyPower,unsigned next) noexcept {
+        const char* reason=!startReadyPower||startReadyPower!=readyPower ? "power-context-changed" :
+            elapsedMs>maxComparableWindowMs ? "window-too-long" : nullptr;
+        const Window result{reason,reason&&!interrupted,startReadyPower,!reason&&observe(next)};
+        startReadyPower=readyPower;
+        interrupted=reason!=nullptr;
+        if(interrupted)flags=0;
+        return result;
+    }
     bool observe(unsigned next) noexcept {
         if (flags == next) return false;
         flags = next;

@@ -8,7 +8,7 @@ import type { RelayMutationContext } from './deckyMirrorRelay';
 import type { GameSpeedState, SpeedResult, SpeedOperationAdmission } from './speedhack';
 export interface SpeedMirrorNativeState {active:boolean;connected:boolean;connection:string;runId:string;connectionRevision:number;powerGeneration:number;hardwareWritesAllowed:boolean;}
 export function createSpeedMirrorActions(deps: {
-  featureAllowed: () => boolean; game: () => DetectedGame | null; power: () => Promise<PowerLifecycleState>;
+  featureAllowed: () => boolean; game: () => DetectedGame | null; power: (context: RelayMutationContext) => Promise<PowerLifecycleState>;
   acquire: (owner: string) => (() => void) | null; presets: number[]; blocked: (game: DetectedGame) => boolean;
   state: () => GameSpeedState | null; apply: (game: DetectedGame, factor: number, admission: SpeedOperationAdmission) => Promise<SpeedResult>;
   clear: (game: DetectedGame, admission: SpeedOperationAdmission) => Promise<SpeedResult>;
@@ -28,7 +28,7 @@ export function createSpeedMirrorActions(deps: {
     const release = deps.acquire('decky-game-speed');
     if (!release) throw Error('SPEED_MIRROR_BUSY');
     try {
-      const power = await deps.power(); checkpoint();
+      const power = await deps.power(context); checkpoint();
       if (power.generation !== context.generation || !isSharedPowerLifecycleAdmitted(power)) throw Error('SPEED_MIRROR_POWER_NOT_READY');
       const {observedNotificationSequence: notificationSequence, suspendSerial} = power;
       const state = deps.state();
@@ -38,7 +38,7 @@ export function createSpeedMirrorActions(deps: {
       // The original owner rechecks the native valve and PID creation identity.
       const admission:SpeedOperationAdmission={generation:context.generation,notificationSequence,suspendSerial,nativePeer:context.nativePeer,checkpoint:async()=>{
         checkpoint();
-        const fresh=await deps.power();checkpoint();
+        const fresh=await deps.power(context);checkpoint();
         if(!isSharedPowerLifecycleAdmitted(fresh)||fresh.generation!==context.generation||
           fresh.observedNotificationSequence!==notificationSequence||fresh.suspendSerial!==suspendSerial) throw Error('SPEED_MIRROR_POWER_NOT_READY');
         if(context.nativePeer){

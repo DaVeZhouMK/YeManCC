@@ -7,6 +7,8 @@ import {runProcess} from '../runner.mjs';
 import {LIFECYCLE_VERSION,verifyR3NormalReturn,verifyR3Tuple} from './r3-contract.mjs';
 import {verifyTerminal26Switch} from './r3-terminal26-switch-contract.mjs';
 import {inspectMsiReturnCases,inspectMsiCancellationCases} from '../../../fixtures/input_coordinator_lifecycle/msi_return_observation.mjs';
+import {verifyCurrent29CandidateLifecycle} from '../../../fixtures/input_coordinator_lifecycle/current29_lifecycle_receipt.mjs';
+import {TERMINAL_SHARED_INPUT_POWER_MANAGED_CONTRACT} from './r3-managed-input-contract.mjs';
 export {inspectMsiReturnCases};
 export {verifyTerminal26Switch};
 import {openCurrentPreparedContext,requireCurrentPreparedContext,currentPreparedSources,currentPreparedArtifacts,recheckCurrentPrepared,recheckCurrentPreparedContexts,verifyCurrentPreparedExecution} from './r3-current-prepared.mjs';
@@ -128,8 +130,8 @@ function verifyTerminal26SwitchNegativeReport(raw){
  return {scope:'ORIGINAL_NECESSARY_ASSERTION_AND_REPORT_CONSISTENCY_ONLY',reportConsistencyVerified:true,cases:raw.cases.length,checks:raw.checks,failures:expectedFailures.length,completeFailureMaskVerified:false};
 }
 
-export function verifyCurrentLifecycleMode(test,raw,{entryText,managedInputContract,tupleSource,switchSource,requireMsiReturnObservation=false,msiCancellation}={}){
- need(managedInputContract===undefined||['current105-exact21-v1','current105-terminal22-v1','current105-terminal23-sd-decoder-v1',tuple26Id].includes(managedInputContract),'UNKNOWN_MANAGED_CONTRACT');
+export function verifyCurrentLifecycleMode(test,raw,{entryText,managedInputContract,tupleSource,switchSource,terminal29Source,requireMsiReturnObservation=false,msiCancellation}={}){
+ need(managedInputContract===undefined||['current105-exact21-v1','current105-terminal22-v1','current105-terminal23-sd-decoder-v1',tuple26Id,TERMINAL_SHARED_INPUT_POWER_MANAGED_CONTRACT].includes(managedInputContract),'UNKNOWN_MANAGED_CONTRACT');
  currentLifecycleModeLabel(test);
  if(msiCancellation!==undefined){
   need(managedInputContract===tuple26Id&&test.role==='positive'&&test.mode==='recovery-protection'&&!test.mutation,
@@ -148,7 +150,14 @@ export function verifyCurrentLifecycleMode(test,raw,{entryText,managedInputContr
    if(test.mutation){const expected=test.role==='switchReturn'?'verified late cleanup queues only the continuation of the already charged recovery':test.role==='switchOwner'?'one current frame fault has exactly one serialized Stop owner':test.role==='recoveryInheritance'?'single real return refresh restores requested operational target':'actual durable request locks before consumer runs';need(raw.status==='FAIL'&&raw.failures.some(row=>row.assertion===expected),'ORIGINAL_LIFECYCLE_SEMANTIC_NEGATIVE_REQUIRED');}
    else if(test.mode==='entry'||test.mode.startsWith('mutation')){const n=test.mode==='entry'?0:test.mode==='mutation1'?1:2,text=entryText,rows=[...text.matchAll(/^(PASS|FAIL) (.+)$/gm)];need(rows.length===56,'ORIGINAL56_ENTRY_CASES_REQUIRED');need(n?raw.status==='FAIL'&&rows.some(row=>row[1]==='FAIL'&&row[2].trim()===(n===1?'Entry-B-ensure-after-stop':'Entry-A-armed-at-admit')):raw.status==='PASS'&&rows.every(row=>row[1]==='PASS'),'ORIGINAL_ENTRY_POLARITY_REQUIRED');}
    else need(raw.status==='PASS'&&raw.failures.length===0&&raw.checks>0,'ORIGINAL_POSITIVE_NATIVE_MODE_FAILED');
-   if(test.mode==='switch-recovery'&&!test.mutation){if(managedInputContract===tuple26Id)verifyTerminal26Switch(raw,{switchSource});else verifyR3NormalReturn(raw);}if(test.mode==='tuple-protection'&&!test.mutation){if(managedInputContract===tuple26Id)verifyTerminal26Tuple(raw,{tupleSource});else verifyR3Tuple(raw);}
+   const verifyTerminal29 = managedInputContract === TERMINAL_SHARED_INPUT_POWER_MANAGED_CONTRACT &&
+     test.role === 'positive' && !test.mutation && ['recovery-protection', 'switch-recovery', 'tuple-protection'].includes(test.mode);
+   if (verifyTerminal29) {
+     verifyCurrent29CandidateLifecycle(test.mode, raw, terminal29Source?.proof, terminal29Source?.source);
+   } else {
+     if(test.mode==='switch-recovery'&&!test.mutation){if(managedInputContract===tuple26Id)verifyTerminal26Switch(raw,{switchSource});else verifyR3NormalReturn(raw);}
+     if(test.mode==='tuple-protection'&&!test.mutation){if(managedInputContract===tuple26Id)verifyTerminal26Tuple(raw,{tupleSource});else verifyR3Tuple(raw);}
+   }
 
   return {originalSemanticChecksVerified:true,preparedContextGranted:false,runtimeAuthorityGranted:false,...(negativeSemanticEvidence?{negativeSemanticEvidence}:{}),...(msiReturnObservation?.present||msiReturnObservation?.required?{msiReturnObservation}:{})};
 }
@@ -160,6 +169,17 @@ function compilerInputs(contexts){const result=new Map();for(const context of co
 function loadedAssemblies(raw){const rows=[];function visit(value){if(!value||typeof value!=='object')return;if(value.buildReceiptSha256&&value.inputManifestSha256&&value.processId){for(const stage of ['startupBindings','finalBindings'])rows.push(...(value[stage]?.loadedAssemblies??[]));return;}for(const child of Object.values(value))if(child&&typeof child==='object')visit(child);}visit(raw.cases);return rows;}
 export function currentLifecyclePreparedSources(repo){return unique(lifecycleRoles.flatMap(role=>currentPreparedSources(openCurrentPreparedContext(role,repo))));}
 export function currentLifecyclePreparedArtifacts(repo){const result=unique(lifecycleRoles.flatMap(role=>currentPreparedArtifacts(openCurrentPreparedContext(role,repo))));need(result.length<=3072,'ORIGINAL_GLOBAL_ARTIFACT_LIMIT3072');return result;}
+function readLifecycleRoleInputs(role,repo){
+ const context=openCurrentPreparedContext(role,repo);
+ return {sources:currentPreparedSources(context),artifacts:currentPreparedArtifacts(context)};
+}
+export function currentLifecyclePreparedRegistration(repo,{readRole=readLifecycleRoleInputs}={}){
+ const roles=lifecycleRoles.map(role=>readRole(role,repo));
+ const evidenceInputs=unique(roles.flatMap(row=>row.sources));
+ const artifactInputs=unique(roles.flatMap(row=>row.artifacts));
+ need(artifactInputs.length<=3072,'ORIGINAL_GLOBAL_ARTIFACT_LIMIT3072');
+ return {evidenceInputs,artifactInputs};
+}
 export async function executeCurrentPreparedPipe(root,role,repo){
  root=path.resolve(root);need(Object.hasOwn(pipeIds,role),'PIPE_ROLE_REQUIRED');need(!fs.existsSync(root),'FRESH_EVIDENCE_REQUIRED');fs.mkdirSync(root,{recursive:true});let failureStage='prerequisite',actualProcess=null,launchContext=null;
  try{
@@ -176,21 +196,26 @@ export async function executeCurrentPreparedPipe(root,role,repo){
  }catch(error){write(path.join(root,'result.json'),{schemaVersion:1,status:'FAIL',passed:false,id:pipeIds[role],case:role,error:error.message,failureStage,actualProcess:actualProcess?{pid:actualProcess.pid,exitCode:actualProcess.exitCode,signal:actualProcess.signal,timedOut:actualProcess.timedOut,launchError:actualProcess.launchError,outputTruncated:actualProcess.outputTruncated,durationMs:actualProcess.durationMs}:null,launchContext,normalProductMainExecuted:false,hardwareIo:false,compilationFailureCountedAsNegative:false});throw error;}
 }
 export async function executeCurrentPreparedLifecycle(root,repo){
- root=path.resolve(root);need(!fs.existsSync(root),'FRESH_EVIDENCE_REQUIRED');fs.mkdirSync(root,{recursive:true});const started=Date.now(),processLedger=[],steps=[];
+ root=path.resolve(root);need(!fs.existsSync(root),'FRESH_EVIDENCE_REQUIRED');fs.mkdirSync(root,{recursive:true});const started=performance.now(),processLedger=[],steps=[];
  try{
   const contexts=Object.fromEntries(lifecycleRoles.map(role=>[role,openCurrentPreparedContext(role,repo)])),allContexts=Object.values(contexts),inputs=recordInputs(repo,allContexts);
   recheckCurrentPreparedContexts(allContexts);
   const plan=currentLifecycleModePlan();
   for(const test of plan){
-   need(Date.now()-started<90000,'ORIGINAL_GROUP90_BUDGET_EXCEEDED');const state=requireCurrentPreparedContext(contexts[test.role]),label=currentLifecycleModeLabel(test),dir=path.join(root,label);fs.mkdirSync(dir);
-   const args=[dir,test.mode],processResult=await runProcess(state.canonical.nativeExe.path,args,{cwd:dir,env:{...process.env,YEMAN_POWER_CONTROL_DIR:dir},timeoutMs:45000});
-   fs.writeFileSync(path.join(dir,'stdout.log'),processResult.stdout);fs.writeFileSync(path.join(dir,'stderr.log'),processResult.stderr);const {stdout,stderr,...terminal}=processResult;processLedger.push({label,exe:state.canonical.nativeExe.path,args,...terminal});write(path.join(root,'process-ledger.json'),{steps:processLedger});
-   need(!terminal.timedOut&&!terminal.launchError&&!terminal.signal&&!terminal.outputTruncated&&terminal.durationMs<=45000&&terminal.exitCode===test.expectedExit,'ORIGINAL_NATURAL_MODE45_EXIT_REQUIRED:'+label);need(fs.existsSync(path.join(dir,'fixture-result.json')),'NATIVE_MODE_REPORT_REQUIRED:'+label);const raw=read(path.join(dir,'fixture-result.json'));
+   const state=requireCurrentPreparedContext(contexts[test.role]),label=currentLifecycleModeLabel(test),dir=path.join(root,label);fs.mkdirSync(dir);
+   const timeoutMs=Math.floor(currentLifecycleRemainingBudget(started,performance.now()).timeoutMs);
+   need(timeoutMs>=1,'ORIGINAL_GROUP90_BUDGET_EXCEEDED');
+   const args=[dir,test.mode],processResult=await runProcess(state.canonical.nativeExe.path,args,{cwd:dir,env:{...process.env,YEMAN_POWER_CONTROL_DIR:dir},timeoutMs});
+   fs.writeFileSync(path.join(dir,'stdout.log'),processResult.stdout);fs.writeFileSync(path.join(dir,'stderr.log'),processResult.stderr);const {stdout,stderr,...terminal}=processResult;processLedger.push({label,exe:state.canonical.nativeExe.path,args,timeoutMs,...terminal});write(path.join(root,'process-ledger.json'),{steps:processLedger});
+   need(!terminal.timedOut&&!terminal.launchError&&!terminal.signal&&!terminal.outputTruncated&&terminal.durationMs<=timeoutMs&&terminal.exitCode===test.expectedExit,'ORIGINAL_NATURAL_MODE45_EXIT_REQUIRED:'+label);need(fs.existsSync(path.join(dir,'fixture-result.json')),'NATIVE_MODE_REPORT_REQUIRED:'+label);const raw=read(path.join(dir,'fixture-result.json'));
    const entryIndex=test.mode==='entry'?0:test.mode==='mutation1'?1:2,entryText=!test.mutation&&(test.mode==='entry'||test.mode.startsWith('mutation'))?fs.readFileSync(path.join(dir,'msi-start-order-entry-selftest-m'+entryIndex+'.txt'),'utf8'):undefined;
    verifyCurrentLifecycleMode(test,raw,{entryText});
    steps.push({mode:test.mode,role:test.role,expectedNegative:!!test.mutation||test.mode.startsWith('mutation'),mutation:test.mutation,exitCode:terminal.exitCode,checks:raw.checks,originalOrderChecks:['entry','mutation1','mutation2'].includes(test.mode)?56:undefined,result:{status:raw.status,checks:raw.checks,failures:raw.failures,cases:raw.cases.map(row=>({name:row.name}))},rawReport:{path:path.join(dir,'fixture-result.json'),sha256:hash(path.join(dir,'fixture-result.json'))},path:dir});
   }
-  recheckCurrentPreparedContexts(allContexts);recheckInputs(repo,inputs);need(Date.now()-started<=90000,'ORIGINAL_GROUP90_BUDGET_EXCEEDED');
-  const generated=steps.flatMap(step=>files(step.path).map(file=>({path:file,sha256:hash(file)}))),result={schemaVersion:1,status:'PASS',passed:true,lifecycleVersion:LIFECYCLE_VERSION,currentContract:'VC-CURRENT-105-6457-38835033-20261021',actualCompilerInputs:compilerInputs(allContexts),sourceHashes:[...inputs.sources,...generated],prerequisiteArtifacts:inputs.artifacts,steps,originalModeBudgetMs:45000,originalGroupBudgetMs:90000,groupWallMs:Date.now()-started,boundary:{fullNativeCoordinatorExecuted:true,requestIpcExecuted:true,sourceBoundPrecompiledFixture:true,compilerExecutedInAdapter:false,sdkRealIo:false,normalProductMainExecuted:false,physicalReturnAccepted:false,osSleep:false}};write(path.join(root,'result.json'),result);return result;
+  recheckCurrentPreparedContexts(allContexts);recheckInputs(repo,inputs);
+  const generated=steps.flatMap(step=>files(step.path).map(file=>({path:file,sha256:hash(file)})));
+  const actualCompilerInputs=compilerInputs(allContexts),groupWallMs=performance.now()-started;
+  need(groupWallMs<=90000,'ORIGINAL_GROUP90_BUDGET_EXCEEDED');
+  const result={schemaVersion:1,status:'PASS',passed:true,lifecycleVersion:LIFECYCLE_VERSION,currentContract:'VC-CURRENT-105-6457-38835033-20261021',actualCompilerInputs,sourceHashes:[...inputs.sources,...generated],prerequisiteArtifacts:inputs.artifacts,steps,originalModeBudgetMs:45000,originalGroupBudgetMs:90000,groupWallMs,boundary:{fullNativeCoordinatorExecuted:true,requestIpcExecuted:true,sourceBoundPrecompiledFixture:true,compilerExecutedInAdapter:false,sdkRealIo:false,normalProductMainExecuted:false,physicalReturnAccepted:false,osSleep:false}};write(path.join(root,'result.json'),result);return result;
  }catch(error){write(path.join(root,'result.json'),{schemaVersion:1,status:'FAIL',passed:false,lifecycleVersion:LIFECYCLE_VERSION,error:error.message,steps,processLedger,compilationFailureCountedAsNegative:false,normalProductMainExecuted:false,hardwareIo:false});throw error;}
 }

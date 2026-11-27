@@ -6,10 +6,10 @@ const out=(process.env.YMCC_EDITOR_WIDTH_OUT || path.resolve(sourceRoot,'../../B
 fs.mkdirSync(out,{recursive:true});
 const source=fs.readFileSync(sourceRoot+'/native/main.cpp','utf8').replace(/\r\n/g,'\n');
 function slice(start,end){const a=source.indexOf(start),b=source.indexOf(end,a);if(a<0||b<a)throw Error('Production slice missing: '+start);return source.slice(a,b);}
-const layout=slice('static bool applyFullHeightLayout(', 'static int  g_effectType');
+const layout=slice('static HWND gameOverlayLayoutWindow()', 'static int  g_effectType');
 const ipc=slice('    ipc_on("window.controllerEditorWidth"', '    ipc_on("window.startDrag"');
-const hit=slice('    case WM_NCLBUTTONDOWN:\n        // Docked windows remain fixed', '    case WM_SG_S0_INTENT:');
-const sizing=slice('    case WM_SIZING:\n        if (g_controllerEditorWidth.active())', '    case WM_SIZE:\n        msiNativeForegroundUiEvent();');
+const hit=slice('    case WM_NCLBUTTONDOWN:\n        // Docked windows remain fixed', '    case WM_STEAM_WALLPAPER_FOREGROUND:');
+const sizing=slice('    case WM_SIZING:\n        if (g_controllerEditorWidth.active())', '    case WM_SIZE:');
 const frame=slice('    case WM_NCCALCSIZE:\n        if (g_frameless', '    case WM_GETMINMAXINFO:');
 const generated=`#define UNICODE
 #define _UNICODE
@@ -27,7 +27,9 @@ const generated=`#define UNICODE
 #include "${sourceRoot}/native/window_taskbar_layout.h"
 #include "${sourceRoot}/deps/json/json.hpp"
 using json=nlohmann::json;
-static HWND g_hwnd=nullptr;
+static HWND g_hwnd=nullptr,g_gameOverlaySurface=nullptr;
+static bool g_gameOverlaySurfaceAttached=false;
+static struct {void displayChanged(){} bool active() const{return g_gameOverlaySurfaceAttached;}} g_gameOverlay;
 static bool g_fullHeight=true,g_frameless=true,dockLeft=false;
 static int g_baseW=580,g_baseH=780;
 static ymcc::editorwidth::Session g_controllerEditorWidth;
@@ -81,6 +83,24 @@ int main(){
  g_fullHeight=false;dockLeft=false;SetWindowLongPtrW(g_hwnd,GWL_STYLE,WS_POPUP|WS_THICKFRAME);SetWindowPos(g_hwnd,nullptr,area.left+20,area.top+20,580,600,SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);
  const RECT ordinary=rect();request("ordinary",true);check(width(rect())==std::min(1160,static_cast<int>(area.right-area.left)),"ordinary main window supports same two-times width");request("ordinary",false);
  check(ymcc::windowlayout::sameRect(ordinary,rect()),"ordinary window restores exact position and size");check((GetWindowLongPtrW(g_hwnd,GWL_STYLE)&WS_THICKFRAME)!=0,"preexisting resize frame remains intact");
+ request("restore",true,1.5);const RECT custom=rect();
+ SetWindowPos(g_hwnd,nullptr,ordinary.left,ordinary.top,width(ordinary),ordinary.bottom-ordinary.top,SWP_NOZORDER|SWP_NOACTIVATE);
+ check(applyControllerEditorWidth()&&ymcc::windowlayout::sameRect(custom,rect()),"ordinary reflow recovers the custom scale after the HWND shrinks");
+ ShowWindow(g_hwnd,SW_SHOWMINNOACTIVE);check(IsIconic(g_hwnd)&&applyControllerEditorWidth()&&g_controllerEditorWidth.restorePending,"iconic reflow defers without using minimized bounds");
+ ShowWindow(g_hwnd,SW_RESTORE);check(applyControllerEditorWidth()&&ymcc::windowlayout::sameRect(custom,rect()),"restore applies the previous custom scale without compounding");
+ ShowWindow(g_hwnd,SW_SHOWMINNOACTIVE);check(request("restore",false).value("ok",false)&&IsIconic(g_hwnd),"closing an iconic editor updates normal placement without restoring the window");
+ ShowWindow(g_hwnd,SW_RESTORE);check(ymcc::windowlayout::sameRect(ordinary,rect()),"iconic close restores unexpanded bounds on next show");
+ request("dpi",true,1.5);dockLeft=true;const RECT suggested{area.left+20,area.top+20,area.left+620,area.top+620};const auto dpi=GetDpiForWindow(g_hwnd);
+ check(applyControllerEditorWidth(nullptr,&suggested,dpi*3/2)&&width(rect())==std::min(1305,static_cast<int>(area.right-area.left)),"DPI change scales the normal baseline instead of adopting a narrow suggested width");
+ request("dpi",false);check(width(rect())==std::min(870,static_cast<int>(area.right-area.left)),"DPI close restores the DPI-adjusted normal width");
+ SetWindowPos(g_hwnd,nullptr,ordinary.left,ordinary.top,width(ordinary),ordinary.bottom-ordinary.top,SWP_NOZORDER|SWP_NOACTIVATE);
+ ShowWindow(g_hwnd,SW_MAXIMIZE);const RECT maximized=rect();
+ check(IsZoomed(g_hwnd)&&request("max",true).value("ok",false)&&ymcc::windowlayout::sameRect(maximized,rect()),"opening the editor on a maximized window leaves it maximized");
+ ShowWindow(g_hwnd,SW_RESTORE);
+ check(applyControllerEditorWidth()&&width(rect())==std::min(1160,static_cast<int>(area.right-area.left)),"restoring maximized editor computes width from the normal rectangle");
+ ShowWindow(g_hwnd,SW_MAXIMIZE);
+ check(request("max",false).value("ok",false)&&IsZoomed(g_hwnd),"closing the editor does not unmaximize the main window");
+ ShowWindow(g_hwnd,SW_RESTORE);check(ymcc::windowlayout::sameRect(ordinary,rect()),"closing while maximized restores the original normal placement");
  check(ymcc::editorwidth::scaledWidth(700,800,2)==800,"narrow portrait work area is never exceeded");
  check(ymcc::editorwidth::scaledWidth(580,1920,NAN)==580,"invalid scale falls back safely");
  DestroyWindow(g_hwnd);std::cout<<json({{"failures",failures},{"checks",checks},{"workArea",{area.left,area.top,area.right,area.bottom}},{"scope","production IPC, layout and window message handlers extracted verbatim; real hidden Win32 HWND; no installed YMCC or device changes"}}).dump(2);return failures?1:0;
@@ -94,7 +114,7 @@ const recipe=[
   'call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat"',
   'if errorlevel 1 exit /b 1',
   `cd /d "${out}"`,
-  'cl /nologo /std:c++20 /utf-8 /EHsc /MT native-window-fixture.cpp /Fe:native-window-fixture.exe /link user32.lib',
+  'cl /nologo /std:c++20 /utf-8 /EHsc /MT native-window-fixture.cpp /Fe:native-window-fixture.exe /link user32.lib shell32.lib',
   'if errorlevel 1 exit /b 1',
   'native-window-fixture.exe > native-window-results.json',
   'exit /b %errorlevel%',

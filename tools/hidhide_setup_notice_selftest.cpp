@@ -7,6 +7,8 @@ static ULONGLONG setupTestClock() { return ::GetTickCount64()+g_setupTestClockOf
 #define GetTickCount64 setupTestClock
 #include "gamepad_driver_setup.h"
 #undef GetTickCount64
+#include "hidhide_installed_version.h"
+#include "log_snapshot_state.h"
 #include <iostream>
 #include <functional>
 #include <tuple>
@@ -21,6 +23,7 @@ static std::string W2U(const std::wstring& value) {
     std::string out(n,'\0');WideCharToMultiByte(CP_UTF8,0,value.data(),(int)value.size(),out.data(),n,nullptr,nullptr);return out;
 }
 static void appendNativeLifecycleLog(const std::string& event,const json& data) {g_setupLogs.push_back({{"event",event},{"data",data}});}
+static bool domainLogEnabled(const char*) {return false;}
 static void ipc_emit(const std::string& event,const json& data) {g_setupEmissions.push_back({{"event",event},{"data",data}});}
 // These two status-only functions are extracted verbatim from the current production main.cpp.
 #define g_gamepadDriverSetup (*g_fixtureSetup)
@@ -87,6 +90,14 @@ int wmain(int argc,wchar_t** argv) {
     check("admin failure distinct",decide(11,report("ADMIN_REQUIRED"))==N::AdminRequired);
     check("active clients distinct",decide(11,report("CLOSE_CONTROLLER_APPS_FIRST"))==N::CloseControllerApps);
     check("existing partial driver distinct",decide(11,report("PRESENT_NOT_READY_NO_REINSTALL"))==N::ExistingNeedsRepair);
+    check("old installed driver distinct",decide(11,report("DRIVER_TOO_OLD_NO_REINSTALL"))==N::ExistingDriverTooOld);
+    using namespace ymcc::input::virtualTargetPolicy;
+    check("unknown installed version is not inferred old",!hidHideDriverTooOld({}));
+    check("field installed version known old",hidHideDriverTooOld({1,1,50,0}));
+    check("exact supported minimum and newer remain allowed",!hidHideDriverTooOld({1,4,181,0})&&!hidHideDriverTooOld({1,5,0,0}));
+    for (const auto persona:{"steamdeck","dualsense-edge","elite"})
+        check("known old HidHide blocks each virtual persona",rejectionReason(false,persona,true)==kHidHideDriverTooOld);
+    check("old HidHide does not block physical mode",!rejectionReason(false,"disabled",true));
     check("installer process failure",decide(11,report("INSTALL_POSTCONDITION_UNPROVEN"))==N::Incomplete);
     check("missing installer code alone is unverified",decide(12,json{})==N::Unverified);
     check("invalid installer code alone is unverified",decide(13,json{})==N::Unverified);
@@ -107,6 +118,28 @@ int wmain(int argc,wchar_t** argv) {
     check("reboot 3010 is not failed install",decide(3010,json{})==N::RebootRequired);
     check("reboot 1641 is not failed install",decide(1641,json{})==N::RebootRequired);
     check("report preserves HidHide reboot",decide(11,report("REBOOT_REQUIRED"))==N::RebootRequired);
+    for(const auto& [stage,notice]:std::vector<std::pair<std::string,N>>{
+        {"UNINSTALL_FAILED",N::UninstallFailed},{"UNINSTALL_RESIDUE",N::UninstallResidue},
+        {"UNINSTALL_IDENTITY_UNVERIFIED",N::UninstallUnverified},{"UPGRADE_INSTALL_FAILED",N::UpgradeInstallFailed},
+        {"UPGRADE_INTERRUPTED",N::UpgradeInterrupted},{"UPGRADE_CLOSE_APPS",N::UpgradeCloseApps},
+        {"UPGRADE_ADMIN_REQUIRED",N::UpgradeAdminRequired}}) {
+        auto upgrade=report(stage);
+        check(("upgrade notice: "+stage).c_str(),decide(11,upgrade)==notice);
+        upgrade["ownerPid"]=owner+1;
+        check(("reject stale upgrade notice: "+stage).c_str(),decide(11,upgrade)==N::Unverified);
+    }
+    auto reboot=report("REBOOT_REQUIRED",3010);
+    reboot["hidhideTransactionBefore"]={{"Phase","reboot-after-uninstall"}};
+    check("same boot after uninstall remains distinct",decide(3010,reboot)==N::UninstallReboot);
+    reboot["hidhideTransactionAfter"]={{"Phase","reboot-after-install"}};
+    check("install reboot overrides previous uninstall record",decide(3010,reboot)==N::UpgradeInstallReboot);
+    auto failed=report("UNINSTALL_FAILED");
+    failed["hidhideMaintenanceExit"]=1603;
+    check("MSI exit is preserved separately from setup code",ymcc::hidHideMaintenanceExit(failed,decide(11,failed))==1603);
+    for(int success:{0,3010,1641}) {
+        auto residue=report("UNINSTALL_RESIDUE"); residue["hidhideMaintenanceExit"]=success;
+        check("residue after successful MSI exit has no fabricated error code",ymcc::hidHideMaintenanceExit(residue,decide(11,residue))==-1);
+    }
     for(const auto& [field,value]:std::vector<std::pair<std::string,json>>{
         {"ownerPid",owner+1},{"installRoot","C:\\other"},{"batch","GP-PREREQ-1"},{"exitCode",0},{"finishedAt",""},
         {"ownerPid","wrong-type"},{"hidhide",42}}) {

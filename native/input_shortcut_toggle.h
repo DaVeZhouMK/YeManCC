@@ -66,6 +66,11 @@ inline InputShortcutJson inputShortcutGyroParams(const InputShortcutJson& motion
     params.erase("gyroMode");
     params["motionMode"] = mode == "suppress" ? "on" : mode;
     params["motionTrigger"] = mode == "on" ? InputShortcutJson(nullptr) : InputShortcutJson(trigger.empty() ? "LT" : trigger);
+    if (preset == "steam") {
+        params["motionMode"] = "off";
+        params["motionTrigger"] = nullptr;
+        params["aimingSightsTrigger"] = nullptr;
+    }
     return params;
 }
 // Explicit linked opening shares the gyro page's selected-preset transaction.
@@ -82,6 +87,11 @@ inline InputShortcutJson inputShortcutLinkedGyroMotion(InputShortcutJson motion)
         trigger.find_first_not_of(" \t\r\n") != std::string::npos);
     if ((stored != presets.end() && stored->is_object()) || !configured)
         motion.update(inputShortcutGyroParams(motion, preset));
+    if (preset == "steam") {
+        motion["motionMode"] = "off";
+        motion["motionTrigger"] = nullptr;
+        motion["aimingSightsTrigger"] = nullptr;
+    }
     motion["preset"] = preset; motion["activePreset"] = preset;
     motion["enabled"] = true; motion["outputMode"] = "virtual-stick";
     return motion;

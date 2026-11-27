@@ -19,5 +19,81 @@ await run('stop-during-native-reservation-retires-late-reservation-without-creat
 await run('off-on-waits-for-old-retirement-then-new-lease-survives-old-replies',async e=>{await e.ready();const old=e.host.inspect().owner;e.policy.decide=r=>r.cmd==='monitorNotice.retire'?'hold':'success';e.host.update({...e.preferences,popupEnabled:false});await e.clock.flush();e.host.update(e.preferences);await e.clock.flush();assert.equal(e.count('monitorNotice.create'),1);await e.clock.advance(2001);e.policy.decide=undefined;await e.lateReplies();await e.clock.advance(250);assert.equal(e.count('monitorNotice.create'),2);assert(e.host.inspect().owner.leaseId>old.leaseId);assert(e.health('new-owner-after-old-retirement').recovered);await e.lateReplies();assert(e.health('new-owner-after-old-replies').recovered);});
 await run('stop-with-pending-create-aborts-ipc-only-after-native-retirement-receipt',async e=>{e.policy.decide=r=>r.cmd==='monitorNotice.create'?'hold':'success';await e.ready();assert.equal(e.operations.size,1);e.stop();await e.clock.flush();assert.equal(e.host.inspect().cleanup.lastRetirement.leaseRetired,true);assert.equal(e.host.inspect().opening,false);assert.equal(e.operations.size,0);assert.equal(e.snapshot().remainingOwnedResources.pendingIpc,0);await e.lateReplies();assert.equal(e.windows.size,0);assert(e.trace.some(t=>t.type==='native.lease.rejected-create'));});
 await run('many-owner-losses-use-monotonic-current-lease-without-healthy-polling',async e=>{await e.ready();let lease=e.host.inspect().owner.leaseId;for(let i=0;i<40;i++){e.externalLoss();await e.clock.advance(250);const current=e.host.inspect().owner;assert(current.leaseId>lease);lease=current.leaseId;assert.equal(e.windows.size,1);assert.equal(e.clock.timers.size,0);}const requests=e.count('monitorNotice.status');await e.clock.advance(30000);assert.equal(e.count('monitorNotice.status'),requests);assert.equal(e.count('monitorNotice.reserve'),41);assert.equal(e.host.inspect().cleanup.pending,0);});
+const readyScope=(serial,revision)=>({phase:'ready',generation:1,suspendSerial:serial,known:true,inputReady:true,
+ hardwareWritesAllowed:true,publicationRevision:revision,observedNotificationSequence:revision,notificationPending:false});
+const heldScope=(serial,revision)=>({...readyScope(serial,revision),phase:'suspending',inputReady:false,hardwareWritesAllowed:false});
+for(const mode of ['after-timeout','ready-in-flight','merged-ready','retry-timeout','incomplete-receipt','new-hold','off','stop','off-in-flight','stop-in-flight','new-hold-in-flight'])await run('unconfirmed-retirement-next-power-scope-'+mode,async(e,row)=>{
+ const retired=()=>e.trace.filter(t=>t.type==='native.request'&&t.cmd==='monitorNotice.retire');
+ const creations=()=>e.count('monitorNotice.create');
+ const first=readyScope(1,2),next=readyScope(2,5);
+ e.publishPowerSnapshot(first);
+ e.policy.deferReady=true;await e.ready();const old=e.host.inspect().owner;
+ e.policy.decide=r=>r.cmd==='monitorNotice.close'?'false':r.cmd==='monitorNotice.retire'?'hold':'success';
+ await e.clock.advance(10000); // The real ready timeout starts exact owner retirement.
+ assert.equal(retired().length,1);assert.equal(creations(),1);
+ e.policy.deferReady=false;
+ if(mode!=='merged-ready')e.publishPowerSnapshot(heldScope(2,4));
+ if(mode==='ready-in-flight')e.publishPowerSnapshot(next);
+ await e.clock.advance(2001);assert.equal(retired().length,2);assert.equal(creations(),1);
+ if(mode==='ready-in-flight')e.policy.decide=undefined;
+ await e.clock.advance(2000);assert.equal(e.host.inspect().cleanup.retirementFailures,1);
+ if(mode!=='ready-in-flight'){
+  assert.equal(e.host.inspect().recovery.ambiguousCreate,true);assert.equal(e.windows.size,1);
+  e.publishPowerSnapshot({...first,publicationRevision:3,observedNotificationSequence:3},{store:false});await e.clock.flush();
+  assert.equal(retired().length,2);assert.equal(creations(),1);
+  if(mode==='off')e.host.update({...e.preferences,popupEnabled:false});
+  if(mode==='stop')e.stop();
+  e.policy.decide=mode==='off'||mode==='stop'||mode==='retry-timeout'||mode==='new-hold'||mode.endsWith('-in-flight')?(r=>r.cmd==='monitorNotice.retire'?'hold':'success'):
+   mode==='incomplete-receipt'?(r=>r.cmd==='monitorNotice.retire'?'false':'success'):undefined;
+  e.publishPowerSnapshot(next);await e.clock.flush();
+ }
+ if(mode==='off'||mode==='stop'){
+  await e.clock.advance(30000);assert.equal(retired().length,2);assert.equal(creations(),1);
+  assert.equal(e.host.inspect().recovery.ambiguousCreate,true);row.unconfirmedBeforeLateReplies=e.snapshot();return;
+ }
+ assert.equal(retired().length,3,'the newer admitted scope settles the original retirement once');
+ for(const request of retired())assert.deepEqual(request.args,{leaseId:old.leaseId,nonce:old.nonce});
+ if(mode==='new-hold'||mode==='new-hold-in-flight')e.publishPowerSnapshot(heldScope(3,7));
+ if(mode==='off-in-flight')e.host.update({...e.preferences,popupEnabled:false});
+ if(mode==='stop-in-flight')e.stop();
+ if(mode.endsWith('-in-flight')&&mode!=='ready-in-flight'){
+  e.policy.decide=undefined;await e.lateReplies();await e.clock.advance(2000);
+  assert.equal(e.host.inspect().cleanup.lastRetirement.resourcesDestroyed,true);
+  assert.equal(e.windows.size,0);assert.equal(creations(),1);assert.equal(retired().length,3);
+  e.publishPowerSnapshot(readyScope(3,8));await e.clock.advance(250);
+  assert.equal(creations(),mode==='new-hold-in-flight'?2:1);
+  assert.equal(retired().length,3);return;
+ }
+ if(mode==='retry-timeout'||mode==='incomplete-receipt'||mode==='new-hold'){
+  e.publishPowerSnapshot({...next,publicationRevision:6,observedNotificationSequence:6},{store:mode!=='new-hold'});
+  await e.clock.advance(30000);
+  assert.equal(creations(),1);assert.equal(retired().length,3);assert.equal(e.host.inspect().recovery.ambiguousCreate,true);
+  e.policy.decide=undefined;e.publishPowerSnapshot(readyScope(3,8));
+  await e.clock.advance(250);assert.equal(retired().length,4);
+ }else await e.clock.advance(250);
+ assert.equal(creations(),2);assert.equal(e.windows.size,1);assert(e.host.inspect().owner.leaseId>old.leaseId);
+ assert.equal(e.host.inspect().cleanup.lastRetirement.resourcesDestroyed,true);
+ const release=e.trace.findIndex(t=>t.type==='native.window.destroyed'&&t.leaseId===old.leaseId&&t.ownerRetirement);
+ const replacement=e.trace.findIndex(t=>t.type==='native.request'&&t.cmd==='monitorNotice.create'&&t.args.leaseId>old.leaseId);
+ assert(release>=0&&replacement>release,'native proof of old owner destruction precedes replacement');
+ const current=e.host.inspect().owner;e.emit('monitorNotice.ready',{id:old.id,nonce:old.nonce});await e.lateReplies();
+ await e.clock.advance(30000);assert.deepEqual(e.host.inspect().owner,current);assert.equal(creations(),2);assert.equal(frames(e).length,0);
+});
+await run('unconfirmed-retirement-revokes-posted-create-before-next-owner',async e=>{
+ e.publishPowerSnapshot(readyScope(1,2));
+ e.policy.decide=r=>['monitorNotice.create','monitorNotice.retire'].includes(r.cmd)?'hold':'success';
+ await e.ready();const old=e.host.inspect().owner;
+ e.publishPowerSnapshot(heldScope(2,3));await e.clock.advance(14001);
+ assert.equal(e.count('monitorNotice.retire'),2);assert.equal(e.count('monitorNotice.create'),1);
+ assert.equal(e.host.inspect().recovery.ambiguousCreate,true);assert.equal(e.windows.size,0);
+ e.policy.decide=undefined;e.publishPowerSnapshot(readyScope(2,4));await e.clock.advance(250);
+ const current=e.host.inspect().owner;
+ assert.equal(e.count('monitorNotice.retire'),3);assert.equal(e.count('monitorNotice.create'),2);
+ assert(current.leaseId>old.leaseId);
+ await e.lateReplies();await e.clock.advance(30000);
+ assert(e.trace.some(t=>t.type==='native.lease.rejected-create'&&t.leaseId===old.leaseId));
+ assert.equal(e.windows.size,1);assert(e.health('late-create-cannot-replace-current').recovered);
+ assert.deepEqual(e.host.inspect().owner,current);assert.equal(e.count('monitorNotice.retire'),3);assert.equal(frames(e).length,0);
+});
 for(const pin of pins)assert.equal(hash(pin.path),pin.sha256,'INPUT_CHANGED_DURING_RECOVERY_CONTROLS '+pin.path);
 const result={at:new Date().toISOString(),status:cases.every(c=>c.passed)?'PASS':'FAIL',cases,counts:{cases:cases.length,passed:cases.filter(c=>c.passed).length,failed:cases.filter(c=>!c.passed).length},pins,originalToolBindingVerified:true,exactConsumerBundleRecompiled:false,explicitHistoricalHostControl:!!opts['--expected-host-source'],boundary:{actualUnrewrittenHostAndIpcBundle:true,webviewAndClockMemoryOnly:true,nativeCarrierExecuted:false,retirementTransportDoubleFaultRemainsExplicitlyUnaccepted:true,installedApplicationControlled:false,manualSleepAcceptanceReady:false,wholeGoalComplete:false}};fs.writeFileSync(out+'/result.json',JSON.stringify(result,null,2)+'\n',{flag:'wx'});console.log(JSON.stringify({status:result.status,counts:result.counts,failedIds:cases.filter(c=>!c.passed).map(c=>c.id),out}));if(result.status!=='PASS')process.exitCode=1;

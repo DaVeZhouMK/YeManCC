@@ -307,6 +307,16 @@ export async function runInputSignalRegressions(options={}) {
   };
   const quickParams={appPath:'Z:\\YMCC-MEMORY-ONLY\\fixture.exe'};
   await run('valid-request-to-real-feedback',async h=>{await h.inject(await h.issue('app.launchQuickApp',quickParams));assert.equal(h.state.launchRequests,1);assert.equal(h.feedback[0]?.state,'applied');assert.equal(h.noticeSurface.frames[0]?.feedback.state,'applied');assert.equal(h.monitorHost.inspect().state.current.state,'applied');},{enableNoticeHost:true});
+  await run('merged-suspend-retires-held-plan-in-the-same-generation',async h=>{
+    const ready={generation:h.state.generation,phase:'ready',known:true,hardwareWritesAllowed:true,inputReady:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:1,suspendSerial:1};
+    h.emit('power.lifecycleChanged',ready);await h.clock.drain();
+    h.emit('input.shortcutAction',await h.issue('app.launchQuickApp',quickParams));await h.waitCommand('settings.read');
+    h.emit('power.lifecycleChanged',{...ready,publicationRevision:2,suspendSerial:2});await h.clock.drain();
+    h.behavior.holdCommand=null;h.release('settings.read');await h.settle();
+    assert.equal(h.state.launchRequests,0,'old shortcut executed across a merged suspend');
+    assert.equal(h.commands.filter(c=>c.cmd==='input.shortcutAction.complete').length,0);
+    await h.inject(await h.issue('app.launchQuickApp',quickParams));assert.equal(h.state.launchRequests,1);
+  },{holdCommand:'settings.read'});
   await run('duplicate-id-executes-once',async h=>{const r=await h.issue('app.launchQuickApp',quickParams);await h.inject(r);await h.inject(r);assert.equal(h.state.launchRequests,1);assert.equal(h.feedback.length,1);});
   await run('expired-request-never-claimed',async h=>{const r=await h.issue();await h.clock.advance(30000);await h.inject(r);assert.equal(h.commands.length,0);});
   await run('duplicate-burst-no-retry-or-timer-storm',async h=>{const r=await h.issue();for(let i=0;i<100;i++)h.emit('input.shortcutAction',r);await h.settle();assert.equal(h.state.taskViewRequests,1);assert.equal(h.commands.filter(c=>c.cmd==='input.shortcutAction.complete').length,1);assert.equal(h.clock.tasks.size,0);});

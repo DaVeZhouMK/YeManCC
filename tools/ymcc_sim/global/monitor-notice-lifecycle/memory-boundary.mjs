@@ -63,12 +63,16 @@ export function createMemoryHost(bundle, policy = {}, outer = null) {
     windows.set(value.id, value); record('native.window.created', value);
     if (value.ready) emit('monitorNotice.ready', { id: value.id, nonce: value.nonce }); return { id: value.id, nonce: value.nonce };
   };
-  const finish = request => {
+  const noticeStatus = () => {
+    const first = [...windows.values()][0];
+    return { id: first?.id ?? 0, ...(first ? { nonce: first.nonce } : {}), available: policy.available !== false, leaseProtocol: 1, ...(first ? { leaseId: first.leaseId } : {}), ready: first?.ready === true, recoveryBlocked: policy.recoveryBlocked === true };
+  };
+  const finish = (request, readSnapshot = powerSnapshot) => {
     const { id, cmd, args } = request;
-    if (cmd === 'power.lifecycle') { record('native.power.read',{snapshot:powerSnapshot});response(id,structuredClone(powerSnapshot));return; }
+    if (cmd === 'power.lifecycle') { record('native.power.read',{snapshot:readSnapshot});response(id,structuredClone(readSnapshot));return; }
     if (cmd === 'diagnostics.frontendTrace') { response(id, {ok:true}); return; } // Diagnostic terminal only; native persistence checked separately.
     if (cmd === 'monitorNotice.status') {
-      const first = [...windows.values()][0]; response(id, { id: first?.id ?? 0, ...(first ? { nonce: first.nonce } : {}), available: policy.available !== false, leaseProtocol: 1, ...(first ? { leaseId: first.leaseId } : {}), ready: first?.ready === true, recoveryBlocked: policy.recoveryBlocked === true });
+      response(id, noticeStatus());
     } else if (cmd === 'monitorNotice.reserve') {
       if (windows.size) { response(id, null, 'Notice owner reservation rejected'); return; }
       lease.serial++; lease.nonce = args.nonce; lease.retired = false;
@@ -118,7 +122,13 @@ export function createMemoryHost(bundle, policy = {}, outer = null) {
       const request = structuredClone(raw); if (typeof request.id !== 'number') throw Error('UNEXPECTED_NATIVE_EVENT');
       operations.set(request.id, request); record('native.request', { requestId: request.id, cmd: request.cmd, args: request.args });
       const decision = policy.decide?.(request, { windows, clock, trace }) ?? 'success';
-      if (decision === 'hold') { held.push(request); return; }
+      if (decision === 'hold' || decision === 'hold-power-read' || decision === 'hold-notice-status') {
+        if (decision === 'hold-power-read' && request.cmd !== 'power.lifecycle') throw Error('FROZEN_REPLY_REQUIRES_POWER_READ');
+        if (decision === 'hold-notice-status' && request.cmd !== 'monitorNotice.status') throw Error('FROZEN_REPLY_REQUIRES_NOTICE_STATUS');
+        const status = decision === 'hold-notice-status' ? noticeStatus() : undefined;
+        held.push({ request, status, readSnapshot: decision === 'hold-power-read' ? structuredClone(powerSnapshot) : undefined });
+        return;
+      }
       if (decision === 'false') { response(request.id, false); return; }
       if (decision === 'error') { response(request.id, null, 'injected transient ' + request.cmd); return; }
       finish(request);
@@ -128,10 +138,11 @@ export function createMemoryHost(bundle, policy = {}, outer = null) {
   const MemoryDate = class extends Date { constructor(...args) { super(...(args.length ? args : [clock.now])); } static now() { return clock.now; } };
   const documentElement = { dataset: { theme: 'blue-black' } };
   const documentTarget = outer ? Object.assign(new MemoryEventTarget(), { documentElement, visibilityState: 'visible' }) : { documentElement };
+  const timeOrigin = clock.now;
   const context = vm.createContext({ window: dom, document: documentTarget,
     crypto: { randomUUID }, Date: MemoryDate, setTimeout: clock.set, clearTimeout: clock.clear,
     CustomEvent, structuredClone, queueMicrotask, console, URLSearchParams, AbortController,
-    ...(outer ? { TextEncoder, TextDecoder, Event: CustomEvent } : {}) });
+    ...(outer ? { TextEncoder, TextDecoder, Event: CustomEvent, performance: { now: () => clock.now - timeOrigin } } : {}) });
   dom.chrome = { webview }; dom.setTimeout = clock.set; dom.clearTimeout = clock.clear;
   new vm.Script(bundle, { filename: 'actual-monitor-notice.bundle.js' }).runInContext(context, { timeout: 5000 });
   const api = context.NoticeLifecycleActual; api.setLogSink(entry => record('ipc.complete', entry));
@@ -175,7 +186,8 @@ export function createMemoryHost(bundle, policy = {}, outer = null) {
     ...(outer ? { outerResources } : {}),
     async ready() { host.ready(preferences); await clock.flush(); },
     stop() { if (stoppedAt === null) stoppedAt = clock.now; record('host.stop'); host.stop(); },
-    async lateReplies() { for (const request of held.splice(0)) { lateCallbacksDelivered++; record('late.native.reply.delivered', { cmd: request.cmd, ...(outer ? { requestId: request.id } : {}) }); finish(request); await clock.flush(); } },
+    async lateReplies() { for (const { request, readSnapshot, status } of held.splice(0)) { lateCallbacksDelivered++; record('late.native.reply.delivered', { cmd: request.cmd, ...(outer ? { requestId: request.id } : {}) }); if(status) response(request.id, status); else finish(request, readSnapshot); await clock.flush(); } },
+    setPowerReadSnapshot(value) { powerSnapshot=structuredClone(value);record('native.power.read-state-changed',{snapshot:powerSnapshot}); },
     externalLoss(reason = 'transient carrier loss') { for (const resource of [...windows.values()]) { windows.delete(resource.id); record('external.window.loss', { id: resource.id, reason }); emit('monitorNotice.closed', { id: resource.id, nonce: resource.nonce }); } },
     nextGeneration() { generation++; record('power.generation', { generation }); },
     deliverRetiredCallbacks() { for (const { type, listener } of dom.history.slice()) { lateCallbacksDelivered++; record('late.dom.callback.delivered', { event: type }); listener(new CustomEvent(type, { detail: type === 'ipc:input.shortcutFeedback' ? { schemaVersion: 0 } : {} })); } },

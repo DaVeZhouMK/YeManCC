@@ -256,7 +256,7 @@ export function validateReceipts({repo, output, sourceHashes, tools}) {
   const partialInit=validatePartialInit(values.get(CHILDREN[11]),{tools,tool,sdk,source,current:fragments,historical});
   const stopReceipt=validateAdmission(values.get(CHILDREN[12]),{source,current:fragments});
   const exitContinuation=validateExit(values.get(CHILDREN[13]),{source,current:fragments,tool,sdk,tools});
-  const dsuOwner=validateDsu(values.get(CHILDREN[14]),{source,tool,sdk,tools});
+  const dsuOwner=validateDsu(values.get(CHILDREN[14]),{repo,source,tool,tools});
   const sensorOwners=validateSensors(values.get(CHILDREN[15]),{source,tool,sdk,tools});
   const x2Owner=validateX2(values.get(CHILDREN[16]),{source,sdk});
   const gamebarOwner=validateGamebar(values.get(CHILDREN[17]),{source,tool,tools});

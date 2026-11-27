@@ -12,6 +12,7 @@ import { DECKY_PAD_CHOICES, DECKY_GYRO_CHOICES } from './deckyInputOptions';
 import { gyroMotionForEnable, gyroMotionParamsForPreset, isGyroPresetKey } from './gyroPresetModel';
 
 export interface GlobalMirrorRead {schedule:PerformanceScheduleConfig;input:InputSettingsSnapshot;source:string;fields:Record<string,MirrorField>;}
+export type ReadGlobalInputSettings = <T>(load: () => Promise<T>) => Promise<T>;
 export function globalMirrorRead(schedule:PerformanceScheduleConfig,input:InputSettingsSnapshot,policy:VirtualTargetPolicy|null=currentVirtualTargetPolicy()):GlobalMirrorRead {
  const target=input.outputTarget||{},blocked=!!virtualTargetSelectionError(target.persona,policy);
  const field=(value:string,choices:MirrorField['choices'],supported=true):MirrorField=>({value,choices:structuredClone(choices),supported});
@@ -19,9 +20,9 @@ export function globalMirrorRead(schedule:PerformanceScheduleConfig,input:InputS
  const preset=isGyroPresetKey(motion.preset)?motion.preset:'fps';
  return {schedule:structuredClone(schedule),input:structuredClone(input),source:JSON.stringify({schedule,input,...(policy?{virtualTargetPolicy:policy}:{})}),fields:{padPersona:field(String(target.persona||'disabled'),virtualTargetOptions(DECKY_PAD_CHOICES,policy)),gyroEnabled:field(target.gyroEnabled===true&&motion.enabled===true&&gyroSupported?'on':'off',[{data:'off',label:'关闭'},{data:'on',label:'开启',...(blocked?{disabled:true}:{})}],gyroSupported),gyroPreset:field(preset,DECKY_GYRO_CHOICES,gyroSupported&&!blocked)}};
 }
-export function createGlobalMirrorActions(deps:{allowed:()=>boolean;game:()=>unknown;locked:()=>boolean;contextCurrent?:(context:RelayMutationContext)=>boolean;targetPolicy?:()=>VirtualTargetPolicy|null;side:()=> 'ac'|'dc'|null;read:()=>Promise<GlobalMirrorRead>;power:()=>Promise<PowerLifecycleState>;acquire:(owner:string)=>(()=>void)|null;
+export function createGlobalMirrorActions(deps:{allowed:()=>boolean;game:()=>unknown;locked:()=>boolean;contextCurrent?:(context:RelayMutationContext)=>boolean;targetPolicy?:()=>VirtualTargetPolicy|null;side:()=> 'ac'|'dc'|null;read:()=>Promise<GlobalMirrorRead>;power:(context:RelayMutationContext)=>Promise<PowerLifecycleState>;acquire:(owner:string)=>(()=>void)|null;
 cas:(revision:number,patch:Record<string,unknown>,isCurrent?:()=>boolean)=>Promise<{ok:boolean;value:InputSettingsSnapshot}>;closeJoyxoff:()=>Promise<boolean>;finishInput?:(saved:boolean,context:RelayMutationContext)=>Promise<MirrorActionResult>;clearShortcut:()=>Promise<unknown>}) {
- return {async execute(args:Record<string,unknown>,context:RelayMutationContext):Promise<MirrorActionResult>{
+ return {async execute(args:Record<string,unknown>,context:RelayMutationContext&{readSettings?:ReadGlobalInputSettings}):Promise<MirrorActionResult>{
   if(Object.keys(args).length!==2||!['padPersona','gyroEnabled','gyroPreset'].includes(String(args.field))||typeof args.value!=='string')throw Error('GLOBAL_MIRROR_INVALID_REQUEST');
   // Default remains the no-game contract. YMCC may explicitly admit the same
   // confirmed game in global scope, fenced by its original profile receipt.
@@ -29,7 +30,7 @@ cas:(revision:number,patch:Record<string,unknown>,isCurrent?:()=>boolean)=>Promi
   if(!deps.allowed()||!contextCurrent()||deps.locked())throw Error('GLOBAL_MIRROR_CONTEXT_CHANGED');
   const release=deps.acquire('decky-global-mirror');if(!release)throw Error('GLOBAL_MIRROR_BUSY');
   const checkpoint=()=>{context.checkpoint();if(!deps.allowed()||!contextCurrent()||deps.locked())throw Error('GLOBAL_MIRROR_CONTEXT_CHANGED');};
-  const gate=async()=>{checkpoint();const p=await deps.power();checkpoint();if(p.generation!==context.generation||p.phase!=='ready'||!p.hardwareWritesAllowed)throw Error('GLOBAL_MIRROR_POWER_NOT_READY');};
+  const gate=async()=>{checkpoint();const p=await deps.power(context);checkpoint();if(p.generation!==context.generation||p.phase!=='ready'||!p.hardwareWritesAllowed)throw Error('GLOBAL_MIRROR_POWER_NOT_READY');};
   const committed=async()=>{
    if(deps.finishInput)return deps.finishInput(true,context);
    // Standalone consumers retain their original native owner; never infer a
@@ -41,7 +42,7 @@ cas:(revision:number,patch:Record<string,unknown>,isCurrent?:()=>boolean)=>Promi
    return {saved:true,applied:false,pending:true,notice:acknowledged?'输入设置已保存；等待 YMCC 输入服务确认':'输入设置已保存；运行确认未完成，不自动重试'};
   };
   try{
-   await gate();const current=await deps.read();checkpoint();if(!context.controlAdmission?.global||current.source!==context.controlAdmission.global)throw Error('GAME_MIRROR_SOURCE_CHANGED');
+   await gate();const current=await (context.readSettings?context.readSettings(deps.read):deps.read());checkpoint();if(!context.controlAdmission?.global||current.source!==context.controlAdmission.global)throw Error('GAME_MIRROR_SOURCE_CHANGED');
    const checkTarget=()=>requireVirtualTargetAllowed(args.field==='padPersona'?args.value:current.input.outputTarget?.persona,
     deps.targetPolicy?deps.targetPolicy():currentVirtualTargetPolicy(),args.field==='padPersona'?args.value!=='disabled':args.field==='gyroPreset'||args.value==='on');
    checkTarget();

@@ -35,13 +35,13 @@ $ErrorActionPreference = 'Stop'
 #     dll EBD12A24... / manifest 430455DE... / exe 77CBA5DF... (apphost unchanged)
 # Recompute-and-refill after any change, never hand-edit.
 $expected = [ordered]@{
-  'YeManFanHost.exe' = 'A3CE266B880F67045D3F895E2FC68B1FE81F641D5F1A08A01F0DE19D2458F733'
-  'YeManFanHost.dll' = '020547F3C334C3439A618661DC9582E3285DBD430234011A4BBBE20540F324CE'
+  'YeManFanHost.exe' = '5E628D76AC13DD47FF846C4888322339DD15CA2D6F4A17491185B1F49EE21AE6'
+  'YeManFanHost.dll' = 'D212346352F64CF29E7D5E5DBF912E39B1766A4C503CDC7E5D6DCF2AA140922C'
 }
 # Keep this file pure ASCII: PS 5.1 misdecodes non-ASCII scripts without BOM
 # and drops the next statement (verified 2026-09-11); additionally the
 # build-workspace pre-gate auto-verifies this chain.
-$expectedManifestSha256 = '01c0d834dd11d60559c5f7d8d4ff0627d9d617e0ec0071f19bc521740c166f10'
+$expectedManifestSha256 = 'e4057d2960714512a2c8c01c701d4b63d9ce167b943cdf3f20ea7ca2508635f0'
 # Installed artifact98/d8: exact fixed fan-batch C# inputs and two projects; broader39-source archive is independently pinned.
 $compiledSourcePins = [ordered]@{
   'capabilities/AsusFanCapabilitySession.cs' = '305b947ba9d2f24748459e2ceba48ab6e762b50f766fac02a457ef267f8bc549'
@@ -49,22 +49,22 @@ $compiledSourcePins = [ordered]@{
   'capabilities/HcDeviceCapabilityCatalog.cs' = 'eeae40ef0a3b2c8065f79d74479086a01ea0a54806eda6528426c627896e40b8'
   'capabilities/HcDeviceCapabilityCatalog.generated.cs' = '718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674'
   'capabilities/HcLightingCapabilityCatalog.cs' = '34f8e1acc945d90633d663dfa979851ca846001e145e2bb86d7457d2dc85d978'
-  'capabilities/HcLightingCapabilityCatalog.generated.cs' = 'f8102e344f6f6106933d4f6de5497ebaf82874133e4d3109d12962a1ae779601'
-  'capabilities/PinnedFanSourceCatalog.cs' = 'e390f8fef9d9a33232bae9ba0bce19cb6f93ef266057cf89e953805d68843ebc'
+  'capabilities/HcLightingCapabilityCatalog.generated.cs' = '87c20000769a2cba93efed0d0c8a81c06a9bfffd31cc4dd770e511e5035e34c0'
+  'capabilities/PinnedFanSourceCatalog.cs' = '1e5de0d28cc482c21126e0dfc14c187c917e75bf17393880f442ab4fdc314e26'
   'FanLab/DeviceCoreSharedDependencies.cs' = '6bc3ea2958aad1238caa399a82249404717987f50fd6bfcbf91a56954df62c66'
   'FanLab/fan-backend/Asus/AsusFanBackendController.cs' = 'bd520d0384389604f7be48efc799b32fc64ea4218783437b5a773c54158f2801'
   'FanLab/fan-backend/Asus/AsusFanBackendReceipts.cs' = '2f00a3f2178d5713b73696595533bbb5df89bce41e2f7693bb1b12454af5afe2'
   'FanLab/fan-backend/Asus/AsusFanBackendTransport.cs' = 'cbf4100fbbc5fe412874366540d81bd07106eea8b65342d2c04146d136d851de'
   'FanLab/fan-backend/Asus/AsusFanCurveWriter.cs' = '3bbfd4884706b89e4dbeac428ec1fc782b70623df54083d3c234caa76b43b8a0'
   'FanLab/fan-backend/PinnedSourceFanCurve.cs' = 'd8bfdbb2abf64fd7c3fe7ae227b5809dfdfeebfbad8726cb62353c9c0e1b9966'
-  'FanLab/fan-backend/PinnedSourceFanSession.cs' = 'e6f6ed0b22336cce212b2f32a047d50623aa8751733ee0e9f6bf8cd8acb3c7d0'
+  'FanLab/fan-backend/PinnedSourceFanSession.cs' = '029fad73083a6edddd0b3df44c89d54a760e8df5a8cf02f8476bfb4fae3a86b5'
   'FanLab/fan-backend/YeManFanBackend.csproj' = 'e473c22939eef91700ee556bacbae0c1b2fbfaf54006b48ef1da6403baa87f30'
   'FanLab/real-host/DeferredHostSuccessor.cs' = '70caf39e6c44d6c557c8d26d58638760b3a139fe3887855908d861a4dcd7a29f'
   'FanLab/real-host/FanCapabilityPolicy.cs' = '9a97242787f0e9234b0e86d37e282e464655288d3729b8f57680b51299a1416b'
   'FanLab/real-host/FanProfileReturnState.cs' = '906d0f2e641b90a5936840959787a54e9da82205cc160bd16588142a57c46145'
   'FanLab/real-host/FanRemoteControlPower.cs' = '6bcf84878eb98618763ecf21503396bcdbbae5a04819364cabb73b3dd154c265'
   'FanLab/real-host/FanRemotePowerContext.cs' = '921416c7163e63de73aa4150516db4a9b08b8beef7b512fb21d741c69103c48b'
-  'FanLab/real-host/FanRemotePowerIntake.cs' = '7c6f234b9a35e26473853df5e70c9ba8a130f65d155b9e389fd90c263fb164f2'
+  'FanLab/real-host/FanRemotePowerIntake.cs' = '0d88139d4c72f4cbd5052bd0504d541b041a8b0e001159bc8f7ebf2f858d8e73'
   'FanLab/real-host/FanRemotePowerScope.cs' = 'bbfee67bcc884e3ee93434fba9b4d9dbca53b3f3f8dcf05decfc9dced0876286'
   'FanLab/real-host/FanRemotePowerSettlement.cs' = '72755d00204baa0e4096d3e06d67cf70338d6efb2f7c77a79fe0370d55b7a6e2'
   'FanLab/real-host/G1FanContractAdapter.cs' = '8bfca4361e8f45fc2f3dac6f9265af93a91a7e8641115073d819582b0fe73b59'
@@ -76,12 +76,12 @@ $compiledSourcePins = [ordered]@{
   'FanLab/real-host/MsiWmiClassRegistration.cs' = 'a0eebef2e4df02a723e142bcb4a0707e6e013d4606ec20907c43b47d17e6c605'
   'FanLab/real-host/MsiWmiPayloadResource.cs' = '39f025987159eb5ac4a236d343d13f56e844e13fc0e320af5a0f9d87f035f883'
   'FanLab/real-host/OneXFanDeviceLifecycle.cs' = '5d02b50ab9b704f53eb4c299aaa92bea4b10a3ea4c417ca0f3f4a573bb7cabd0'
-  'FanLab/real-host/PinnedSourceFanConsumer.cs' = '51400f33b9146865d9e3aba1290094534aa9f17b708a0ba2e3a0aa369ddeb9a7'
-  'FanLab/real-host/PinnedSourceFanEngine.cs' = 'b73a50b1c12f427bd8db5a4a207d6cfc031b024a9040f1f6f2cb3da288931adf'
+  'FanLab/real-host/PinnedSourceFanConsumer.cs' = 'b15a3bd7f67d93e2ff9d0d2b6e0e363950e6250a2ec65ae0a535526c95ea9bf9'
+  'FanLab/real-host/PinnedSourceFanEngine.cs' = '48a900d8d0d8cc9f1313beeab53b4bc4b2bdde5410dd01f35bcc82b388ad31e5'
   'FanLab/real-host/PinnedSourceFanSelection.cs' = '628b0cf4d338cb2ec3b41d4b628c583a7d068aa5a23abc589e6cef7ab1680b8a'
   'FanLab/real-host/PinnedSourceFanTransports.cs' = '119c09c24493edb32f9f10ff1b672e8f1588a118dce77cd1af9bb460604b5c7a'
   'FanLab/real-host/PinnedUmaEcFanTransport.cs' = '1f2f32091472402ccd97afffcb9541f3b05d9eefcd51e5c39e9494aff7bc81ba'
-  'FanLab/real-host/Program.cs' = 'b09552382b6775b3a73190ca570da30a182ec866123afbc1b2c58391d166c94b'
+  'FanLab/real-host/Program.cs' = 'a338d9e6f94bda21b0b6a18673845f862c46818389a8408a3bbcfeb78a6bdf5a'
   'FanLab/real-host/Section18CandidateFakes.cs' = 'ef35d49c85f1ff17a3be2452e7227fa5c4a13096d0afc2ff7463d313647bd7c6'
   'FanLab/real-host/Section18CandidateLifecycle.cs' = '10d8841234bebe348d5b3d4c7d98a50ea2c869b51828077d9cc287fad7a556ca'
   'FanLab/real-host/Section19CandidateLifecycle.cs' = '4715f9d7722d8b73c9f95cd7a5ee46c136e5d3265e5e4ba5d05efab99e453272'
@@ -92,8 +92,8 @@ $compiledSourcePins = [ordered]@{
   'FanLab/real-host/YeManFanHost.csproj' = '62da1b6f23c44c8ccdecafaf0ca1e0f28dc3de88723573c8ffc249eb356020c4'
   'FanLab/RuntimeDependencyContract.cs' = '2b4c7769abb6ba97c3ffe2baae474aea27aa92a3b019ee291a98ba14b97af16b'
   'native/ProcessEfficiency.cs' = '4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c'
-  'native/SharedSleepPower/RemoteNativePowerClient.cs' = '823d84267bd1f3ca3fed6964040532ae32237e156d088d0a22b69bacdc8415d9'
-  'native/SharedSleepPower/RemotePowerContracts.cs' = '8963b24e17c1b21b1b6ab011be332f07ca765747839cbeef3b8ed384b9cf3110'
+  'native/SharedSleepPower/RemoteNativePowerClient.cs' = 'ac38b92351519583c0446baf606e3e3db4b50d63d78e8a3ee0873ce2dfbb5d64'
+  'native/SharedSleepPower/RemotePowerContracts.cs' = 'd4b9e2242a3b7a36a70233abae34eff0156bb3fa5c33977bb1752d410095c41c'
 }
 $payloadInput = if ([string]::IsNullOrWhiteSpace($PayloadRoot)) {
   Join-Path (Split-Path -Parent $PSScriptRoot) 'PowerControl\fan-host'
@@ -112,9 +112,9 @@ function Get-Sha256([string]$Path) {
 
 # Select exact approved component sources independently of unfinished live development.
 $liveProjectRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot)).TrimEnd('\')
-$componentSourceBundleRelative = 'deps/fan-host-source/candidate-onex-f1-fan-aliases-20261124'
-$componentSourceBundleManifestSha256 = '88a501bbda40005f7584b35263b950559d3072f41c76bb665928e4389768798f'
-$componentBackendSha256 = '09690a1263ceb55d1ee0d362b3e43686078f1194cec5dff3c49b7c6cdfac65dd'
+$componentSourceBundleRelative = 'deps/fan-host-source/candidate-gpd-winmax3-20261127'
+$componentSourceBundleManifestSha256 = '7ae28da84eef7d86696ff7328dd4862541b4817240b90c4cae5d062319650867'
+$componentBackendSha256 = 'dc121bf8995219cdb9abf6b5c8664c26f1825b437febc553e59a917c0d042500'
 $selectedSourceRoot = if ([string]::IsNullOrWhiteSpace($SourceRoot)) { Join-Path $liveProjectRoot ($componentSourceBundleRelative + '/source') } else { $SourceRoot }
 $sourceBundleVerifier = Join-Path $PSScriptRoot 'hc-device-runtime/verify-host-source-bundle.ps1'
 if (-not (Test-Path -LiteralPath $sourceBundleVerifier -PathType Leaf)) { throw 'FAN_HOST_SOURCE_BUNDLE_VERIFIER_UNAVAILABLE' }

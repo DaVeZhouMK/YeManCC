@@ -117,11 +117,21 @@ struct ArtworkFixture {
 };
 int wmain(int argc,wchar_t** argv) {
     try {
-        require(argc==2,"Pass a new Build fixture directory");const auto root=fs::absolute(argv[1]);
+        const bool manualFallback=argc==3&&std::wstring_view(argv[2])==L"--manual-fallback";
+        const bool previewReadiness=argc==3&&std::wstring_view(argv[2])==L"--preview-readiness";
+        const bool manualOriginal=argc==3&&std::wstring_view(argv[2])==L"--manual-original";
+        const bool manualCacheRetention=argc==3&&std::wstring_view(argv[2])==L"--manual-cache-retention";
+        require(argc==2||manualFallback||previewReadiness||manualOriginal||manualCacheRetention,"Pass a new Build fixture directory");const auto root=fs::absolute(argv[1]);
         const auto build=fs::absolute(fs::path(__FILE__).parent_path()/L".."/L".."/L".."/L"Build").lexically_normal();
         require(pathWithin(root,build)&&!fs::exists(root),"Unsafe/reused fixture root");fs::create_directories(root);
         const auto priorRoot=custom_steam_library::configuredDataRoot();json tests=json::array();
         auto test=[&](const char* name,const std::function<void(const fs::path&)>& action){
+            if(previewReadiness&&!std::string_view(name).starts_with("preview-readiness-"))return;
+            if(manualOriginal&&!std::string_view(name).starts_with("manual-original-"))return;
+            if(manualCacheRetention&&!std::string_view(name).starts_with("manual-cache-retention-"))return;
+            if(manualFallback && !std::string_view(name).starts_with("manual-fallback-") &&
+                std::string_view(name)!="missing-manual-file-allows-automatic-fallback" &&
+                std::string_view(name)!="manual-deleted-slot-is-not-recreated-even-with-stale-file") return;
             const auto p=root/(L"c"+std::to_wstring(tests.size()));fs::create_directories(p);
             try{action(p);tests.push_back({{"name",name},{"passed",true}});}catch(const std::exception& e){tests.push_back({{"name",name},{"passed",false},{"error",e.what()}});}
             artworkTestTransport={};selftestSteamRunning=false;selftestMoveFault={};
@@ -131,7 +141,145 @@ int wmain(int argc,wchar_t** argv) {
         test("manual-cover-does-not-block-auto-long-and-wallpaper",[](const auto& p){ArtworkFixture f(p);f.manual["cover"]={{"file",toUtf8((p/L"fixtures"/L"tall.png").wstring())}};const auto m=f.run();require(f.slot(m,"tall")["provider"]=="manual-override","Manual cover replaced");require(f.slot(m,"long")["ok"]&&f.slot(m,"hero")["ok"],"Other slots were blocked");});
         test("manual-wallpaper-does-not-block-auto-cover",[](const auto& p){ArtworkFixture f(p);f.manual["wallpaper"]={{"file",toUtf8((p/L"fixtures"/L"hero.png").wstring())}};const auto m=f.run();require(f.slot(m,"hero")["provider"]=="manual-override"&&f.slot(m,"tall")["ok"],"Manual wallpaper blocked cover");});
         test("manual-deleted-slot-is-not-recreated-even-with-stale-file",[](const auto& p){ArtworkFixture f(p);f.manual={{"cover",{{"file",toUtf8((p/L"fixtures"/L"tall.png").wstring())}}},{"artworkProtection",{{"cover","deleted"}}}};const auto m=f.run();require(!f.slot(m,"tall")["ok"].template get<bool>(),"Deleted cover recreated");require(f.slot(m,"hero")["ok"],"Deletion blocked other slots");});
+        test("manual-original-decoded-fallback-carries-current-choice",[](const auto& p){
+            ArtworkFixture f(p);const auto original=p/L"fixtures"/L"tall.png", bad=f.data/L"bad.png";
+            fixtureText(bad,"damaged hand-picked portable copy");
+            const json choice={{"file",toUtf8(original.wstring())},{"portableFile",toUtf8(bad.wstring())},{"updatedAt",42}};
+            f.manual={{"cover",choice},{"artworkProtection",{{"cover","manual"}}}};
+            auto result=f.slot(f.run(),"tall");
+            require(jsonStringOr(result,"provider")=="manual-override"&&jsonStringOr(result,"sha256")==sha256(readBinaryFile(original)),"Original was not validated");
+            require(result.value("manualRecovery",json::object())==choice&&
+                readBinaryFile(fs::path(toWide(jsonStringOr(result,"portableFile"))))==readBinaryFile(original)&&
+                readBinaryFile(bad)!=readBinaryFile(original),"Validated original was not projected separately with its current choice");
+            fixturePng(bad,600,910);
+            result=f.slot(f.run(),"tall");
+            require(!result.contains("manualRecovery")&&jsonStringOr(result,"sha256")==sha256(readBinaryFile(bad)),"Restored portable original no longer won");
+        });
+        test("preview-readiness-temporary-image-settles-retry-not-import",[](const auto& p){
+            ArtworkFixture f(p);
+            f.manual={{"cover",{{"file",toUtf8((p/L"chosen.png").wstring())}}},{"artworkProtection",{{"cover","manual"}}}};
+            const auto manifest=f.run();
+            const auto waiting=artworkReadiness(manifest,f.manual);
+            require(!waiting["minimumComplete"].template get<bool>()&&!waiting["tall"].template get<bool>(),"Worker considers temporary portrait publishable");
+            require(waiting["automaticSlotsComplete"].template get<bool>(),"Worker left a settled preview slot eligible for another scrape");
+            const auto cleared=artworkReadiness(manifest,json::object());
+            require(!cleared["automaticSlotsComplete"].template get<bool>(),"Stale preview blocked automatic work after the choice was cleared");
+            fixturePng(p/L"chosen.png",600,900);
+            const auto restored=artworkReadiness(manifest,f.manual);
+            require(restored["minimumComplete"].template get<bool>()&&restored["automaticSlotsComplete"].template get<bool>(),"Restored original was not recognized");
+        });
+        for (const auto* variant : {"missing", "unreadable", "changed-cache", "cleared", "reselected", "deleted"}) {
+            const auto mode = std::string_view(variant);
+            test((std::string("manual-cache-retention-") + variant).c_str(), [mode](const auto& p) {
+                ArtworkFixture f(p);
+                const auto original = p/L"original.png", portable = p/L"bad-portable.png";
+                const auto text = [](const fs::path& path) { return toUtf8(path.wstring()); };
+                const auto good = fixturePng(original, 640, 1000);
+                fixtureText(portable, "unreadable portable source");
+                const json choice = {{"file", text(original)}, {"portableFile", text(portable)}, {"updatedAt", 42}};
+                f.manual = {{"cover", choice}, {"artworkProtection", {{"cover", "manual"}}}};
+                const auto initial = f.run(), first = f.slot(initial, "tall");
+                require(first.value("manualRecovery", json::object()) == choice, "Fixture did not produce a recovery record");
+                const auto cache = fs::path(toWide(jsonStringOr(first, "portableFile")));
+                require(cache != original && readBinaryFile(cache) == good, "Fixture did not publish an independent recovery copy");
+                fs::remove(original);
+                if (mode == "unreadable") fixtureText(original, "unreadable replacement at original path");
+                if (mode != "unreadable") fs::remove(portable);
+                if (mode == "changed-cache") {
+                    fs::remove(cache);
+                    fixturePng(cache, 650, 980);
+                }
+                if (mode == "cleared") f.manual = json::object();
+                if (mode == "reselected") f.manual["cover"]["updatedAt"] = 43;
+                if (mode == "deleted") f.manual["artworkProtection"]["cover"] = "deleted";
+                const auto next = f.slot(f.run(), "tall");
+                if (mode != "missing" && mode != "unreadable") {
+                    require(!next.contains("manualRecovery"), "An invalidated recovery record survived re-scrape");
+                    if (mode == "cleared") {
+                        require(jsonBoolSafe(next, "ok", false) && jsonStringOr(next, "provider") != "manual-override" &&
+                            !jsonBoolSafe(next, "previewOnlyManualFallback", false), "Cleared manual choice was not replaced by an ordinary automatic image");
+                        require(!jsonBoolSafe(artworkReadiness(initial, f.manual), "tall", true), "Old manual record still satisfies readiness after clear");
+                    } else if (mode == "deleted") {
+                        require(!jsonBoolSafe(next, "ok", true), "Deleted choice was republished");
+                    } else {
+                        require(!jsonBoolSafe(next, "ok", false) || jsonBoolSafe(next, "previewOnlyManualFallback", false),
+                            "Invalidated choice became publishable artwork");
+                        if (mode == "reselected") require(!jsonBoolSafe(artworkReadiness(initial, f.manual), "tall", true),
+                            "Old manual record still satisfies readiness after reselection");
+                    }
+                    return;
+                }
+                const auto second = f.slot(f.run(), "tall");
+                for (const auto& row : {next, second}) {
+                    require(row.value("manualRecovery", json::object()) == choice && jsonBoolSafe(row, "ok", false) &&
+                        !jsonBoolSafe(row, "previewOnlyManualFallback", false) && jsonStringOr(row, "file") == text(original) &&
+                        jsonStringOr(row, "portableFile") == text(cache), "Re-scrape lost the original recovery record");
+                }
+                require(readBinaryFile(cache) == good, "Re-scrape overwrote verified cache bytes");
+
+                const auto vdf = p/L"Steam"/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf";
+                auto document = BinaryVdfDocument::emptySteamShortcuts();
+                vdfFindObject(document.root(), "shortcuts")->objectValue.push_back({"0", steamShortcutNode(-1073741823,
+                    "Fixture Game", quotedSteamPath(f.exe), quotedSteamPath(f.exe.parent_path()), 0)});
+                writeAtomic(vdf, document.serialize());
+                const auto originalVdf = readBinaryFile(vdf);
+                const auto simulated = applySteamArtwork(f.exe, f.output, f.data, loadJsonDocument(f.durable()),
+                    vdf, std::nullopt, false, false);
+                const auto& mappings = simulated.at("mappings");
+                require(!mappings.empty() && std::none_of(mappings.begin(), mappings.end(), [](const json& row) {
+                    return jsonStringOr(row, "type") == "tall";
+                }), "Legacy apply consumed a retired original path instead of leaving it to the library writer");
+                if (mode == "unreadable") return;
+                const auto scan = f.data/L"state"/L"library-scan.json";
+                writeJsonAtomic(scan, {{"games", json::array({{{"gameDirectory", text(f.exe.parent_path())},
+                    {"primaryExecutable", text(f.exe)}, {"status", "ready"}}})}});
+                const auto portrait = vdf.parent_path()/L"grid"/L"3221225473p.png";
+                fixtureText(portrait, "broken Steam portrait");
+                refreshExistingSteamArtwork(f.data, scan, SteamShortcutTarget{vdf, "19627"}, f.data/L"state"/L"repair.json",
+                    true, {canonicalPathKey(f.exe.parent_path())});
+                require(readBinaryFile(portrait) == good && readBinaryFile(vdf) == originalVdf,
+                    "Recovery after re-scrape did not repair the portrait on the original card");
+                const auto restored = fixturePng(portable, 600, 910);
+                const auto live = f.slot(f.run(), "tall");
+                require(!live.contains("manualRecovery") && jsonStringOr(live, "sha256") == sha256(restored),
+                    "A recovered cache outranked the restored configured portable source");
+            });
+        }
         test("missing-manual-file-allows-automatic-fallback",[](const auto& p){ArtworkFixture f(p);f.manual={{"cover",{{"file",toUtf8((p/L"missing.png").wstring())}}},{"artworkProtection",{{"cover","manual"}}}};const auto m=f.run();require(f.slot(m,"tall")["ok"]&&f.slot(m,"tall")["provider"]!="manual-override","Missing file blocked fallback");});
+        test("manual-fallback-preview-does-not-replace-original-or-write-steam",[](const auto& p){
+            ArtworkFixture f(p);
+            const auto original=p/L"manual.png",vdf=p/L"Steam"/L"userdata"/L"19627"/L"config"/L"shortcuts.vdf";
+            auto document=BinaryVdfDocument::emptySteamShortcuts();
+            vdfFindObject(document.root(),"shortcuts")->objectValue.push_back({"0",steamShortcutNode(-1073741823,"Fixture Game",quotedSteamPath(f.exe),quotedSteamPath(f.exe.parent_path()),0)});
+            writeAtomic(vdf,document.serialize());const auto originalVdf=readBinaryFile(vdf);
+            f.manual={{"cover",{{"file",toUtf8(original.wstring())}}},{"artworkProtection",{{"cover","manual"}}}};
+            f.install();const auto config=f.data/L"config"/L"manual-overrides.json";const auto before=readBinaryFile(config);
+            const auto m=f.run(),cover=f.slot(m,"tall");
+            require(jsonBoolSafe(cover,"ok",false)&&jsonBoolSafe(cover,"previewOnlyManualFallback",false)&&
+                fs::path(toWide(jsonStringOr(cover,"portableFile"))).stem()==L"tall-preview-fallback"&&
+                !fs::exists(original)&&readBinaryFile(config)==before,"Preview fallback replaced the user choice or lost its restriction");
+            const auto apply=applySteamArtwork(f.exe,f.output,f.data,m,vdf,std::nullopt,false,false);
+            require(!apply.at("mappings").empty()&&std::none_of(apply.at("mappings").begin(),apply.at("mappings").end(),[](const json& row){return jsonStringOr(row,"type")=="tall";})&&
+                readBinaryFile(vdf)==originalVdf,"Applying artwork published a preview-only portrait");
+            auto restoredBytes=fixturePng(original,600,975);
+            const auto restored=f.slot(f.run(),"tall");
+            require(jsonStringOr(restored,"provider")=="manual-override"&&!jsonBoolSafe(restored,"previewOnlyManualFallback",false)&&
+                jsonStringOr(restored,"sha256")==sha256(restoredBytes)&&readBinaryFile(config)==before,"Returning manual original did not displace temporary artwork");
+        });
+        test("manual-fallback-reuse-remains-preview-only-until-choice-is-cleared",[](const auto& p){
+            ArtworkFixture f(p);
+            f.manual={{"cover",{{"file",toUtf8((p/L"missing.png").wstring())}}},{"artworkProtection",{{"cover","manual"}}}};
+            const auto first=f.slot(f.run(),"tall");
+            const auto preserved=f.slot(f.run(),"tall");
+            require(jsonBoolSafe(first,"previewOnlyManualFallback",false)&&jsonBoolSafe(preserved,"previewOnlyManualFallback",false)&&
+                jsonBoolSafe(preserved,"preservedExisting",false)&&jsonStringOr(preserved,"portableFile")==jsonStringOr(first,"portableFile"),
+                "Reusing a temporary image lost its publication guard");
+            f.manual=json::object();
+            const auto automatic=f.slot(f.run(),"tall");
+            require(jsonBoolSafe(automatic,"ok",false)&&!jsonBoolSafe(automatic,"previewOnlyManualFallback",false)&&
+                !jsonBoolSafe(automatic,"preservedExisting",false)&&jsonStringOr(automatic,"portableFile")!=jsonStringOr(first,"portableFile"),
+                "An expired temporary preview blocked a normal automatic portrait");
+        });
         test("automatic-igdb-to-baidu-fallback-with-no-steamid",[](const auto& p){ArtworkFixture f(p);f.igdbImages=false;const auto m=f.run();for(const auto* type:{"tall","long","hero"})require(f.slot(m,type)["provider"]=="baidu-image"&&f.slot(m,type)["ok"],"Baidu slot not applied");});
         test("baidu-still-works-when-igdb-identity-fails",[](const auto& p){ArtworkFixture f(p);f.igdbImages=false;f.failIdentity=true;const auto m=f.run();require(m["successCount"]>=3,"Failed identity prevented visual fallback");require(positiveJsonInt(m["match"],"appId")==0&&positiveJsonInt(m["match"],"igdbId")==0,"Search hit granted identity");});
         test("japanese-old-game-with-neither-steamid-nor-igdb-id-gets-baidu-images",[](const auto& p){ArtworkFixture f(p);f.title=L"維新の嵐 幕末志士伝";f.exe=p/L"Ishin2"/L"ISHIN2.EXE";fixtureText(f.exe,"isolated old-game fixture");f.withIgdbId=false;f.igdbImages=false;f.caption="維新の嵐幕末志士伝攻略・画像集";f.manual["name"]=toUtf8(f.title);const auto m=f.run();for(const auto* type:{"tall","long","hero"})require(f.slot(m,type)["provider"]=="baidu-image"&&f.slot(m,type)["ok"],"Japanese no-ID fallback missing");require(positiveJsonInt(m["match"],"appId")==0&&positiveJsonInt(m["match"],"igdbId")==0,"Artwork invented an identity");require(m["match"]["formalName"]==toUtf8(f.title),"Fallback lost readable title");});

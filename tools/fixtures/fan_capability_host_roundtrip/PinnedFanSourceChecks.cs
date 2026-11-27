@@ -21,6 +21,49 @@ internal static class PinnedFanSourceChecks
 {
 
     private const string Token="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    private const string Max3Class="YeManCC.SourceDevices.GPDWinMax3";
+
+    internal static void CheckMax3(Action<bool,string> check)
+    {
+        var source=FanCapabilityCatalog.FindPinnedFanSource(Max3Class)!;
+        check(source.DeviceId=="ymcc.device.GPDWinMax3"&&source.SourceCommit==source.SourceSha256&&
+            source.DutyRegister==0x047b&&source.SecondaryDutyRegister==0x047a&&source.StatusPort==0x4e&&source.DataPort==0x4f,
+            "max3:exact-source-identity-and-ports");
+        check(ReferenceEquals(source,FanCapabilityCatalog.MatchPinnedFanSource("gpd"," g1638-01 "))&&
+            FanCapabilityCatalog.MatchPinnedFanSource("GPD","G1618-05") is null&&
+            FanCapabilityCatalog.MatchPinnedFanSource("GPD","G1638-01-PRO") is null&&
+            FanCapabilityCatalog.MatchPinnedFanSource("NOT GPD","G1638-01") is null,"max3:exact-board-and-vendor-only");
+        var terminal=new MemoryTransport(source);
+        using(var owner=Own(source,terminal))
+        {
+            owner.Open();owner.ApplyPercent(0);owner.ApplyPercent(100);
+            check(terminal.Writes.SequenceEqual(new (ushort,byte)[]{(0x047b,1),(0x047a,1),(0x047b,244),(0x047a,244)}),
+                "max3:manual-zero-and-maximum-in-oem-order");
+            terminal.BeforeWrite=(reg,value)=>{if(reg==0x047a&&value==0)throw new IOException("second return fails");};
+            check(!owner.TryStop()&&terminal.IsReady&&!owner.AutomaticCommandsReturned,"max3:second-return-failure-retains-owner");
+            Reject(()=>Own(source,new MemoryTransport(source)),check,"max3:pending-owner-blocks-replacement");
+            terminal.BeforeWrite=null;
+            check(owner.TryStop()&&!terminal.IsReady&&owner.AutomaticCommandsReturned&&!owner.AutomaticReturnObserved&&
+                terminal.Reads==0&&terminal.Writes.Skip(4).SequenceEqual(new (ushort,byte)[]{(0x047b,0),(0x047a,0),(0x047a,0)}),
+                "max3:only-unsettled-channel-retried-no-fake-readback");
+        }
+        var next=new MemoryTransport(source);bool permit=true;
+        using(var owner=Own(source,next,()=>permit))
+        {
+            owner.Open();next.BeforeWrite=(_,value)=>{if(value!=0)permit=false;};
+            Reject(()=>owner.ApplyPercent(50),check,"max3:sleep-revocation-before-second-write");
+            check(owner.TryStop()&&next.Writes.SequenceEqual(new (ushort,byte)[]{(0x047b,122),(0x047b,0)}),
+                "max3:return-only-channel-issued-before-sleep");
+        }
+        var failed=new MemoryTransport(source);
+        using(var owner=Own(source,failed))
+        {
+            owner.Open();failed.BeforeWrite=(reg,value)=>{if(reg==0x047a&&value!=0)throw new IOException("second write fails");};
+            Reject(()=>owner.ApplyPercent(50),check,"max3:second-duty-write-failure");
+            check(owner.TryStop()&&failed.Writes.SequenceEqual(new (ushort,byte)[]{(0x047b,122),(0x047a,122),(0x047b,0),(0x047a,0)}),
+                "max3:ambiguous-issued-channel-is-also-returned");
+        }
+    }
 
     private sealed class MemoryTransport : IPinnedFanTransport
 
@@ -219,13 +262,14 @@ internal static class PinnedFanSourceChecks
 
             var ports=new MemoryPorts();var bus=new MemoryBus();using var t=new PinnedSuperIoFanTransport(ports,d,bus);
 
-            var prefix=$"enter:004E:004F,w:004E:2E,w:004F:11,w:004E:2F,w:004F:{d.ControlRegister>>8:X2},w:004E:2E,w:004F:10,w:004E:2F,w:004F:{(byte)d.ControlRegister:X2},w:004E:2E,w:004F:12,w:004E:2F";
+            var register=d.SecondaryDutyRegister??d.ControlRegister;
+            var prefix=$"enter:004E:004F,w:004E:2E,w:004F:11,w:004E:2F,w:004F:{register>>8:X2},w:004E:2E,w:004F:10,w:004E:2F,w:004F:{(byte)register:X2},w:004E:2E,w:004F:12,w:004E:2F";
 
-            check(t.ReadByte(d.ControlRegister)==184,"pinned-fan:raw-read-value-"+d.DeviceId);
+            check(t.ReadByte(register)==184,"pinned-fan:raw-read-value-"+d.DeviceId);
 
             check(string.Join(',',ports.Trace)==prefix+",r:004F,exit:004E:004F","pinned-fan:full-fixed-read-sequence-"+d.DeviceId);
 
-            ports.Trace.Clear();t.WriteByte(d.ControlRegister,d.ControlOn);
+            ports.Trace.Clear();t.WriteByte(register,d.ControlOn);
 
             check(string.Join(',',ports.Trace)==prefix+$",w:004F:{d.ControlOn:X2},exit:004E:004F","pinned-fan:full-fixed-write-sequence-"+d.DeviceId);
 
@@ -388,7 +432,7 @@ internal static class PinnedFanSourceChecks
             "HandheldCompanion.Devices.OneXPlayerX2MiniPro|ymcc.device.OneXPlayerX2MiniPro|HandheldCompanion/Devices/OneXPlayer/OneXPlayerX2MiniPro.cs|7f06350daeb1d1c7157ae21f1dc231637394008256b3fc4c22c747109e2c7b67|f2e58468d9917189d4be7ccfc242385ce2c3035b|Valkirie/HandheldCompanion|SuperIo16|044A|044B|1|255|004E|004F|0470|ONE-NETBOOK TECHNOLOGY CO., LTD.,ONE-NETBOOK|ONEXPLAYER X2Mini PRO",
         };
         var oldRows = FanCapabilityCatalog.PinnedSourceDeclarations
-            .Where(row => row.ModelClass != PinnedUmaFanChecks.ModelClass).ToArray();
+            .Where(row => row.ModelClass != PinnedUmaFanChecks.ModelClass && row.ModelClass != Max3Class).ToArray();
         string Identity(PinnedFanDescriptor row) => string.Join("|", row.ModelClass, row.DeviceId,
             row.SourceFile, row.SourceSha256, row.SourceCommit, row.SourceRepository, row.Transport,
             row.ControlRegister.ToString("X4"), row.DutyRegister.ToString("X4"), row.ControlOn,
@@ -409,8 +453,8 @@ internal static class PinnedFanSourceChecks
                 "pinned-fan:original-nine-exact-dmi-"+row.DeviceId);
         }
         var uma = PinnedUmaFanChecks.Descriptor;
-        check(FanCapabilityCatalog.PinnedSourceDeclarations.Count == 10 &&
-            FanCapabilityCatalog.PinnedSourceDeclarations.Last() == uma, "pinned-fan:tenth-source-is-superx");
+        check(FanCapabilityCatalog.PinnedSourceDeclarations.Count == 11 &&
+            FanCapabilityCatalog.PinnedSourceDeclarations[9] == uma, "pinned-fan:tenth-source-is-superx");
         check(uma.ModelClass == "YeManCC.SourceDevices.OneXPlayerSuperX" &&
             uma.DeviceId == "ymcc.device.OneXPlayerSuperX" && uma.Transport == PinnedFanTransportKind.WmiUmaEc16 &&
             uma.ControlRegister == 0x044A && uma.DutyRegister == 0x044B && uma.ControlOn == 1 &&

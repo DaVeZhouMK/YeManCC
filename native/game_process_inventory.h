@@ -148,9 +148,9 @@ public:
 
 // Recurring game discovery consumes the native owner's immutable Basic rows
 // directly. One-shot Steam listeners above always request fresh0.
-inline auto readSharedBasicSnapshot() {
+inline auto readSharedBasicSnapshot(ULONGLONG maxAge = 250) {
     return ymcc::processInventory::read(ymcc::processInventory::resolveQuery(),
-        ymcc::processInventory::currentTime, 250, false);
+        ymcc::processInventory::currentTime, maxAge, false);
 }
 
 // These state objects are accessed under the existing g_gameValveMx. The
@@ -185,6 +185,11 @@ using TopologyFilter = bool (*)(const BasicEntry&, const RuleKey&);
 // open a process required by the live validator, not a persistent negative.
 enum class WorkingSetRead { Read, AccessDenied, Unavailable };
 using WorkingSetReader = WorkingSetRead (*)(const TopologyEntry&, OwnedEntry&);
+struct WorkingSetBatchResult {
+    bool complete = false;
+    DWORD invalidOpenPid = 0;
+};
+using WorkingSetBatchReader = WorkingSetBatchResult (*)(const std::vector<TopologyEntry>&, std::vector<OwnedEntry>&);
 inline bool readWorkingSetHints(const std::vector<TopologyEntry>& topology,
     WorkingSetReader reader, std::vector<OwnedEntry>& rows) {
     std::vector<OwnedEntry> staged; staged.reserve(topology.size());
@@ -236,6 +241,7 @@ inline bool refreshForegroundWorkingSets(const std::vector<TopologyEntry>& topol
 struct Memo {
     TopologyFilter topologyFilter = nullptr;
     WorkingSetReader workingSetReader = nullptr;
+    WorkingSetBatchReader workingSetBatchReader = nullptr;
     bool ready = false, available = false, wasForeground = false, resetProgress = true;
     ULONGLONG at = 0, fullAt = 0;
     bool topologyAvailable = false;
@@ -249,14 +255,65 @@ struct Memo {
     RuleKey rules;
     std::vector<OwnedEntry> rows;
 };
-inline const Memo& inventory(const RuleKey& rules, bool actualForeground, TopologyFilter topologyFilter = nullptr, WorkingSetReader workingSetReader = nullptr) {
+inline bool retryExitedWorkingSetRow(Memo& memo, DWORD pid, WorkingSetBatchReader reader) {
+    // Only a complete fresh table that differs by this one removal can reuse
+    // the original rule projection. Do not reuse partial working-set reads.
+    const auto fresh = readSharedBasicSnapshot(0);
+    if (!fresh || fresh->basicStatus != ymcc::processInventory::Status::Complete ||
+        memo.rawOrder.empty() || fresh->rows.size() != memo.rawOrder.size() - 1 ||
+        memo.rawRelevant.size() != memo.rawOrder.size()) return false;
+    const auto* locale = std::setlocale(LC_CTYPE, nullptr);
+    if (!locale || memo.filterLocale != locale) return false;
+    using BasicRow = ymcc::processInventory::Entry;
+    std::vector<const BasicRow*> order;
+    order.reserve(fresh->rows.size());
+    for (const auto& row : fresh->rows) {
+        if (row.pid == pid) return false;
+        order.push_back(&row);
+    }
+    std::sort(order.begin(), order.end(), [](const BasicRow* a, const BasicRow* b) { return a->pid < b->pid; });
+    const auto retired = std::lower_bound(memo.rawOrder.begin(), memo.rawOrder.end(), pid,
+        [](const BasicRow* row, DWORD key) { return row->pid < key; });
+    if (retired == memo.rawOrder.end() || (*retired)->pid != pid) return false;
+    const auto offset = static_cast<std::size_t>(retired - memo.rawOrder.begin());
+    for (std::size_t i = 0; i < order.size(); ++i) {
+        const auto& current = *order[i];
+        const auto& old = *memo.rawOrder[i + (i >= offset)];
+        if (current.pid != old.pid || current.name != old.name || current.sequence != old.sequence ||
+            current.parentPid != old.parentPid) return false;
+    }
+    auto topology = memo.topology;
+    const auto entry = std::lower_bound(topology.begin(), topology.end(), pid,
+        [](const TopologyEntry& row, DWORD key) { return row.pid < key; });
+    if (entry == topology.end() || entry->pid != pid) return false;
+    topology.erase(entry);
+    std::vector<OwnedEntry> rows;
+    if (!reader(topology, rows).complete) return false;
+    memo.rawRelevant.erase(memo.rawRelevant.begin() + offset);
+    memo.rawOrder = std::move(order);
+    memo.rawSource = fresh;
+    memo.topology = std::move(topology);
+    memo.rows = std::move(rows);
+    return true;
+}
+inline bool refreshBackgroundWorkingSets(Memo& memo, WorkingSetReader single, WorkingSetBatchReader batch) {
+    if (!batch) return readWorkingSetHints(memo.topology, single, memo.rows);
+    const auto result = batch(memo.topology, memo.rows);
+    if (result.complete) return true;
+    if (!result.invalidOpenPid) return false;
+    try { return retryExitedWorkingSetRow(memo, result.invalidOpenPid, batch); }
+    catch (...) { return false; }
+}
+inline const Memo& inventory(const RuleKey& rules, bool actualForeground, TopologyFilter topologyFilter = nullptr,
+    WorkingSetReader workingSetReader = nullptr, WorkingSetBatchReader workingSetBatchReader = nullptr) {
     static Memo memo;
     const auto ticket = invalidation.load(std::memory_order_acquire);
     const auto now = GetTickCount64();
     const bool becameForeground = actualForeground && !memo.wasForeground;
     memo.wasForeground = actualForeground;
     const bool mandatory = !memo.ready || !(memo.rules == rules) || memo.invalidationTicket != ticket || becameForeground ||
-        memo.topologyFilter != topologyFilter || memo.workingSetReader != workingSetReader;
+        memo.topologyFilter != topologyFilter || memo.workingSetReader != workingSetReader ||
+        memo.workingSetBatchReader != workingSetBatchReader;
     if (mandatory || now - memo.at >= topologyIntervalMs) {
         const auto basic = readSharedBasicSnapshot();
         const bool basicValid = basic->basicStatus == ymcc::processInventory::Status::Complete;
@@ -330,6 +387,7 @@ inline const Memo& inventory(const RuleKey& rules, bool actualForeground, Topolo
         memo.ready = true; memo.available = false; memo.fullAt = now;
         memo.invalidationTicket = ticket; memo.rules = rules;
         memo.topologyFilter = topologyFilter; memo.workingSetReader = workingSetReader; ++memo.version;
+        memo.workingSetBatchReader = workingSetBatchReader;
         memo.topologyAvailable = basicValid;
         if (!reuseProjection) memo.topology = std::move(topology);
         memo.rows.clear();
@@ -344,7 +402,7 @@ inline const Memo& inventory(const RuleKey& rules, bool actualForeground, Topolo
             memo.rows = std::move(foregroundRows);
             memo.fullAt = (std::min)(now, basic->observedAt);
             memo.available = true;
-        } else if (selective && readWorkingSetHints(memo.topology, workingSetReader, memo.rows)) {
+        } else if (selective && refreshBackgroundWorkingSets(memo, workingSetReader, workingSetBatchReader)) {
             // A reused Basic table cannot acquire a later absence-proof age.
             memo.fullAt = (std::min)(now, basic->observedAt);
             memo.available = true;

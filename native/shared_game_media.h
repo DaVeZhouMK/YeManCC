@@ -12,6 +12,7 @@
 #include <thread>
 #include <mutex>
 #include <memory>
+#include <new>
 #include <sstream>
 #include <set>
 #include <map>
@@ -27,6 +28,7 @@
 #pragma comment(lib, "bcrypt.lib")
 namespace ymcc::media {
 using Json = nlohmann::json;
+namespace downloads { class Queue; }
 inline constexpr int videoQualityPolicy=3;
 inline constexpr int playback30Policy=1;
 namespace steamDemand {
@@ -98,13 +100,16 @@ inline void setMediaRefresh(Json& e,const std::string& slot,bool requested){
     e["refreshRequested"]=dynamic||image;
     if(dynamic||image)e["refreshSlot"]=dynamic?(image?"both":"dynamic"):"static";
 }
-inline bool needsVideoQualityUpgrade(const Json& e,int64_t time){
-    return e.value("dynamicReady",false)&&!e.value("deleted",false)&&
+inline bool needsVideoQualityUpgrade(const Json& e,int64_t time,bool dynamicReady){
+    return dynamicReady&&!e.value("deleted",false)&&
         !e.value("manualSlots",Json::object()).value("dynamic",false)&&!e.value("deletedSlots",Json::object()).value("dynamic",false)&&
         e.value("videoUnavailableUntil",int64_t{0})<=time&&
         e.value("assets",Json::object()).value("dynamic",Json::object()).value("qualityPolicy",0)<videoQualityPolicy&&
         (e.value("assets",Json::object()).value("dynamic",Json::object()).value("selectedHeight",0)<=0||
          e.value("assets",Json::object()).value("dynamic",Json::object()).value("selectedHeight",0)>preferredVideoHeight(e));
+}
+inline bool needsVideoQualityUpgrade(const Json& e,int64_t time){
+    return needsVideoQualityUpgrade(e,time,e.value("dynamicReady",false));
 }
 inline std::string stringField(const Json& object,const char* key,const std::string& fallback={}){if(!object.is_object())return fallback;const auto item=object.find(key);return item!=object.end()&&item->is_string()?item->get<std::string>():fallback;}
 namespace fs = std::filesystem;
@@ -129,10 +134,19 @@ inline auto readMediaObserved(const fs::path& p,Parsed&& parsed,Bytes&& fromByte
     if(ec)throw std::runtime_error("media-index-unreadable");if(!exists)return parsed(Json::object());
     const auto size=fs::file_size(disk,ec);
     if(ec||size>16*1024*1024)throw std::runtime_error("media-index-unreadable");
+    // Keep this buffer alive until the stream closes, including the fallback.
+    std::unique_ptr<char[]> ioBuffer;
     std::ifstream in(disk,std::ios::binary);if(!in)throw std::runtime_error("media-index-unreadable");
     // Small complete documents can use the same parser's cheaper iterator path.
     // Keep stream semantics for size races, embedded NULs and large documents.
     if(size<=1024*1024){
+        // MSVC reads binary ifstreams through a small CRT buffer. Group those
+        // reads while still checking the complete, freshly opened document.
+        constexpr size_t bufferSize=64*1024;
+        if(size>=bufferSize){
+            ioBuffer.reset(new(std::nothrow) char[bufferSize]);
+            if(ioBuffer)in.rdbuf()->pubsetbuf(ioBuffer.get(),bufferSize);
+        }
         std::string bytes(static_cast<size_t>(size),'\0');
         if(in.read(bytes.data(),static_cast<std::streamsize>(size))&&in.peek()==std::char_traits<char>::eof()&&
             in.eof()&&!in.bad()&&bytes.find('\0')==std::string::npos){
@@ -173,6 +187,7 @@ inline Json identityWorkerArguments(const std::string& executable,const fs::path
     return Json::array({executable,"--steam-identity-only",utf8(output.wstring())});
 }
 class Store {
+    friend class downloads::Queue;
     fs::path root_;
     fs::path index()const{return root_/L"config"/L"game-media.json";}
     std::shared_ptr<const Json> readInventoryState()const{
@@ -264,6 +279,12 @@ class Store {
             {std::lock_guard lock(mutex);std::swap(cached,next);}
             return value;
         });
+    }
+    std::shared_ptr<const Json> queueAdmissionEntries()const{
+        Lock lock(root_);
+        auto document=readOnlyDocument();
+        const auto* entries=&document->at("entries");
+        return {std::move(document),entries};
     }
     void save(Json& j){
         j.erase("_mediaChanged");j["schemaVersion"]=1;j["revision"]=j.value("revision",uint64_t{0})+1;j["updatedAt"]=now();atomicWrite(index(),j);
@@ -413,6 +434,7 @@ class Store {
 
 public:
     explicit Store(fs::path root):root_(std::move(root)){bindMediaPowerPreference(root_);}
+    const fs::path& dataRoot() const noexcept { return root_; }
     const fs::path& root()const{return root_;}
     Json snapshot(bool includeWallpaperPlayback=false)const{
         Lock lock(root_);auto j=*readOnlyDocument();
@@ -458,10 +480,22 @@ private:
             if(!found.empty())key=found;
         }
         if(!j["entries"].contains(key))return {{"key",key},{"status","missing"},{"bindingRevision",0},{"ready",false}};
-        auto e=normalizeEntry(j["entries"][key]);std::error_code ec;
-        if(e.contains("asset"))e["ready"]=fs::is_regular_file(custom_steam_library::ioPath(assetPath(e["asset"])),ec)&&!ec;
-        for(const auto* slot:{"static","dynamic"}){const bool exists=e[std::string(slot)+"Ready"].get<bool>()&&fs::is_regular_file(custom_steam_library::ioPath(assetPath(e["assets"][slot])),ec)&&!ec;e[std::string(slot)+"Ready"]=exists;ec.clear();}
-        if(!e.value("ready",false)&&!e.value("deleted",false)&&e.value("wallpaperMode",std::string{})=="dynamic"&&e.value("staticReady",false)){e["asset"]=e["assets"]["static"];e["ready"]=true;}
+        auto e=normalizeEntry(j["entries"][key]);
+        const auto fileReady=[&](const Json& asset){
+            std::error_code ec;
+            return fs::is_regular_file(custom_steam_library::ioPath(assetPath(asset)),ec)&&!ec;
+        };
+        const bool dynamicMode=e["wallpaperMode"]=="dynamic";
+        const bool hasSelection=e.contains("asset");
+        // Normalization projects the usable slot into asset, including the static fallback.
+        const std::string_view selectedSlot=dynamicMode&&e["dynamicReady"].get<bool>()?"dynamic":"static";
+        const bool selectedReady=hasSelection&&fileReady(e["asset"]);
+        if(hasSelection)e["ready"]=selectedReady;
+        for(const auto* slot:{"static","dynamic"}){
+            auto& ready=e[std::string(slot)+"Ready"];
+            ready=ready.get<bool>()&&(hasSelection&&selectedSlot==slot?selectedReady:fileReady(e["assets"][slot]));
+        }
+        if(!selectedReady&&!e.value("deleted",false)&&dynamicMode&&e.value("staticReady",false)){e["asset"]=e["assets"]["static"];e["ready"]=true;}
         return e;
     }
     // Current-game display only: reusing a video never writes a media alias
@@ -848,7 +882,18 @@ public:
         }
         else if(action=="rename"){const auto name=a.value("name",std::string{});if(name.empty()||name.size()>512)throw std::runtime_error("media-invalid-name");e["name"]=name;}
         else if(action=="mode"){const auto mode=a.value("mode",std::string{});if(mode!="static"&&mode!="dynamic")throw std::runtime_error("media-mode-invalid");e["wallpaperMode"]=mode;e["modeExplicit"]=true;}
-        else if(action=="playback"){const double start=a.value("start",0.0),end=a.value("end",0.0);const auto fit=a.value("fit",std::string{"cover"});if(!std::isfinite(start)||!std::isfinite(end)||start<0||start>86400||end<0||end>86400||(end>0&&end<=start)||(fit!="cover"&&fit!="contain"))throw std::runtime_error("media-playback-range-invalid");e["playback"]={{"start",start},{"end",end},{"fit",fit}};e["playbackExplicit"]=true;}
+        else if(action=="playback"){
+            const double start=a.value("start",0.0),end=a.value("end",0.0);
+            const auto fit=a.value("fit",std::string{"cover"});
+            const auto previous=e.find("playback");
+            const auto startMode=a.contains("startMode")?stringField(a,"startMode"):
+                (previous!=e.end()&&stringField(*previous,"startMode")=="from-start"?"from-start":"random");
+            if(!std::isfinite(start)||!std::isfinite(end)||start<0||start>86400||end<0||end>86400||(end>0&&end<=start)||(fit!="cover"&&fit!="contain"))throw std::runtime_error("media-playback-range-invalid");
+            if(startMode!="random"&&startMode!="from-start")throw std::runtime_error("media-playback-start-mode-invalid");
+            e["playback"]={{"start",start},{"end",end},{"fit",fit}};
+            if(startMode=="from-start")e["playback"]["startMode"]=startMode;
+            e["playbackExplicit"]=true;
+        }
         else throw std::runtime_error("media-edit-action-invalid");
         e["bindingRevision"]=e.value("bindingRevision",uint64_t{0})+1;releasePreparation(e);e["updatedAt"]=now();e=normalizeEntry(e);j["entries"][e["key"].get<std::string>()]=e;steamDemand::require(a);save(j);return e;
     }

@@ -78,7 +78,7 @@ static void healthy(unsigned hz,UINT32 interval=10,const char* family="winrt",co
 }
 static void failInitialAndMove(){for(int n=0;n<12;++n)feed(10);feed(10,1000,false,150);feed(10,1000,false,150);}
 static std::string ascii_lower(std::string v){for(auto&c:v)c=static_cast<char>(tolower(static_cast<unsigned char>(c)));return v;}
-struct MotionConfig{bool motionEnabled=true,motionActionEnabled=true,motionTriggerResolved=true,motionTogglePressed=false,motionToggleStatus=false;std::string motionMode="off",motionTrigger;};
+struct MotionConfig{bool steamControlled=false,motionEnabled=true,motionActionEnabled=true,motionTriggerResolved=true,motionTogglePressed=false,motionToggleStatus=false;std::string motionMode="off",motionTrigger;};
 static MotionConfig g_realStickTest;
 // PRODUCTION_TRIGGER
 static bool admitted(const json& motion,bool held=false){g_realStickTest={};g_realStickTest.motionMode=motion.value("motionMode",std::string("off"));g_realStickTest.motionTrigger=motion.value("motionTrigger",json()).is_string()?motion["motionTrigger"].get<std::string>():"";XINPUT_GAMEPAD pad{};if(held)pad.bLeftTrigger=255;return inputCaptureMotionTriggered(pad);}
@@ -91,6 +91,10 @@ static void statusCases(){
  const auto sensorMeta=fixtureMeta;const HANDLE g_inputHostProcess=reinterpret_cast<HANDLE>(1);
  const std::string g_inputHostRunId="memory-host";const int g_inputHostEpoch=1;
  const bool hostAlive=g_inputHostProcess!=nullptr&&!g_inputHostRunId.empty();
+ // This cadence fixture has no Windows source-view witness; its new diagnostic stays null.
+ const bool windowsSensorViewCurrent=false,controllerMotionRoute=false;
+ const UINT64 gyroRejectedSamples=0,accelRejectedSamples=0;
+ const struct {bool privateSource=false;struct {UINT64 bindingGeneration=0,choiceGeneration=0;} submission;} windowsSensorView{};
  g_realStickTest={};g_realStickTest.motionMode="on";
  // PRODUCTION_STATUS
  const auto status=findEvent("gyro-status-second");
@@ -101,7 +105,7 @@ static void statusCases(){
 static void activationCases(){
  json input={{"revision",1},{"outputTarget",{{"persona","disabled"},{"buttonMappingEnabled",false},{"gyroEnabled",false}}},{"gyroMotion",{{"enabled",false},{"motionMode","off"},{"motionTrigger",nullptr},{"outputMode","disabled"},{"activePreset","fps"},{"gyroMultiplier",2.4}}}};
  const auto frozen=input;ymcc::InputShortcutRuntime runtime;auto on=runtime.toggle(input,"session","input.virtualGamepadToggle","steamdeck");
- check(on.ok&&on.enabled&&admitted(on.effective["gyroMotion"]),"first virtual-link enable admits motion without a preset click");
+ check(on.ok&&on.enabled&&!admitted(on.effective["gyroMotion"])&&admitted(on.effective["gyroMotion"],true),"first virtual-link enable admits motion without a preset click");
  check(on.effective["gyroMotion"]["gyroMultiplier"]==2.4,"legacy tuning survives first activation");check(input==frozen,"runtime linkage never writes durable settings");
  for(const auto mode:{"off","suppress","toggle"}){runtime.clear();input["gyroMotion"]["presets"]["fps"]={{"motionMode",mode},{"motionTrigger","LT"},{"gyroMultiplier",1.7}};auto next=runtime.toggle(input,"session","input.virtualGamepadToggle","steamdeck");auto m=next.effective["gyroMotion"];
   check(m["gyroMultiplier"]==1.7&&m["motionTrigger"]=="LT","linked activation expands the selected saved preset");

@@ -236,11 +236,17 @@ runs:
         $_.ok -eq $true -and $_.name -clike 'native-owner real HTTP committed wake survives an unavailable Native write fact: *'
       })
       $passedNames = @($wakeIpc.results | Where-Object { $_.ok -eq $true } | ForEach-Object { $_.name })
+      $handoffBoundaries = @('ready', 'off', 'new-sleep', 'unpublished-physical', 'unpublished-without-pair')
+      $unavailableBoundaries = @('ready', 'off', 'new-sleep', 'expired')
+      $manualWaitCases = @(
+        'native-owner real HTTP first manual curve waits during native unavailable',
+        'native-owner real HTTP first manual curve waits during public pending'
+      )
       if ($wakeIpc.ok -ne $true -or $wakeIpc.hardwareCalls -ne 0 -or
-          @($handoffs.facts.boundary | Sort-Object -Unique).Count -ne 3 -or
-          @($unavailable.facts.boundary | Sort-Object -Unique).Count -ne 3 -or
+          @($handoffBoundaries | Where-Object { $handoffs.facts.boundary -cnotcontains $_ }).Count -ne 0 -or
+          @($unavailableBoundaries | Where-Object { $unavailable.facts.boundary -cnotcontains $_ }).Count -ne 0 -or
           $passedNames -cnotcontains 'native-owner real HTTP delayed native permission preserves the newest explicit curve' -or
-          $passedNames -cnotcontains 'native-owner real HTTP first manual curve waits for a changing Native write fact') {
+          @($manualWaitCases | Where-Object { $passedNames -cnotcontains $_ }).Count -ne 0) {
         throw 'Fan release check did not exercise Native permission handoff, OFF, newer sleep and explicit control.'
       }
       $backgroundWakeEvidence = Join-Path $env:RUNNER_TEMP 'fan-release-background-wake-ipc'
@@ -259,10 +265,17 @@ runs:
         'background-ready without the private notification: pending',
         'background-ready without the private notification: stale'
       )
+      $requiredColdStartup = @(
+        'background-ready public startup with no prior Host: authorized',
+        'background-ready public startup with no prior Host: off-after-claim'
+      )
       if ($backgroundWake.ok -ne $true -or $backgroundWake.hardwareCalls -ne 0 -or
           @($requiredBoundaries | Where-Object { $boundaryFacts -cnotcontains $_ }).Count -ne 0 -or
           @($requiredProjectedWake | Where-Object { $backgroundPassedNames -cnotcontains $_ }).Count -ne 0) {
         throw 'Fan release check did not cover one-shot wake, coordinator IPC failures and the projection without a private notification.'
+      }
+      if (@($requiredColdStartup | Where-Object { $backgroundPassedNames -cnotcontains $_ }).Count -ne 0) {
+        throw 'Fan release check did not cover startup without a Host and cancellation after the claim.'
       }
   - name: Generate version sources and type check
     if: ${{ inputs.check-only != 'true' }}

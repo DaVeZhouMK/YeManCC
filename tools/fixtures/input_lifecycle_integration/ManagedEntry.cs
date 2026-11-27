@@ -22,6 +22,7 @@ internal static partial class Program
     private static int _managedRecreateDecodeCount;
     private static string? _managedLastCommand;
     private static ulong _managedLastSequence;
+    private static string? _exitReceiptGatePipe;
 
     // Extends the pre-existing no-op diagnostic declaration, never Handle.
     private sealed partial class Stage
@@ -34,7 +35,21 @@ internal static partial class Program
             if (_managedFault == "prepare-create-exception-once") Fixture.CreateThrows = false;
             ManagedObserve("handle-end");
         }
-        public void BeginWrite() => ManagedObserve("pipe-write-begin");
+        public void BeginWrite()
+        {
+            if (_exitReceiptGatePipe is { } pipe && _managedLastCommand == "QUERY_TARGET_OWNERSHIP")
+            {
+                if (_managedFaultConsumed) throw new InvalidOperationException("exit-receipt-gate-reentered");
+                using var held = EventWaitHandle.OpenExisting(@"Local\YMCC-fixture-exit-held-" + pipe);
+                using var release = EventWaitHandle.OpenExisting(@"Local\YMCC-fixture-exit-release-" + pipe);
+                ManagedObserve("exit-receipt-held");
+                if (!held.Set() || !release.WaitOne(TimeSpan.FromMilliseconds(1400)))
+                    throw new TimeoutException("exit-receipt-gate-not-released");
+                _managedFaultConsumed = true;
+                ManagedObserve("exit-receipt-released");
+            }
+            ManagedObserve("pipe-write-begin");
+        }
         public void EndWrite() => ManagedObserve("pipe-write-end");
     }
 
@@ -317,6 +332,14 @@ internal static partial class Program
             !receipt.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ||
             File.Exists(receipt) || Directory.Exists(receipt)) return false;
         var fault = values.GetValueOrDefault("--fault", "none");
+        if (fault == "ps-exit-held-ownership-receipt")
+        {
+            if (pipe.Length > 120 || !pipe.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_')) return false;
+            var privateNonce = values.GetValueOrDefault("--nonce", "");
+            if (string.IsNullOrWhiteSpace(privateNonce) || privateNonce.Length > 160) return false;
+            options = new(pipe, parentPid, Path.GetFullPath(receipt), fault, privateNonce);
+            return true;
+        }
         if (fault is not ("none" or "output-stop-once" or "controller-dispose-once" or "context-dispose-once" or "recreate-owned-ids-rotate" or "recreate-owned-ids-foreign" or "recreate-owned-ids-unbound-ack" or "ps-same-instance-ids" or "ps-late-ownership-read" or "recreate-output-stop-twice" or "recreate-output-stop-always" or "prepare-ack-loss-held-exit" or "prepare-create-exception-once")) return false;
         var nonce=values.GetValueOrDefault("--nonce","fake-nonce");
         if(string.IsNullOrWhiteSpace(nonce)||nonce.Length>160)return false;
@@ -371,7 +394,9 @@ internal static partial class Program
         }
         var options = parsed!;
         _managedOptions = options;
-        _managedFault = options.Fault;
+        // Keep the original late-ownership read premise; only delay its wire write.
+        _exitReceiptGatePipe = options.Fault == "ps-exit-held-ownership-receipt" ? options.Pipe : null;
+        _managedFault = _exitReceiptGatePipe is null ? options.Fault : "ps-late-ownership-read";
         _managedSession = new HostSession(options.Nonce, options.ParentPid);
         var session = _managedSession;
         object? stateAfterLoop = null;

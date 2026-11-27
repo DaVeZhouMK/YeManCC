@@ -13,6 +13,693 @@ from log_lane_audit import module_profile_preparation_evidence, MODULE_PROFILE_P
 from log_lane_audit import export_copy_failure_record, export_copy_failure_evidence, export_operation_record
 from log_lane_audit import buffered_native_sink_evidence, BUFFERED_NATIVE_SINKS, BUFFERED_NATIVE_FAILURE_STAGES
 from log_lane_audit import cost_retention_evidence, InputSourceReadbackEvidence
+from log_lane_audit import restore_controller_boundary_windows
+
+
+class MsiReturnDebtLaneTests(unittest.TestCase):
+    def test_qualified_repeat_violates_only_root_resident_members(self):
+        retained = dict(event='msi-claw-return-debt', action='retained', basis='release-unproven',
+                        policy='qualified device-side fact only; retained until readback/xinput-readmission',
+                        where='xinput-readmission', readbackVerified=False, xinputReAdmitted=False,
+                        returnDebtRetained=True, returnDebtEpisodeId=1, nativePid=37, pid=37,
+                        writerProcessCreation100ns='123', powerGeneration=7,
+                        producerPowerGeneration=6, observedPowerGeneration=7, connectedMask=1,
+                        physicalSourceMask=0, admittedMask=0, externalPrioritySourceMask=0,
+                        boardAuthorized=True, externalPrioritySuspended=False, routeDisarmed=True)
+        repeat = dict(retained, returnDebtRepeatSample=True)
+        invalid = (dict(repeat, action='discharged'), dict(repeat, basis='xinput-readmitted'),
+                   dict(repeat, returnDebtRepeatSample=1), dict(repeat, returnDebtRepeatSample=False),
+                   dict(repeat, returnDebtEpisodeId=0), dict(repeat, nativePid=38),
+                   dict(repeat, producerPowerGeneration=False), dict(repeat, observedPowerGeneration=6),
+                   dict(repeat, readbackVerified=0), dict(repeat, xinputReAdmitted=True),
+                   dict(repeat, connectedMask=1 << 32), dict(repeat, routeDisarmed=0),
+                   dict(repeat, where=None), dict(repeat, event='unrelated'))
+
+        def wire(row):
+            return (json.dumps(row) + '\r\n').encode('ascii')
+
+        low = ('native-lifecycle.log', 'native-lifecycle.2.log', 'native-lifecycle.log.previous')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'return-debt.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                for name in (*low, 'native-detail.log.1', 'nested/native-lifecycle.log'):
+                    archive.writestr(name, b'{bad\n' + b''.join(map(wire, (retained, repeat, *invalid))))
+            result = audit_zip(path, {'baseEvents': ['msi-claw-return-debt']})
+        self.assertCountEqual([
+            (row['kind'], row['event'], row['file'], row['archiveEntryOccurrence'], row['exampleLines'],
+             sum(part['bytes'] for part in row['nativeLowFindingWriterFootprint']['buckets'].values()))
+            for row in result['violations']], [
+            ('known-detail-in-native-low', 'msi-claw-return-debt', name, 0, [3], len(wire(repeat))) for name in low])
+
+
+class FrontendResidentLaneTests(unittest.TestCase):
+    def test_resident_observations_and_ambiguous_writer_envelopes_are_distinct(self):
+        notice = dict(event='frontend-trace', where='monitor-notice-lifecycle', severity='trace',
+                      origin='renderer-observation', lane='event', traceParseStatus='parsed',
+                      messageTruncated=False, trace={'stage': 'healthy'}, pid=37)
+        writer = dict(writerEnvelopeSchema=1, writerPid=37, writerProcessCreation100ns='123')
+        calibration = dict(notice, **writer, where='controller-calibration', trace={'stage': 'apply'}, lane='detail')
+        cpu = dict(notice, **dict(writer, writerProcessCreation100ns=None), where='cpu-ccd-visibility', trace={'schema': 1})
+        qualified = (notice, calibration, cpu)
+        invalid = (dict(notice, writerEnvelopeSchema=True), dict(notice, **dict(writer, writerPid=38)),
+                   dict(notice, **dict(writer, writerProcessCreation100ns='0123')), dict(notice, origin='native-receipt'),
+                   dict(notice, messageTruncated=0), dict(notice, trace={}), dict(notice, lane='unknown'))
+        other = (dict(notice, event='frontend-error'), dict(notice, where='controller-preview'))
+
+        def wire(row):
+            return (json.dumps(row) + '\r\n').encode()
+
+        low = 'frontend-trace.log'
+        detail = 'frontend-trace-detail.2.log'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'frontend-resident.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr(low, b''.join(wire(dict(row, lane='event')) for row in qualified))
+                for name in (detail, 'frontend-trace-detail.log.previous', 'nested/frontend-trace-detail.log'):
+                    archive.writestr(name, b'{partial\n'+b''.join(map(wire, (*qualified, *invalid, *other))))
+            report = audit_zip(path, {'baseEvents': []})
+        field = 'frontendResidentLaneEvidence'
+        views = {member['file']:member[field] for member in report['files'] if field in member}
+        self.assertEqual(set(views), {low, detail, 'frontend-trace-detail.log.previous'})
+        notice_view = views[detail]['sources']['monitor-notice-lifecycle']
+        self.assertEqual((notice_view['qualifiedRows'], notice_view['legacyPidOnlyRows'], notice_view['unverifiedEnvelopeRows'],
+                          notice_view['unverifiedExampleLines']), (1, 1, len(invalid), list(range(5, 5+len(invalid)))))
+        self.assertEqual(notice_view['writerBuckets']['writer-unresolved'], {'rows': 1, 'bytes': len(wire(notice))})
+        self.assertEqual(views[detail]['sources']['controller-calibration']['writerBuckets']['export-writer-unresolved'],
+                         {'rows': 1, 'bytes': len(wire(calibration))})
+        self.assertCountEqual([(item['kind'], item['file'], item['where'], item['archiveEntryOccurrence'],
+                                item['exampleLines'], item['rawRowBytes']) for item in report['violations']],
+                              [('frontend-resident-observation-in-detail', name, row['where'], 0, [line], len(wire(row)))
+                               for name in (detail, 'frontend-trace-detail.log.previous')
+                               for line, row in enumerate(qualified, 2)])
+
+
+class NativeExitFailureLaneTests(unittest.TestCase):
+    def test_typed_repeat_only_in_root_low_is_misplaced(self):
+        cleanup = dict(event='exit-cleanup-wait-failed', exitSessionId='37-4', win32=6,
+                       ownerRetained=True, retryWithMessageWait=True)
+        kernel = dict(event='exit-kernel-wait-failed', exitSessionId='37-0', win32=0)
+        marker = dict(event='session-clean-exit-failed', reason='session-marker-write-failed',
+                      schemaVersion=1, scope='session-marker-file-write-result;not-host-process-or-device-retirement',
+                      sessionMarkerWriteSucceeded=False, nativeProcessExitProven=False,
+                      inputHostRetirementProven=False, deviceReturnProven=False)
+        first = [dict(row, pid=37, writerProcessCreation100ns='123') for row in (cleanup, kernel, marker)]
+        selected = [dict(row, exitFailureRepeatSample=True) for row in first]
+        invalid = (dict(selected[0], ownerRetained=1), dict(selected[0], retryWithMessageWait=False),
+                   dict(selected[1], exitSessionId=True), dict(selected[1], exitSessionId='37-00'),
+                   dict(selected[1], exitSessionId='38-4'), dict(selected[1], exitSessionId='37-18446744073709551616'),
+                   dict(selected[1], win32=1 << 32),
+                   dict(selected[1], exitFailureRepeatSample=1), dict(selected[2], schemaVersion=True),
+                   dict(selected[2], sessionMarkerWriteSucceeded=True),
+                   dict(selected[2], event='session-clean-exit'), dict(selected[2], pid='37'))
+
+        def wire(row):
+            return (json.dumps(row) + '\r\n').encode('ascii')
+
+        names = ('native-lifecycle.log', 'native-lifecycle.2.log', 'native-lifecycle.log.previous')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'exit-failures.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                for name in (*names, 'native-detail.log.1', 'nested/native-lifecycle.log'):
+                    archive.writestr(name, b'{partial\n' + b''.join(map(wire, (*first, *selected, *invalid))))
+            report = audit_zip(path, {'baseEvents': [row['event'] for row in first]})
+        actual = [(item['file'], item['event'], item['kind'], item['archiveEntryOccurrence'],
+                   item['exampleLines'], sum(bucket['bytes'] for bucket in
+                                             item['nativeLowFindingWriterFootprint']['buckets'].values()))
+                  for item in report['violations']]
+        self.assertCountEqual(actual, [(name, row['event'], 'known-detail-in-native-low', 0, [line], len(wire(row)))
+                                       for name in names for line, row in enumerate(selected, 5)])
+
+
+class PlaybackRetryLaneTests(unittest.TestCase):
+    def test_only_marked_cpu_retry_in_root_low_is_a_violation(self):
+        header = b'[2026-11-27 02:53:24.123] [INFO] '
+        legacy = dict(event='game-media.playback30-attempt', code=17, stage='admission-withdrawn', retry=True, win32=0)
+        repeat = dict(legacy, veto='cpu-busy', sameCpuVetoStreak=2, playbackCpuRetryRepeatV1=True)
+        invalid = (dict(repeat, sameCpuVetoStreak=8), dict(repeat, retry=False), dict(repeat, veto='worker-grant-not-current'),
+                   dict(repeat, playbackCpuRetryRepeatV1=1), dict(repeat, win32=1))
+        def wire(row):
+            return (json.dumps(row)+'\r\n').encode()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'playback.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('app.log.1', b'\xef\xbb\xbf'+b''.join(header+wire(row) for row in (legacy, repeat, *invalid)))
+                archive.writestr('nested/app.log', header+wire(repeat))
+                archive.writestr('native-lifecycle.log', b''.join(wire(row) for row in (legacy, repeat, *invalid)))
+                archive.writestr('native-detail.log', wire(repeat))
+                archive.writestr('nested/native-lifecycle.log', wire(repeat))
+            result = audit_zip(path, {'baseEvents':[]})
+        self.assertEqual({f['file']:f['playbackRetryAppEvidence'] for f in result['files'] if 'playbackRetryAppEvidence' in f},
+            {'app.log.1': {'unmarkedAdmissionRequeue':dict(count=1,rawRowBytes=3+len(header)+len(wire(legacy)),firstLine=1,lastLine=1),
+                           'markedDetailInAppLow':dict(count=1,rawRowBytes=len(header)+len(wire(repeat)),firstLine=2,lastLine=2)}})
+        self.assertCountEqual([(v['kind'],v['file'],v.get('exampleLines',[v.get('firstLine')])) for v in result['violations']],
+            [('known-detail-in-app-low','app.log.1',[2]), ('known-detail-in-native-low','native-lifecycle.log',[2])])
+
+
+class RogXboxFaceTextEvidenceTests(unittest.TestCase):
+    def test_classify_legacy_and_fallback_without_writer_attribution(self):
+        header = b'[2026-11-27 02:53:24.123] [INFO] rog.xbox-face-enabled reason=window-hidden wrote='
+        legacy = header+b'false\r\n'
+        no_call = header+b'false fallback=native-face-row-unconfirmed writeOpCalls=0\n'
+        failed = no_call.replace(b'Calls=0', b'Calls=5')
+        succeeded = no_call.replace(b'Calls=0', b'Calls=2').replace(b'false', b'true').rstrip()
+        invalid = [no_call.replace(b'Calls=0',b'Calls=6'), no_call.replace(b'false',b'true'),
+                   no_call.replace(b'[INFO]',b'[WARN]')]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'rog-face.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('app.1.log', b'\xef\xbb\xbf'+legacy+no_call+failed+b''.join(invalid)+succeeded)
+                archive.writestr('nested/app.log', no_call)
+                archive.writestr('native-lifecycle.log', '{"event":"domain-xbox-face-write","wrote":false,"writeOpCalls":0}\n')
+            result = audit_zip(path, {'baseEvents':['domain-xbox-face-write']})
+        self.assertEqual({f['file']:f['rogXboxFaceTextEvidence'] for f in result['files'] if 'rogXboxFaceTextEvidence' in f},
+            {'app.1.log': {'legacyUnmarked':dict(count=1,rawRowBytes=3+len(legacy),firstLine=1,lastLine=1),
+                           'flushUnconfirmedFallback':dict(count=3,rawRowBytes=len(no_call+failed+succeeded),firstLine=2,lastLine=7,
+                             reportedOperation=dict(operationNotInvoked=1, operationInvokedWithoutSuccess=1, operationReportedSuccess=1))}})
+        self.assertEqual(result['violations'], [])
+
+
+class XInputSlotTextEvidenceTests(unittest.TestCase):
+    def test_account_legacy_and_fallback_only_in_root_app_members(self):
+        header = b'[2026-11-27 02:53:24.123] [INFO] '
+        legacy = header + b'gamepad.xinput-slots slots=[0,2] primary=2\r\n'
+        fallback = header + b'gamepad.xinput-slots slots=[] primary=0 fallback=native-slot-row-unconfirmed admittedMask=0'
+        invalid = [legacy.replace(b'[0,2]',b'[2,0]'), legacy.replace(b'[0,2]',b'[0,0]'),
+                   legacy.replace(b'[INFO]',b'[WARN]'), fallback.replace(b'admittedMask=0',b'admittedMask=16')+b'\n']
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'slots.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('app.log.1', b'\xef\xbb\xbf'+legacy+b''.join(invalid)+fallback)
+                archive.writestr('app.log', header+b'another event\n')
+                archive.writestr('nested/app.log', legacy)
+            result = audit_zip(path, {'baseEvents':[]})
+        self.assertEqual({f['file']:f['xinputSlotTextEvidence'] for f in result['files'] if 'xinputSlotTextEvidence' in f},
+                         {'app.log.1': {'legacyUnmarked':dict(count=1,rawRowBytes=len(legacy)+3,firstLine=1,lastLine=1),
+                                        'flushUnconfirmedFallback':dict(count=1,rawRowBytes=len(fallback),firstLine=6,lastLine=6)}})
+        self.assertEqual(result['violations'], [])
+
+
+class DriverSetupProgressLaneTests(unittest.TestCase):
+    def test_active_marked_progress_only(self):
+        progress = dict(event='gamepad-driver-setup', phase='usbip-progress',
+                        state=1, usbipProgressRepeat=True, pid=12)
+        rows = [progress, dict(progress, state=5), dict(progress, state=2),
+                dict(progress, usbipProgressRepeat=1), dict(progress, state=True),
+                dict(progress, phase='result'), dict(progress, usbipProgressRepeat=False)]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'usbip.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log', ''.join(json.dumps(row)+'\n' for row in rows))
+                archive.writestr('native-detail.log', json.dumps(progress)+'\n')
+            result = audit_zip(path, {'baseEvents':['gamepad-driver-setup']})
+        self.assertEqual([(v['kind'], v['file'], v['exampleLines']) for v in result['violations']],
+                         [('known-detail-in-native-low', 'native-lifecycle.log', [1, 2])])
+
+
+class CloseRefreshPollLaneTests(unittest.TestCase):
+    def test_command_result_retains_failures_and_explicit_slow_read_witnesses(self):
+        base = dict(event='input-host-command-result', pid=37, command='SUBMIT_FRAME')
+        failed = dict(base, ok=False, phase='transport', error=109)
+        frame = dict(base, ok=True, phase='accepted')
+        slow = dict(base, command='HIDHIDE_QUERY_STATE', ok=True, phase='slow-read-accepted', sameRequest=True)
+        witness = dict(slow, slowReadReason='interval')
+        detailed = dict(slow, slowReadSample=True)
+        poll = dict(base, command='HIDHIDE_CYCLE_POLL', ok=True, phase='accepted', cyclePollRepeat=True)
+        rows = [failed, dict(failed, phase='rejected'), frame, slow, witness, detailed, poll,
+                dict(failed, ok=0), dict(failed, phase='future'), dict(witness, sameRequest=1),
+                dict(witness, slowReadSample=False), dict(failed, event=None, kind=base['event']),
+                dict(poll, cyclePollRepeat=1)]
+        lines = [json.dumps(row).encode() + b'\r\n' for row in rows]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'command.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                for member in ('native-lifecycle.log.1', 'native-detail.2.log', 'nested/native-detail.log'):
+                    archive.writestr(member, b''.join(lines))
+            result = audit_zip(path, {'baseEvents': [base['event']]})
+        self.assertEqual({(r['kind'], r['file']): r['exampleLines'] for r in result['violations']}, {
+            ('successful-frame-in-native-low', 'native-lifecycle.log.1'): [3],
+            ('known-detail-in-native-low', 'native-lifecycle.log.1'): [6, 7],
+            ('input-host-command-resident-in-native-detail', 'native-detail.2.log'): [1, 2, 5],
+        })
+        views = {entry['file']: entry['inputHostCommandResultLaneCoverage']['states'] for entry in result['files']
+                 if 'inputHostCommandResultLaneCoverage' in entry}
+        self.assertEqual(set(views), {'native-lifecycle.log.1', 'native-detail.2.log'})
+        self.assertEqual(views['native-lifecycle.log.1'], views['native-detail.2.log'])
+        self.assertEqual(views['native-detail.2.log']['resident-failure'], dict(rows=2,
+                         bytes=len(lines[0])+len(lines[1]), exampleLines=[1, 2]))
+        self.assertEqual(views['native-detail.2.log']['unmarked-slow-read']['exampleLines'], [4])
+
+    def test_only_explicit_accepted_repeat_in_the_low_lane_is_a_violation(self):
+        row = dict(event='input-host-command-result', command='HIDHIDE_CYCLE_POLL',
+                   phase='accepted', ok=True, pid=100)
+        repeat = dict(row, cyclePollRepeat=True)
+        controls = [row, dict(repeat, cyclePollRepeat=1), dict(repeat, ok=1),
+                    dict(repeat, ok=False, phase='transport'), dict(repeat, phase='rejected'),
+                    dict(repeat, command='HIDHIDE_QUERY')]
+        def encode(rows):
+            return ''.join(json.dumps(record)+'\n' for record in rows)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'poll.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log', encode([*controls, repeat]))
+                archive.writestr('native-detail.log', encode([repeat]))
+                archive.writestr('nested/native-lifecycle.log', encode([repeat]))
+            result = audit_zip(path, {'baseEvents':['input-host-command-result']})
+        self.assertEqual([(item['kind'], item['file'], item['exampleLines']) for item in result['violations']],
+                         [('known-detail-in-native-low', 'native-lifecycle.log', [7])])
+
+
+class FocusResumeCompletionEvidenceTests(unittest.TestCase):
+    def test_separate_compatibility_receipt_from_new_operation(self):
+        fields = dict(pid=100, writerProcessCreation100ns='12345', gamePid=200, processCreated=54321, requestId=1,
+                      generation=2, powerGeneration=2, gameStatus='no-game-window', powerLifecycle='ready',
+                      focused=False, attached=False, policy='identity-bound-bounded-worker')
+        health = dict(fields, event='focus-resume-health', stage='complete', probeError=0)
+        activate = dict(fields, event='focus-resume-activate')
+        def encode(*rows):
+            return b''.join((json.dumps(row)+'\r\n').encode() if isinstance(row, dict) else row for row in rows)
+        no_birth = lambda row: {k: v for k, v in row.items() if k != 'writerProcessCreation100ns'}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'focus.zip'
+            with zipfile.ZipFile(path,'w') as archive:
+                archive.writestr('native-lifecycle.log', encode(health, activate, no_birth(health), no_birth(activate),
+                    health, b'{bad\r\n', activate, health, dict(activate, focused=True), health,
+                    dict(activate, writerProcessCreation100ns='12346'), health, dict(activate, gamePid=True)))
+                archive.writestr('native-lifecycle.log.1', encode(activate))
+                archive.writestr('native-detail.log', encode(health, activate))
+                archive.writestr('nested/native-lifecycle.log', encode(health, activate))
+            report = audit_zip(path, {'baseEvents':['focus-resume-health','focus-resume-activate']})
+        views = {entry['file']:entry['focusResumeCompletionEvidence'] for entry in report['files']
+                 if 'focusResumeCompletionEvidence' in entry}
+        self.assertEqual(set(views), {'native-lifecycle.log','native-lifecycle.log.1'})
+        root = views['native-lifecycle.log']
+        self.assertEqual((root['completionRows'],root['activationRows'],root['paired'],root['writerBirthMissingCandidates']), (6,6,1,1))
+        self.assertEqual(root['pairedActivationRawBytes'],len(encode(activate)))
+        self.assertEqual(root['examples'],[dict(completionLine=1,activationLine=2)])
+        self.assertEqual(root['missingBirthExampleLines'],[dict(completionLine=3,activationLine=4)])
+        self.assertEqual(views['native-lifecycle.log.1']['unpairedActivationRows'],1)
+        self.assertEqual(report['violations'],[])
+
+
+class DeckyModePublicationEvidenceTests(unittest.TestCase):
+    def test_mode_signals_keep_reported_missing_and_unverified_separate(self):
+        import warnings
+
+        seed = dict(event='steam-mode-signal', diagnosticSchema=2, reason='shared-verified-mode')
+        labels = ('no-prior-publication', 'mode', 'document', 'update-residue', 'empty-frontend',
+                  'backend-connection', 'hooks', 'client-connection', 'client-checking', 'client-verification')
+        present = [dict(seed, publicationTrigger=label) for label in labels]
+        invalid = [dict(seed, publicationTrigger=value) for value in (None, True, [], 'private-untrusted')]
+        invalid.extend((dict(seed, publicationTrigger='mode', reason='other'),
+                        dict(seed, publicationTrigger='mode', diagnosticSchema=2.0)))
+
+        def encode(rows):
+            return b''.join(json.dumps(row).encode('ascii') + b'\r\n' for row in rows)
+
+        with tempfile.TemporaryDirectory() as directory, warnings.catch_warnings():
+            warnings.simplefilter('ignore', UserWarning)
+            path = Path(directory) / 'mode.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('decky-sidebar.log', encode(present + [seed] * 5 + invalid))
+                archive.writestr('decky-sidebar.previous.log', b'{broken\r\n' + encode([seed]))
+                archive.writestr('decky-sidebar.previous.log', encode(present[:1]))
+                archive.writestr('nested/decky-sidebar.log', encode(present))
+                archive.writestr('native-lifecycle.log', encode(present))
+            original = path.read_bytes()
+            report = audit_zip(path, {'baseEvents': []})
+            self.assertEqual(path.read_bytes(), original)
+        views = {(f['file'], f['archiveEntryOccurrence']): f['deckyModePublicationEvidence']
+                 for f in report['files'] if 'deckyModePublicationEvidence' in f}
+        self.assertEqual(set(views), {('decky-sidebar.log', 0), ('decky-sidebar.previous.log', 0),
+                                      ('decky-sidebar.previous.log', 1)})
+        current = views[('decky-sidebar.log', 0)]
+        self.assertEqual(current['counts'], dict(reported=10, missing=5, unverified=6))
+        self.assertEqual(current['reportedTriggerCounts'], dict.fromkeys(labels, 1))
+        self.assertEqual(current['exampleLines']['missing'], [11, 12, 13, 14])
+        self.assertEqual(current['exampleLines']['unverified'], [16, 17, 18, 19])
+        self.assertFalse(current['laneViolationInferred'])
+        self.assertNotIn('private-untrusted', json.dumps(current))
+        self.assertEqual(views[('decky-sidebar.previous.log', 0)]['exampleLines'], {'missing': [2]})
+        self.assertEqual(views[('decky-sidebar.previous.log', 1)]['reportedTriggerCounts'], {'no-prior-publication': 1})
+        self.assertFalse(any(row.get('event') == 'steam-mode-signal' for row in report['violations']))
+
+
+class HidHideTargetInventoryCopiesTests(unittest.TestCase):
+    def test_root_native_copy_projection(self):
+        from ai_log_reader import hidhide_target_inventory_projection, payload_records
+
+        packed = dict(event='hidhide.visibility-snapshot', targetInventory=[{'instance': 'HID-A'}, {'instance': 'HID-B'}],
+                      targetInventoryCopiesV1={'physicalTargets': [{'instance': 1, 'hidden': False, 'extra': 0},
+                                                                  {'instance': 'USB-ROOT', 'hidden': True}],
+                                               'gameInputTargets': [0, 'other', 0]})
+        expected = dict(physicalTargets=[dict(instance='HID-B', hidden=False, extra=0), dict(instance='USB-ROOT', hidden=True)],
+                        gameInputTargets=['HID-A', 'other', 'HID-A'])
+        conflict = dict(packed, physicalTargets=[])
+        duplicate = dict(packed, targetInventory=packed['targetInventory'] + [{'instance': 'HID-A'}])
+        self.assertEqual(hidhide_target_inventory_projection(packed), dict(state='restorable', restoredFields=expected))
+        self.assertEqual(hidhide_target_inventory_projection(duplicate), dict(state='invalid-index'))
+        self.assertEqual(hidhide_target_inventory_projection(conflict),
+                         dict(state='conflicting-inline-fields', fields=['physicalTargets']))
+        for bad in (True, -1, 2, 1.0, None):
+            broken = dict(packed, targetInventoryCopiesV1=dict(packed['targetInventoryCopiesV1'], gameInputTargets=[bad]))
+            self.assertEqual(hidhide_target_inventory_projection(broken), dict(state='invalid-index'))
+        self.assertIsNone(hidhide_target_inventory_projection(dict(packed, event='different')))
+        for copies in ({'unknown': [0]}, {'gameInputTargets': [0] * 65}, {'physicalTargets': [{'instance': 0, 'hidden': 1}]},
+                       {'gameInputTargets': ['no-reference']}):
+            self.assertNotIn('restoredFields', hidhide_target_inventory_projection(dict(packed, targetInventoryCopiesV1=copies)))
+        sample = ''.join(json.dumps(row) + '\n' for row in (packed, conflict, duplicate)).encode()
+        counts = {'restorable': 1, 'conflicting-inline-fields': 1, 'invalid-index': 1}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'inventory.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                for name in ('native-lifecycle.log.1', 'native-detail.1.log', 'virtual-gamepad.log', 'nested/native-lifecycle.log'):
+                    archive.writestr(name, sample)
+            report = audit_zip(path, {'baseEvents': ['hidhide.visibility-snapshot']})
+        self.assertEqual({item['file']: item['hidHideTargetInventoryCopiesCounts'] for item in report['files']
+                          if 'hidHideTargetInventoryCopiesCounts' in item},
+                         {'native-lifecycle.log.1': counts, 'native-detail.1.log': counts})
+        row = next(payload_records('native-lifecycle.log.1', sample, 'file', 'json-lines'))
+        self.assertEqual(row['value'], packed)
+        self.assertEqual(row['byteOffset'], 0)
+        self.assertEqual(row['hidHideTargetInventoryCopies']['restoredFields'], expected)
+        for name in ('virtual-gamepad.log', 'nested/native-lifecycle.log'):
+            self.assertNotIn('hidHideTargetInventoryCopies', next(payload_records(name, sample, 'file', 'json-lines')))
+
+
+class OemKeyCatalogTests(unittest.TestCase):
+    def test_oem_catalog_projection_is_local_and_all_or_nothing(self):
+        from ai_log_reader import oem_key_catalog_projection, payload_records
+
+        packed = dict(event='oem-key-usage-query', schemaVersion=1, pid=53,
+                      oemKeyCatalogV1=[['r4', 'R4', 2, 'full', 'hid-button', False],
+                                       ['keyboard', 'Keyboard', 0, 'click-only', 'keyboard-vk', True]])
+        expected = [dict(keyId='r4', label='R4', backIndex=2, triggerCapability='full',
+                         physicalForm='hid-button', captureImplemented=False),
+                    dict(keyId='keyboard', label='Keyboard', backIndex=0, triggerCapability='click-only',
+                         physicalForm='keyboard-vk', captureImplemented=True)]
+        conflict = dict(packed, keys=expected)
+        broken = dict(packed, oemKeyCatalogV1=packed['oemKeyCatalogV1'] + [['x', 'X', True, 'full', 'embedded', False]])
+        legacy = {k: v for k, v in conflict.items() if k != 'oemKeyCatalogV1'}
+        self.assertIsNone(oem_key_catalog_projection(legacy))
+        self.assertIsNone(oem_key_catalog_projection(dict(packed, event='unrelated')))
+        for value in (dict(packed, schemaVersion=True), dict(packed, oemKeyCatalogV1=[]),
+                      dict(packed, oemKeyCatalogV1=packed['oemKeyCatalogV1'] * 17)):
+            self.assertEqual(oem_key_catalog_projection(value), dict(state='invalid-envelope'))
+        for entry in (['x', 'X', 256, 'full', 'embedded', False], ['x', 'X', 1, 'full', 'embedded', 1],
+                      ['x', 'X', 1, 'full', 'embedded', False, 'extra'], ['x', 'X', -1, 'full', 'embedded', False]):
+            self.assertEqual(oem_key_catalog_projection(dict(packed, oemKeyCatalogV1=[entry])),
+                             dict(state='invalid-descriptor'))
+        sample = ''.join(json.dumps(row) + '\n' for row in [packed, conflict, broken, legacy]).encode()
+        with tempfile.TemporaryDirectory() as directory:
+            archive_path = Path(directory) / 'catalog.zip'
+            with zipfile.ZipFile(archive_path, 'w') as archive:
+                archive.writestr('native-lifecycle.log.1', sample)
+                archive.writestr('native-detail.1.log', sample)
+                archive.writestr('nested/native-detail.log', sample)
+            audit = audit_zip(archive_path, {'baseEvents': ['oem-key-usage-query']})
+        counts = dict(restorable=1, **{'conflicting-inline-fields': 1, 'invalid-descriptor': 1})
+        self.assertEqual({entry['file']: entry['oemKeyCatalogCounts'] for entry in audit['files']
+                          if 'oemKeyCatalogCounts' in entry},
+                         {'native-lifecycle.log.1': counts, 'native-detail.1.log': counts})
+        # The line reader exposes a projection while retaining the physical row and offset.
+        observed = list(payload_records('native-lifecycle.log.1', sample, 'fixture', 'json-lines'))
+        self.assertEqual(observed[0]['oemKeyCatalog'], dict(state='restorable', restoredFields={'keys': expected}))
+        self.assertEqual(observed[0]['value'], packed)
+        self.assertEqual(observed[0]['byteOffset'], 0)
+        self.assertNotIn('restoredFields', observed[1]['oemKeyCatalog'])
+        self.assertNotIn('restoredFields', observed[2]['oemKeyCatalog'])
+        self.assertNotIn('oemKeyCatalog', observed[3])
+        self.assertNotIn('oemKeyCatalog', next(payload_records('nested/native-lifecycle.log', sample, 'nested', 'json-lines')))
+
+
+class GamepadFallbackEdgeEvidenceTests(unittest.TestCase):
+    @staticmethod
+    def anchor(sequence, **changes):
+        return {'event': 'gamepad-controller-wake', 'pid': 7, 'writerProcessCreation100ns': '111',
+                'connectionEdgeSequence': sequence, 'powerGeneration': 73, 'powerLifecycle': 'ready', **changes}
+
+    @staticmethod
+    def fallback(**changes):
+        return {'event': 'gamepad-fallback-tick', 'connected': True, 'pid': 7,
+                'writerProcessCreation100ns': '111', 'powerGeneration': 75, 'powerLifecycle': 'suspended', **changes}
+
+    @staticmethod
+    def ref(sequence, /, **changes):
+        return {'schema': 1, 'sequence': sequence, 'ageMs': 151, 'powerGeneration': 73, 'powerLifecycle': 'ready',
+                'appendConfirmed': True, 'observedPowerGeneration': 73, 'observedPowerLifecycle': 'ready', **changes}
+
+    def test_disconnect_holds_join_only_explicit_current_writer_and_power(self):
+        anchor = lambda seq, **changes: dict(self.anchor(seq), event='gamepad-controller-sleep') | changes
+        hold = dict(event='hidhide.unplugged-unhide-held', reason='xinput-disconnect-during-wake-hold',
+                    pXinput='UNENCLOSED', pid=7, writerProcessCreation100ns='111',
+                    powerGeneration=73, powerLifecycle='ready')
+        rows = [dict(hold, connectionEdgeSequence=seq) for seq in (1, 2, 3, 4, 5, 6, None, True)]
+        rows += [dict(rows[0], powerGeneration=74), dict(rows[0], powerLifecycle='resuming'),
+                 dict(rows[0], writerProcessCreation100ns=None), dict(rows[0], connectionEdgeSequence=0),
+                 dict(rows[0], reason='future'), hold]
+        def wire(items):
+            return ''.join(json.dumps(item) + '\n' for item in items)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'hold.zip'
+            with zipfile.ZipFile(path, 'w') as z:
+                z.writestr('native-lifecycle.log.1', wire([anchor(1), anchor(2), anchor(3), self.anchor(4),
+                                                          anchor(5, writerProcessCreation100ns='222')]))
+                z.writestr('native-lifecycle.log', wire([anchor(3), *rows]))
+                z.writestr('native-detail.log', wire([anchor(2), rows[0]]))
+                z.writestr('nested/native-lifecycle.log', wire([anchor(6), *rows]))
+                z.writestr('native-lifecycle.log.pending', wire([anchor(1), *rows]))
+            report = audit_zip(path, {'baseEvents': [hold['event']]})
+        evidence = report['commonEvidence'].get('gamepadFallbackEdgeEvidence', {}).get('disconnectHoldEvidence')
+        self.assertIsNotNone(evidence)
+        self.assertEqual(evidence['linkCountsByLane'], {
+            'low': {'linked': 2, 'ambiguous-anchor': 1, 'anchor-context-mismatch': 3, 'anchor-not-retained': 2,
+                    'current-anchor-unconfirmed': 1, 'invalid-reference': 2, 'writer-unresolved': 1, 'unrecognized-hold': 1},
+            'detail': {'linked': 1}})
+        self.assertEqual(evidence['omittedWitnesses'], 0)
+        first = evidence['witnesses'][0]
+        self.assertEqual((first['file'], first['line'], first['writerProcessCreation100ns']), ('native-lifecycle.log', 2, '111'))
+        self.assertEqual(first['anchor'], {'file': 'native-lifecycle.log.1', 'archiveEntryOccurrence': 0, 'line': 1})
+
+    def test_zip_joins_exact_edges_and_keeps_missing_and_ambiguous_separate(self):
+        row, ref, anchor = self.fallback, self.ref, self.anchor
+        outside = 'edge-outside-recent-window'
+        rows = [row(connectionObservation=outside, connectionEdgeReference=ref(1)),
+                row(connectionObservation=outside, connectionEdgeReference=ref(2)),
+                row(connectionObservation=outside, connectionEdgeReference=ref(3)),
+                row(connectionObservation=outside, connectionEdgeReference=ref(4)),
+                row(writerProcessCreation100ns=None, connectionObservation=outside, connectionEdgeReference=ref(1)),
+                row(connectionObservation=outside), row(connectionObservation='no-matching-edge'), row(),
+                row(duplicateConnectionEdge=True, connectionEdgeSequence=1, connectionEdgeAgeMs=150,
+                    connectionEdgePowerGeneration=73, connectionEdgePowerLifecycle='ready')]
+        roots = [anchor(1), anchor(2, writerProcessCreation100ns='222'), anchor(3), anchor(4, event='gamepad-controller-sleep')]
+        data = lambda rs: ''.join(json.dumps(r) + '\n' for r in rs)
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'fallback-edge.zip'
+            with zipfile.ZipFile(path, 'w') as z:
+                z.writestr('native-lifecycle.log.1', data(roots))
+                z.writestr('native-lifecycle.log', data([anchor(3), *rows]))
+                z.writestr('native-detail.log', data([rows[-1], anchor(2)]))
+                z.writestr('nested/native-lifecycle.log', data([anchor(2), *rows]))
+                z.writestr('native-lifecycle.log.pending', data([anchor(1), anchor(2)]))
+            report = audit_zip(path, {'baseEvents': ['gamepad-fallback-tick']})
+        evidence = report['commonEvidence']['gamepadFallbackEdgeEvidence']
+        self.assertEqual(evidence['linkCountsByLane'], {'low': {'linked': 2, 'anchor-not-retained': 1,
+            'ambiguous-anchor': 1, 'anchor-context-mismatch': 1, 'writer-unresolved': 1}, 'detail': {'linked': 1}})
+        self.assertEqual(evidence['countsByLaneAndSelection']['low'], {outside: 5, 'retained-without-reference': 1,
+            'no-matching-edge': 1, 'legacy-unmarked': 1, 'explicit-duplicate': 1})
+        self.assertEqual(evidence['witnesses'][0]['anchor'],
+            {'file': 'native-lifecycle.log.1', 'archiveEntryOccurrence': 0, 'line': 1})
+        self.assertEqual(evidence['witnesses'][0]['edgeReference']['observedPowerGeneration'], 73)
+        self.assertTrue(any(v['kind'] == 'known-detail-in-native-low' and v['file'] == 'native-lifecycle.log'
+                            and v['exampleLines'] == [10] for v in report['violations']))
+
+    def test_checks_reason_shape_and_keeps_unknown_values_unresolved(self):
+        from log_lane_audit import _fallback_edge_observation
+        outside = 'edge-outside-recent-window'
+        valid = [(outside, self.ref(1, ageMs=None)),
+                 ('edge-context-changed', self.ref(1, observedPowerGeneration=74, ageMs=0)),
+                 ('edge-write-unconfirmed', self.ref(1, appendConfirmed=False, ageMs=1))]
+        for reason, ref in valid:
+            self.assertEqual(_fallback_edge_observation(self.fallback(connectionObservation=reason, connectionEdgeReference=ref))[0], reason)
+        for changes in ({'ageMs': 150}, {'ageMs': True}, {'schema': True}, {'sequence': 0}, {'sequence': 1.0},
+                        {'appendConfirmed': 1}, {'observedPowerLifecycle': 'resuming'}, {'powerGeneration': 0}):
+            r = self.fallback(connectionObservation=outside, connectionEdgeReference=self.ref(1, **changes))
+            self.assertEqual(_fallback_edge_observation(r), ('invalid-reference', None))
+        self.assertEqual(_fallback_edge_observation(self.fallback(duplicateConnectionEdge=True,
+            connectionObservation=outside, connectionEdgeReference=self.ref(1))), ('conflicting-selection', None))
+
+    def test_limits_do_not_claim_absent_edges_or_drop_counts(self):
+        from unittest.mock import patch
+        from log_lane_audit import gamepad_fallback_edge_evidence
+        rows = [(i, self.fallback(connectionObservation='edge-outside-recent-window', connectionEdgeReference=self.ref(2)))
+                for i in range(3, 23)]
+        with patch('log_lane_audit._FALLBACK_EDGE_MAX_ANCHORS', 1):
+            result = gamepad_fallback_edge_evidence([('native-lifecycle.log',
+                [(1, self.anchor(1)), (2, self.anchor(2)), *rows], {'archiveEntryOccurrence': 0})], ('7', '111'))
+        self.assertEqual(result['linkCountsByLane']['low'], {'anchor-index-limited': 20})
+        self.assertEqual(result['omittedAnchorRows'], 1)
+        self.assertEqual(result['rowsByWriterRelation'], {'export-writer': 20})
+        self.assertEqual(len(result['witnesses']), 16)
+        self.assertEqual(result['omittedWitnesses'], 4)
+
+
+class GameOverlayFrameBoundsTests(unittest.TestCase):
+    @staticmethod
+    def row(mask=7):
+        return {'event':'game-overlay-surface', 'phase':'presented', 'presentation':{
+            'main': {'boundsRead':True,'bounds':[-1,0,1920,1080],'frameHresult':0},
+            'display': {'boundsRead':True,'bounds':[0,0,750,1008],'frameHresult':0},
+            'foreground': {'boundsRead':True,'bounds':[0,0,1920,1080],'frameHresult':1},
+            'frameBoundsCopiesV1':mask, 'crossSourceAtomic':False}}
+
+    def test_restores_each_rect_from_its_own_window(self):
+        from log_lane_audit import restore_game_overlay_frame_bounds
+        row = self.row()
+        restored, state, targets = restore_game_overlay_frame_bounds(row)
+        self.assertEqual((state, targets), ('restored', ('main','display','foreground')))
+        for name in targets:
+            self.assertEqual(restored['presentation'][name]['frameBounds'], row['presentation'][name]['bounds'])
+            self.assertIsNot(restored['presentation'][name]['frameBounds'], row['presentation'][name]['bounds'])
+            self.assertNotIn('frameBounds', row['presentation'][name])
+        self.assertIs(restored['presentation']['crossSourceAtomic'], False)
+        self.assertNotIn('frameBoundsCopiesV1', restored['presentation'])
+
+    def test_invalid_or_conflicting_marker_leaves_whole_receipt_unchanged(self):
+        from log_lane_audit import restore_game_overlay_frame_bounds
+        for value in (True, 1.0, 0, 8, None):
+            row = self.row(value)
+            self.assertEqual(restore_game_overlay_frame_bounds(row), (row,'invalid-marker',()))
+        for change in ({'frameBounds':None}, {'boundsRead':False}, {'frameHresult':-1},
+                       {'frameHresult':1<<31}, {'bounds':[True,0,1920,1080]}, {'bounds':[0,0,1<<31,0]}):
+            row = self.row()
+            row['presentation']['display'].update(change)
+            self.assertEqual(restore_game_overlay_frame_bounds(row), (row,'conflict',()))
+        row = self.row(); row['event'] = 'controller-isolation-boundary'
+        self.assertEqual(restore_game_overlay_frame_bounds(row), (row,None,()))
+
+    def test_audit_retains_copy_evidence_and_ignores_renderer_only_receipts(self):
+        row = self.row(3)
+        bad = self.row(1); bad['presentation']['main']['frameBounds'] = None
+        legacy = self.row(); del legacy['presentation']['frameBoundsCopiesV1']
+        renderer = {'event':'game-overlay-surface','phase':'renderer-replied'}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'surface.zip'
+            with zipfile.ZipFile(path,'w') as archive:
+                archive.writestr('native-lifecycle.log.1', ''.join(json.dumps(r)+'\n' for r in [row,bad,legacy,renderer]))
+            evidence = audit_zip(path, {'baseEvents':['game-overlay-surface']})['commonEvidence']['gameOverlayFrameBoundsCopies']
+        self.assertEqual(evidence['countsByState'], {'restored':1,'conflict':1,'legacy':1})
+        self.assertEqual(evidence['restoredByTarget'], {'main':1,'display':1})
+        self.assertEqual(evidence['firstWitnessByState']['conflict']['line'], 2)
+
+
+class GameOverlayObservationLimitsTests(unittest.TestCase):
+    @staticmethod
+    def row(mask=63):
+        return {'event': 'game-overlay-surface', 'phase': 'surface-return', 'hresult': -1, 'presentation': {
+            'observationLimitsV1': mask,
+            'main': {'hwnd': 11}, 'display': {'hwnd': 12}, 'foreground': {'hwnd': 15},
+            'zOrder': {'captureFailed': True},
+        }}
+
+    def test_restores_only_explicit_paths_and_keeps_other_fields(self):
+        from log_lane_audit import restore_game_overlay_observation_limits
+        row = self.row()
+        restored, status, paths = restore_game_overlay_observation_limits(row)
+        self.assertEqual(status, 'restored')
+        self.assertEqual(len(paths), 6)
+        self.assertEqual(restored['presentation'], {
+            'crossSourceAtomic': False, 'screenVisibleVerified': False,
+            'main': {'hwnd': 11, 'screenVisibleVerified': False},
+            'display': {'hwnd': 12, 'screenVisibleVerified': False},
+            'foreground': {'hwnd': 15, 'screenVisibleVerified': False},
+            'zOrder': {'captureFailed': True, 'pixelOcclusionProven': False},
+        })
+        self.assertEqual(restored['hresult'], -1)
+        self.assertEqual(row, self.row())
+        row = self.row(4)
+        row['presentation']['screenVisibleVerified'] = True
+        row['presentation']['display']['screenVisibleVerified'] = None
+        row['presentation']['frameBoundsCopiesV1'] = 1
+        restored, status, paths = restore_game_overlay_observation_limits(row)
+        self.assertEqual((status, paths), ('restored', ('main.screenVisibleVerified',)))
+        self.assertIs(restored['presentation']['screenVisibleVerified'], True)
+        self.assertIsNone(restored['presentation']['display']['screenVisibleVerified'])
+        self.assertEqual(restored['presentation']['frameBoundsCopiesV1'], 1)
+
+    def test_bad_marker_or_any_conflict_leaves_entire_row_unchanged(self):
+        from log_lane_audit import restore_game_overlay_observation_limits
+        for value in (True, 1.0, '1', None, 0, -1, 64):
+            row = self.row(value)
+            self.assertEqual(restore_game_overlay_observation_limits(row), (row, 'invalid-marker', ()))
+        for zorder in (None, [], {'pixelOcclusionProven': None}, {'pixelOcclusionProven': False}):
+            row = self.row()
+            row['presentation']['zOrder'] = zorder
+            self.assertEqual(restore_game_overlay_observation_limits(row), (row, 'conflict', ()))
+            self.assertNotIn('screenVisibleVerified', row['presentation']['main'])
+        row = self.row()
+        del row['presentation']['observationLimitsV1']
+        self.assertEqual(restore_game_overlay_observation_limits(row), (row, 'legacy', ()))
+
+    def test_archive_counts_only_native_roots_and_keeps_original_line(self):
+        malformed = self.row(64)
+        renderer = {'event': 'game-overlay-surface', 'phase': 'renderer-requested'}
+        payload = ''.join(json.dumps(row) + '\n' for row in (self.row(), malformed, renderer))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'surface.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.1.log', payload)
+                archive.writestr('virtual-gamepad.log', payload)
+            result = audit_zip(path, {'baseEvents': ['game-overlay-surface']})
+        evidence = result['commonEvidence']['gameOverlayObservationLimits']
+        self.assertEqual(evidence['countsByState'], {'restored': 1, 'invalid-marker': 1})
+        self.assertEqual(evidence['firstWitnessByState']['invalid-marker']['line'], 2)
+
+
+class ControllerBoundaryWindowCopyTests(unittest.TestCase):
+    @staticmethod
+    def row(mask=3, **extra):
+        return {'event': 'controller-isolation-boundary', 'schema': 1, 'pid': 73,
+                'presentation': {'main': {'hwnd': 4197480, 'valid': True, 'bounds': [1, 2, 3, 4]},
+                                 'windowCopiesV1': mask, 'crossSourceAtomic': False, **extra}}
+
+    def test_restore_marked_destinations_only(self):
+        row = self.row(1, foreground={'hwnd': 88, 'valid': False})
+        restored, state, targets = restore_controller_boundary_windows(row)
+        self.assertEqual((state, targets), ('restored', ('display',)))
+        view = restored['presentation']
+        self.assertEqual(view['display'], row['presentation']['main'])
+        self.assertEqual(view['foreground'], row['presentation']['foreground'])
+        self.assertIs(view['crossSourceAtomic'], False)
+        view['display']['bounds'][0] = 44
+        self.assertEqual(row['presentation']['main']['bounds'][0], 1)
+        self.assertIn('windowCopiesV1', row['presentation'])
+
+    def test_conflicts_and_invalid_versions_remain_raw(self):
+        for mask in (0, 4, True, None, 1.0, '1'):
+            with self.subTest(mask=mask):
+                row = self.row(mask)
+                self.assertEqual(restore_controller_boundary_windows(row), (row, 'invalid-marker', ()))
+        for schema in (2, True, 1.0):
+            row = {**self.row(), 'schema': schema}
+            self.assertEqual(restore_controller_boundary_windows(row), (row, 'invalid-marker', ()))
+        for row in (self.row(display=None), self.row(display=self.row()['presentation']['main']), self.row(main={})):
+            self.assertEqual(restore_controller_boundary_windows(row), (row, 'conflict', ()))
+        row = self.row()
+        row['event'] = 'game-overlay-surface'
+        self.assertEqual(restore_controller_boundary_windows(row), (row, None, ()))
+
+    def test_audit_counts_rows_and_preserves_conflict_location(self):
+        legacy = self.row()
+        del legacy['presentation']['windowCopiesV1']
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'receipt.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log', '\n'.join(map(json.dumps, (legacy, self.row(), self.row(display=None))))+'\n')
+                archive.writestr('native-lifecycle.log.1', json.dumps(self.row(2))+'\n')
+            result = audit_zip(path, {'baseEvents': []})['commonEvidence']['controllerBoundaryWindowCopies']
+        self.assertEqual(result['countsByState'], {'legacy': 1, 'restored': 2, 'conflict': 1})
+        self.assertEqual(result['restoredByTarget'], {'display': 1, 'foreground': 2})
+        self.assertEqual(result['firstWitnessByState']['conflict']['line'], 3)
 
 
 class InputSourceReadbackEvidenceTests(unittest.TestCase):
@@ -75,6 +762,50 @@ class NativeBusRateEvidenceTests(unittest.TestCase):
         row.update(changes)
         return row
 
+    def test_bus_terminal_and_msi_feedback_lanes_keep_physical_evidence(self):
+        import warnings
+
+        rate = 'input-capture-bus-rate'
+        interruption = 'input-capture-bus-rate-boundary'
+        feedback = 'msi-dinput-feedback'
+        edge = self.sample(event=rate, previousRateFlags=2, state='recovered')
+        boundary = self.sample(event=interruption, previousRateFlags=2, windowMs=2310,
+                               windowInterruption='window-too-long', startReadyPowerGeneration=1,
+                               endReadyPowerGeneration=1)
+        managed_failure = dict(edge, event=feedback, managed=True, ok=False)
+        managed_success = dict(managed_failure, ok=True)
+        unmanaged = dict(managed_failure, managed=False)
+        malformed = [dict(managed_failure, managed=1), dict(managed_failure, ok=0),
+                     dict(managed_failure, ok=None), {'event': feedback, 'managed': True}]
+        aliases = [{'kind': event, 'managed': True, 'ok': False} for event in (rate, interruption, feedback)]
+
+        def wire(row):
+            return (json.dumps(row) + '\r\n').encode('ascii')
+
+        expected_resident = (edge, boundary, managed_failure)
+        detail_cases = (self.sample(), managed_success, unmanaged, *malformed, *aliases)
+        names = ('native-detail.log', 'native-detail.log.prev', 'native-detail.1.log', 'native-detail.1.log')
+        with tempfile.TemporaryDirectory(prefix='ymcc-bus-feedback-lanes-') as root:
+            path = Path(root) / 'bus-feedback.zip'
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', UserWarning)
+                with zipfile.ZipFile(path, 'w') as archive:
+                    for name in (*names, 'nested/native-detail.log'):
+                        archive.writestr(name, b'{partial\r\n' + b''.join(map(wire, (*expected_resident, *detail_cases))))
+                    archive.writestr('native-lifecycle.log', b''.join(map(wire, (*expected_resident, *detail_cases[:3]))))
+            result = audit_zip(path, {'baseEvents': [rate, interruption, feedback]})
+        kind_by_event = {rate: 'bus-rate-transition-in-native-detail', interruption: 'bus-rate-boundary-in-native-detail',
+                         feedback: 'msi-managed-feedback-failure-in-native-detail'}
+        actual = [(v['file'], v['archiveEntryOccurrence'], v['kind'], v['event'], v['exampleLines'],
+                   sum(bucket['bytes'] for bucket in v['nativeDetailFindingWriterFootprint']['buckets'].values()))
+                  for v in result['violations'] if v['kind'] in kind_by_event.values()]
+        self.assertCountEqual(actual, [(name, int(index == 3), kind_by_event[row['event']], row['event'], [line], len(wire(row)))
+                                       for index, name in enumerate(names)
+                                       for line, row in enumerate(expected_resident, 2)])
+        self.assertCountEqual([(v['event'], v['exampleLines']) for v in result['violations']
+                               if v['kind'] == 'known-detail-in-native-low'],
+                              [('input-capture-bus-rate-sample', [4]), (feedback, [5, 6])])
+
     def test_samples_and_transitions_are_distinct_across_writer_lifetimes(self):
         from log_lane_audit import native_bus_rate_evidence
         sample = self.sample()
@@ -133,6 +864,76 @@ class NativeBusRateEvidenceTests(unittest.TestCase):
             value = audit_zip(path, {'baseEvents':[]})['commonEvidence']['nativeBusRateEvidence']
         self.assertEqual((value['observedSamples'],value['observedTransitions'],value['unexpectedLaneRows']), (1,1,0))
         self.assertEqual({v['file'] for v in value['witnesses']}, {'native-detail.log.1','native-lifecycle.log'})
+
+    def test_interrupted_legacy_and_current_windows_do_not_count_as_recovery(self):
+        from log_lane_audit import native_bus_rate_evidence
+        recovery = self.sample(event='input-capture-bus-rate', previousRateFlags=2, state='recovered')
+        boundary = self.sample(event='input-capture-bus-rate-boundary', previousRateFlags=2,
+                               windowInterruption='power-context-changed', startReadyPowerGeneration=1,
+                               endReadyPowerGeneration=0, windowMs=21640747, powerLifecycle='suspended')
+        sample = self.sample(windowInterruption='window-too-long', windowMs=742663)
+        evidence = native_bus_rate_evidence([
+            ('native-lifecycle.log', [(1, dict(recovery, windowMs=742663)),
+                                     (2, dict(recovery, powerLifecycle='resuming')),
+                                     (3, boundary), (4, recovery),
+                                     (5, dict(boundary, endReadyPowerGeneration=1))], {}),
+            ('native-detail.log', [(1, sample)], {}),
+        ])
+        self.assertEqual(evidence['transitionCounts'], [{'previousRateFlags': 2, 'rateFlags': 0, 'kind': 'recovered', 'count': 1}])
+        self.assertEqual(evidence['observedBoundaries'], 2)
+        self.assertEqual(evidence['sampleCounts'], [])
+        self.assertEqual(evidence['unprojectedRows'], {'invalid-window-interruption': 1})
+        self.assertEqual([(row['carrier'], row['reason'], row['count']) for row in evidence['interruptionCounts']], [
+            ('boundary', 'power-context-changed', 1), ('legacy-transition', 'legacy-power-not-ready', 1),
+            ('legacy-transition', 'legacy-window-too-long', 1), ('sample', 'window-too-long', 1)])
+        self.assertEqual([(v['carrier'], v['first']['line']) for v in
+                         evidence['interruptionWriterPowerGroups'][0]['counts']],
+                         [('boundary', 3), ('legacy-transition', 2), ('legacy-transition', 1), ('sample', 1)])
+
+    def test_bus_interruptions_keep_row_context_and_actual_lane(self):
+        from log_lane_audit import native_bus_rate_evidence
+        sample = self.sample(powerGeneration=2, windowInterruption='power-context-changed')
+        boundary = dict(sample, event='input-capture-bus-rate-boundary', previousRateFlags=0,
+                        startReadyPowerGeneration=1, endReadyPowerGeneration=0)
+        value = native_bus_rate_evidence([
+            ('native-lifecycle.log', [(8,boundary), (9,sample)], {'archiveEntryOccurrence':1}),
+            ('native-detail.log', [(21,sample), (22,sample),
+                                   (23,dict(sample, writerProcessCreation100ns='12345678901234568')),
+                                   (24,dict(sample, powerGeneration=3))], {'archiveEntryOccurrence':2}),
+            ('nativeXdetail.log', [(1,sample)], {}),
+            ('native-detailXlog', [(1,sample)], {}),
+        ])
+        groups = value.get('interruptionWriterPowerGroups', [])
+        self.assertEqual([(g['pid'], g['writerProcessCreation100ns'], g['powerGeneration']) for g in groups],
+                         [(37,'12345678901234567',2), (37,'12345678901234568',2), (37,'12345678901234567',3)])
+        self.assertEqual(groups[0]['counts'], [
+            dict(carrier='boundary', physicalLane='lifecycle', reason='power-context-changed', count=1,
+                 first=dict(file='native-lifecycle.log', line=8, archiveEntryOccurrence=1,
+                            startReadyPowerGeneration=1, endReadyPowerGeneration=0)),
+            dict(carrier='sample', physicalLane='detail', reason='power-context-changed', count=2,
+                 first=dict(file='native-detail.log', line=21, archiveEntryOccurrence=2)),
+            dict(carrier='sample', physicalLane='lifecycle', reason='power-context-changed', count=1,
+                 first=dict(file='native-lifecycle.log', line=9, archiveEntryOccurrence=1)),
+        ])
+        self.assertEqual(value['unexpectedLaneRows'], 1)
+        self.assertEqual((value['sampleCounts'], value['transitionCounts'], value['writerPowerGroups']), ([], [], []))
+
+    def test_bus_interruption_budget_and_missing_identity_do_not_hide_totals(self):
+        from log_lane_audit import native_bus_rate_evidence
+        sample = self.sample(windowInterruption='window-too-long', windowMs=2001)
+        rows = [dict(sample, powerGeneration=i) for i in range(34)]
+        rows += [sample, dict(sample, writerProcessCreation100ns='0'), dict(sample, pid=True),
+                 dict(sample, powerGeneration=None), dict(sample, windowMs=2000), self.sample(powerGeneration=34)]
+        value = native_bus_rate_evidence([('native-detail.log', list(enumerate(rows, 1)), {})])
+        self.assertEqual(value['interruptionCounts'], [dict(carrier='sample', reason='window-too-long', count=38)])
+        self.assertEqual(value['interruptionUnboundRows'], 3)
+        self.assertEqual(value['interruptionWriterPowerGroupLimitRows'], 2)
+        self.assertEqual(len(value['interruptionWriterPowerGroups']), value['writerPowerGroupLimit'])
+        self.assertEqual(value['interruptionWriterPowerGroups'][1]['counts'][0]['count'], 2)
+        self.assertEqual(value['unprojectedRows'], {'invalid-window-interruption':1})
+        self.assertEqual(value['unboundRows'], 0)
+        self.assertEqual(value['writerPowerGroupLimitRows'], 0)
+        self.assertEqual([g['powerGeneration'] for g in value['writerPowerGroups']], [34])
 
     def test_compact_samples_restore_scope_without_upgrading_unknown_records(self):
         from log_lane_audit import native_bus_rate_evidence
@@ -636,6 +1437,415 @@ class GyroReceiptAgeEvidenceTests(unittest.TestCase):
                                  [('134393820000419716', 2), ('17', 3)])
 
 
+class GyroSampleLaneComparisonTests(unittest.TestCase):
+    BIRTH = '134393820000419716'
+    EVENT = 'gyro-motion.log'
+    SAMPLE = 'gyro-motion-samples.log'
+    KIND = 'gyro-periodic-sample-in-event-carrier'
+
+    def manifest(self, **operation_fields):
+        operation = dict(schema=1, id='37-400-1', writerPid=37, writerProcessCreation100ns=self.BIRTH,
+                         ordinal='1', startedTickMs='400', scope='admitted-ordinary-log-export;diagnostic-correlation-only')
+        return 'processId=37\nexportOperation=' + json.dumps({**operation, **operation_fields}) + '\n'
+
+    def row(self, **fields):
+        return dict(event='gyro-status-second', writerPid=37, writerEnvelopeSchema=1,
+                    writerProcessCreation100ns=self.BIRTH, **fields)
+
+    def audit(self, members, manifests=None):
+        import warnings
+        manifests = [self.manifest()] if manifests is None else manifests
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'gyro.zip'
+            with warnings.catch_warnings(), zipfile.ZipFile(path, 'w') as bundle:
+                warnings.filterwarnings('ignore', message='Duplicate name:', category=UserWarning)
+                for manifest in manifests:
+                    bundle.writestr('YeManCC-export-manifest.txt', manifest)
+                for name, rows in members:
+                    bundle.writestr(name, ''.join('\n' if row is None else json.dumps(row) + '\n' for row in rows))
+            before = path.read_bytes()
+            report = audit_zip(path, {'baseEvents': []})
+            self.assertEqual(path.read_bytes(), before)
+        return (report['commonEvidence']['gyroSampleLaneComparison'],
+                [finding for finding in report['violations'] if finding['kind'] == self.KIND], report['files'])
+
+    def test_mixed_event_rotation_only_flags_periodic_rows_by_the_exact_writer(self):
+        old = {**self.row(), 'writerProcessCreation100ns': '134393820000419715'}
+        missing = self.row()
+        del missing['writerProcessCreation100ns']
+        unversioned = self.row()
+        del unversioned['writerEnvelopeSchema']
+        event = self.EVENT + '.1'
+        sample = self.SAMPLE + '.2'
+        view, findings, entries = self.audit([
+            (event, [old, missing, unversioned, None, self.row(ok=True), self.row(ok=False),
+                     self.row(success=False), self.row(ok=0), self.row(success='false'), self.row()]),
+            (self.EVENT, []), (sample, [self.row()]),
+        ])
+        self.assertEqual(view['state'], 'separate-sampling-observed')
+        self.assertEqual(view['dedicatedSampleWitnessMembers'], [sample])
+        self.assertEqual(view['eligibleReadMembers'], [event, self.EVENT, sample])
+        self.assertEqual(view['confirmedEventCarrierSampleRows'], 2)
+        self.assertEqual([(item['file'], item['counts']['byPid'], item['exampleLines']) for item in findings],
+                         [(event, {'37': 2}, [5, 10])])
+        evidence = next(entry['gyroSampleLaneEvidence'] for entry in entries if entry['file'] == event)
+        self.assertEqual(evidence['countsByWriterAndShape'], {
+            'other-writer': {'periodic-sample': 1}, 'writer-unresolved': {'periodic-sample': 2},
+            'export-writer': {'periodic-sample': 2, 'explicit-failure': 2, 'unknown-result-fields': 2}})
+
+    def test_missing_or_inapplicable_dedicated_sample_is_not_a_clean_comparison(self):
+        alternate_writer = {**self.row(), 'writerPid': 38}
+        for samples in ([], [(self.SAMPLE, [alternate_writer])], [(self.SAMPLE, [self.row(ok=False)])],
+                        [(self.SAMPLE, [self.row(success=1)])], [('nested/' + self.SAMPLE, [self.row()])]):
+            with self.subTest(samples=samples):
+                view, findings, _ = self.audit([(self.EVENT, [self.row()]), *samples])
+                self.assertEqual(view['state'], 'separate-sampling-not-observed')
+                self.assertIsNone(view['confirmedEventCarrierSampleRows'])
+                self.assertEqual(findings, [])
+
+    def test_ambiguous_or_incomplete_manifest_does_not_bind_writer(self):
+        valid = self.manifest()
+        for manifests in ([], [valid, valid], [valid + 'processId=37\n'],
+                          [valid + valid.split('\n', 1)[1]],
+                          [valid.replace('"writerPid": 37', '"writerPid": 37, "writerPid": 37')],
+                          [self.manifest(writerProcessCreation100ns=None)], [valid.replace('processId=37', 'processId=38')]):
+            with self.subTest(manifests=manifests):
+                view, findings, _ = self.audit([(self.EVENT, [self.row()]), (self.SAMPLE, [self.row()])], manifests)
+                self.assertEqual(view['state'], 'export-writer-unresolved')
+                self.assertIsNone(view['reportedExportWriter'])
+                self.assertIsNone(view['confirmedEventCarrierSampleRows'])
+                self.assertEqual(findings, [])
+
+    def test_duplicate_member_is_excluded_on_either_side(self):
+        for name in (self.EVENT, self.SAMPLE):
+            with self.subTest(name=name):
+                view, findings, entries = self.audit([
+                    (self.EVENT, [self.row()]), (self.SAMPLE, [self.row()]), (name, [self.row()]),
+                ])
+                self.assertEqual(view['excludedRepeatedMembers'], {name: 2})
+                self.assertEqual([entry['archiveEntryOccurrence'] for entry in entries if entry['file'] == name], [0, 1])
+                self.assertEqual(findings, [])
+                self.assertEqual(view['confirmedEventCarrierSampleRows'], 0 if name == self.EVENT else None)
+
+
+class SleepSteamInspectionLaneTests(unittest.TestCase):
+    def test_explicit_periodic_sample_in_root_low_members(self):
+        event = 'sleep-steam-inspected'
+        sample = dict(snapshotSchemaVersion=2, snapshotPurpose='observation', snapshotReason='periodic')
+        def row(detail, wrapped):
+            value = dict(event=event)
+            value.update(dict(details=detail) if wrapped else detail)
+            return json.dumps(value).encode()
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'steam-inspections.zip'
+            data = b'bad row\r\n' + row(sample, True) + b'\r\n' + b'\n'.join(
+                row({**sample, **invalid}, True) for invalid in (
+                    {'snapshotReason': 'state-change'}, {'snapshotPurpose': 'input-preflight'},
+                    {'snapshotSchemaVersion': 2.0}, {'snapshotSchemaVersion': None}))
+            with zipfile.ZipFile(path, 'w') as z:
+                z.writestr('sleep-facts.log.previous', data)
+                z.writestr('old/sleep-facts.log', data)
+                z.writestr('native-lifecycle.log.1', row(sample, False))
+                z.writestr('native-detail.log', row(sample, False))
+                z.writestr('other/native-lifecycle.log', row(sample, False))
+            result = audit_zip(path, {'baseEvents': []})
+        hits = [item for item in result['violations'] if item.get('event') == event]
+        self.assertEqual([(item['file'], item['kind'], item['exampleLines']) for item in hits], [
+            ('sleep-facts.log.previous', 'steam-inspection-periodic-in-sleep-low', [2]),
+            ('native-lifecycle.log.1', 'known-detail-in-native-low', [1])])
+        self.assertEqual(hits[0]['rawRowBytes'], len(row(sample, True)) + 2)
+
+
+class SleepDeviceChangeLaneTests(unittest.TestCase):
+    def test_ordinary_device_tree_samples_in_sleep_facts(self):
+        import warnings
+        birth = '134401550065218553'
+        operation = dict(schema=1, id='37-400-1', writerPid=37, writerProcessCreation100ns=birth,
+                         ordinal='1', startedTickMs='400', scope='admitted-ordinary-log-export;diagnostic-correlation-only')
+        sample = dict(code=7, userStandby=False, standbyAgeEligible=False, retryCandidate=True)
+
+        def row(details, **fields):
+            value = dict(event='device-change', writerPid=37, writerProcessCreation100ns=birth, details=details)
+            return json.dumps({**value, **fields}).encode() + b'\r\n'
+
+        misplaced = row(sample)
+        old = row(sample, writerProcessCreation100ns='134401550065218552')
+        unknown = row(sample, writerPid=None, pid=37, hostPid=37)
+        legitimate = (row({**sample, 'userStandby': True}) + row({**sample, 'standbyAgeEligible': True}) +
+                      row({**sample, 'code': 32768}) + row({**sample, 'code': 32772}))
+        uncertain = (row({'code': 7}) + row({**sample, 'code': 7.0}) + row({**sample, 'code': True}) +
+                     row({**sample, 'code': '7'}) + row({**sample, 'userStandby': 0}) +
+                     row({**sample, 'standbyAgeEligible': None}) + row(None))
+        unrelated = row(sample, event='wake-boundary') + row(sample, event=None, kind='device-change')
+        name = 'sleep-facts.log'
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'sleep.zip'
+            with warnings.catch_warnings(), zipfile.ZipFile(path, 'w') as bundle:
+                warnings.filterwarnings('ignore', message='Duplicate name:')
+                bundle.writestr('YeManCC-export-manifest.txt', 'processId=37\nexportOperation=' + json.dumps(operation))
+                bundle.writestr(name, b'broken\n\n' + misplaced + legitimate + uncertain + unrelated + unknown)
+                bundle.writestr(name + '.previous', old)
+                bundle.writestr(name + '.previous', row(sample, writerPid=38))
+                bundle.writestr('steam/' + name, misplaced)
+                bundle.writestr('nested/' + name, misplaced)
+                bundle.writestr('unrelated!' + name, misplaced)
+                bundle.writestr('native-detail.log', row(sample, event='sleep-device-tree-sample', factEvent='device-change'))
+            before = hashlib.sha256(path.read_bytes()).hexdigest()
+            report = audit_zip(path, {'baseEvents': []})
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), before)
+
+        hits = [item for item in report['violations'] if item['kind'] == 'device-tree-sample-in-sleep-low']
+        self.assertEqual([(item['file'], item['archiveEntryOccurrence'], item['exampleLines']) for item in hits],
+                         [(name, 0, [3, 17]), (name + '.previous', 0, [1]), (name + '.previous', 1, [1])])
+        self.assertEqual(hits[0]['writerFootprint']['buckets']['export-writer'], {'rows': 1, 'bytes': len(misplaced)})
+        self.assertEqual(hits[0]['writerFootprint']['buckets']['writer-unresolved'], {'rows': 1, 'bytes': len(unknown)})
+        self.assertEqual(hits[1]['writerFootprint']['buckets']['same-pid-other-birth'], {'rows': 1, 'bytes': len(old)})
+        self.assertEqual(hits[2]['writerFootprint']['buckets']['other-writer']['rows'], 1)
+        view, = [item['sleepDeviceChangeLaneEvidence'] for item in report['files'] if item['file'] == name]
+        self.assertEqual(view['counts'], {'detail-only': 2, 'standby-context': 2, 'other-device-change': 2,
+                                          'unverified-context': 7})
+        warning, = [item for item in report['coverageWarnings'] if item.get('kind') == 'sleep-device-change-lane-unverified']
+        self.assertEqual(warning['exampleLines'], list(range(8, 15)))
+
+
+class NativeLowWriterFootprintTests(unittest.TestCase):
+    BIRTH = '134401550065218553'
+
+    def manifest(self):
+        operation = dict(schema=1, id='37-400-1', writerPid=37, writerProcessCreation100ns=self.BIRTH,
+                         ordinal='1', startedTickMs='400', scope='admitted-ordinary-log-export;diagnostic-correlation-only')
+        return 'processId=37\nexportOperation=' + json.dumps(operation) + '\n'
+
+    def test_light_isolation_receipts_require_an_exact_writer_and_unique_retained_ticket(self):
+        from log_lane_audit import light_isolation_ticket_evidence
+        writer = dict(pid=37, writerProcessCreation100ns=self.BIRTH, session=0)
+        sel = dict(writer, event='summon-isolation-selected', mode='light-no-game')
+        ack = dict(writer, event='summon-light-gamepad', scope='steam-gamepad-navigation')
+        selections = [dict(sel, lightTicketSerial=n) for n in (71, 72, 72, 74)]
+        replies = [dict(ack, intentLightTicketSerial=n) for n in (71, 72, 73, 74, 0, True)]
+        replies[3]['writerProcessCreation100ns'] = '123'
+        replies += [ack, dict(ack, intentLightTicketSerial=71, writerProcessCreation100ns=None)]
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'light.zip'
+            with zipfile.ZipFile(path, 'w') as bundle:
+                bundle.writestr('YeManCC-export-manifest.txt', self.manifest())
+                bundle.writestr('native-detail.log', ''.join(json.dumps(r)+'\n' for r in replies))
+                bundle.writestr('native-lifecycle.1.log', ''.join(json.dumps(r)+'\n' for r in selections))
+                bundle.writestr('nested/native-lifecycle.log', json.dumps(dict(sel, lightTicketSerial=73))+'\n')
+            view = audit_zip(path, {'baseEvents': []})['commonEvidence']['lightIsolationTicketEvidence']
+        receipts = view['events'][ack['event']]
+        self.assertEqual({key: value['rows'] for key, value in receipts.items()}, {
+            'linked-to-retained-selection': 1, 'ambiguous-retained-selection': 1, 'selection-not-retained': 2,
+            'no-ticket': 1, 'invalid-ticket-fields': 1, 'ticket-unreported': 1, 'writer-unresolved': 1})
+        linked, = receipts['linked-to-retained-selection']['examples']
+        self.assertEqual(linked['selection'], {'file': 'native-lifecycle.1.log', 'archiveEntryOccurrence': 0, 'line': 1})
+        self.assertEqual(linked['writerRelation'], 'export-writer')
+        bounded = light_isolation_ticket_evidence([
+            ('native-lifecycle.log', list(enumerate(selections, 1)), {}),
+            ('native-detail.log', list(enumerate(replies, 1)), {})], ('37', self.BIRTH), max_anchors=1)
+        self.assertEqual(bounded['selectionRowsOutsideIndex'], 3)
+        self.assertEqual(bounded['events'][ack['event']]['selection-index-incomplete']['rows'], 3)
+
+    def test_frame_admission_lane_coverage_is_not_a_verdict_for_unmarked_rows(self):
+        name = 'native-lifecycle.1.log'
+        base = dict(event='input-host-frame-admission', pid=37, writerProcessCreation100ns=self.BIRTH)
+        legacy = {key: val for key, val in base.items() if key != 'writerProcessCreation100ns'}
+        sample = {**base, 'readRepeatSample': True}
+        cause = 'canonical-read-already-consumed'
+        cases = [base, legacy, {**base, 'readRepeatSample': 1},
+                 {**base, 'readRepeatRecord': {}}, {**base, 'readRepeatRecord': 'repeat-summary'},
+                 {**base, 'assemblyCause': cause}, {**base, 'assemblyCause': 'unknown'}, sample]
+        raw = [json.dumps(row).encode('utf-8') + b'\r\n' for row in cases]
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'frame.zip'
+            with zipfile.ZipFile(path, 'w') as bundle:
+                bundle.writestr('YeManCC-export-manifest.txt', self.manifest())
+                bundle.writestr(name, b''.join(raw[:2]) + b'bad-json\n' + b''.join(raw[2:]))
+                bundle.writestr('native-detail.log.1', raw[-1])
+                bundle.writestr('nested/' + name, raw[0])
+                bundle.writestr('native-lifecycle.log.pending', raw[0])
+            audit = audit_zip(path, {'baseEvents': [base['event']]})
+        views = {f['file']: f['frameAdmissionLaneCoverage'] for f in audit['files']
+                 if 'frameAdmissionLaneCoverage' in f}
+        self.assertEqual(set(views), {name, 'native-detail.log.1'})
+        low = views[name]
+        self.assertEqual(low['observedRows'], 8)
+        self.assertEqual(low['reportedExportWriter']['writerProcessCreation100ns'], self.BIRTH)
+        self.assertEqual({key: view['exampleLines'] for key, view in low['states'].items()}, {
+            'unmarked': [1, 2], 'unrecognized-marker': [4, 5, 8], 'reported-resident-receipt': [6],
+            'assembly-cause-only': [7], 'reported-detail-sample': [9]})
+        self.assertEqual(low['states']['unmarked']['writerBuckets']['writer-unresolved'],
+                         {'rows': 1, 'bytes': len(raw[1])})
+        self.assertEqual(low['states']['unmarked']['writerBuckets']['export-writer'],
+                         {'rows': 1, 'bytes': len(raw[0])})
+        self.assertEqual(views['native-detail.log.1']['states']['reported-detail-sample']['exampleLines'], [1])
+        self.assertEqual([(v['kind'], v['file'], v['exampleLines']) for v in audit['violations']],
+                         [('known-detail-in-native-low', name, [9])])
+
+    def test_frame_admission_inverse_lane_and_conflicting_markers(self):
+        base = dict(event='input-host-frame-admission', pid=37, writerProcessCreation100ns=self.BIRTH)
+        labels = ('episode-start', 'first-recovery', 'context-changed', 'repeat-summary')
+        resident = [{**base, 'readRepeatRecord': label} for label in labels]
+        mixed = {**resident[0], 'readRepeatSample': True}
+        malformed = {**resident[1], 'readRepeatSample': 1}
+        alias = {k: v for k, v in resident[2].items() if k != 'event'}
+        alias['eventName'] = base['event']
+        sample = {**base, 'readRepeatSample': True}
+        def wire(rows):
+            return b''.join(json.dumps(row).encode() + b'\r\n' for row in rows)
+        low, detail = 'native-lifecycle.log', 'native-detail.1.log'
+        resident_bytes = wire(resident)
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'frame.zip'
+            with zipfile.ZipFile(path, 'w') as bundle:
+                bundle.writestr('YeManCC-export-manifest.txt', self.manifest())
+                bundle.writestr(low, wire([mixed, sample, resident[0]]))
+                bundle.writestr(detail, wire([base, mixed, malformed, alias, sample]) + b'bad-json\n' + resident_bytes)
+                bundle.writestr('nested/' + detail, resident_bytes)
+                bundle.writestr('native-detail.log.pending', resident_bytes)
+            audit = audit_zip(path, {'baseEvents': [base['event']]})
+        violations = {v['kind']: v for v in audit['violations']}
+        self.assertEqual(set(violations), {'known-detail-in-native-low', 'frame-admission-resident-in-native-detail'})
+        self.assertEqual(violations['known-detail-in-native-low']['exampleLines'], [2])
+        misplaced = violations['frame-admission-resident-in-native-detail']
+        self.assertEqual(misplaced['file'], detail)
+        self.assertEqual(misplaced['archiveEntryOccurrence'], 0)
+        self.assertEqual(misplaced['exampleLines'], [7, 8, 9, 10])
+        self.assertEqual(misplaced['counts']['all'], 4)
+        self.assertEqual(misplaced['nativeDetailFindingWriterFootprint']['buckets']['export-writer'],
+                         {'rows': 4, 'bytes': len(resident_bytes)})
+        coverage = {entry['file']: entry['frameAdmissionLaneCoverage'] for entry in audit['files']
+                    if 'frameAdmissionLaneCoverage' in entry}
+        self.assertEqual(set(coverage), {low, detail})
+        self.assertEqual(coverage[low]['states']['conflicting-markers']['exampleLines'], [1])
+        self.assertEqual(coverage[detail]['states']['conflicting-markers']['exampleLines'], [2])
+        self.assertEqual(coverage[detail]['states']['unrecognized-marker']['exampleLines'], [3])
+        self.assertEqual(coverage[detail]['observedRows'], 8)
+
+    def test_root_lifecycle_attributes_original_bytes_by_reported_writer(self):
+        current = {'event': 'short', 'pid': 37, 'writerProcessCreation100ns': self.BIRTH}
+        old = {**current, 'writerProcessCreation100ns': '134401550065218552'}
+        unknown = {**current, 'pid': True, 'writerPid': 37}
+        other = {**current, 'pid': 38, 'writerPid': 37}
+        missing = {key: value for key, value in current.items() if key != 'writerProcessCreation100ns'}
+        larger = {**current, 'event': 'larger', 'text': 'µ' * 70}
+
+        def encode(row, ending=b'\n'):
+            return json.dumps(row, ensure_ascii=False).encode('utf-8') + ending
+
+        exact = b'\xef\xbb\xbf' + encode(current, b'\r\n')
+        other_bytes, old_bytes = encode(other), encode(old)
+        missing_bytes, unknown_bytes = encode(missing), encode(unknown)
+        larger_bytes = encode(larger, b'')
+        unparsed = b'\r\nnot-json\n[]\r\n'
+        payload = exact + missing_bytes + unparsed + old_bytes + unknown_bytes + other_bytes + larger_bytes
+        path_name = 'native-lifecycle.log.1'
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'native.zip'
+            with zipfile.ZipFile(path, 'w') as bundle:
+                bundle.writestr('YeManCC-export-manifest.txt', self.manifest())
+                bundle.writestr(path_name, payload)
+                bundle.writestr('nested/' + path_name, payload)
+                bundle.writestr('native-detail.log', payload)
+            report = audit_zip(path, {'baseEvents': []})
+            with zipfile.ZipFile(path) as bundle:
+                self.assertEqual(bundle.read(path_name), payload)
+
+        scoped = [(item['file'], item['nativeLowWriterFootprint']) for item in report['files']
+                  if 'nativeLowWriterFootprint' in item]
+        self.assertEqual([name for name, _ in scoped], [path_name])
+        view = scoped[0][1]
+        self.assertEqual(view['reportedExportWriter'], {'writerPid': 37, 'writerProcessCreation100ns': self.BIRTH})
+        self.assertEqual(view['buckets'], {
+            'export-writer': {'rows': 2, 'bytes': len(exact + larger_bytes)},
+            'same-pid-other-birth': {'rows': 1, 'bytes': len(old_bytes)},
+            'other-writer': {'rows': 1, 'bytes': len(other_bytes)},
+            'writer-unresolved': {'rows': 2, 'bytes': len(missing_bytes + unknown_bytes)},
+            'export-writer-unresolved': {'rows': 0, 'bytes': 0}})
+        self.assertEqual(view['bytesOutsideParsedObjectRows'], len(unparsed))
+        self.assertEqual(view['topExportWriterEventsByBytes'], [
+            {'event': 'larger', 'rows': 1, 'bytes': len(larger_bytes)}, {'event': 'short', 'rows': 1, 'bytes': len(exact)}])
+
+    def test_ambiguous_manifest_and_repeated_members_keep_bytes_unbound_and_separate(self):
+        import warnings
+        name = 'native-lifecycle.log'
+        row = json.dumps(dict(event='short', pid=37, writerProcessCreation100ns=self.BIRTH)).encode() + b'\n'
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'native.zip'
+            with warnings.catch_warnings(), zipfile.ZipFile(path, 'w') as bundle:
+                warnings.filterwarnings('ignore', message='Duplicate name:', category=UserWarning)
+                bundle.writestr('YeManCC-export-manifest.txt', self.manifest() + 'processId=37\n')
+                bundle.writestr(name, row)
+                bundle.writestr(name, row * 2)
+            report = audit_zip(path, {'baseEvents': []})
+        files = [item for item in report['files'] if item['file'] == name]
+        self.assertEqual([item['archiveEntryOccurrence'] for item in files], [0, 1])
+        for i, item in enumerate(files, 1):
+            view = item['nativeLowWriterFootprint']
+            self.assertIsNone(view['reportedExportWriter'])
+            self.assertEqual(view['buckets']['export-writer-unresolved'], {'rows': i, 'bytes': i * len(row)})
+            self.assertEqual(view['buckets']['export-writer'], {'rows': 0, 'bytes': 0})
+            self.assertEqual(view['topExportWriterEventsByBytes'], [])
+
+
+    def test_native_low_findings_measure_only_matching_physical_rows_by_writer(self):
+        def row(pid=37, birth=self.BIRTH, *, event='system-xinput-readback', reason='buttons-change', ending=b'\n'):
+            return json.dumps(dict(event=event, pid=pid, writerProcessCreation100ns=birth,
+                                   reason=reason), ensure_ascii=False).encode('utf-8') + ending
+
+        current = b'\xef\xbb\xbf' + row(ending=b'\r\n')
+        reused = row(birth='134393820000419717')
+        historical = row(pid=36)
+        unknown = row(birth=None, ending=b'')
+        foreign = row(event='monitor-data-snapshot')
+        normal = row(reason='mask-change')
+        payload = current + normal + b'not-json\n' + historical + foreign + reused + unknown
+        name = 'native-lifecycle.log'
+        with tempfile.TemporaryDirectory() as temp:
+            import warnings
+            path = Path(temp) / 'findings.zip'
+            with warnings.catch_warnings(), zipfile.ZipFile(path, 'w') as bundle:
+                warnings.filterwarnings('ignore', message='Duplicate name:', category=UserWarning)
+                bundle.writestr('YeManCC-export-manifest.txt', self.manifest())
+                bundle.writestr(name, payload)
+                bundle.writestr(name, normal + historical)
+                bundle.writestr('native-detail.log', payload)
+            audit = audit_zip(path, {'baseEvents': []})
+        system = [item for item in audit['violations'] if item['event'] == 'system-xinput-readback']
+        self.assertEqual([(item['archiveEntryOccurrence'], item['exampleLines']) for item in system],
+                         [(0, [1, 4, 6, 7]), (1, [2])])
+        self.assertEqual(system[0]['nativeLowFindingWriterFootprint']['buckets'], {
+            'export-writer': {'rows': 1, 'bytes': len(current)},
+            'same-pid-other-birth': {'rows': 1, 'bytes': len(reused)},
+            'other-writer': {'rows': 1, 'bytes': len(historical)},
+            'writer-unresolved': {'rows': 1, 'bytes': len(unknown)},
+            'export-writer-unresolved': {'rows': 0, 'bytes': 0}})
+        self.assertEqual(system[0]['nativeLowFindingWriterFootprint']['exportWriterExampleLines'], [1])
+        self.assertEqual(system[1]['nativeLowFindingWriterFootprint']['exportWriterExampleLines'], [])
+        monitor, = [item for item in audit['violations'] if item['event'] == 'monitor-data-snapshot']
+        self.assertEqual(monitor['nativeLowFindingWriterFootprint']['exportWriterExampleLines'], [5])
+        self.assertEqual(monitor['nativeLowFindingWriterFootprint']['buckets']['export-writer'],
+                         {'rows': 1, 'bytes': len(foreign)})
+
+    def test_native_low_findings_do_not_attribute_unknown_export_writer_by_filename_or_pid_alone(self):
+        value = lambda birth: json.dumps(dict(event='system-xinput-readback', reason='buttons-change',
+                                             pid=37, writerProcessCreation100ns=birth)).encode() + b'\n'
+        reported, missing = value(self.BIRTH), value(None)
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'YeManCC-logs-20261126-150201-37-123-1.zip'
+            with zipfile.ZipFile(path, 'w') as bundle:
+                bundle.writestr('YeManCC-export-manifest.txt', 'processId=37\n')
+                bundle.writestr('native-lifecycle.log', reported + missing)
+            finding, = audit_zip(path, {'baseEvents': []})['violations']
+        self.assertEqual(finding['counts']['currentPidMatch'], 2)
+        footprint = finding['nativeLowFindingWriterFootprint']
+        self.assertIsNone(footprint['reportedExportWriter'])
+        self.assertEqual(footprint['exportWriterExampleLines'], [])
+        self.assertEqual(footprint['buckets']['export-writer-unresolved'], {'rows': 1, 'bytes': len(reported)})
+        self.assertEqual(footprint['buckets']['writer-unresolved'], {'rows': 1, 'bytes': len(missing)})
+
+
 class DomainWriterEnvelopeTests(unittest.TestCase):
     @staticmethod
     def row(pid=37,birth='134393820000419716'):
@@ -929,6 +2139,61 @@ class HidHideWriterObservationTests(unittest.TestCase):
         value=self.record(self.row());self.assertEqual(value['state'],'reported-writer-settlement');self.assertTrue(value['writerSettlementReported']);self.assertEqual(value['reported']['childBirth'],'134393820000419717')
         for k in ('physicalReturnProven','virtualTargetRetiredProven','externalGameInputProven','liveProcessOrJobStateProven','errorCodeInferred'):self.assertFalse(value[k])
         self.assertNotIn('error',value['reported'])
+    def test_compact_settlement_round_trips_in_zip_without_inferred_identity(self):
+        from log_lane_audit import restore_hidhide_cli_receipt
+        old=self.row()
+        old.update(parentPid=42,parentBirth='123',childPid=0,childBirth='',
+                   reason='exact-native-child-and-job-writer-quiescent')
+        compact={k:v for k,v in old.items() if k not in ('jobName','scope')}
+        compact['writerReceiptDefaultsV1']=1
+        self.assertEqual(restore_hidhide_cli_receipt(compact),(old,None))
+        self.assertEqual(self.record(compact),self.record(old))
+        malformed={**compact,'scope':None}
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'writer.zip'
+            payload=''.join(json.dumps(row)+'\n' for row in (compact,malformed)).encode()
+            AuditTests.receipt_selection_write(path,[('native-lifecycle.log',payload)])
+            report=audit_zip(path,{'baseEvents':['hidhide-cli-writer']})
+            records=[item['record'] for item in report['commonEvidence']['hidHideWriterObservationEvidence']['observations']]
+            self.assertEqual(records[0],self.record(old))
+            self.assertEqual(records[1]['fieldIssues'],['invalid-writer-receipt-defaults'])
+            self.assertFalse(records[1]['writerSettlementReported'])
+            with zipfile.ZipFile(path) as z:self.assertEqual(z.read('native-lifecycle.log'),payload)
+    def test_compact_settlement_marker_conflicts_leaves_source_unchanged(self):
+        from log_lane_audit import restore_hidhide_cli_receipt
+        row={k:v for k,v in self.row().items() if k not in ('scope','jobName')}
+        row['writerReceiptDefaultsV1']=1
+        for change in ({'writerReceiptDefaultsV1':True},{'writerReceiptDefaultsV1':1.0},
+                       {'writerReceiptDefaultsV1':2},{'jobName':None},{'phase':'deferred'},
+                       {'reason':'future'},{'attemptId':'../outside'},{'attemptId':'..'}):
+            bad={**row,**change}
+            self.assertEqual(restore_hidhide_cli_receipt(bad),(bad,'invalid-writer-receipt-defaults'))
+            self.assertFalse(self.record(bad)['writerSettlementReported'])
+        unrelated={**row,'event':'other'}
+        self.assertEqual(restore_hidhide_cli_receipt(unrelated),(unrelated,None))
+    def test_owned_parent_copy_restores_only_same_row_identity(self):
+        from log_lane_audit import restore_hidhide_cli_receipt
+        full = self.row()
+        compact = {k: v for k, v in full.items() if k not in ('jobName', 'scope', 'parentPid', 'parentBirth')}
+        compact['writerReceiptDefaultsV2'] = 2
+        self.assertEqual(restore_hidhide_cli_receipt(compact), (full, None))
+        self.assertEqual(self.record(compact), self.record(full))
+        self.assertNotEqual(compact['pid'], compact['childPid'])
+        bad_values = ({'writerReceiptDefaultsV2': True}, {'writerReceiptDefaultsV2': 2.0},
+                      {'writerReceiptDefaultsV2': 1}, {'writerReceiptDefaultsV1': 1},
+                      {'scope': None}, {'jobName': None}, {'parentPid': full['pid']}, {'parentBirth': None},
+                      {'phase': 'deferred'}, {'reason': 'exact-native-child-and-job-writer-quiescent'},
+                      {'attemptId': '..'}, {'pid': True}, {'pid': 1 << 32}, {'pid': 0},
+                      {'writerProcessCreation100ns': '0123'}, {'writerProcessCreation100ns': str(1 << 64)},
+                      {'writerProcessCreation100ns': 123}, {'writerProcessCreation100ns': None})
+        for changes in bad_values:
+            with self.subTest(changes=changes):
+                bad = {**compact, **changes}
+                self.assertEqual(restore_hidhide_cli_receipt(bad), (bad, 'invalid-writer-receipt-defaults'))
+                self.assertFalse(self.record(bad)['writerSettlementReported'])
+        without_birth = {k: v for k, v in compact.items() if k != 'writerProcessCreation100ns'}
+        self.assertEqual(restore_hidhide_cli_receipt(without_birth), (without_birth, 'invalid-writer-receipt-defaults'))
+
     def test_deferred_rejected_and_history_hint_remain_independent(self):
         for phase in ('deferred','launch-rejected'):
             row=self.row();row.update(phase=phase,reason='unrecognised-store-reason',attemptId='',jobName='',parentPid=0,parentBirth='',childPid=0,childBirth='');value=self.record(row);self.assertEqual(value['state'],'reported-'+phase);self.assertFalse(value['writerSettlementReported']);self.assertFalse(value['reported']['reasonKnown']);self.assertNotIn('reason',value['reported'])
@@ -1111,6 +2376,36 @@ class QuarantineObservationTests(unittest.TestCase):
                 self.assertEqual(self.repeats([base, boundary, base]), {})
         self.assertEqual(self.repeats([self.row(owner='future'), self.row(owner='future')]), {})
 
+    def test_quarantine_explicit_lane_markers(self):
+        birth = '134401550065218552'
+        base = self.row(writerProcessCreation100ns=birth)
+        held = self.row('input-host-quarantine-restore-held', writerProcessCreation100ns=birth)
+        marked = lambda row, flag: {**row, 'quarantineRepeatSample': flag}
+        wire = lambda rows: b''.join(json.dumps(row).encode() + b'\r\n' for row in rows)
+        low, detail = 'native-lifecycle.log.1', 'native-detail.1.log'
+        low_error = wire([marked(base, True)])
+        detail_error = wire([marked(held, False)])
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'fixture.zip'
+            with zipfile.ZipFile(path, 'w') as z:
+                z.writestr('YeManCC-export-manifest.txt', f'processId=37\nwriterProcessCreation100ns={birth}\n')
+                z.writestr(low, wire([base, marked(base, False), marked(base, False), base, marked(base, 1)]) + low_error)
+                z.writestr(detail, wire([marked(held, True), marked(held, 0), held]) + b'bad-json\n' + detail_error)
+                z.writestr('nested/' + detail, detail_error)
+                z.writestr('native-detail.log.pending', detail_error)
+                z.writestr('native-lifecycle.log.pending', low_error)
+            result = audit_zip(path, {'baseEvents': [], 'baseEventCount': 0})
+        self.assertEqual({(v['kind'], v['file'], tuple(v['exampleLines'])) for v in result['violations']},
+                         {('quarantine-repeat-in-native-low', low, (6,)),
+                          ('quarantine-resident-in-native-detail', detail, (5,))})
+        for finding in result['violations']:
+            is_low = finding['file'] == low
+            field = 'nativeLowFindingWriterFootprint' if is_low else 'nativeDetailFindingWriterFootprint'
+            self.assertEqual(sum(item['bytes'] for item in finding[field]['buckets'].values()),
+                             len(low_error if is_low else detail_error))
+        self.assertEqual(self.repeats([base, marked(base, False), base]), {})
+        self.assertEqual(self.repeats([base, marked(base, 1), base]), {})
+
     def test_quarantine_zip_lane_and_duplicate_references_keep_raw_values(self):
         import warnings
         base = self.row()
@@ -1127,9 +2422,20 @@ class QuarantineObservationTests(unittest.TestCase):
                     archive.writestr('native-lifecycle.log', payload)
                     archive.writestr('native-lifecycle-detail.log', payload)
                     archive.writestr('native-lifecycle.log.1', json.dumps(base) + '\n')
+                    archive.writestr('native-lifecycle.1.log', payload)
+                    archive.writestr('native-lifecycle.1.log', json.dumps(base) + '\n')
+                    archive.writestr('native-lifecycle.previous.log', payload)
+                    archive.writestr('native-lifecycle.prev.log', json.dumps(base) + '\n{broken}\n' + json.dumps(base) + '\n')
+                    archive.writestr('steam/native-lifecycle.1.log', payload)
+                    archive.writestr('native-lifecycle.log.pending', payload)
             report = audit_zip(path, {'baseEvents': [], 'baseEventCount': 0})
             findings = report['violations']
-            self.assertEqual(len(findings), 4)
+            self.assertEqual(sorted((f['file'], f['archiveEntryOccurrence'], f['event'], f['exampleLines'])
+                                    for f in findings), sorted(
+                (name, occurrence, row['event'], [line])
+                for name, occurrence in (('native-lifecycle.log', 0), ('native-lifecycle.log', 1),
+                                         ('native-lifecycle.1.log', 0), ('native-lifecycle.previous.log', 0))
+                for row, line in ((base, 2), (held, 4))))
             for finding in findings:
                 self.assertEqual(finding['counts']['all'], 1)
                 self.assertEqual(finding['counts']['currentPidMatch'], 1)
@@ -1755,6 +3061,428 @@ class MenuInputTraceTests(unittest.TestCase):
         self.assertEqual(result['unrecognizedTraceSnapshots'],1)
         self.assertEqual(result['snapshots'][0]['reported'],{})
         self.assertFalse(result['manifestSuppliesWriterBirth'] or result['identityCopySuppliesWriterBirth'])
+
+
+class CommonFrameLaneTests(unittest.TestCase):
+    def test_reverse_check_preserves_periodic_and_unknown_rows(self):
+        birth = '134401550065218552'
+        event = 'input-host-frame-evidence'
+        row = {'event': event, 'pid': 37, 'writerProcessCreation100ns': birth, 'formatVersion': 2,
+               'diagnosticOnly': True, 'snapshotReason': 'state-change', 'diagnosticRecoveryReoffer': False,
+               'source': {'snapshotKnown': True}, 'frameProof': {}}
+        moved = [row, {**row, 'frameTopologyOnlyV1': True}, {**row, 'diagnosticRecoveryReoffer': True},
+                 {**row, 'source': {'snapshotKnown': False}}]
+        periodic = {**row, 'snapshotReason': 'periodic', 'frameScopeSchema': 1}
+        unknown = [{**row, 'formatVersion': 2.0}, {**row, 'diagnosticOnly': 1},
+                   {**row, 'diagnosticRecoveryReoffer': None}, {**row, 'source': {'snapshotKnown': 1}},
+                   {**row, 'source': {'snapshotKnown': True, 'inactiveTopologySample': True}},
+                   {**row, 'frameScopeSchema': 1}, {**row, 'frameProof': None},
+                   {k: v for k, v in {**row, 'type': event}.items() if k != 'event'}]
+
+        def wire(value):
+            return json.dumps(value).encode() + b'\r\n'
+
+        operation = dict(schema=1, id='37-400-1', writerPid=37, writerProcessCreation100ns=birth,
+                         ordinal='1', startedTickMs='400', scope='admitted-ordinary-log-export;diagnostic-correlation-only')
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'frame.zip'
+            low, detail = 'native-lifecycle.log.1', 'native-detail.log.1'
+            with zipfile.ZipFile(path, 'w') as z:
+                z.writestr('YeManCC-export-manifest.txt', 'processId=37\nexportOperation=' + json.dumps(operation) + '\n')
+                z.writestr(low, wire(row) + wire(periodic))
+                z.writestr(detail, wire(periodic) + b'bad-json\n' + b''.join(wire(r) for r in moved + unknown))
+                z.writestr('nested/' + detail, wire(row))
+                z.writestr('native-detail.log.pending', wire(row))
+            result = audit_zip(path, {'baseEvents': [event], 'baseEventCount': 1})
+        findings = result['violations']
+        self.assertCountEqual([(v['kind'], v['file'], v['exampleLines']) for v in findings],
+                              [('known-detail-in-native-low', low, [2]),
+                               ('common-frame-transition-in-native-detail', detail, [3, 4, 5, 6])])
+        reverse = next(v for v in findings if v['file'] == detail)
+        self.assertEqual(reverse['archiveEntryOccurrence'], 0)
+        self.assertEqual(reverse['nativeDetailFindingWriterFootprint']['buckets']['export-writer'],
+                         {'rows': len(moved), 'bytes': sum(len(wire(r)) for r in moved)})
+
+
+class FocusAndSummonPreflightTests(unittest.TestCase):
+    def test_only_explicit_periodic_focus_sample_in_native_low_is_wrong(self):
+        row = dict(event='focus-foreground-changed', why='1hz', pid=37)
+        controls = [dict(row, why=why) for why in ('resume', 'focus', '1Hz', None, True, ['1hz'])]
+        controls += [dict(row, event='focus-foreground-change'), dict(type=row['event'], why='1hz')]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'focus.zip'
+            wire = ''.join(json.dumps(item) + '\n' for item in [row, *controls])
+            with zipfile.ZipFile(path, 'w') as archive:
+                for name in ('native-lifecycle.1.log', 'native-detail.log', 'focus-trace.log.1',
+                             'nested/native-lifecycle.log', 'native-lifecycle.log.pending'):
+                    archive.writestr(name, wire)
+            result = audit_zip(path, {'baseEvents': [row['event']]})
+        found = [r for r in result['violations'] if r['kind'] == 'known-detail-in-native-low']
+        self.assertEqual([(r['file'], r['event'], r['exampleLines']) for r in found],
+                         [('native-lifecycle.1.log', row['event'], [1])])
+
+    def test_preflight_reader_preserves_raw_and_does_not_fill_trigger(self):
+        row = dict(event='summon-isolation-preflight', mode='original-game-latched', gameOpen=True,
+                   observationGeneration=9, summonPreflightDefaultsV1=1)
+        explicit = dict(row, preflightTrigger='game-observed-after-preflight')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'preflight.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log', json.dumps(row)+'\n')
+                archive.writestr('native-detail.log.1', json.dumps(explicit)+'\n')
+                for other in ('nested/native-lifecycle.log', 'native-lifecycle.log.pending', 'focus-trace.log'):
+                    archive.writestr(other, json.dumps(row)+'\n')
+            observed = [r for r in iter_ai_records(path) if 'summonPreflightDefaults' in r]
+        self.assertCountEqual([r['value'] for r in observed], [row, explicit])
+        for record in observed:
+            self.assertEqual(record['summonPreflightDefaults']['restoredFields'],
+                dict(authority='unique-game-observation', phase='before-window-show',
+                     foregroundIsGameAuthority=False, deviceWorkIssued=False))
+
+    def test_preflight_projection_leaves_inline_unknown_and_legacy_values_alone(self):
+        from ai_log_reader import summon_preflight_defaults_projection as project
+        row = dict(event='summon-isolation-preflight', summonPreflightDefaultsV1=1)
+        for value in (True, '1', 1.0, 2, None):
+            self.assertEqual(project(dict(row, summonPreflightDefaultsV1=value)), {'state': 'invalid-envelope'})
+        for field in ('authority', 'phase', 'foregroundIsGameAuthority', 'deviceWorkIssued'):
+            self.assertEqual(project(dict(row, **{field: None})),
+                             {'state': 'conflicting-inline-fields', 'fields': [field]})
+        self.assertIsNone(project(dict(row, event='summon-isolation-selected')))
+        self.assertIsNone(project(dict(event=row['event'], gameOpen=True)))
+
+
+class SteamLightLeaseReceiptTests(unittest.TestCase):
+    def test_native_zip_restores_exact_receipts_without_inferring_a_steam_request(self):
+        row = dict(event='summon-light-gamepad', acknowledged=True, reason='no-steam-lease',
+                   session=3, serial=7, lightLeaseReceiptV1=1)
+        rows = [row, dict(row, acknowledged=False, steamRequestReturned=True),
+                dict(row, steamRequestReturned=False)]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'lease.zip'
+            wire = ''.join(json.dumps(item) + '\n' for item in rows)
+            with zipfile.ZipFile(path, 'w') as archive:
+                for name in ('native-lifecycle.log.1', 'native-detail.log', 'nested/native-lifecycle.log.1',
+                             'native-lifecycle.log.pending', 'virtual-gamepad.log'):
+                    archive.writestr(name, wire)
+            found = [r for r in iter_ai_records(path) if 'steamLightLeaseReceipt' in r]
+        self.assertEqual([r['value'] for r in found], rows * 2)
+        self.assertEqual([r['steamLightLeaseReceipt']['restoredFields'] for r in found], [
+            dict(scope='steam-gamepad-navigation', leaseMs=3000, renewalMs=750, deviceVisibilityChanged=False,
+                 result=result) for result in ('acknowledged', 'unconfirmed', 'acknowledged') * 2])
+
+    def test_invalid_ack_marker_and_conflicting_inline_values_stay_unresolved(self):
+        from ai_log_reader import steam_light_lease_receipt_projection as project
+        row = dict(event='summon-light-gamepad', acknowledged=True, lightLeaseReceiptV1=1)
+        for value in (True, 1.0, '1', None, 2):
+            self.assertEqual(project(dict(row, lightLeaseReceiptV1=value)), {'state': 'invalid-envelope'})
+        for value in (1, 0, None, 'true'):
+            self.assertEqual(project(dict(row, acknowledged=value)), {'state': 'invalid-envelope'})
+        for field in ('scope', 'leaseMs', 'renewalMs', 'deviceVisibilityChanged', 'result'):
+            self.assertEqual(project(dict(row, **{field: None})),
+                             {'state': 'conflicting-inline-fields', 'fields': [field]})
+        self.assertIsNone(project(dict(row, event='steam-light-fallback')))
+        self.assertIsNone(project(dict(event=row['event'], acknowledged=True)))
+
+
+class TargetReturnRecordScopeTests(unittest.TestCase):
+    def test_projection_preserves_original_history_receipt_for_native_root_members_and_mirror(self):
+        row = dict(event='input-host-target-return-record', phase='physical-path-settled',
+                   reason='exact-owned-path-readback-not-hidden', revision=101,
+                   historyBindingMatched=False, originKey='fixture-origin', returnRecordScopeV1=1)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'return.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                for name in ('native-lifecycle.log', 'native-detail.log.1', 'virtual-gamepad.log.1',
+                             'nested/native-lifecycle.log', 'native-lifecycle.log.pending',
+                             'nested/virtual-gamepad.log', 'virtual-gamepad.log.pending'):
+                    archive.writestr(name, json.dumps(row) + '\n')
+            rows = [r for r in iter_ai_records(path) if 'targetReturnRecordScope' in r]
+        self.assertEqual([r['value'] for r in rows], [row] * 3)
+        self.assertEqual([r['targetReturnRecordScope']['restoredFields'] for r in rows], [
+            dict(scope='target-and-owned-physical-write-ahead;current-owner-settlement;R3-bounded-cold-return',
+                 historyOnly=True, currentAdmission=False, gameInputVerified=False)] * 3)
+
+    def test_old_rows_bad_versions_and_inline_values_stay_unresolved(self):
+        from ai_log_reader import target_return_record_scope_projection as project
+        row = dict(event='input-host-target-return-record', returnRecordScopeV1=1)
+        for marker in (True, 1.0, '1', None, 2):
+            self.assertEqual(project(dict(row, returnRecordScopeV1=marker)), {'state': 'invalid-envelope'})
+        for field in ('scope', 'historyOnly', 'currentAdmission', 'gameInputVerified'):
+            self.assertEqual(project(dict(row, **{field: None})),
+                             {'state': 'conflicting-inline-fields', 'fields': [field]})
+        self.assertIsNone(project(dict(row, event='input-host-target-return-record-next')))
+        self.assertIsNone(project(dict(event=row['event'], gameInputVerified=False)))
+
+
+class OemHidReadFlagsTests(unittest.TestCase):
+    def test_projection_preserves_read_completion_without_claiming_close(self):
+        drain = dict(event='oem-hid-read-lifecycle', status='drain-complete', success=False, error=995,
+                     hidReadFlagsV1=1)
+        closed = dict(drain, status='closed')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'hid.zip'
+            wire = ''.join(json.dumps(row) + '\n' for row in (drain, closed))
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.prev.log', wire)
+                archive.writestr('nested/native-lifecycle.prev.log', wire)
+                archive.writestr('native-lifecycle.log.pending', wire)
+            rows = [r for r in iter_ai_records(path) if 'oemHidReadFlags' in r]
+        self.assertEqual([r['value'] for r in rows], [drain, closed])
+        self.assertEqual([r['oemHidReadFlags']['restoredFields'] for r in rows],
+                         [{'resourceTerminal': True}, {'readPending': False, 'resourceTerminal': True}])
+
+    def test_unknown_marker_status_and_inline_flags_stay_unresolved(self):
+        from ai_log_reader import oem_hid_read_flags_projection as project
+        row = dict(event='oem-hid-read-lifecycle', status='drain-complete', hidReadFlagsV1=1)
+        for marker in (True, 1.0, '1', None, 2):
+            self.assertEqual(project(dict(row, hidReadFlagsV1=marker)), {'state': 'invalid-envelope'})
+        self.assertEqual(project(dict(row, status=[])), {'state': 'invalid-envelope'})
+        self.assertEqual(project(dict(row, readPending=None)),
+                         {'state': 'conflicting-inline-fields', 'fields': ['readPending']})
+        self.assertIsNone(project(dict(row, event='oem-hid-read-lifecycle-next')))
+        self.assertIsNone(project({k: v for k, v in row.items() if k != 'hidReadFlagsV1'}))
+
+
+class GyroCalibrationStorageTests(unittest.TestCase):
+    row = dict(event='gyro-calibration-result', sourceQualified=True, saved=False, storageReason='not-attempted',
+               gyroStorageDefaultsV1=1, reason='processing-source-unavailable', rolledBack=True)
+
+    def test_reader_projects_native_and_gyro_roots_without_mutating_wire_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'gyro.zip'
+            roots = ('native-lifecycle.log.1', 'native-detail.prev.log', 'gyro-motion.log')
+            members = (*roots, 'gyro-motion-samples.log', 'nested/gyro-motion.log', 'native-lifecycle.log.pending')
+            with zipfile.ZipFile(path, 'w') as archive:
+                for member in members:
+                    archive.writestr(member, json.dumps(self.row) + '\r\n')
+            rows = [r for r in iter_ai_records(path) if 'gyroCalibrationStorage' in r]
+        self.assertEqual(len(rows), len(roots))
+        for record in rows:
+            self.assertEqual(record['value'], self.row)
+            self.assertEqual(record['gyroCalibrationStorage'], {'state': 'restorable', 'restoredFields': {
+                'storageReplaced': False, 'storageReadbackVerified': False, 'storageError': 0, 'recoveryPath': ''}})
+
+    def test_invalid_or_conflicting_storage_evidence_is_not_decoded(self):
+        from ai_log_reader import gyro_calibration_storage_projection as project
+        invalid = [{'gyroStorageDefaultsV1': marker} for marker in (True, 1.0, '1', None, 2)]
+        invalid += [{'sourceQualified': 1}, {'saved': 0}, {'saved': True}, {'storageReason': 'replaced'}]
+        for mutation in invalid:
+            self.assertEqual(project({**self.row, **mutation}), {'state': 'invalid-envelope'})
+        self.assertEqual(project(dict(self.row, storageError=0, recoveryPath=None)), {
+            'state': 'conflicting-inline-fields', 'fields': ['recoveryPath', 'storageError']})
+        self.assertIsNone(project(dict(self.row, event='gyro-auto-calibrate-start')))
+        self.assertIsNone(project({k: v for k, v in self.row.items() if k != 'gyroStorageDefaultsV1'}))
+
+
+class UiOutputScopeTests(unittest.TestCase):
+    def test_rotated_root_projection_preserves_host_and_neutral_evidence(self):
+        passthrough = {'event': 'virtual-ui-output', 'phase': 'passthrough-requested', 'uiOwnsInput': False,
+                       'submitNeutral': True, 'neutralAccepted': True, 'hostSubmission': 'frame-accepted',
+                       'uiOutputScopeV1': 1}
+        dsu = {'event': 'dsu-ui-output', 'phase': 'neutral', 'uiOwnsInput': False,
+               'submitNeutral': True, 'uiOutputScopeV1': 1}
+        raw = ''.join(json.dumps(row) + '\r\n' for row in (passthrough, dsu)).encode()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'fixture.zip'
+            with zipfile.ZipFile(path, 'w') as z:
+                z.writestr('native-lifecycle.prev.log', raw)
+                z.writestr('nested/native-lifecycle.prev.log', raw)
+                z.writestr('native-lifecycle.log.pending', raw)
+            projections = [r for r in iter_ai_records(path) if r['record'] == 'json_record' and 'uiOutputScope' in r]
+        self.assertEqual([r['value'] for r in projections], [passthrough, dsu])
+        for projection, scope in zip(projections, ('final-virtual-output-only', 'dsu-feed-only'), strict=True):
+            self.assertEqual(projection['uiOutputScope'], {'state': 'restorable',
+                'restoredFields': {'verificationScope': scope, 'diagnosticRecoveryReoffer': False}})
+
+    def test_unknown_markers_explicit_fields_and_other_events_stay_unresolved(self):
+        from ai_log_reader import ui_output_scope_projection as project
+        row = {'event': 'virtual-ui-output', 'uiOutputScopeV1': 1}
+        for value in (True, 1.0, '1', None, 2):
+            self.assertEqual(project({**row, 'uiOutputScopeV1': value}), {'state': 'invalid-envelope'})
+        self.assertEqual(project({**row, 'verificationScope': None, 'diagnosticRecoveryReoffer': True}),
+                         {'state': 'conflicting-inline-fields', 'fields': ['diagnosticRecoveryReoffer', 'verificationScope']})
+        self.assertIsNone(project({**row, 'event': 'steamdeck-ui-output'}))
+        self.assertIsNone(project({'event': 'virtual-ui-output', 'verificationScope': 'final-virtual-output-only'}))
+
+
+class SummonSelectionDefaultsTests(unittest.TestCase):
+    def test_root_rotation_restores_policy_without_altering_ticket_values(self):
+        light = dict(event='summon-isolation-selected', session=0, mode='light-no-game', lightTicketSerial=87,
+                     entrypoint='foreground-main-window', summonSelectionDefaultsV1=1)
+        original = dict(event='summon-isolation-selected', session=2, mode='original', lightTicketSerial=0,
+                        summonSelectionDefaultsV1=1)
+        raw = ''.join(json.dumps(row) + '\r\n' for row in (light, original)).encode()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'summon.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log.1', raw)
+                archive.writestr('nested/native-lifecycle.log.1', raw)
+            rows = [r for r in iter_ai_records(path) if 'summonSelectionDefaults' in r]
+        self.assertEqual([r['value'] for r in rows], [light, original])
+        for index, policy in enumerate(('keep-device-steam-navigation-lease', 'original-owner')):
+            self.assertEqual(rows[index]['summonSelectionDefaults'], {'state': 'restorable', 'restoredFields': {
+                'authority': 'unique-game-observation', 'nativeBorrowExemptionRequested': index == 0,
+                'physicalIsolationPolicy': policy}})
+
+    def test_legacy_conflicting_and_malformed_selection_is_not_inferred(self):
+        from ai_log_reader import summon_selection_defaults_projection as project
+        row = dict(event='summon-isolation-selected', mode='light-no-game', summonSelectionDefaultsV1=1)
+        for value in (True, 1.0, '1', None, 2):
+            self.assertEqual(project(dict(row, summonSelectionDefaultsV1=value)), {'state': 'invalid-envelope'})
+        self.assertEqual(project(dict(row, mode='future')), {'state': 'invalid-envelope'})
+        self.assertEqual(project(dict(row, physicalIsolationPolicy=None)),
+                         {'state': 'conflicting-inline-fields', 'fields': ['physicalIsolationPolicy']})
+        self.assertIsNone(project(dict(row, event='summon-light-gamepad')))
+        self.assertIsNone(project({'event': 'summon-isolation-selected', 'mode': 'original'}))
+
+
+class ScreenMenuOriginTests(unittest.TestCase):
+    def test_reader_keeps_pre_queue_power_and_raw_member(self):
+        packed = {'event': 'screen-standalone-special', 'phase': 'completed', 'requestId': 9,
+                  'generation': (1 << 64) - 1, 'screenMenuOriginPowerV1': '18446744073709551615',
+                  'producerPowerGeneration': 15, 'powerGeneration': 18}
+        expected = {'requestId': '9', 'generation': '18446744073709551615', 'channel': 'screen', 'schema': 1,
+                    'powerGeneration': '18446744073709551615', 'powerSource': 'native-before-action-queue'}
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'screen-menu.zip'
+            raw = (json.dumps(packed) + '\r\n').encode()
+            with zipfile.ZipFile(path, 'w') as z:
+                z.writestr('native-lifecycle.prev.log', raw)
+                z.writestr('nested/native-lifecycle.prev.log', raw)
+                z.writestr('native-detail.log.pending', raw)
+            decoded = [r for r in iter_ai_records(path) if r['record'] == 'json_record']
+            with zipfile.ZipFile(path) as z:
+                self.assertEqual(z.read('native-lifecycle.prev.log'), raw)
+        projected = [r for r in decoded if 'screenMenuOrigin' in r]
+        self.assertEqual(len(projected), 1)
+        self.assertEqual(projected[0]['value'], packed)
+        self.assertEqual(projected[0]['byteLength'], len(raw))
+        self.assertEqual(projected[0]['screenMenuOrigin'],
+                         {'state': 'restorable', 'restoredFields': {'menuActionOrigin': expected}})
+
+    def test_conflicts_and_invalid_copies_do_not_restore(self):
+        from ai_log_reader import screen_menu_origin_projection as project
+        row = {'event': 'screen-standalone-special', 'phase': 'completed',
+               'requestId': 1, 'generation': 2, 'screenMenuOriginPowerV1': '0'}
+        self.assertEqual(project(row)['restoredFields']['menuActionOrigin']['powerGeneration'], '0')
+        for key, values in {'screenMenuOriginPowerV1': (1, '00', '+1', '1\n', '18446744073709551616', None),
+                            'requestId': (True, 0, -1, 1.0, '1', 1 << 64),
+                            'generation': (False, None), 'phase': ('queued', None)}.items():
+            for value in values:
+                with self.subTest(key=key, value=value):
+                    self.assertEqual(project({**row, key: value}), {'state': 'invalid-envelope'})
+        for inline in ({'schema': 2}, None):
+            self.assertEqual(project({**row, 'menuActionOrigin': inline}),
+                             {'state': 'conflicting-inline-fields', 'fields': ['menuActionOrigin']})
+        self.assertIsNone(project({**row, 'event': 'shortcut-frontend-button'}))
+        self.assertIsNone(project({k: v for k, v in row.items() if k != 'screenMenuOriginPowerV1'}))
+
+
+class PhysicalIdentityLaneTests(unittest.TestCase):
+    event = 'physical-controller-identity'
+    marker = 'physicalIdentityScopeV1'
+    fixed = dict(source='raw-input-pnp-resolution',
+                 observationScope='per-interface-identity;selected-interface-trajectory-in-detail')
+    state = dict(event=event, snapshotReason='state-change', resolved=True, sourcePath='fixture-hid', sourceGeneration=7,
+                 pid=37, writerProcessCreation100ns='123')
+
+    def test_reverse_lane_requires_an_explicit_resolved_producer_shape(self):
+        legacy = dict(self.state, **self.fixed)
+        compact = dict(self.state, **{self.marker: 1})
+        sample = dict(compact, snapshotReason='repeat')
+        unknown = [self.state, dict(compact, **{self.marker: True}), dict(compact, source=None),
+                   dict(legacy, resolved=False), dict(legacy, resolved=1), dict(legacy, sourcePath=''),
+                   dict(legacy, sourceGeneration=True), dict(legacy, sourceGeneration=0),
+                   dict(legacy, sourceGeneration=1 << 64), dict(legacy, source='another-producer'),
+                   dict(legacy, observationScope='future'), dict(legacy, event='physical-controller-identities'),
+                   {**{k: v for k, v in legacy.items() if k != 'event'}, 'eventName': self.event}]
+        def wire(row):
+            return json.dumps(row).encode() + b'\r\n'
+        payload = b'{bad\r\n' + b''.join(map(wire, [legacy, compact, sample, *unknown]))
+        low, detail = 'native-lifecycle.2.log', 'native-detail.log.previous'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'identity.zip'
+            operation = dict(schema=1, id='37-8-1', writerPid=37, writerProcessCreation100ns='123', ordinal='1',
+                             startedTickMs='8', scope='admitted-ordinary-log-export;diagnostic-correlation-only')
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('YeManCC-export-manifest.txt', 'processId=37\nexportOperation=' + json.dumps(operation) + '\n')
+                for name in (low, detail, 'nested/' + detail, 'native-detail.log.pending'):
+                    archive.writestr(name, payload)
+            findings = [v for v in audit_zip(path, {'baseEvents': [self.event]})['violations'] if v['event'] == self.event]
+        self.assertCountEqual([(v['kind'], v['file'], v['exampleLines']) for v in findings], [
+            ('known-detail-in-native-low', low, [4]), ('physical-identity-resident-in-native-detail', detail, [2, 3])])
+        reverse = next(v for v in findings if v['file'] == detail)
+        self.assertEqual(reverse['archiveEntryOccurrence'], 0)
+        self.assertEqual(reverse['nativeDetailFindingWriterFootprint']['buckets']['export-writer'],
+                         {'rows': 2, 'bytes': len(wire(legacy)) + len(wire(compact))})
+
+    def test_scope_is_a_root_native_projection_and_keeps_conflicts_raw(self):
+        packed = dict(self.state, **{self.marker: 1})
+        rows = [packed, dict(packed, snapshotReason='repeat'), dict(packed, source=None),
+                dict(packed, **{self.marker: 1.0}), dict(packed, **{self.marker: 2}),
+                dict(packed, snapshotReason='future'), dict(packed, event='physical-controller-identities')]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'projection.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                for name in ('native-lifecycle.log.1', 'native-detail.prev.log', 'nested/native-detail.prev.log',
+                             'native-detail.log.pending', 'virtual-gamepad.log'):
+                    archive.writestr(name, ''.join(json.dumps(row) + '\n' for row in rows))
+            found = [row for row in iter_ai_records(path) if 'physicalIdentityScope' in row]
+        expected = [{'state': 'restorable', 'restoredFields': self.fixed}] * 2 + [
+            {'state': 'conflicting-inline-fields', 'fields': ['source']}] + [{'state': 'invalid-envelope'}] * 3
+        self.assertEqual([row['value'] for row in found], rows[:6] * 2)
+        self.assertEqual([row['physicalIdentityScope'] for row in found], expected * 2)
+
+
+class ConnectionRearReverseLaneTests(unittest.TestCase):
+    def test_root_lanes_preserve_context_receipts_and_detail_samples(self):
+        connection = 'gamepad-fallback-tick'
+        rear = 'msi-rear-source-observation'
+        writer = {'pid': 7, 'writerProcessCreation100ns': '134402000000000000'}
+        fallback = {**writer, 'event': connection, 'connected': False, 'connectionObservation': 'edge-outside-recent-window',
+                    'connectionEdgeReference': {'schema': 1, 'sequence': 8, 'ageMs': 151, 'powerGeneration': 4,
+                                                'observedPowerGeneration': 4, 'powerLifecycle': 'ready',
+                                                'observedPowerLifecycle': 'ready', 'appendConfirmed': True}}
+        duplicate = {**writer, 'event': connection, 'connected': False, 'duplicateConnectionEdge': True,
+                     'connectionEdgeSequence': 8, 'connectionEdgeAgeMs': 150,
+                     'connectionEdgePowerGeneration': 4, 'connectionEdgePowerLifecycle': 'ready'}
+        context = {**writer, 'event': rear, 'schema': 1, 'snapshotReason': 'context-change', 'row': 1, 'rowLimit': 48,
+                   'rearDemand': True, 'virtualTargetEnabled': False, 'keyboardHookHandlePresent': True}
+        current = {**context, 'schema': 2, 'row': 48, 'shortcutRecordingActive': False}
+        raw = {**current, 'snapshotReason': 'raw-input-change'}
+        no_edge = {**writer, 'event': connection, 'connected': True, 'connectionObservation': 'no-matching-edge'}
+        no_reference = {**no_edge, 'connectionObservation': 'edge-write-unconfirmed'}
+        moved = [fallback, no_edge, no_reference, context, current]
+        unknown = [{**no_edge, 'connectionObservation': None}, {**no_edge, 'connected': 1},
+                   {**no_edge, 'duplicateConnectionEdge': True}, {**fallback, 'connectionEdgeReference': None},
+                   {**fallback, 'connectionEdgeReference': {**fallback['connectionEdgeReference'], 'ageMs': 150}},
+                   {**context, 'schema': True}, {**context, 'schema': 3}, {**context, 'row': 49},
+                   {**context, 'rearDemand': 1}, {**context, 'schema': 2}]
+        low, detail = 'native-lifecycle.log.2', 'native-detail.prev.log'
+        def wire(rows):
+            return b''.join((json.dumps(row) + '\n').encode() for row in rows)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'split.zip'
+            operation = dict(schema=1, id='7-400-1', writerPid=7, writerProcessCreation100ns=writer['writerProcessCreation100ns'],
+                             ordinal='1', startedTickMs='400', scope='admitted-ordinary-log-export;diagnostic-correlation-only')
+            with zipfile.ZipFile(path, 'w') as z:
+                z.writestr('YeManCC-export-manifest.txt', 'processId=7\nexportOperation=' + json.dumps(operation) + '\n')
+                z.writestr(low, wire(moved + [duplicate, raw]))
+                z.writestr(detail, wire([duplicate, raw] + moved + unknown))
+                z.writestr('nested/' + detail, wire(moved))
+                z.writestr('native-detail.log.pending', wire(moved))
+            result = audit_zip(path, {'baseEvents': [connection, rear], 'baseEventCount': 2})
+        findings = result['violations']
+        self.assertCountEqual([(v['kind'], v['file'], v['exampleLines']) for v in findings],
+                              [('known-detail-in-native-low', low, [6]),
+                               ('input-activity-counters-in-native-low', low, [7]),
+                               ('fallback-connection-resident-in-native-detail', detail, [3, 4, 5]),
+                               ('msi-rear-context-in-native-detail', detail, [6, 7])])
+        for event, rows in ((connection, moved[:3]), (rear, moved[3:])):
+            reverse = next(v for v in findings if v['file'] == detail and v['event'] == event)
+            self.assertEqual(reverse['archiveEntryOccurrence'], 0)
+            self.assertEqual(reverse['nativeDetailFindingWriterFootprint']['buckets']['export-writer'],
+                             {'rows': len(rows), 'bytes': len(wire(rows))})
 
 
 class AuditTests(unittest.TestCase):
@@ -2697,6 +4425,50 @@ class AuditTests(unittest.TestCase):
         collector.observe(filename,list(enumerate(rows,1)),{'archiveEntryOccurrence':occurrence})
         return collector.evidence()
 
+    def test_virtual_step_producer_copies_preserve_recovery_projection(self):
+        from copy import deepcopy
+        from ai_log_reader import VIRTUAL_PRODUCER_COPY_FIELDS, payload_records, virtual_step_producer_copies
+        from log_lane_audit import virtual_journal_first_sample
+        raw = self.recovery_first_row('input-host-runtime-recovery')
+        compact = deepcopy(raw)
+        names = ('requestId', 'reason', 'stage')
+        compact['producerIdentityCopiesV1'] = sum(1 << VIRTUAL_PRODUCER_COPY_FIELDS.index(name) for name in names)
+        expected = {name: compact['firstSample']['producer'].pop(name) for name in names}
+        self.assertEqual(virtual_step_producer_copies(compact), expected)
+        self.assertEqual(virtual_journal_first_sample(compact), raw['firstSample'])
+        self.assertEqual(self.recovery_first_summary([compact]), self.recovery_first_summary([raw]))
+        data = (json.dumps(compact) + '\n').encode('utf-8')
+        row, = payload_records('virtual-adaptation.log', data, 1, 'json-lines')
+        self.assertEqual(row['value'], compact)
+        self.assertEqual(row['virtualStepProducerCopies'], expected)
+        for name in ('nested/virtual-adaptation.log', 'virtual-adaptation-session.jsonl'):
+            row, = payload_records(name, data, 2, 'json-lines')
+            self.assertNotIn('virtualStepProducerCopies', row)
+
+    def test_virtual_step_producer_copies_reject_corruption(self):
+        from copy import deepcopy
+        from ai_log_reader import VIRTUAL_PRODUCER_COPY_FIELDS, virtual_step_producer_copies
+        from log_lane_audit import virtual_journal_first_sample
+        row = self.recovery_first_row()
+        bit = 1 << VIRTUAL_PRODUCER_COPY_FIELDS.index('requestId')
+        del row['firstSample']['producer']['requestId']
+        row['producerIdentityCopiesV1'] = bit
+        invalid = [dict(row, producerIdentityCopiesV1=mask) for mask in (0, True, -1, 1 << 21, float(bit))]
+        invalid += [dict(row, virtualFrameSampleSchema=1), dict(row, event='first-witness'),
+                    dict(row, uniqueKey=dict(row['uniqueKey'], schema=True))]
+        conflict = deepcopy(row)
+        conflict['firstSample']['producer']['requestId'] = 10
+        invalid.append(conflict)
+        for missing in (None, {}, [], 1.5, 1 << 64):
+            case = deepcopy(row)
+            case['uniqueKey']['identity']['requestId'] = missing
+            invalid.append(case)
+        for case in invalid:
+            with self.subTest(case=case):
+                self.assertIsNone(virtual_step_producer_copies(case))
+                self.assertIsNone(virtual_journal_first_sample(case))
+        self.assertIn('unsupported-producer-identity-copies', json.dumps(self.recovery_first_summary([conflict])))
+
     def test_recovery_first_reader_exact_domains_and_reported_success_boundaries(self):
         rows=[self.recovery_first_row(event) for event in ('input-host-runtime-recovery','input-host-recovery-exhausted','input-host-recovery-fallback')]
         result=self.recovery_first_summary(rows);member=result['members'][0]
@@ -2842,6 +4614,953 @@ class AuditTests(unittest.TestCase):
             self.assertEqual(sum(row['counts']['all'] for row in violations),7)
             self.assertTrue(all(row['kind']=='known-detail-in-native-low' and row['file']=='native-lifecycle.log' for row in violations))
 
+    def test_msi_backkey_neutral_frame_marker_controls_lane(self):
+        base = {'event': 'msi-backkey-frame-link', 'pid': 37,
+                'effectiveBackButtons': 0, 'frameBackButtons': 0}
+        rows = [base, {**base, 'neutralFrameSample': False}, {**base, 'neutralFrameSample': 1},
+                {**base, 'neutralFrameSample': True}]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'backkey.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log.1', ''.join(json.dumps(row)+'\n' for row in rows))
+                archive.writestr('native-detail.log', json.dumps(rows[-1])+'\n')
+            report = audit_zip(path, {'baseEvents': [base['event']]})
+            self.assertEqual([(v['kind'], v['file'], v['exampleLines']) for v in report['violations']],
+                             [('known-detail-in-native-low', 'native-lifecycle.log.1', [4])])
+
+    def test_legacy_msi_neutral_submit_burst_stays_separate_from_violations(self):
+        origin = {'event': 'msi-backkey-frame-link', 'pid': 37, 'writerProcessCreation100ns': '123',
+                  'site': 'frame-submit-boundary', 'receiptScope': 'submit-boundary', 'source': 'msi-dinput',
+                  'verificationScope': 'ymcc-native-producer', 'powerLifecycle': 'ready', 'powerGeneration': 1,
+                  'epoch': 2, 'sourceGeneration': 3, 'effectiveBackButtons': 0, 'frameBackButtons': 0,
+                  'encodedBackButtons': 'UNKNOWN', 'wireBackBits': 'UNKNOWN', 'frameSequence': 8,
+                  'submitOutcome': 'accepted', 'dropReason': '', 'linked': True, 'time': '2026-11-12T15:47:19.000'}
+        neutral = {**origin, 'frameSequence': 9, 'submitOutcome': 'not-submitted',
+                   'dropReason': 'semantic-neutral', 'linked': False, 'time': '2026-11-12T15:47:19.100'}
+        cases = [([], neutral, True),
+                 ([{'pid': 38, 'powerGeneration': 9, 'powerLifecycle': 'sleeping'}], neutral, True),
+                 ([{'pid': 37, 'writerProcessCreation100ns': '456'}], neutral, False),
+                 ([{'pid': 37, 'powerGeneration': 2}], neutral, False),
+                 ([{'pid': 37, 'powerLifecycle': 'sleeping'}], neutral, False),
+                 ([None], neutral, False),
+                 ([{**origin, 'site': 'host-report-consumed'}], neutral, False),
+                 ([{**origin, 'frameBackButtons': 2}], neutral, False),
+                 ([{**origin, 'submitOutcome': 'rejected', 'dropReason': 'host-rejected', 'linked': False}], neutral, False),
+                 ([], {**neutral, 'time': '2026-11-12T15:47:19.101'}, False),
+                 ([], {**neutral, 'time': '2026-11-12T15:47:18.999'}, False),
+                 ([], {**neutral, 'frameSequence': 8}, False),
+                 ([], {**neutral, 'sourceGeneration': 4}, False),
+                 ([], {**neutral, 'epoch': 3}, False),
+                 ([], {**neutral, 'effectiveBackButtons': False}, False),
+                 ([], {**neutral, 'neutralFrameSample': False}, False),
+                 ([], {**neutral, 'linkPowerGeneration': 1}, False)]
+        with tempfile.TemporaryDirectory() as directory:
+            for middle, last, expected in cases:
+                with self.subTest(middle=middle, last=last):
+                    path = Path(directory)/'backkey.zip'
+                    lines = [(json.dumps(row)+'\r\n').encode() for row in (origin, *middle, last)]
+                    with zipfile.ZipFile(path, 'w') as archive:
+                        archive.writestr('native-lifecycle.log', b''.join(lines))
+                        archive.writestr('native-detail.log', b''.join(lines))
+                    report = audit_zip(path, {'baseEvents': [origin['event']]})
+                    self.assertFalse(report['violations'])
+                    field = 'legacyMsiNeutralSubmitRepeatEvidence'
+                    files = {f['file']: f for f in report['files']}
+                    self.assertNotIn(field, files['native-detail.log'])
+                    self.assertEqual(field in files['native-lifecycle.log'], expected)
+                    if expected:
+                        evidence = files['native-lifecycle.log'][field]
+                        self.assertEqual(evidence['exampleLines'], [len(lines)])
+                        buckets = evidence['writerFootprint']['buckets']
+                        self.assertEqual(sum(b['bytes'] for b in buckets.values()), len(lines[-1]))
+
+    def test_unattributed_msi_neutral_rows_are_counted_without_inferred_delivery_or_lanes(self):
+        base = {'event': 'msi-backkey-frame-link', 'pid': 37, 'site': 'frame-submit-boundary',
+                'receiptScope': 'submit-boundary', 'source': 'msi-dinput', 'verificationScope': 'ymcc-native-producer',
+                'powerLifecycle': 'ready', 'powerGeneration': 1, 'epoch': 2, 'sourceGeneration': 3, 'frameSequence': 8,
+                'effectiveBackButtons': 0, 'frameBackButtons': 0, 'encodedBackButtons': 'UNKNOWN', 'wireBackBits': 'UNKNOWN',
+                'submitOutcome': 'accepted', 'dropReason': '', 'linked': True}
+        neutral = {**base, 'writerProcessCreation100ns': None, 'submitOutcome': 'not-submitted',
+                   'dropReason': 'semantic-neutral', 'linked': False}
+        others = [{**base, **change} for change in (
+            {'writerProcessCreation100ns': '134402000000000000'}, {'frameBackButtons': 2}, {'frameBackButtons': False},
+            {'site': 'host-report-consumed'}, {'linked': False}, {'neutralFrameSample': False}, {'linkPowerGeneration': 1},
+            {'powerGeneration': 0}, {'submitOutcome': 'rejected', 'dropReason': 'host-rejected'})]
+        def wire(row):
+            return (json.dumps(row) + '\r\n').encode()
+        low, detail = 'native-lifecycle.prev.log', 'native-detail.log.1'
+        field = 'legacyMsiNeutralUnattributedEvidence'
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'backkey.zip'
+            with zipfile.ZipFile(path, 'w') as z:
+                z.writestr(low, wire(base) + b'invalid-json\n' + wire(neutral) + b''.join(map(wire, others)))
+                z.writestr(detail, wire(base) + wire(neutral))
+                z.writestr('nested/' + low, wire(base))
+            report = audit_zip(path, {'baseEvents': [base['event']]})
+        self.assertFalse(report['violations'])
+        result = {entry['file']: entry[field] for entry in report['files'] if field in entry}
+        self.assertEqual(list(result), [low])
+        self.assertEqual(result[low]['writerIdentity'], 'writer-unresolved')
+        self.assertEqual(result[low]['bySubmitOutcome'], {
+            'accepted': {'rows': 1, 'rawRowBytes': len(wire(base)), 'firstLine': 1, 'lastLine': 1, 'exampleLines': [1]},
+            'not-submitted': {'rows': 1, 'rawRowBytes': len(wire(neutral)), 'firstLine': 3, 'lastLine': 3, 'exampleLines': [3]},
+        })
+
+    def test_msi_trigger_only_flags_explicit_detail_selection_in_low(self):
+        base = {'event': 'msi-dinput-trigger-evidence', 'pid': 37}
+        sample = {**base, 'legacyRecordSelected': False, 'sustainedWitness': True}
+        rows = [base, {**sample, 'legacyRecordSelected': 0}, {**sample, 'legacyRecordSelected': None},
+                {**sample, 'legacyRecordSelected': 'false'},
+                {**sample, 'legacyRecordSelected': True, 'outcomeEdge': True, 'getStateHresult': -1}, sample]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'msi-trigger.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log.1', ''.join(json.dumps(row)+'\n' for row in rows))
+                archive.writestr('native-detail.log', json.dumps(sample)+'\n')
+            report = audit_zip(path, {'baseEvents': [base['event']]})
+            self.assertEqual([(v['kind'], v['file'], v['exampleLines']) for v in report['violations']],
+                             [('known-detail-in-native-low', 'native-lifecycle.log.1', [6])])
+
+    def test_input_frame_repeat_marker_controls_lane(self):
+        base = {'event': 'input-host-frame-admission', 'pid': 37, 'phase': 'before-frame-assembly',
+                'reason': 'canonical-read-context-retired', 'sourceNeutralized': True}
+        rows = [base, {**base, 'readRepeatSample': 1}, {**base, 'readRepeatSample': False},
+                {**base, 'readRepeatRecord': 'episode-start'}, {**base, 'readRepeatRecord': 'repeat-summary'},
+                {**base, 'readRepeatSample': True}]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'frame.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log.1', ''.join(json.dumps(row)+'\n' for row in rows))
+                archive.writestr('native-detail.log', json.dumps(rows[-1])+'\n')
+            report = audit_zip(path, {'baseEvents': [base['event']]})
+            self.assertEqual([(v['kind'], v['file'], v['exampleLines']) for v in report['violations']],
+                             [('known-detail-in-native-low', 'native-lifecycle.log.1', [6])])
+
+    def test_gamepad_fallback_edge_marker_controls_lane(self):
+        base = {'event': 'gamepad-fallback-tick', 'pid': 37, 'connected': True}
+        rows = [base, {**base, 'duplicateConnectionEdge': 1}, {**base, 'duplicateConnectionEdge': False},
+                {**base, 'connectionObservation': 'edge-write-unconfirmed'},
+                {**base, 'duplicateConnectionEdge': True, 'connectionEdgeSequence': 7}]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'fallback.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log', ''.join(json.dumps(row)+'\n' for row in rows))
+                archive.writestr('native-detail.log', json.dumps(rows[-1])+'\n')
+            report = audit_zip(path, {'baseEvents': [base['event']]})
+            self.assertEqual([(v['kind'], v['file'], v['exampleLines']) for v in report['violations']],
+                             [('known-detail-in-native-low', 'native-lifecycle.log', [5])])
+
+    def test_wake_rescan_marks_only_explicit_wait_dispatch(self):
+        base = {'event': 'input-host-wake-rescan', 'pid': 37, 'action': 'hot-replace-queued'}
+        repeat = {**base, 'repeatPhysicalReturnDispatch': True}
+        rows = [base, {**base, 'repeatPhysicalReturnDispatch': 1},
+                {**base, 'repeatPhysicalReturnDispatch': False}, {**repeat, 'action': 'other'}, repeat]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'wake.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log.1', ''.join(json.dumps(row)+'\n' for row in rows))
+                archive.writestr('native-detail.log', json.dumps(repeat)+'\n')
+            report = audit_zip(path, {'baseEvents': [base['event']]})
+            self.assertEqual([(v['kind'], v['file'], v['exampleLines']) for v in report['violations']],
+                             [('known-detail-in-native-low', 'native-lifecycle.log.1', [5])])
+
+    def test_hidhide_no_journal_lane_requires_explicit_no_attempt(self):
+        base = {'event': 'hidhide.unplugged-unhide', 'pid': 37, 'state': 'no-journaled-physical', 'unhideOk': False}
+        sample = {**base, 'unhideAttempted': False, 'repeatNoJournalObservation': True}
+        rows = [base, {**sample, 'unhideAttempted': True}, {**sample, 'unhideAttempted': 0},
+                {**sample, 'repeatNoJournalObservation': 1}, {**sample, 'state': 'active-journal-missing-base-identity'}, sample]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'disconnect.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log.1', ''.join(json.dumps(row)+'\n' for row in rows))
+                archive.writestr('native-detail.log', json.dumps(sample)+'\n')
+            report = audit_zip(path, {'baseEvents': [base['event']]})
+            self.assertEqual([(v['kind'], v['file'], v['exampleLines']) for v in report['violations']],
+                             [('known-detail-in-native-low', 'native-lifecycle.log.1', [6])])
+
+    def test_hidhide_restore_snapshot_lane_requires_a_repeat_witness(self):
+        base = {'event': 'hidhide.visibility-snapshot', 'phase': 'restore', 'readback': False,
+                'restoreSnapshotSequence': 15, 'restoreSnapshotTransactionId': 'fixture-txn'}
+        sample = {**base, 'repeatRestoreSnapshot': True}
+        rows = [base, {**sample, 'repeatRestoreSnapshot': False}, {**sample, 'repeatRestoreSnapshot': 1},
+                {**sample, 'readback': True}, {**sample, 'restoreSnapshotSequence': True}, sample]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'restore.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log', ''.join(json.dumps(row)+'\n' for row in rows))
+                archive.writestr('native-detail.log', json.dumps(sample)+'\n')
+            report = audit_zip(path, {'baseEvents': [base['event']]})
+            self.assertEqual([(v['kind'], v['file'], v['exampleLines']) for v in report['violations']],
+                             [('known-detail-in-native-low', 'native-lifecycle.log', [6])])
+
+    def test_mouse_cached_window_requires_marked_confirmed_cached_result(self):
+        sample = dict(event='mouse-mode-context', cachedWindowSample=True, backendReadbackFresh=False,
+                      ok=True, stateKnown=True, controlAllowed=True, provider='ymcc', on=False,
+                      foregroundImage='game.exe', backendObservedAt=10, observedAt=20,
+                      foregroundPid=4, sequence=2, foregroundCreated='11', foregroundWindow='30')
+        rows = [dict(sample, cachedWindowSample=1), dict(sample, backendReadbackFresh=True),
+                dict(sample, ok=False), dict(sample, foregroundPid=True), dict(sample, foregroundCreated='0'),
+                dict(sample, foregroundWindow='18446744073709551616'), dict(sample, provider='steam'),
+                {k: v for k, v in sample.items() if k != 'cachedWindowSample'}, sample]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'mouse-context.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log', ''.join(json.dumps(row) + '\n' for row in rows))
+                archive.writestr('native-detail.log', json.dumps(sample) + '\n')
+            report = audit_zip(path, {'baseEvents': ['mouse-mode-context']})
+        self.assertEqual([(v['kind'], v['file'], v['exampleLines']) for v in report['violations']],
+                         [('known-detail-in-native-low', 'native-lifecycle.log', [9])])
+
+    def test_hidhide_quarantine_results_require_explicit_failed_repeat_witness(self):
+        shared = dict(reason='quarantine-endpoint-absent', repeatQuarantineResult=True)
+        sweep = dict(shared, event='hidhide.sweep-all-devices', listAttempted=True, listOk=False)
+        restore = dict(shared, event='hidhide.p-hid-restore', unhideAttempted=True,
+                       status='release-unproven', commandResult='cli-fallback-failed', configReadback='UNKNOWN')
+        rows = [sweep, restore, dict(sweep, listOk=True), dict(sweep, listOk=0),
+                dict(sweep, reason='app-exit'), dict(restore, status='restored'),
+                dict(restore, repeatQuarantineResult=1), dict(restore, configReadback='not-hidden'),
+                dict(restore, commandResult='cli-fallback-accepted'),
+                {key: value for key, value in restore.items() if key != 'repeatQuarantineResult'}]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'quarantine-results.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log.1', ''.join(json.dumps(row) + '\n' for row in rows))
+                archive.writestr('native-detail.log', ''.join(json.dumps(row) + '\n' for row in rows[:2]))
+            report = audit_zip(path, {'baseEvents': [sweep['event'], restore['event']]})
+        self.assertEqual(sorted((v['kind'], v['file'], v['exampleLines']) for v in report['violations']),
+                         [('known-detail-in-native-low', 'native-lifecycle.log.1', [1]),
+                          ('known-detail-in-native-low', 'native-lifecycle.log.1', [2])])
+
+    def test_hidhide_slow_read_lane_requires_a_successful_marked_sample(self):
+        base = dict(event='input-host-command-result', command='HIDHIDE_QUERY_STATE',
+                    phase='slow-read-accepted', ok=True)
+        sample = {**base, 'slowReadSample': True}
+        rows = [base, {**base, 'slowReadReason': 'interval', 'slowReadWindow': {'count': 3}},
+                {**sample, 'slowReadSample': 1}, {**sample, 'ok': 1}, {**sample, 'ok': False},
+                {**sample, 'phase': 'transport'}, {**sample, 'command': 'TUPLE_SUBMIT_STATS'}, sample]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'slow-read.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log.1', ''.join(json.dumps(row) + '\n' for row in rows))
+                archive.writestr('native-detail.log', json.dumps(sample) + '\n')
+            report = audit_zip(path, {'baseEvents': [base['event']]})
+        self.assertEqual([(v['kind'], v['file'], v['exampleLines']) for v in report['violations']],
+                         [('known-detail-in-native-low', 'native-lifecycle.log.1', [8])])
+
+    def test_switch_wait_samples_use_the_explicit_marker_and_exact_beat(self):
+        rows = [{'event': 'input-host-switch-settle', 'switchWaitSample': True}]
+        rows += [{'event': 'input-host-switch-audit', 'beat': beat, 'switchWaitSample': True}
+                 for beat in ('throttled', 'enqueue', 'dequeue')]
+        rows += [{**rows[0], 'switchWaitSample': val} for val in (None, 1, 'true', False)]
+        rows += [{'event': 'input-host-switch-audit', 'beat': 'enqueue'},
+                 {'event': 'input-host-switch-audit', 'beat': 'request', 'switchWaitSample': True},
+                 {'event': 'input-host-switch-audit', 'beat': 'settled', 'switchWaitSample': True}]
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'switch.zip'
+            payload = ''.join(json.dumps(row) + '\n' for row in rows)
+            with zipfile.ZipFile(path, 'w') as z:
+                z.writestr('native-lifecycle.1.log', payload)
+                z.writestr('native-detail.log', payload)
+            found = [entry for entry in audit_zip(path, {'baseEvents': []})['violations']
+                     if entry['event'] in ('input-host-switch-settle', 'input-host-switch-audit')]
+        self.assertEqual(sorted((row['file'], row['event'], row['exampleLines']) for row in found), [
+            ('native-lifecycle.1.log', 'input-host-switch-audit', [2, 3, 4]),
+            ('native-lifecycle.1.log', 'input-host-switch-settle', [1])])
+
+    def test_queued_wait_marker_preserves_rejections_and_terminal_receipts(self):
+        player = {'event': 'input-host-player-start-work', 'action': 'consuming'}
+        merge = {'event': 'late-hide-enqueue', 'outcome': 'coalesced', 'coalesced': True}
+        rows = [player, merge]
+        rows += [{**row, 'switchWaitSample': True} for row in (player, merge)]
+        rows += [{**row, 'switchWaitSample': value} for row in (player, merge) for value in (False, 1, 'true', None)]
+        rows += [{**player, 'action': 'rejected', 'switchWaitSample': True}]
+        rows += [{**merge, 'outcome': outcome, 'switchWaitSample': True}
+                 for outcome in ('accepted', 'refused', 'already-completed')]
+        rows += [{**merge, 'coalesced': value, 'switchWaitSample': True} for value in (False, 1, 'true', None)]
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'queued-wait.zip'
+            payload = ''.join(json.dumps(row) + '\n' for row in rows)
+            with zipfile.ZipFile(path, 'w') as z:
+                z.writestr('native-lifecycle.1.log', payload)
+                z.writestr('native-detail.log', payload)
+            findings = audit_zip(path, {'baseEvents': [player['event'], merge['event']]})['violations']
+        self.assertEqual([(row['file'], row['event'], row['exampleLines']) for row in findings],
+                         [('native-lifecycle.1.log', player['event'], [3]),
+                          ('native-lifecycle.1.log', merge['event'], [4])])
+
+    def test_haptic_success_repeat_only_flags_marked_success_in_native_low(self):
+        event = 'gamepad-touch-haptics-summary'
+        success = {'event': event, 'sent': 1, 'failed': 0, 'dropped': 0}
+        repeat = {**success, 'touchHapticSuccessRepeat': True}
+        rows = [success, repeat]
+        rows += [{**repeat, 'touchHapticSuccessRepeat': value} for value in (False, 1, 'true', None)]
+        for key, bad in (('sent', (0, True, 2**64, None)), ('failed', (1, False, 0.0, None)),
+                         ('dropped', (1, False, 0.0, None))):
+            rows += [{**repeat, key: value} for value in bad]
+        rows.append({**repeat, 'event': 'gamepad-vibrate'})
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'haptics.zip'
+            payload = ''.join(json.dumps(row) + '\n' for row in rows)
+            with zipfile.ZipFile(path, 'w') as z:
+                z.writestr('native-lifecycle.prev.log', payload)
+                z.writestr('native-detail.log.1', payload)
+                z.writestr('virtual-gamepad.log', payload)
+            found = [entry for entry in audit_zip(path, {'baseEvents': [event]})['violations']
+                     if entry['kind'] == 'known-detail-in-native-low']
+        self.assertEqual([(row['file'], row['event'], row['exampleLines']) for row in found],
+                         [('native-lifecycle.prev.log', event, [2])])
+
+    def test_screen_read_repeat_only_flags_marked_get_in_native_low(self):
+        get = {'event': 'screen-touchpads-state', 'callSite': 'screenTouchpads.get'}
+        rows = [get, {**get, 'screenReadRepeat': True}]
+        rows += [{**get, 'screenReadRepeat': value} for value in (False, 1, 'true', None)]
+        rows += [{**get, 'callSite': site, 'screenReadRepeat': True}
+                 for site in ('screenTouchpads.set', 'screenTouchpads.saveProfiles', 'wake-recovery', None)]
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'screen.zip'
+            payload = ''.join(json.dumps(row) + '\n' for row in rows)
+            with zipfile.ZipFile(path, 'w') as z:
+                z.writestr('native-lifecycle.1.log', payload)
+                z.writestr('native-detail.log', payload)
+            found = [entry for entry in audit_zip(path, {'baseEvents': ['screen-touchpads-state']})['violations']
+                     if entry['event'] == 'screen-touchpads-state']
+        self.assertEqual([(row['file'], row['kind'], row['exampleLines']) for row in found],
+                         [('native-lifecycle.1.log', 'known-detail-in-native-low', [2])])
+
+    def test_native_explicit_input_samples_and_actions_use_wire_fields(self):
+        trajectories = ('input-native-signal-window', 'rog-raw-input-window',
+                        'aya-oem-input-edge', 'aokzoe-oem-input-edge', 'gpd-oem-input-edge')
+        rows = [(dict(event=event), True) for event in trajectories]
+        rows.extend((dict(event='input-host-exit-fence', phase=phase, repeatRefusalSample=marker),
+                     phase == 'refused' and marker is True)
+                    for phase in ('refused', 'raised', 'reset-refused') for marker in (True, False, 1, None))
+        rows.append((dict(event='input-host-exit-fence', phase='refused'), False))
+        for event, reason in (('physical-controller-identity', 'repeat'), ('onex-x2-owner', 'periodic')):
+            rows.extend((dict(event=event, snapshotReason=value), value == reason)
+                        for value in (reason, 'state-change', 'initial', 'explicit', None, True))
+        rows.extend((dict(event='msi-dinput-feedback', managed=managed, ok=ok),
+                     type(managed) is bool and type(ok) is bool and (not managed or ok))
+                    for managed in (True, False, 0, None) for ok in (True, False, 1, None))
+        rows.extend((dict(event='gamepad-vibrate-request', schema=schema, requestSource=source, ok=False),
+                     type(schema) is int and schema == 2 and source == 'unclassified')
+                    for schema in (2, 2.0, None) for source in ('manual-test', 'unclassified', 'future', None))
+        backend = dict(event='gamepad-vibrate', requestSource='unclassified', ok=True, touchFeedback=False, rc=0)
+        rows.append((backend, True))
+        rows.extend(({**backend, key: value}, False) for key, value in (
+            ('requestSource', 'manual-test'), ('requestSource', None), ('ok', False), ('ok', 1),
+            ('touchFeedback', True), ('touchFeedback', 0), ('rc', 5), ('rc', 0.0), ('rc', False)))
+        rows.append(({key: value for key, value in backend.items() if key != 'requestSource'}, False))
+        req = dict(event='shortcut-action-request', status='issued', id='test', actionId='open')
+        result = dict(event='shortcut-action-result', state='applied', schemaVersion=1,
+                      origin='controller-shortcut', id='test', actionId='open')
+        rows += [(req, True), (result, True), ({**result, 'state': 'saved'}, True)]
+        rows.extend(({**base, **change}, False) for base in (req, result)
+                    for change in ({'id': ''}, {'actionId': None}, {'id': 1}))
+        rows.extend(({**req, 'status': status}, False) for status in ('pending', 'refused', 'failed'))
+        rows.extend(({**result, **change}, False) for change in (
+            {'state': 'failed'}, {'state': 'pending'}, {'schemaVersion': True},
+            {'schemaVersion': 1.0}, {'origin': 'future'}))
+        payload = ''.join(json.dumps(row) + '\n' for row, _ in rows)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'explicit-lanes.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log.1', payload)
+                archive.writestr('native-detail.log', payload)
+            report = audit_zip(path, {'baseEvents': []})
+        expected = {}
+        for line, (row, detail) in enumerate(rows, 1):
+            if detail:
+                expected.setdefault(row['event'], []).append(line)
+        reverse = [v for v in report['violations'] if v['kind'] == 'msi-managed-feedback-failure-in-native-detail']
+        forward = [v for v in report['violations'] if v['kind'] != 'msi-managed-feedback-failure-in-native-detail']
+        self.assertEqual([(v['file'], v['kind']) for v in forward],
+                         [('native-lifecycle.log.1', 'known-detail-in-native-low')] * len(expected))
+        self.assertEqual({v['event']: v['exampleLines'] for v in forward}, expected)
+        failure_lines = [line for line, (row, _) in enumerate(rows, 1) if row['event'] == 'msi-dinput-feedback'
+                         and row.get('managed') is True and row.get('ok') is False]
+        self.assertEqual([(v['file'], v['event'], v['exampleLines']) for v in reverse],
+                         [('native-detail.log', 'msi-dinput-feedback', failure_lines)])
+
+    def test_rog_tree_noise_lane_preserves_baseline_and_terminal(self):
+        base = {'event': 'rog.controller-remap-noise-ignored', 'pid': 37, 'devGen': 2}
+        sample = {**base, 'signatureObservation': 'cached-signature-unchanged', 'terminal': False, 'repeatDeviceTreeNoise': True}
+        rows = [base, {**sample, 'repeatDeviceTreeNoise': 1}, {**sample, 'terminal': True},
+                {**sample, 'signatureObservation': 'baseline-established'}, sample,
+                {**sample, 'repeatDeviceTreeNoise': False, 'terminal': True},
+                {**sample, 'repeatDeviceTreeNoise': False, 'signatureObservation': 'baseline-established'},
+                {**sample, 'repeatDeviceTreeNoise': False}]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'rog-noise.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log', ''.join(json.dumps(row)+'\n' for row in rows))
+                archive.writestr('native-detail.log', json.dumps(sample)+'\n')
+            report = audit_zip(path, {'baseEvents': [base['event']]})
+            self.assertEqual([(v['kind'], v['file'], v['exampleLines']) for v in report['violations']],
+                             [('known-detail-in-native-low', 'native-lifecycle.log', [5])])
+            warning, = [w for w in report['coverageWarnings'] if w.get('kind') == 'device-tree-lane-selection-unverified']
+            self.assertEqual(warning['file'], 'native-lifecycle.log')
+            self.assertEqual(warning['counts'], {'no-selection-fields': 1, 'invalid-selection-fields': 3})
+            self.assertEqual(warning['exampleLines'], [1, 2, 3, 4])
+
+    def test_rog_tree_noise_resident_in_detail_and_unknown_stay_separate(self):
+        event = 'rog.controller-remap-noise-ignored'
+        sample = dict(event=event, signatureObservation='cached-signature-unchanged', terminal=False,
+                      repeatDeviceTreeNoise=True, pid=37, writerProcessCreation100ns='134401866149618551')
+        resident = dict(sample, repeatDeviceTreeNoise=False)
+        baseline = dict(resident, signatureObservation='baseline-established')
+        terminal = dict(resident, terminal=True)
+        rows = [sample, baseline, resident, terminal, dict(sample, terminal=True),
+                dict(resident, repeatDeviceTreeNoise=0), dict(resident, terminal=0), {'event': event},
+                {'kind': event, 'signatureObservation': 'baseline-established', 'terminal': False,
+                 'repeatDeviceTreeNoise': False}]
+        serialized = [(json.dumps(row)+'\n').encode() for row in rows]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'rog-noise.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-detail.prev.log', b''.join(serialized))
+                archive.writestr('steam/logs/native-detail.prev.log', b''.join(serialized))
+                archive.writestr('gyro-motion.log', b''.join(serialized))
+            report = audit_zip(path, {'baseEvents': [event]})
+        finding, = report['violations']
+        self.assertEqual((finding['kind'], finding['file'], finding['exampleLines']),
+                         ('rog-tree-noise-resident-in-native-detail', 'native-detail.prev.log', [2, 3, 4]))
+        buckets = finding['nativeDetailFindingWriterFootprint']['buckets'].values()
+        self.assertEqual(sum(bucket['rows'] for bucket in buckets), 3)
+        self.assertEqual(sum(bucket['bytes'] for bucket in buckets), sum(map(len, serialized[1:4])))
+        warning, = [w for w in report['coverageWarnings'] if w.get('kind') == 'device-tree-lane-selection-unverified']
+        self.assertEqual((warning['file'], warning['counts'], warning['exampleLines']),
+                         ('native-detail.prev.log', {'invalid-selection-fields': 4, 'no-selection-fields': 1},
+                          [5, 6, 7, 8, 9]))
+
+    def test_dinput_reprobe_lane_requires_a_marked_known_miss(self):
+        base = {'event': 'msi-dinput-transition', 'pid': 37, 'phase': 'exhausted-reprobe'}
+        valid = {**base, 'result': 'main-interface-not-found', 'repeatReprobeSample': True}
+        rows = [base, {**valid, 'repeatReprobeSample': 1}, {**valid, 'result': 'unresolved'},
+                {**valid, 'phase': 'input-lost'}, valid]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'dinput.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log', ''.join(json.dumps(row)+'\n' for row in rows))
+                archive.writestr('native-detail.log', json.dumps(valid)+'\n')
+            report = audit_zip(path, {'baseEvents': [base['event']]})
+            self.assertEqual([(v['kind'], v['file'], v['exampleLines']) for v in report['violations']],
+                             [('known-detail-in-native-low', 'native-lifecycle.log', [5])])
+
+    def test_wmi_identical_absent_retry_marker_controls_lane(self):
+        base = {'event': 'msi-wmi-source-capability', 'pid': 37, 'availability': 'absent'}
+        rows = [base, {**base, 'repeatRetrySample': 1}, {**base, 'repeatRetrySample': False},
+                {**base, 'identicalAbsentRetriesSinceResident': 10},
+                {**base, 'repeatRetrySample': True, 'availability': 'unknown'},
+                {**base, 'repeatRetrySample': True}]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'wmi.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log', ''.join(json.dumps(row)+'\n' for row in rows))
+                archive.writestr('native-detail.log', json.dumps(rows[-1])+'\n')
+            report = audit_zip(path, {'baseEvents': [base['event']]})
+            self.assertEqual([(v['kind'], v['file'], v['exampleLines']) for v in report['violations']],
+                             [('known-detail-in-native-low', 'native-lifecycle.log', [6])])
+
+    def test_calibration_sample_requires_explicit_scoped_fusion_wait(self):
+        row = dict(event='gyro-calibration-awaiting-current-recipe', pid=37, deviceId='device',
+                   matrixId='recipe', matrixSourceSha256='digest', sourceQualified=True, loaded=False, weight=0,
+                   confidence=0.0, restoreContext=dict(schema=1, sourceScope='scoped-frame', bindingGeneration='2',
+                      choiceGeneration='1', sessionStartSteadyTicks='42', recheckReason='fusion-session-changed'))
+        marked = dict(row, calibrationSessionWaitSample=True)
+        rows = [row, dict(marked, calibrationSessionWaitSample=1), dict(marked, loaded=True),
+                dict(marked, restoreContext=None), dict(marked, restoreContext=dict(row['restoreContext'], bindingGeneration=None)),
+                dict(marked, restoreContext=dict(row['restoreContext'], recheckReason='first-recipe')), marked]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'calibration.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                for member in ('native-lifecycle.1.log', 'native-detail.log', 'nested/native-lifecycle.log'):
+                    archive.writestr(member, ''.join(json.dumps(record) + '\n' for record in rows))
+            result = audit_zip(path, {'baseEvents': [row['event']]})
+        self.assertEqual([(r['kind'], r['file'], r['exampleLines']) for r in result['violations']],
+                         [('known-detail-in-native-low', 'native-lifecycle.1.log', [7])])
+
+    def test_sensor_power_refusal_sample_requires_supported_admission_shape(self):
+        event = 'gyro-power-command-rejected'
+        base = dict(event=event, pid=37, request='suspend', phase='admission',
+                    reason='sta-owner-or-wake-unavailable', submissionAccepted=False, commandCompleted=False)
+        sample = dict(base, sensorPowerRefusalRepeatSample=True)
+        rows = [base, dict(sample, sensorPowerRefusalRepeatSample=1),
+                dict(sample, sensorPowerRefusalRepeatSample=False), dict(sample, request='restart'),
+                dict(sample, phase='execution'), dict(sample, reason=[]), dict(sample, reason='unknown'),
+                dict(sample, submissionAccepted=0), dict(sample, commandCompleted=True),
+                dict(sample, event='gyro-power-command-queued'), sample,
+                dict(sample, request='resume', reason='resume-scope-not-current')]
+        render = lambda records: ''.join(json.dumps(row) + '\n' for row in records)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'refusal.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.1.log', render(rows))
+                archive.writestr('native-lifecycle.log.2', render([sample]))
+                archive.writestr('native-detail.log', render([sample]))
+                archive.writestr('history/native-lifecycle.log', render([sample]))
+            result = audit_zip(path, {'baseEvents': [event, 'gyro-power-command-queued']})
+        self.assertCountEqual([(row['kind'], row['file'], row['exampleLines']) for row in result['violations']],
+                              [('known-detail-in-native-low', 'native-lifecycle.1.log', [11, 12]),
+                               ('known-detail-in-native-low', 'native-lifecycle.log.2', [1])])
+
+    def test_publication_failure_sample_requires_matching_consumer_and_boolean(self):
+        event = 'power-projection-consumer-failed'
+        base = dict(event=event, pid=37, consumer='lifecycle-publication')
+        marked = dict(base, publicationFailureRepeatSample=True)
+        rows = [base, dict(marked, publicationFailureRepeatSample=1),
+                dict(marked, consumer='overlay'), dict(marked, publicationFailureRepeatSample=False), marked]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'publication.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.1.log', ''.join(json.dumps(row) + '\n' for row in rows))
+                archive.writestr('native-detail.log', json.dumps(marked) + '\n')
+            result = audit_zip(path, {'baseEvents': [event]})
+        self.assertEqual([(row['kind'], row['file'], row['exampleLines']) for row in result['violations']],
+                         [('known-detail-in-native-low', 'native-lifecycle.1.log', [5])])
+
+    def test_late_hide_off_sample_requires_explicit_matching_state_in_low(self):
+        sample = dict(event='input-host-late-hide-decision', pid=37, lateHideOffRepeatSample=True,
+                      outcome='skipped', gate='virtual-target-not-enabled', reason='xinput-connect',
+                      bypass='none', bypassSource='msi-xinput-connect-confirmed', runIdEmpty=True,
+                      virtualTargetEnabled=False, journalActive=False, wakeHold=False, deferredStartHide=False,
+                      msiSourceActive=False, msiGenerationValid=False, powerGen=1, sourceGen=2, hostGen=0,
+                      msiMainSourceGeneration=0, msiReconfirmGeneration=0)
+        legacy = {key: value for key, value in sample.items() if key != 'lateHideOffRepeatSample'}
+        rows = [legacy, dict(sample, lateHideOffRepeatSample=1), dict(sample, journalActive=True),
+                dict(sample, virtualSessionEnabledAtGate=False), dict(sample, hostGen=False),
+                dict(sample, powerGen=-1), dict(sample, gate='already-queued-this-tuple'), sample]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'late-hide.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log.1', ''.join(json.dumps(row) + '\n' for row in rows))
+                archive.writestr('native-detail.log', json.dumps(sample) + '\n')
+                archive.writestr('nested/native-lifecycle.log', json.dumps(sample) + '\n')
+            report = audit_zip(path, {'baseEvents': [sample['event']]})
+        self.assertEqual([(row['kind'], row['file'], row['exampleLines']) for row in report['violations']],
+                         [('known-detail-in-native-low', 'native-lifecycle.log.1', [8])])
+
+    def test_foreground_wait_requires_explicit_matching_sample_in_low(self):
+        wait = dict(event='native-foreground-isolation', pid=37, phase='restore-wait',
+                    reason='same-cycle-helper-still-live')
+        marked = dict(wait, foregroundWaitRepeat=True)
+        deferred = dict(marked, event='msi-native-foreground-isolation', phase='virtual-work-deferred',
+                        reason='same-native-ownership-still-unresolved')
+        rows = [wait, dict(marked, foregroundWaitRepeat=1), dict(marked, foregroundWaitRepeat=False),
+                dict(marked, reason='port-refresh-pending'), dict(marked, phase='refresh-failed'),
+                dict(marked, event='another-event'), marked, deferred]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'foreground.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log', ''.join(json.dumps(row) + '\n' for row in rows))
+                archive.writestr('native-detail.log', json.dumps(deferred) + '\n')
+            report = audit_zip(path, {'baseEvents': [wait['event'], deferred['event']]})
+        self.assertCountEqual([(row['kind'], row['file'], row['exampleLines']) for row in report['violations']],
+                              [('known-detail-in-native-low', 'native-lifecycle.log', [7]),
+                               ('known-detail-in-native-low', 'native-lifecycle.log', [8])])
+
+    def test_input_snapshot_repeat_marker_controls_lane(self):
+        oem = dict(event='oem-key-usage-query', pid=37, schemaVersion=1)
+        rog = dict(event='rog.hid-bound', pid=37, matched=False)
+        caps = dict(event='gamepad.feedbackCaps', pid=37, schema=3, ledVerified=False)
+        marked_caps = dict(caps, inputSnapshotRepeatSample=True)
+        marked_oem = dict(oem, inputSnapshotRepeatSample=True)
+        marked_rog = dict(rog, inputSnapshotRepeatSample=True)
+        rows = [oem, rog, dict(oem, inputSnapshotRepeatSample=1),
+                dict(rog, inputSnapshotRepeatSample='true'), dict(rog, inputSnapshotRepeatSample=False),
+                dict(event='rog.hid-bound-other', pid=37, inputSnapshotRepeatSample=True),
+                dict(kind='rog.hid-bound', pid=37, inputSnapshotRepeatSample=True), marked_oem, marked_rog,
+                caps, dict(caps, inputSnapshotRepeatSample=1), dict(caps, inputSnapshotRepeatSample=False),
+                dict(kind=caps['event'], inputSnapshotRepeatSample=True), marked_caps]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'input-snapshots.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log.1', ''.join(json.dumps(row) + '\n' for row in rows))
+                archive.writestr('native-detail.log', ''.join(json.dumps(row) + '\n' for row in (marked_oem, marked_rog, marked_caps)))
+                archive.writestr('nested/native-lifecycle.log', json.dumps(marked_rog) + '\n')
+                archive.writestr('nested/native-lifecycle.log.1', json.dumps(marked_caps) + '\n')
+            report = audit_zip(path, {'baseEvents': [oem['event'], rog['event'], caps['event']]})
+        self.assertCountEqual([(row['kind'], row['file'], row['exampleLines']) for row in report['violations']],
+                              [('known-detail-in-native-low', 'native-lifecycle.log.1', [8]),
+                               ('known-detail-in-native-low', 'native-lifecycle.log.1', [9]),
+                               ('known-detail-in-native-low', 'native-lifecycle.log.1', [14])])
+
+    def test_additional_input_snapshot_markers_are_root_native_low_only(self):
+        events = ('rog.hid-discovery-summary', 'gamepad-openxinput-slot-guard', 'gamepad-openxinput-assign-slot')
+        marked = [dict(event=e, inputSnapshotRepeatSample=True) for e in events]
+        controls = [dict(event=e) for e in events] + [dict(kind=e, inputSnapshotRepeatSample=True) for e in events]
+        controls += [dict(event=e, inputSnapshotRepeatSample=v) for e in events for v in (False, 1, 'true', None)]
+        wire = b'{bad\r\n' + b''.join(json.dumps(row).encode() + b'\r\n' for row in [*marked, *controls])
+        low = 'native-lifecycle.previous.log'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'additional-snapshots.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                for name in (low, 'native-detail.log.1', 'nested/' + low, 'native-lifecycle.log.pending'):
+                    archive.writestr(name, wire)
+            violations = audit_zip(path, {'baseEvents': list(events)})['violations']
+        self.assertCountEqual([(r['file'], r['kind'], r['event'], r['exampleLines']) for r in violations],
+                              [(low, 'known-detail-in-native-low', e, [i]) for i, e in enumerate(events, 2)])
+
+    def test_rog_discovery_scope_projection_preserves_raw_and_requires_known_schema(self):
+        packed = dict(event='rog.hid-discovery-summary', schema=2, rogDiscoveryScopeV1=1,
+                      enumerationComplete=False, enumerationError=5)
+        rows = [packed, dict(packed, rogDiscoveryScopeV1=True), dict(packed, rogDiscoveryScopeV1=2),
+                dict(packed, schema=2.0), dict(packed, physicalAbsenceProven=None),
+                dict(packed, event='rog.hid-bound')]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'discovery.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                for name in ('native-lifecycle.log.1', 'native-detail.previous.log', 'nested/native-detail.log', 'native-detail.log.pending'):
+                    archive.writestr(name, ''.join(json.dumps(row) + '\n' for row in rows))
+            seen = [row for row in iter_ai_records(path) if 'rogDiscoveryScope' in row]
+        self.assertEqual([r['value'] for r in seen], rows[:5] * 2)
+        self.assertEqual([r['rogDiscoveryScope']['state'] for r in seen],
+                         ['restorable', *(['invalid-envelope'] * 3), 'conflicting-inline-fields'] * 2)
+        self.assertEqual(seen[0]['rogDiscoveryScope']['restoredFields'],
+                         {'interfaceInspectionCoverage': 'not-measured', 'physicalAbsenceProven': False})
+
+    def test_oem_guard_quiet_marker_controls_lane(self):
+        base = {'event': 'oem-vendor-stack', 'pid': 37, 'state': 'task-absent'}
+        rows = [base, {**base, 'wakeGuardQuietRepeat': 1}, {**base, 'wakeGuardQuietRepeat': False},
+                {**base, 'wakeGuardQuietRepeat': True},
+                {**base, 'state': 'process-stop-observation', 'wakeGuardQuietRepeat': True},
+                {**base, 'state': 'applied', 'wakeGuardQuietRepeat': True},
+                {**base, 'state': 'task-removed', 'wakeGuardQuietRepeat': True}]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'guard.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log', ''.join(json.dumps(row)+'\n' for row in rows))
+                archive.writestr('native-detail.log', json.dumps(rows[3])+'\n')
+            report = audit_zip(path, {'baseEvents': [base['event']]})
+            self.assertEqual([(v['kind'], v['file'], v['exampleLines']) for v in report['violations']],
+                             [('known-detail-in-native-low', 'native-lifecycle.log', [4, 5, 6])])
+
+    def test_frontend_detail_samples_are_checked_in_each_root_lane(self):
+        row = {'event': 'frontend-trace', 'where': 'gamepad-admission', 'lane': 'event',
+               'writerEnvelopeSchema': 1, 'writerPid': 37, 'writerProcessCreation100ns': '123',
+               'pid': 999, 'time': '2026-11-26T17:28:39.000'}
+        link = {'schema': 1, 'sequence': 3, 'session': '37:100'}
+        trace = {'stage': 'entry-pass', 'uiActionLink': link}
+        rows = [
+            {**row, 'lane': 'detail', 'trace': trace},
+            {**row, 'trace': {**trace, 'stage': 'exec-run'}, 'writerProcessCreation100ns': '124'},
+            {**row, 'lane': 'detail', 'writerEnvelopeSchema': True, 'trace': {'stage': 'window'}},
+            {**row, 'trace': {**trace, 'stage': 'nav-done', 'action': 'page-next'}},
+            {**row, 'trace': {**trace, 'stage': 'owner-result', 'phase': 'after-call'}},
+            {**row, 'trace': {'stage': 'entry-pass'}},
+            {**row, 'trace': {**trace, 'uiActionLink': {**link, 'schema': True}}},
+            {**row, 'trace': {**trace, 'uiActionLink': {**link, 'sequence': 1 << 53}}},
+            {**row, 'trace': {**trace, 'uiActionLink': {**link, 'session': '037:100'}}},
+            {**row, 'trace': {**trace, 'uiActionLink': {**link, 'extra': 1}}},
+            {**row, 'event': 'frontend-error', 'lane': 'detail'},
+            {**row, 'lane': None, 'trace': {'stage': 'owner-result'}},
+            {k: v for k, v in row.items() if k != 'lane'},
+        ]
+        lines = [(json.dumps(item)+'\r\n').encode() for item in rows]
+        operation = {'schema': 1, 'id': '37-8-1', 'writerPid': 37, 'writerProcessCreation100ns': '123',
+                     'ordinal': '1', 'startedTickMs': '8', 'scope': 'admitted-ordinary-log-export;diagnostic-correlation-only'}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'frontend.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('YeManCC-export-manifest.txt', 'processId=37\nexportOperation='+json.dumps(operation)+'\n')
+                for member in ('frontend-trace.log.1', 'frontend-trace-detail.log', 'nested/frontend-trace.log'):
+                    archive.writestr(member, b''.join(lines))
+            report = audit_zip(path, {'baseEvents': []})
+        field = 'frontendTraceLaneEvidence'
+        files = {member['file']: member for member in report['files']}
+        self.assertNotIn(field, files.get('nested/frontend-trace.log', {}))
+        low = files['frontend-trace.log.1'][field]
+        self.assertEqual(files['frontend-trace-detail.log'][field], low)
+        self.assertEqual(low['reportedLaneCounts'], {'detail': 2, 'event': 8, 'missing': 1, 'unrecognized': 1})
+        self.assertEqual((low['linkedDetailSampleRows'], low['explicitAndLinkedRows']), (2, 1))
+        self.assertEqual(len(report['violations']), 1)
+        violation = report['violations'][0]
+        self.assertEqual((violation['kind'], violation['file'], violation['exampleLines']),
+                         ('known-detail-in-frontend-low', 'frontend-trace.log.1', [1, 2, 3]))
+        writer = violation['frontendDetailWriterFootprint']
+        self.assertEqual(writer['exportWriterExampleLines'], [1])
+        for i, category in enumerate(('export-writer', 'same-pid-other-birth', 'writer-unresolved')):
+            self.assertEqual(writer['buckets'][category], {'rows': 1, 'bytes': len(lines[i])})
+
+    def test_frontend_unlinked_navigation_only_checks_pass_and_run_samples(self):
+        trace = dict(stage='entry-pass', action='page-prev', admissionEpoch=0)
+        row = dict(event='frontend-trace', where='gamepad-admission', lane='event',
+                   traceParseStatus='parsed', messageTruncated=False, trace=trace)
+        records = [row, dict(row, trace=dict(trace, stage='exec-run', action='page-next', admissionEpoch=(1 << 53) - 1))]
+        records += [dict(row, trace=dict(trace, stage=stage)) for stage in
+                    ('entry-drop', 'exec-drop', 'nav-start', 'nav-done', 'nav-rejected', 'nav-fail')]
+        records += [dict(row, trace=dict(trace, admissionEpoch=value)) for value in (True, -1, 0.0, 1 << 53, None)]
+        records += [dict(row, trace=dict(trace, uiActionLink=None)), dict(row, trace=dict(trace, action='confirm')),
+                    dict(row, messageTruncated=True), dict(row, traceParseStatus='unknown')]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'navigation.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                for member in ('frontend-trace.1.log', 'frontend-trace.log.2', 'frontend-trace-detail.log', 'nested/frontend-trace.log'):
+                    archive.writestr(member, ''.join(json.dumps(record) + '\n' for record in records))
+            report = audit_zip(path, {'baseEvents': []})
+        self.assertCountEqual([(v['kind'], v['file'], v['exampleLines']) for v in report['violations']],
+                              [('known-detail-in-frontend-low', 'frontend-trace.1.log', [1, 2]),
+                               ('known-detail-in-frontend-low', 'frontend-trace.log.2', [1, 2])])
+        view = next(f['frontendTraceLaneEvidence'] for f in report['files'] if f['file'] == 'frontend-trace-detail.log')
+        self.assertEqual((view['unlinkedNavigationDetailSampleRows'], view['linkedDetailSampleRows']), (2, 0))
+
+    def test_frontend_preview_only_later_healthy_windows_are_detail_samples(self):
+        metric = {'count': 1, 'saturated': False, 'maxMs': 125}
+        trace = dict(schemaVersion=1, stage='window', policy='VC-PREVIEW-TRACE-20261024-R1',
+                     endedBy='window-budget', partial=False, windowSequence=2, finalizationOverrunMs=125.0,
+                     gamepadStateDeliveryCount=1, presentedCount=4, updateCount=2,
+                     patchStartWithoutCompletionAtEnd=False, overwrittenPatchStartCount=0,
+                     updateWithoutPatchStartCount=0, context={'mixed': False, 'changed': 0},
+                     raf=dict(pendingWhenEnding=False, missingCallbackCount=0, outsideWindowCallbackCount=0,
+                              cancelFailedCount=0, unavailableCount=0), timeout={'cancelFailed': False},
+                     latestReceiptAgeAtPatch={**metric, 'maxMs': 250}, patchSpan=metric, patchToRafCallback=metric)
+        row = dict(event='frontend-trace', where='controller-preview', lane='event', trace=trace,
+                   writerEnvelopeSchema=1, writerPid=37, writerProcessCreation100ns='123')
+        negatives = [dict(windowSequence=1), dict(windowSequence=7), dict(windowSequence=2.0), dict(partial=True),
+                     dict(endedBy='visibility-change'), dict(policy='future'), dict(schemaVersion=True),
+                     dict(finalizationOverrunMs=125.01), dict(finalizationOverrunMs=False), dict(presentedCount=0),
+                     dict(context={'mixed': True, 'changed': 0}), dict(raf=dict(trace['raf'], missingCallbackCount=1)),
+                     dict(timeout={'cancelFailed': True}), dict(patchSpan={**metric, 'saturated': True}),
+                     dict(patchToRafCallback={**metric, 'maxMs': 126}), dict(latestReceiptAgeAtPatch=None)]
+        negative_rows = [{**row, 'trace': {**trace, **change}} for change in negatives]
+        low = (b'broken\n' + (json.dumps(row) + '\r\n').encode() +
+               ''.join(json.dumps(value) + '\n' for value in negative_rows + [{**row, 'where': 'gamepad-admission'}]).encode())
+        detail = (json.dumps({**row, 'lane': 'detail'}) + '\n').encode()
+        operation = dict(schema=1, id='37-8-1', writerPid=37, writerProcessCreation100ns='123',
+                         ordinal='1', startedTickMs='8', scope='admitted-ordinary-log-export;diagnostic-correlation-only')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'preview.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('YeManCC-export-manifest.txt', 'processId=37\nexportOperation=' + json.dumps(operation))
+                archive.writestr('frontend-trace.log.1', low)
+                archive.writestr('frontend-trace-detail.log', detail)
+                archive.writestr('nested/frontend-trace.log', low)
+            report = audit_zip(path, {'baseEvents': []})
+        hit, = report['violations']
+        self.assertEqual((hit['kind'], hit['file'], hit['exampleLines']),
+                         ('known-detail-in-frontend-low', 'frontend-trace.log.1', [2]))
+        writer = hit['frontendDetailWriterFootprint']
+        self.assertEqual(writer['buckets']['export-writer'], {'rows': 1, 'bytes': len((json.dumps(row) + '\r\n').encode())})
+        views = {entry['file']: entry['frontendTraceLaneEvidence'] for entry in report['files'] if 'frontendTraceLaneEvidence' in entry}
+        self.assertEqual(views['frontend-trace.log.1']['previewDetailSampleRows'], 1)
+        self.assertEqual(views['frontend-trace.log.1']['explicitAndPreviewRows'], 0)
+        self.assertEqual(views['frontend-trace-detail.log']['previewDetailSampleRows'], 1)
+        self.assertEqual(views['frontend-trace-detail.log']['explicitAndPreviewRows'], 1)
+
+    def test_decky_mirror_periodic_samples_in_root_low_members(self):
+        import warnings
+        queued, detail = 'mirror-snapshot-queued', 'decky-mirror-snapshot-detail'
+        change = {'event': queued, 'snapshotReason': 'state-change'}
+        sample = {'event': detail, 'snapshotReason': 'periodic', 'sourceEvent': queued}
+        legacy = {'event': queued}
+        wrong_source = dict(sample, sourceEvent='mirror-snapshot-request')
+        wrong_marker = dict(change, snapshotReason=True)
+        misrouted = dict(change, snapshotReason='periodic')
+        near_match = dict(misrouted, event='mirror-snapshot-request')
+
+        def encode(row):
+            return json.dumps(row).encode('ascii') + b'\r\n'
+
+        with tempfile.TemporaryDirectory() as directory, warnings.catch_warnings():
+            warnings.simplefilter('ignore', UserWarning)
+            path = Path(directory) / 'decky-mirror.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('decky-sidebar.log.1', b'{broken\n' + b''.join(map(encode,
+                    (change, legacy, wrong_source, wrong_marker, near_match, misrouted, sample))))
+                archive.writestr('native-lifecycle.previous.log', encode(sample) * 9)
+                archive.writestr('native-lifecycle.previous.log', encode(sample)[:-2])
+                archive.writestr('native-detail.log.1', encode(sample))
+                archive.writestr('steam/logs/decky-sidebar.log', encode(misrouted))
+            report = audit_zip(path, {'baseEvents': []})
+
+        hits = [(v['file'], v['archiveEntryOccurrence'], v['event'], v['count'], v['rawRowBytes'], v['exampleLines'])
+                for v in report['violations'] if v['kind'] == 'decky-mirror-periodic-in-low']
+        self.assertEqual(hits, [
+            ('decky-sidebar.log.1', 0, queued, 1, len(encode(misrouted)), [7]),
+            ('decky-sidebar.log.1', 0, detail, 1, len(encode(sample)), [8]),
+            ('native-lifecycle.previous.log', 0, detail, 9, 9 * len(encode(sample)), list(range(1, 9))),
+            ('native-lifecycle.previous.log', 1, detail, 1, len(encode(sample)) - 2, [1])])
+        views = {(f['file'], f['archiveEntryOccurrence']): f['deckyMirrorSnapshotLaneEvidence']['counts']
+                 for f in report['files'] if 'deckyMirrorSnapshotLaneEvidence' in f}
+        self.assertEqual(views['decky-sidebar.log.1', 0]['state-change']['exampleLines'], [2])
+        self.assertEqual(views['decky-sidebar.log.1', 0]['unverified']['exampleLines'], [3, 4, 5])
+        self.assertEqual(views['native-detail.log.1', 0]['periodic']['count'], 1)
+        self.assertEqual(len(views), 4)
+        self.assertEqual(len(report['violations']), len(hits))
+
+    def test_decky_admission_runtime_routes_and_member_occurrences(self):
+        import warnings
+        event = 'decky-runtime-admission-detail'
+        base = dict(phase='waiting-manual-steam', reason='steam-ui-state-pending', admissionDetail='shared-mode-pending',
+                    admissionSteamPid=104, admissionSteamBirth='105', admissionPowerGeneration=8)
+        sample = dict(base, event=event, sourceEvent='runtime', runtimeObservation='slow-admission-repeat')
+        checkpoint = dict(base, event='runtime', reason='steam-bigpicture-required', admissionDetail='desktop',
+                          admissionRepeatBatchCount=64)
+        legacy = dict(event='runtime', phase='waiting-manual-steam', reason='steam-ui-state-pending',
+                      admissionDetail='shared-mode-pending', admissionAttempts=2999, admissionRecovery=True)
+        retagged = dict(sample, event='runtime')
+
+        def encode(row):
+            return json.dumps(row).encode('ascii') + b'\r\n'
+
+        with tempfile.TemporaryDirectory() as directory, warnings.catch_warnings():
+            warnings.simplefilter('ignore', UserWarning)
+            path = Path(directory) / 'decky-admission.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('decky-sidebar.log.1', b'{broken\n' + encode(legacy) + encode(checkpoint) + encode(retagged))
+                archive.writestr('native-lifecycle.previous.log', encode(sample) * 9)
+                archive.writestr('native-lifecycle.previous.log', encode(sample)[:-2])
+                archive.writestr('native-detail.log.1', encode(dict(sample, pid=91, powerGeneration=9)) + encode(checkpoint))
+                archive.writestr('nested/decky-sidebar.log', encode(sample))
+                archive.writestr('decky-sidebar.log', encode(legacy) * 4)
+            report = audit_zip(path, {'baseEvents': []})
+        hits = [(v['kind'], v['file'], v['archiveEntryOccurrence'], v['event'], v['count'], v['rawRowBytes'], v['exampleLines'])
+                for v in report['violations'] if v['kind'].startswith('decky-admission-')]
+        self.assertEqual(hits, [
+            ('decky-admission-repeat-in-low', 'decky-sidebar.log.1', 0, 'runtime', 1, len(encode(retagged)), [4]),
+            ('decky-admission-repeat-in-low', 'native-lifecycle.previous.log', 0, event, 9, 9 * len(encode(sample)), list(range(1, 9))),
+            ('decky-admission-repeat-in-low', 'native-lifecycle.previous.log', 1, event, 1, len(encode(sample)) - 2, [1]),
+            ('decky-admission-checkpoint-in-detail', 'native-detail.log.1', 0, 'runtime', 1, len(encode(checkpoint)), [2])])
+        views = {(entry['file'], entry['archiveEntryOccurrence']): entry['deckyAdmissionRuntimeLaneEvidence']['counts']
+                 for entry in report['files'] if 'deckyAdmissionRuntimeLaneEvidence' in entry}
+        self.assertEqual(views['decky-sidebar.log.1', 0]['checkpoint']['exampleLines'], [3])
+        self.assertEqual(views['native-detail.log.1', 0]['slow-repeat']['exampleLines'], [1])
+        self.assertEqual(len(views), 4)
+
+    def test_decky_admission_markers_reject_ambiguous_or_incomplete_records(self):
+        pending = dict(event='decky-runtime-admission-detail', phase='waiting-manual-steam', sourceEvent='runtime',
+                       runtimeObservation='slow-admission-repeat', reason='steam-ui-state-pending',
+                       admissionDetail='shared-mode-pending', admissionSteamPid=104, admissionSteamBirth='105',
+                       admissionPowerGeneration=8)
+        checkpoint = dict(event='runtime', phase='waiting-manual-steam', reason='steam-bigpicture-required',
+                          admissionDetail='desktop', admissionSteamPid=104, admissionSteamBirth='105',
+                          admissionPowerGeneration=8, admissionRepeatBatchCount=64)
+        invalid = [dict(pending, **patch) for patch in (
+            dict(phase='starting'), dict(sourceEvent='steam-mode-read'), dict(runtimeObservation=True),
+            dict(admissionSteamPid=True), dict(admissionSteamPid=1 << 32), dict(admissionSteamBirth=105),
+            dict(admissionSteamBirth='0105'), dict(admissionSteamBirth=str(1 << 64)), dict(admissionPowerGeneration=0),
+            dict(admissionPowerGeneration=8.0), dict(admissionDetail='admission-read-failed'), dict(admissionRepeatBatchCount=64))]
+        invalid += [dict(checkpoint, **patch) for patch in (
+            dict(admissionRepeatBatchCount=64.0), dict(admissionRepeatBatchCount=63), dict(sourceEvent='runtime'),
+            dict(runtimeObservation='future'), dict(admissionSteamBirth=None))]
+        data = ''.join(json.dumps(row) + '\n' for row in invalid).encode('ascii')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'decky-invalid.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log', data)
+                archive.writestr('native-detail.log', data)
+            report = audit_zip(path, {'baseEvents': []})
+        self.assertFalse([v for v in report['violations'] if v['kind'].startswith('decky-admission-')])
+        views = [entry['deckyAdmissionRuntimeLaneEvidence']['counts'] for entry in report['files']
+                 if 'deckyAdmissionRuntimeLaneEvidence' in entry]
+        self.assertEqual(views, [{'unverified': {'count': len(invalid), 'rawRowBytes': len(data),
+                                               'exampleLines': list(range(1, 9))}}] * 2)
+
+    def test_fan_resume_lane_uses_explicit_markers_in_both_root_streams(self):
+        event = 'fan-host-resume-observe'
+        edge = {'event': event, 'snapshotReason': 'state-change', 'pid': 37}
+        sample = dict(edge, snapshotReason='periodic')
+        unknown = [{'event': event}, *(dict(edge, snapshotReason=v) for v in (None, True, [], 'future'))]
+        terminal = dict(sample, event='fan-host-resume-result')
+        def payload(rows):
+            return ''.join(json.dumps(row)+'\n' for row in rows).encode('ascii')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'fan-resume.zip'
+            with zipfile.ZipFile(path,'w') as archive:
+                archive.writestr('fan-lifecycle.log.1', b'{broken\n'+payload([edge, sample, *unknown, terminal]))
+                archive.writestr('virtual-gamepad.previous.log', payload([sample, edge]))
+                archive.writestr('steam/logs/fan-lifecycle.log', payload([sample]))
+                archive.writestr('fan-lifecycleXlog', payload([sample]))
+            report = audit_zip(path, {'baseEvents':[]})
+        self.assertEqual([(v['kind'],v['file'],v['exampleLines']) for v in report['violations']], [
+            ('fan-resume-periodic-in-fan-low', 'fan-lifecycle.log.1', [3]),
+            ('fan-resume-state-change-in-gamepad-detail', 'virtual-gamepad.previous.log', [2])])
+        files = {f['file']: f['fanResumeObserveLaneEvidence'] for f in report['files'] if 'fanResumeObserveLaneEvidence' in f}
+        self.assertEqual(set(files), {'fan-lifecycle.log.1', 'virtual-gamepad.previous.log'})
+        evidence = files['fan-lifecycle.log.1']
+        self.assertEqual(evidence['countsByMarker'], {
+            'state-change': {'rows':1, 'bytes':len(payload([edge]))},
+            'periodic': {'rows':1, 'bytes':len(payload([sample]))},
+            'missing': {'rows':1, 'bytes':len(payload(unknown[:1]))},
+            'unrecognized': {'rows':4, 'bytes':len(payload(unknown[1:]))}})
+        warning, = [w for w in report['coverageWarnings'] if w.get('kind')=='fan-resume-observe-lane-unverified']
+        self.assertEqual(warning['exampleLines'], [4,5,6,7,8])
+
+    def test_fan_resume_findings_keep_archive_occurrences_and_example_limits(self):
+        import warnings
+        row = {'event':'fan-host-resume-observe', 'snapshotReason':'periodic', 'pid':37, 'writerPid':99}
+        line = json.dumps(row)+'\n'
+        with tempfile.TemporaryDirectory() as directory, warnings.catch_warnings():
+            warnings.simplefilter('ignore', UserWarning)
+            path = Path(directory)/'duplicate-fan-resume.zip'
+            with zipfile.ZipFile(path,'w') as archive:
+                archive.writestr('YeManCC-export-manifest.txt', 'processId=37\n')
+                archive.writestr('fan-lifecycle.log', line*12)
+                archive.writestr('fan-lifecycle.log', line.rstrip('\n'))
+            report = audit_zip(path, {'baseEvents':[]})
+        self.assertEqual([(v['archiveEntryOccurrence'],v['counts']['currentPidMatch'],v['exampleLines'])
+                          for v in report['violations']], [(0,12,list(range(1,9))), (1,1,[1])])
+        self.assertEqual([f['fanResumeObserveLaneEvidence']['countsByMarker']['periodic']['bytes']
+                          for f in report['files'] if 'fanResumeObserveLaneEvidence' in f], [12*len(line),len(line)-1])
+
+    def test_xinput_slot_gate_groups_same_row_mask_changes(self):
+        from log_lane_audit import xinput_slot_gate_evidence
+        base = {'connectedMask':1, 'prevMask':1, 'admittedMask':1, 'prevAdmittedMask':1}
+        observations = [dict(base, prevMask=None), dict(base, prevMask=0, prevAdmittedMask=0),
+                        dict(base, prevMask=0), dict(base, prevMask=0, prevAdmittedMask=-1),
+                        dict(base, prevAdmittedMask=0), dict(base, prevMask=True, prevAdmittedMask=0), base,
+                        dict(base, connectedMask=16), dict(base, prevAdmittedMask=None),
+                        {'connectedMask':1, 'prevMask':1}, {'connectedMask':1}]
+        lines = [(json.dumps(row)+'\n').encode('ascii') for row in observations]
+        groups = xinput_slot_gate_evidence(b''.join(lines), list(enumerate(observations, 1)), None)['groups']
+        self.assertEqual({k:v['exampleLines'] for k,v in groups.items()}, {
+            'raw-baseline':[1], 'both-changed':[2], 'raw-only':[3], 'raw-changed-admission-unresolved':[4],
+            'admission-only':[5], 'admission-changed-raw-unresolved':[6], 'both-reported-unchanged':[7],
+            'insufficient-mask-evidence':[8,9,10,11]})
+        self.assertEqual(sum(v['bytes'] for v in groups.values()), sum(map(len,lines)))
+
+    def test_xinput_slot_gate_uses_root_native_lanes_and_exact_reported_writer(self):
+        row = {'event':'xinput-slot-devices', 'connectedMask':1, 'prevMask':1, 'admittedMask':1,
+               'prevAdmittedMask':0, 'pid':37, 'writerProcessCreation100ns':'123'}
+        op = {'schema':1,'id':'37-8-1','writerPid':37,'writerProcessCreation100ns':'123',
+              'ordinal':'1','startedTickMs':'8','scope':'admitted-ordinary-log-export;diagnostic-correlation-only'}
+        rows = [row, dict(row, writerProcessCreation100ns='124'), dict(row, writerProcessCreation100ns=None)]
+        lines = [json.dumps(item).encode('ascii')+b'\r\n' for item in rows]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'slot-gate.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('YeManCC-export-manifest.txt', 'processId=37\nexportOperation='+json.dumps(op)+'\n')
+                for name in ('native-lifecycle.1.log', 'native-detail.log', 'nested/native-lifecycle.log'):
+                    archive.writestr(name, b'{bad\n'+b''.join(lines))
+            report = audit_zip(path, {'baseEvents':['xinput-slot-devices']})
+        views = {item['file']:item['xinputSlotGateEvidence'] for item in report['files'] if 'xinputSlotGateEvidence' in item}
+        self.assertEqual(set(views), {'native-lifecycle.1.log', 'native-detail.log'})
+        group = views['native-lifecycle.1.log']['groups']['admission-only']
+        self.assertEqual((group['exampleLines'], group['exportWriterExampleLines']), ([2,3,4], [2]))
+        for i, bucket in enumerate(('export-writer', 'same-pid-other-birth', 'writer-unresolved')):
+            self.assertEqual(group['writerBuckets'][bucket], {'rows':1, 'bytes':len(lines[i])})
+        self.assertEqual(views['native-detail.log']['groups']['admission-only'], group)
+        self.assertEqual([(v['kind'], v['file'], v['exampleLines']) for v in report['violations']],
+                         [('xinput-slot-gate-receipt-in-native-detail', 'native-detail.log', [2, 3, 4])])
+
+    def test_slot_gate_only_reports_detail_receipts_with_a_reported_baseline_or_edge(self):
+        base = dict(event='xinput-slot-devices', connectedMask=1, prevMask=1, admittedMask=1, prevAdmittedMask=1)
+        rows = [base, dict(base, prevMask=None), dict(base, prevMask=0), dict(base, prevAdmittedMask=0),
+                dict(base, prevMask=True, prevAdmittedMask=None), dict(base, prevMask=0, event=None),
+                dict(base, prevMask=0, prevAdmittedMask=0), dict(base, prevMask=0, prevAdmittedMask='0'),
+                dict(base, prevMask=16, prevAdmittedMask=0)]
+        lines = [json.dumps(row).encode('ascii') + b'\n' for row in rows]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'slot-gate.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                for member in ('native-lifecycle.log', 'native-detail.1.log', 'nested/native-detail.1.log'):
+                    archive.writestr(member, b''.join(lines))
+            report = audit_zip(path, {'baseEvents': [base['event']]})
+        self.assertEqual([(v['kind'], v['file'], v['exampleLines']) for v in report['violations']],
+                         [('xinput-slot-gate-receipt-in-native-detail', 'native-detail.1.log', [2, 3, 4, 7, 8, 9])])
+        low = next(f for f in report['files'] if f['file'] == 'native-lifecycle.log')['xinputSlotGateEvidence']['groups']
+        self.assertEqual(low['both-reported-unchanged']['exampleLines'], [1])
+        self.assertEqual(low['insufficient-mask-evidence']['exampleLines'], [5])
+
     def test_monitor_hud_lanes_distinguish_streaming_paint_from_recovery(self):
         native = [
             {'event':'desktop-hud-event','hudEvent':name,'pid':37}
@@ -2932,13 +5651,38 @@ class AuditTests(unittest.TestCase):
                     archive.writestr('native-lifecycle.log',payload)
                     archive.writestr('native-lifecycle.log.1',json.dumps(base)+'\n')
                     archive.writestr('native-detail.log',payload)
+                    archive.writestr('native-lifecycle.prev.log', payload)
+                    archive.writestr('native-lifecycle.4.log', json.dumps(base)+'\n')
+                    archive.writestr('native-lifecycle.4.log', json.dumps(base)+'\n')
+                    archive.writestr('native-lifecycle.previous.log', json.dumps(base)+'\n{broken}\n'+json.dumps(base)+'\n')
+                    archive.writestr('steam/native-lifecycle.1.log', payload)
+                    archive.writestr('native-lifecycle.log.pending', payload)
             result=audit_zip(path,{'baseEvents':['input-host-recovery-fallback']})
             findings=[row for row in result['violations'] if row['kind']=='unchanged-recovery-queue-refusal-in-native-low']
-            self.assertEqual(len(findings),2)
-            self.assertEqual(len({row['archiveEntryOccurrence'] for row in findings}),2)
+            self.assertEqual(sorted((row['file'], row['archiveEntryOccurrence'], row['exampleLines'])
+                                    for row in findings), [
+                ('native-lifecycle.log', 0, [2]), ('native-lifecycle.log', 1, [2]),
+                ('native-lifecycle.prev.log', 0, [2])])
             for row in findings:
                 self.assertEqual(row['counts']['all'],1)
                 self.assertFalse(row['businessActionDuplicationInferred'] or row['producerEmissionCoverageProven'] or row['processLifetimeProven'])
+
+    def test_marked_recovery_refusal_audits_rotated_root_without_needing_prior_row(self):
+        first = self.recovery_refusal()
+        repeat = dict(first, recoveryQueueRefusalRepeatSample=True)
+        controls = [dict(first, recoveryQueueRefusalRepeatSample=value) for value in (1, 'true', False)]
+        controls += [dict(repeat, state='owned-return-proven'), dict(repeat, serial=True),
+                     dict(repeat, requestId=0), dict(repeat, serial=1 << 64)]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'marked.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                wire = ''.join(json.dumps(row) + '\n' for row in [repeat, repeat, first, *controls])
+                for name in ('native-lifecycle.log.1', 'native-detail.log',
+                             'nested/native-lifecycle.log.1', 'native-lifecycle.log.pending'):
+                    archive.writestr(name, wire)
+            result = audit_zip(path, {'baseEvents': [first['event']]})
+        self.assertEqual([(row['kind'], row['file'], row['exampleLines']) for row in result['violations']],
+                         [('known-detail-in-native-low', 'native-lifecycle.log.1', [1, 2])])
 
     def test_scheduling_delay_known_detail_lane_and_transport_stays_resident(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -4743,7 +7487,7 @@ class AuditTests(unittest.TestCase):
         records = [(1, legacy), (2, known), (3, other), (4, known), (5, known),
                    (6, detail), (7, known), (8, row(inactiveWithoutSource=1)),
                    (9, known), (10, {**detail, 'snapshotReason':'state-change'}), (11, known)]
-        self.assertEqual([line for line,_ in repeated_frame_observations(records, evidence=evidence)], [5, 6])
+        self.assertEqual([line for line,_ in repeated_frame_observations(records, evidence=evidence)], [5])
         self.assertEqual(evidence['reasonCounts'], {'invalid-inactive-source-context':1, 'invalid-inactive-topology-sample':1})
 
     def test_frame_unknown_versions_never_seed_or_bridge_context_history(self):
@@ -4839,11 +7583,11 @@ class AuditTests(unittest.TestCase):
         sampled={**row,'semanticNeutral':True,'observedTick':1000}
         self.assertEqual([line for line,_ in repeated_frame_observations([(1,row),(2,sampled)])],[2])
 
-    def test_frame_periodic_known_version_is_independent_of_missing_source_context(self):
+    def test_frame_periodic_breaks_comparison_even_without_source_context(self):
         row=self.comparable_frame()
         periodic=self.comparable_frame(snapshotReason='periodic',source={})
         evidence={}
-        self.assertEqual([line for line,_ in repeated_frame_observations([(1,row),(2,periodic),(3,row),(4,row)],evidence=evidence)],[2,4])
+        self.assertEqual([line for line,_ in repeated_frame_observations([(1,row),(2,periodic),(3,row),(4,row)],evidence=evidence)],[4])
         self.assertEqual(evidence,{})
         for value in (True,{},[]):
             evidence={}
@@ -4891,7 +7635,7 @@ class AuditTests(unittest.TestCase):
         value={**row,'diagnosticRecoveryReoffer':False}
         self.assertEqual([line for line,_ in repeated_frame_observations([(1,row),(2,value),(3,row)])],[2,3])
         periodic={**value,'snapshotReason':'periodic','source':{}}
-        self.assertEqual([line for line,_ in repeated_frame_observations([(1,row),(2,periodic),(3,row),(4,row)])],[2,4])
+        self.assertEqual([line for line,_ in repeated_frame_observations([(1,row),(2,periodic),(3,row),(4,row)])],[4])
 
     def test_frame_log_recovery_bad_marker_types_reset_comparison(self):
         row=self.comparable_frame()
@@ -4978,6 +7722,28 @@ class AuditTests(unittest.TestCase):
                 both=[(1,row),(2,other),(4,dict(row)),(5,dict(other)),(6,row),(7,other)]
                 self.assertEqual(self.continuity_repeated_lines(detect(both,unknown_lines=[3])),[6,7])
 
+    def test_same_pid_reported_birth_or_generation_boundary_retires_repeat_history(self):
+        from log_lane_audit import repeated_recovery_fallback_observations
+        recovery = ('recovery', repeated_recovery_fallback_observations, self.recovery_refusal(), None)
+        for label, detect, row, _ in (*self.continuity_samples(), recovery):
+            known = {**row, 'writerProcessCreation100ns': '123'}
+            other = {**known, 'pid': 38}
+            unrelated = {'event': 'thread-role', 'pid': known['pid']}
+            for change in ({'writerProcessCreation100ns': '456'}, {'writerProcessCreation100ns': None},
+                           {'writerProcessCreation100ns': '0'}, {'powerGeneration': known['powerGeneration'] + 1},
+                           {'powerGeneration': False}):
+                with self.subTest(classifier=label, change=change):
+                    for boundary in ({**unrelated, **change}, {**known, **change}):
+                        rows = [known, other, boundary, known, other, known]
+                        self.assertEqual(self.continuity_repeated_lines(detect(enumerate(rows, 1))), [5, 6])
+            self.assertEqual(self.continuity_repeated_lines(detect(enumerate([known, unrelated, known], 1))), [3])
+
+    def test_periodic_frame_marker_does_not_bridge_birth_boundary(self):
+        _, detect, row, _ = self.continuity_samples()[-1]
+        known = {**row, 'writerProcessCreation100ns': '123'}
+        marker = {**known, 'writerProcessCreation100ns': '456', 'snapshotReason': 'periodic'}
+        self.assertEqual(self.continuity_repeated_lines(detect(enumerate([known, marker, known, known], 1))), [4])
+
     def test_invalid_rows_and_nonobject_lines_do_not_bridge_zip_repeats(self):
         malformed=(b'{broken}',b'{"event":"boot-single-instance-acquired","event":"x"}',
                    b'{"event":"hidden","v":NaN}',b'{"event":"bad\xff"}',b'null',b'[]',b'false')
@@ -5013,14 +7779,39 @@ class AuditTests(unittest.TestCase):
     def test_unknown_line_does_not_hide_independent_periodic_or_raw_lane_violations(self):
         row=self.continuity_samples()[-1][2]
         periodic={**row,'snapshotReason':'periodic'}
-        self.assertEqual(self.continuity_repeated_lines(repeated_frame_observations([(3,periodic)],unknown_lines=[2])),[3])
+        self.assertEqual(self.continuity_repeated_lines(repeated_frame_observations([(3,periodic)],unknown_lines=[2])),[])
         with tempfile.TemporaryDirectory() as root:
             path=Path(root)/'raw.zip'
             detail={'event':'input-host-command-result','pid':37,'command':'SUBMIT_FRAME','ok':True}
             self.receipt_selection_write(path,[('native-lifecycle.log',b'{bad}\n'+json.dumps(detail).encode()+b'\n'+json.dumps(periodic).encode()+b'\n')])
             report=audit_zip(path,{'baseEvents':[]})
             self.assertEqual({q['kind']:q['exampleLines'] for q in report['violations']},
-                {'successful-frame-in-native-low':[2],'unchanged-frame-observation-in-native-low':[3]})
+                {'successful-frame-in-native-low':[2],'known-detail-in-native-low':[3]})
+
+    def test_frame_periodic_lane_marker_does_not_require_writer_or_comparison_context(self):
+        row={**self.comparable_frame(), 'writerProcessCreation100ns':'123'}
+        periodic={**row, 'snapshotReason':'periodic'}
+        no_identity={'event':row['event'],'snapshotReason':'periodic'}
+        bad_context={**periodic,'formatVersion':999,'writerProcessCreation100ns':'456'}
+        controls=[{**row,'snapshotReason':v} for v in ('Periodic','periodic ',True,None)]
+        rows=[row,periodic,row,row,no_identity,bad_context,*controls]
+        raw=b''.join(json.dumps(r).encode()+b'\n' for r in rows)
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'frame-lane.zip'
+            self.receipt_selection_write(path,[('native-lifecycle.log.1',raw),
+                ('native-detail.log',b''.join(json.dumps(r).encode()+b'\n' for r in (no_identity,bad_context,periodic)))])
+            report=audit_zip(path,{'baseEvents':[]})
+        findings={v['kind']:v for v in report['violations']}
+        self.assertEqual({kind:v['exampleLines'] for kind,v in findings.items()},
+            {'known-detail-in-native-low':[2,5,6], 'unchanged-frame-observation-in-native-low':[4]})
+        self.assertTrue(all(v['file']=='native-lifecycle.log.1' for v in findings.values()))
+        buckets=findings['known-detail-in-native-low']['nativeLowFindingWriterFootprint']['buckets']
+        self.assertEqual(sum(bucket['rows'] for bucket in buckets.values()),3)
+        self.assertEqual(sum(bucket['bytes'] for bucket in buckets.values()),
+            sum(len(raw.splitlines(keepends=True)[i-1]) for i in (2,5,6)))
+        comparison=next(f['frameComparisonEvidence'] for f in report['files'] if 'frameComparisonEvidence' in f)
+        self.assertEqual(comparison['reasonCounts'],
+            {'writer-unattributed':1,'unsupported-format-version':1,'unsupported-snapshot-reason':4})
 
     def test_continuity_unknowns_are_scoped_to_member_occurrence_and_rotation(self):
         row=self.continuity_samples()[0][2];encoded=json.dumps(row).encode()
@@ -6110,6 +8901,29 @@ class AuditTests(unittest.TestCase):
         return {'schema':1,'api':'GetExitCodeProcess','attempted':True,'succeeded':False,
                 'errorDomain':'win32-last-error','error':5,**updates}
 
+    def test_foreground_idle_exit_query_compaction_preserves_authority(self):
+        from log_lane_audit import native_foreground_helper_record, restore_foreground_idle_exit_query
+        for event in ('native-foreground-isolation', 'msi-native-foreground-isolation'):
+            row = self.foreground_helper_row(event=event, phase='refresh-completed', helperExitCode=0, helperFailure='')
+            packed = dict(row, helperExitQueryIdleV1=1)
+            idle = self.foreground_exit_query(attempted=False, succeeded=None, errorDomain=None, error=None)
+            original = dict(row, helperExitQuery=idle)
+            self.assertEqual(restore_foreground_idle_exit_query(packed), (original, 'restored'))
+            view = native_foreground_helper_record(packed)
+            self.assertEqual(view, native_foreground_helper_record(original))
+            self.assertEqual(view['helperOutcome'], 'unproven-exit-query')
+            self.assertFalse(view['exitQuery']['exitValueValidatedByReportedQuery'])
+            self.assertNotIn('helperExitQuery', packed)
+            for bad in (True, 1.0, '1', 2, None):
+                view = native_foreground_helper_record(dict(packed, helperExitQueryIdleV1=bad))
+                self.assertEqual(view['exitQuery']['state'], 'invalid-idle-query-marker')
+                self.assertEqual(view['helperOutcome'], 'invalid-exit-query-evidence')
+            explicit_success = self.foreground_exit_query(succeeded=True, errorDomain=None, error=None)
+            conflict = native_foreground_helper_record(dict(packed, helperExitQuery=explicit_success))
+            self.assertEqual(conflict['exitQuery']['state'], 'conflicting-idle-query-marker')
+            self.assertFalse(conflict['exitQuery']['exitValueValidatedByReportedQuery'])
+            self.assertEqual(conflict['helperOutcome'], 'invalid-exit-query-evidence')
+
     def test_foreground_helper_exit_query_failure_is_not_child_nonzero(self):
         from log_lane_audit import native_foreground_helper_record
         for error in (0,5,0xffffffff):
@@ -7189,20 +10003,42 @@ class AuditTests(unittest.TestCase):
         self.assertTrue(all(r['writerProcessCreation100ns'] is None for r in refs))
 
     def test_system_xinput_button_trajectory_is_detail_but_connection_and_errors_resident(self):
+        birth = '134401550065218552'
+        event = 'system-xinput-readback'
+        base = {'event': event, 'pid': 37, 'writerProcessCreation100ns': birth,
+                'source': 'system32-xinput1_4', 'observerScope': 'same-YMCC-process; HidHide exemption may apply; not external Steam proof'}
+        first = {**base, 'reason': 'first', 'connectedMask': 0}
+        changed = {**base, 'reason': 'mask-change', 'connectedMask': 15}
+        unavailable = {**base, 'reason': 'module-or-entrypoint-unavailable', 'available': False}
+        button = {**base, 'reason': 'buttons-change', 'connectedMask': 1}
+        def wire(row):
+            return json.dumps(row).encode() + b'\r\n'
+        misplaced = (first, changed, unavailable)
+        ambiguous = ({**first, 'connectedMask': True}, {**first, 'connectedMask': 16},
+                     {**first, 'observerScope': 'unrelated'}, {**first, 'source': None},
+                     {**first, 'available': False}, {**changed, 'available': True},
+                     {**unavailable, 'available': 0}, {**unavailable, 'connectedMask': 0},
+                     {**changed, 'event': 'different-event'}, {'event': event, 'reason': 'first'})
+        operation = dict(schema=1, id='37-400-1', writerPid=37, writerProcessCreation100ns=birth,
+                         ordinal='1', startedTickMs='400', scope='admitted-ordinary-log-export;diagnostic-correlation-only')
         with tempfile.TemporaryDirectory() as root:
-            archive=Path(root)/'system.zip'
-            rows=[{'event':'system-xinput-readback','reason':reason,'pid':37} for reason in
-                  ['first','mask-change','module-or-entrypoint-unavailable','buttons-change']]
-            with zipfile.ZipFile(archive,'w') as z:
-                z.writestr('native-lifecycle.log',''.join(json.dumps(r)+'\n' for r in rows))
-                z.writestr('native-detail.log',json.dumps(rows[-1])+'\n')
-            report=audit_zip(archive,{'baseEvents':['system-xinput-readback'],'baseEventCount':1})
-            self.assertEqual(len(report['violations']),1)
-            issue=report['violations'][0]
-            self.assertEqual(issue['file'],'native-lifecycle.log')
-            self.assertEqual(issue['event'],'system-xinput-readback')
-            self.assertEqual(issue['counts']['all'],1)
-            self.assertEqual(issue['exampleLines'],[4])
+            archive = Path(root) / 'system.zip'
+            low, detail = 'native-lifecycle.log', 'native-detail.1.log'
+            with zipfile.ZipFile(archive, 'w') as z:
+                z.writestr('YeManCC-export-manifest.txt', 'processId=37\nexportOperation=' + json.dumps(operation) + '\n')
+                z.writestr(low, b''.join(map(wire, (*misplaced, button))))
+                z.writestr(detail, wire(button) + b'bad-json\n' + b''.join(map(wire, (*misplaced, *ambiguous))))
+                z.writestr('nested/' + detail, wire(first))
+                z.writestr('native-detail.log.pending', wire(unavailable))
+            report = audit_zip(archive, {'baseEvents': [event], 'baseEventCount': 1})
+        issues = report['violations']
+        self.assertCountEqual([(v['kind'], v['file'], v['event'], v['exampleLines']) for v in issues],
+                              [('known-detail-in-native-low', low, event, [4]),
+                               ('system-xinput-resident-in-native-detail', detail, event, [3, 4, 5])])
+        reverse = next(v for v in issues if v['file'] == detail)
+        footprint = reverse['nativeDetailFindingWriterFootprint']
+        self.assertEqual(reverse['counts']['all'], 3)
+        self.assertEqual(footprint['buckets']['export-writer'], {'rows': 3, 'bytes': sum(len(wire(row)) for row in misplaced)})
 
     def test_speedhack_is_external_timestamped_text_including_rotations(self):
         with tempfile.TemporaryDirectory() as root:
@@ -7302,13 +10138,14 @@ class AuditTests(unittest.TestCase):
         row={'writerEnvelopeSchema':1,'writerPid':37,'writerProcessCreation100ns':'123','pid':777,'browserProcessId':888,'hostPid':999}
         names=('frontend-trace.log','frontend-trace-detail.log','frontend-errors.log','webview-failures.log')
         for name in names:
-            for suffix in ('','.1','.prev','.previous'):
-                self.assertEqual(process_identity(row,name+suffix),('37','writerPid'))
+            for member in (name, name+'.1', name+'.prev', name+'.previous',
+                           name[:-4]+'.1.log', name[:-4]+'.prev.log', name[:-4]+'.previous.log'):
+                self.assertEqual(process_identity(row,member),('37','writerPid'))
                 for bad in (True,None,0,-1,1.0,'３７',1<<32):
-                    self.assertEqual(pid({**row,'writerPid':bad},name+suffix),'unknown')
+                    self.assertEqual(pid({**row,'writerPid':bad},member),'unknown')
                 for schema in (True,None,0,1.0,'1',2):
-                    self.assertEqual(pid({**row,'writerEnvelopeSchema':schema},name+suffix),'unknown')
-                self.assertEqual(pid({k:v for k,v in row.items() if k not in ('writerPid','writerEnvelopeSchema')},name+suffix),'unknown')
+                    self.assertEqual(pid({**row,'writerEnvelopeSchema':schema},member),'unknown')
+                self.assertEqual(pid({k:v for k,v in row.items() if k not in ('writerPid','writerEnvelopeSchema')},member),'unknown')
         legacy={'origin':'renderer-observation','where':'controller-calibration','pid':37,'browserProcessId':888}
         self.assertEqual(process_identity(legacy,'frontend-trace.log'),('37','pid'))
         self.assertEqual(process_identity({**legacy,'where':'monitor-notice-lifecycle'},'frontend-trace.log.1'),('37','pid'))
@@ -7620,7 +10457,7 @@ class AuditTests(unittest.TestCase):
                 (6,{**row,'formatVersion':2,'snapshotReason':'state-change'}),
                 (7,{**row,'source':{}}),
                 (8,{'event':'boot-single-instance-acquired','pid':7}), (9,row)]
-        self.assertEqual([i for i,_ in repeated_frame_observations(rows)], [2,5])
+        self.assertEqual([i for i,_ in repeated_frame_observations(rows)], [2])
 
     def test_v2_neutral_activity_is_not_a_resident_transition(self):
         source = dict(snapshotKnown=True, inputSource='xinput', powerGeneration=1,
@@ -7774,6 +10611,40 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(report['identityRejections'], {'writer-birth-unavailable': 4})
         self.assertEqual(report['receiptVolume']['completionOutcomes'], {'skipped': 1})
 
+    def test_late_hide_stage_defaults_keep_transactions_and_original_rows(self):
+        from ai_log_reader import late_hide_stage_defaults_projection as project
+        original = self.late_hide_rows()
+        original[1]['owner'] = 'capture-lifecycle-thread'
+        packed = [dict(row) for row in original]
+        for index, fields in ((1, ('reason', 'owner')), (2, ('reason',))):
+            for key in fields:
+                del packed[index][key]
+            packed[index]['lateHideStageDefaultsV1'] = 1
+        for marker in (True, 1.0, '1', 2, None):
+            self.assertEqual(project(dict(packed[1], lateHideStageDefaultsV1=marker)), {'state': 'invalid-envelope'})
+        conflict = dict(packed[1], owner=None)
+        self.assertEqual(project(conflict), {'state': 'conflicting-inline-fields', 'fields': ['owner']})
+        self.assertIsNone(project(original[1]))
+        self.assertIsNone(project(dict(packed[1], event='late-hide-enqueue')))
+        self.assertIsNone(project(dict(packed[1], event=[])))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'late-hide.zip'
+            encode = lambda rows: ''.join(json.dumps(row) + '\n' for row in rows)
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log', encode(original))
+                archive.writestr('native-lifecycle.prev.log', encode(packed))
+                archive.writestr('native-detail.log', encode([conflict]))
+                archive.writestr('nested/native-lifecycle.prev.log', encode(packed))
+            report = audit_zip(path, {'baseEvents': [row['event'] for row in original]})
+            visual = [r for r in iter_ai_records(path) if 'lateHideStageDefaults' in r]
+        by_file = {r['file']: r for r in report['transactionSummaries']}
+        first, second = (by_file[f] for f in ('native-lifecycle.log', 'native-lifecycle.prev.log'))
+        self.assertEqual(first['episodes'], second['episodes'])
+        files = {r['file']: r for r in report['files']}
+        self.assertEqual(files['native-lifecycle.prev.log']['lateHideStageDefaultsCounts'], {'restorable': 2})
+        self.assertEqual(files['native-detail.log']['lateHideStageDefaultsCounts'], {'conflicting-inline-fields': 1})
+        self.assertEqual([r['value'] for r in visual], [packed[1], packed[2], conflict])
+
     def test_late_hide_coalescing_and_unambiguous_order(self):
         admit, dequeue, decision, complete = self.late_hide_rows()
         reuse = dict(admit, outcome='coalesced', coalesced=True)
@@ -7826,6 +10697,45 @@ class AuditTests(unittest.TestCase):
             self.assertEqual(found[0]['selectionScope'],'producer-reported-repeatObservation-true;not-sequential-equality-or-operation-identity')
             self.assertFalse(found[0]['businessActionDuplicationInferred'] or found[0]['producerEmissionCoverageProven'])
             self.assertEqual(path.read_bytes(),original)
+
+    def test_native_lane_rotation_keeps_writer_and_observed_host_separate(self):
+        event = 'system-xinput-readback'
+        row = {'event': event, 'reason': 'buttons-change', 'pid': 37, 'hostPid': 99}
+        no_writer = {key: value for key, value in row.items() if key != 'pid'}
+        names = [f'native-{stream}{rotation}' for stream in ('lifecycle', 'detail')
+                 for rotation in ('.log', '.log.1', '.log.prev', '.log.previous', '.1.log', '.prev.log', '.previous.log')]
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'rotations.zip'
+            with zipfile.ZipFile(path, 'w') as z:
+                z.writestr('YeManCC-export-manifest.txt', 'processId=37\n')
+                for name in names:
+                    z.writestr(name, ''.join(json.dumps(value) + '\n' for value in (row, no_writer)))
+            report = audit_zip(path, {'baseEvents': [event]})
+        for name in names:
+            with self.subTest(name=name):
+                self.assertEqual(process_identity(row, name), ('37', 'pid'))
+                self.assertEqual(pid(no_writer, name), 'unknown')
+        self.assertEqual([item['file'] for item in report['violations']], names[:7])
+        for item in report['violations']:
+            self.assertEqual(item['kind'], 'known-detail-in-native-low')
+            self.assertEqual(item['counts']['byPid'], {'37': 1, 'unknown': 1})
+            self.assertEqual(item['exampleLines'], [1, 2])
+
+    def test_root_lanes_reject_lookalike_member_names(self):
+        native = {'event': 'system-xinput-readback', 'reason': 'buttons-change', 'pid': 37}
+        frontend = {'event': 'frontend-trace', 'where': 'controller-preview', 'lane': 'detail'}
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'lookalikes.zip'
+            with zipfile.ZipFile(path, 'w') as z:
+                for base, row in (('native-lifecycle', native), ('frontend-trace', frontend)):
+                    for name in (f'{base}.log', f'{base}.1.log.2', f'other!{base}.log', f'{base}.log.pending'):
+                        z.writestr(name, json.dumps(row) + '\n')
+            report = audit_zip(path, {'baseEvents': [native['event']]})
+        self.assertEqual({q['file']: q['lane'] for q in report['files']}, {
+            'native-lifecycle.log': 'native-low', 'native-lifecycle.1.log.2': 'unclassified',
+            'other!native-lifecycle.log': 'unclassified', 'frontend-trace.log': 'frontend-low',
+            'frontend-trace.1.log.2': 'unclassified', 'other!frontend-trace.log': 'unclassified'})
+        self.assertEqual({q['file'] for q in report['violations']}, {'native-lifecycle.log', 'frontend-trace.log'})
 
     def test_retained_repeat_lane_native_rotations_detail_and_foreign_streams(self):
         row={'event':'input-host-session-retained','pid':37,'repeatObservation':True}
@@ -8380,6 +11290,45 @@ class AuditTests(unittest.TestCase):
                 self.assertEqual(view['offsetMatches'], [dict(file=name, archiveEntryOccurrence=0, line=2,
                     rawLineSha256=hashlib.sha256(partial).hexdigest()) for name in files])
 
+    def test_buffered_tail_separator_keeps_scope_and_old_unknown(self):
+        partial = b'{"tdp":'
+        complete = b'{"event":"tdp.request"}\n'
+        content = partial + b'\n' + complete
+        metadata = 'log-export-availability.json'
+        active, rotated = 'tdp-detail.log', 'tdp-detail.log.1'
+        receipt = {'schemaVersion': 1, 'accepted': 1, 'last': {'tick': 0, 'offsetBytes': len(partial)}}
+        cases = (
+            ('matching-rotation', [(active, partial), (rotated, content), ('steam/logs/' + rotated, content)],
+             receipt, 'reported-separator-flushed', [rotated]),
+            ('same-offset-both', [(active, content), (rotated, content)], receipt, 'reported-separator-flushed', [active, rotated]),
+            ('wrong-lane', [('tdp.log', content)], receipt, 'reported-separator-flushed', []),
+            ('duplicate', [(rotated, content), (rotated, content)], receipt, 'reported-separator-flushed', []),
+            ('bad-offset', [(rotated, content)], dict(receipt, last={'tick': 8, 'offsetBytes': 3}), 'reported-separator-flushed', []),
+            ('bad-count', [(rotated, content)], dict(receipt, accepted=9007199254740992), 'invalid-fields', []),
+            ('none', [(rotated, content)], dict(schemaVersion=1, accepted=0, last=None), 'reported-none-accepted', []),
+            ('legacy', [(rotated, content)], None, None, []),
+        )
+        for label, entries, separator, state, files in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / 'buffered-tail.zip'
+                slot = {'file': active, 'failureObservations': 0, 'counterSaturated': False,
+                        'streamOpen': False, 'streamGood': True, 'first': None, 'last': None, 'pendingRows': 0}
+                if separator is not None:
+                    slot['tailSeparatorEvidence'] = separator
+                value = {'bufferedNativeLogEvidence': {'schemaVersion': 1, 'writerPid': 37,
+                         'counterLimit': 9007199254740991, 'fileWriteProof': False, 'snapshotAtomicAcrossSinks': False,
+                         'evidenceScope': 'current-Native-owned-buffer-slots;not-file-write-or-whole-history-proof', 'sinks': [slot]}}
+                self.receipt_selection_write(path, entries + [(metadata, json.dumps(value))])
+                sinks = audit_zip(path, {'baseEvents': []})['commonEvidence']['bufferedNativeSinkEvidence']['sinks']
+                view = next(s for s in sinks if s['file'] == active).get('tailSeparatorEvidence')
+                if state is None:
+                    self.assertIsNone(view)
+                    continue
+                self.assertEqual(view['state'], state)
+                self.assertFalse(view['fileIdentityProven'])
+                self.assertEqual(view['offsetMatches'], [dict(file=name, archiveEntryOccurrence=0, line=1,
+                    rawLineSha256=hashlib.sha256(partial).hexdigest()) for name in files])
+
     def test_buffered_native_sink_evidence_keeps_failed_flush_and_old_unknown(self):
         receipt={'schemaVersion':1,'writerPid':7,'fileWriteProof':False,'snapshotAtomicAcrossSinks':False,
             'sinks':[{'file':'tdp.log','failureObservations':1,'pendingRows':0,'streamOpen':False,'streamGood':True,
@@ -8745,7 +11694,562 @@ class AuditTests(unittest.TestCase):
 
 
 
+class FanHostPowerBoundaryLaneTests(unittest.TestCase):
+    def test_fault_ledger_flags_only_explicit_repeat_evidence(self):
+        normal = dict(eventName='oem.power-boundary', schemaVersion=2, diagnosticSchemaVersion=1,
+                      processId=71, hostInstanceId='b'*32,
+                      details=dict(state='entered', repeatCount=1,
+                                   metadata=dict(fanScope='fan:71:3', operationId='fan:71:3', powerObservationScopeSchema=1)))
+        repeated = dict(normal, details=dict(normal['details'], repeatCount=2, state='scope-ended'))
+        sample = dict(repeated, eventName='oem.power-boundary-sample')
+        summary = dict(repeated, eventName='oem.power-boundary-summary')
+        malformed = [dict(repeated, details=dict(repeated['details'], repeatCount=value)) for value in (None, False, 2.0, '2')]
+        malformed += [dict(repeated, details=dict(repeated['details'], state='other')),
+                      dict(repeated, details=dict(repeated['details'], metadata={'powerObservationScopeSchema': 1})),
+                      dict(repeated, schemaVersion=True), dict(repeated, diagnosticSchemaVersion=1.0)]
+        encoded = lambda values: b''.join((json.dumps(row)+'\r\n').encode() for row in values)
+        members = [('fan-host-fault.log', [normal, sample, repeated, summary, *malformed]),
+                   ('fan-host-fault.log.1', [sample]), ('yeman-fan-host-runtime.203.log', [normal, sample, repeated]),
+                   ('nested/fan-host-fault.log', [sample]), ('legacy!fan-host-fault.log', [sample])]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'fan.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                for name, values in members:
+                    archive.writestr(name, b'bad\n'+encoded(values))
+            report = audit_zip(path, {'baseEvents': []})
+            with zipfile.ZipFile(path) as archive:
+                self.assertEqual(archive.read(members[0][0]), b'bad\n'+encoded(members[0][1]))
+        self.assertEqual([(hit['file'], hit['event'], hit['exampleLines'], hit['rawRowBytes']) for hit in report['violations']], [
+            ('fan-host-fault.log', sample['eventName'], [3], len(encoded([sample]))),
+            ('fan-host-fault.log', normal['eventName'], [4], len(encoded([repeated]))),
+            ('fan-host-fault.log.1', sample['eventName'], [2], len(encoded([sample])))])
+        self.assertTrue(all(hit['kind']=='fan-host-power-boundary-repeat-in-fault' and
+                            hit['archiveEntryOccurrence']==0 for hit in report['violations']))
+        views = {entry['file']: entry['fanHostPowerBoundaryLaneEvidence'] for entry in report['files']
+                 if 'fanHostPowerBoundaryLaneEvidence' in entry}
+        self.assertEqual(views['fan-host-fault.log']['counts'], {'first-boundary': 1, 'explicit-repeat-sample': 1,
+            'repeat-marked-boundary': 1, 'unclassified-summary': 1, 'unverified-boundary': 8})
+        self.assertEqual(views['yeman-fan-host-runtime.203.log']['counts'], {'first-boundary': 1, 'explicit-repeat-sample': 1,
+            'repeat-marked-boundary': 1})
+        self.assertNotIn('legacy!fan-host-fault.log', views)
+
+
+class FanHostRuntimeLaneTests(unittest.TestCase):
+    def test_only_qualified_runtime_events_in_root_fault_members_are_violations(self):
+        events = ('api.request-success', 'hc-operation.begin', 'hc-operation.phase', 'hc-operation.return', 'host.runtime-sample')
+        env = dict(schemaVersion=2, diagnosticSchemaVersion=1, processId=71, hostInstanceId='b'*32,
+                   runId='fan-host:71:' + 'b'*32)
+        rows = [dict(env, eventName=event) for event in events]
+        unknown = [dict(rows[0], **change) for change in (dict(schemaVersion=2.0), dict(diagnosticSchemaVersion=True),
+                   dict(processId=True), dict(hostInstanceId='wrong'), dict(runId='other'))]
+        controls = [dict(env, eventName=event) for event in ('hc-operation.write-cancelled', 'power.fault-locked',
+                                                           'host.runtime-samples')]
+        controls.append(dict(env, event=events[0]))
+        def wire(row):
+            return json.dumps(row).encode() + b'\r\n'
+        payload = b'bad\n' + b''.join(map(wire, [*rows, *unknown, *controls]))
+        low, detail = 'fan-host-fault.2.log', 'yeman-fan-host-runtime.203.log'
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'runtime-fault.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                for name in (low, detail, 'nested/' + low, 'fan-host-fault.log.pending'):
+                    archive.writestr(name, payload)
+            report = audit_zip(path, {'baseEvents': []})
+        self.assertCountEqual([(v['file'], v['kind'], v['event'], v['count'], v['rawRowBytes'], v['exampleLines'],
+                               v['archiveEntryOccurrence']) for v in report['violations']],
+                              [(low, 'fan-host-runtime-only-in-fault', event, 1, len(wire(row)), [line], 0)
+                               for line, (event, row) in enumerate(zip(events, rows), 2)])
+        views = {f['file']: f['fanHostRuntimeLaneEvidence'] for f in report['files'] if 'fanHostRuntimeLaneEvidence' in f}
+        self.assertEqual(set(views), {low, detail})
+        self.assertEqual(views[low], views[detail])
+        self.assertEqual(views[low]['unverifiedEnvelopes'][events[0]],
+                         dict(count=5, rawRowBytes=sum(map(lambda row: len(wire(row)), unknown)), exampleLines=list(range(7, 12))))
+
+
+class TdpHelperStartContextTests(unittest.TestCase):
+    def test_root_tdp_and_rotated_detail_keep_raw_with_context_projection(self):
+        first = dict(event='tdp.helper-start', schemaVersion=1, route='daemon', source='schedule',
+                     operationId='tdp:123:1', requestPowerGeneration=6, powerGeneration=7, helperStartContextV1=1)
+        second = dict(first, route='cli', operationId='native:58-4')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'helper.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('tdp.log', json.dumps(first)+'\n')
+                archive.writestr('tdp-detail.log.1', json.dumps(second)+'\n')
+                for unrelated in ('others/tdp.log', 'tdp.log.pending', 'native-lifecycle.log'):
+                    archive.writestr(unrelated, json.dumps(first)+'\n')
+            found = [r for r in iter_ai_records(path) if 'tdpHelperStartContext' in r]
+        self.assertCountEqual([r['value'] for r in found], [first, second])
+        for r in found:
+            self.assertEqual(r['tdpHelperStartContext']['restoredFields'], dict(owner='YMCC-parent',
+                machineIdentitySource='existing-native-startup-cache', processStarted=False,
+                hardwareCommandReturned='not-observed', readbackMatched='not-observed'))
+
+    def test_strict_version_route_field_conflicts_and_untagged_rows(self):
+        from ai_log_reader import tdp_helper_start_context_projection as project
+        row = dict(event='tdp.helper-start', schemaVersion=1, route='daemon', helperStartContextV1=1)
+        for extra in (dict(helperStartContextV1=True), dict(helperStartContextV1=1.0), dict(helperStartContextV1='1'),
+                      dict(schemaVersion=True), dict(schemaVersion=2), dict(route='msi-g3e-wmi'), dict(route=[])):
+            self.assertEqual(project({**row, **extra}), {'state': 'invalid-envelope'})
+        for field in ('owner', 'machineIdentitySource', 'processStarted', 'hardwareCommandReturned', 'readbackMatched'):
+            self.assertEqual(project(dict(row, **{field: None})),
+                             {'state': 'conflicting-inline-fields', 'fields': [field]})
+        self.assertIsNone(project(dict(row, event='tdp.helper-result')))
+        self.assertIsNone(project({k: v for k, v in row.items() if k != 'helperStartContextV1'}))
+
+
+class TdpAmdFailureReceiptTests(unittest.TestCase):
+    @staticmethod
+    def sample():
+        scope = 'StrixHalo_PM_table_limit_fields_only'
+        amd = dict(schemaVersion=1, vendor='amd', unit='w', hardwareCommandReturned=True, readbackMatched=False,
+                   physicalPowerVerified=False, verificationScope=scope, readbackState='mismatch', reason='amd_tdp_readback_mismatch',
+                   requestedLimitsW=dict(stapm=120, fast=120, slow=120), observedLimitsW=dict(stapm=100.0, fast=100.0, slow=100.0))
+        result = dict(event='tdp.helper-result', schemaVersion=1, pid=37, runId='ymcc:37:123', operationId='tdp:1795456714627:92',
+                      requestedW=120, source='schedule', route='daemon', powerGeneration=8, requestPowerGeneration=8,
+                      requestId='37-4', responseRequestId='37-4', helperCommandReturned=True, hardwareCommandReturned=True,
+                      readbackMatched=False, verificationScope=scope, helperResult=dict(amdObservation=amd), ok=False, rc=6,
+                      stale=False, ignored=False, error='amd_tdp_readback_mismatch: test', time='result', monotonicTick=1)
+        echo = {key: result[key] for key in ('schemaVersion', 'pid', 'runId', 'operationId', 'requestedW', 'source', 'route', 'powerGeneration', 'error')}
+        echo.update(event='tdp.failed', hardwareCommandReturned='not-observed', readbackMatched='not-observed', processStarted=False)
+        return result, dict(result, event='tdp.failed', time='failed', monotonicTick=2), echo
+
+    def test_pair_and_text_echo_stay_in_member_and_backoff_is_separate(self):
+        result, failed, echo = self.sample()
+        backoff = dict(echo, operationId='tdp:1795456714627:93', source='autofloat', error='TDP hardware write is in backoff')
+        invalid = dict(backoff, hardwareCommandReturned=True)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'tdp.zip'
+            encode = lambda items: ''.join(json.dumps(row) + '\n' for row in items)
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('tdp.log.1', 'bad\n' + encode([result, failed, echo, backoff, invalid]))
+                archive.writestr('tdp.log', encode([result]))
+                archive.writestr('tdp-detail.log', encode([failed]))
+                archive.writestr('nested/tdp.log', encode([result, failed]))
+            report = audit_zip(path, {'baseEvents': []})
+        views = {row['file']: row['tdpAmdFailureReceiptEvidence'] for row in report['files'] if 'tdpAmdFailureReceiptEvidence' in row}
+        view = views['tdp.log.1']
+        self.assertEqual(view['rowsByClass'], {'structured-helper-result': 1, 'structured-failure': 1,
+                         'mismatch-text-no-command-observed': 1, 'backoff-text-no-command-observed': 1,
+                         'backoff-shape-unverified': 1})
+        self.assertEqual((view['requestGroupsByClass'], view['textEchoCandidates'], view['backoffRowsBySource']),
+                         ({'same-request-pair': 1}, 1, {'autofloat': 1}))
+        self.assertEqual((view['requestGroupExamples'][0]['lines'], view['requestGroupExamples'][0]['textEchoCandidateLine']), ([2, 3], 4))
+        self.assertFalse(view['physicalPowerVerified'])
+        self.assertFalse(view['writerLifetimeVerified'])
+        self.assertEqual([views[name]['requestGroupsByClass'] for name in ('tdp.log', 'tdp-detail.log')], [{'single-structured-receipt': 1}] * 2)
+        self.assertNotIn('nested/tdp.log', views)
+        self.assertEqual(report['violations'], [])
+
+    def test_duplicates_conflicts_unknown_context_and_stale_rows_never_make_pair(self):
+        from log_lane_audit import tdp_amd_failure_receipt_evidence
+        result, failed, echo = self.sample()
+        for changed in (dict(failed, responseRequestId='37-5'), dict(failed, stale=True),
+                        dict(failed, powerGeneration=9), dict(failed, requestedW=121)):
+            view = tdp_amd_failure_receipt_evidence(list(enumerate([result, changed, echo], 1)))
+            self.assertEqual(view['requestGroupsByClass'], {'ambiguous-or-conflicting': 1})
+            self.assertEqual(view['textEchoCandidates'], 0)
+        for items in ([result, result, failed], [failed, result]):
+            self.assertEqual(tdp_amd_failure_receipt_evidence(list(enumerate(items, 1)))['requestGroupsByClass'],
+                             {'ambiguous-or-conflicting': 1})
+        view = tdp_amd_failure_receipt_evidence(list(enumerate([result, dict(failed, runId='ymcc:37:456'), echo], 1)))
+        self.assertEqual(view['requestGroupsByClass'], {'single-structured-receipt': 2})
+        self.assertEqual(view['textEchoCandidates'], 0)
+        conflicting = dict(failed, operationId='tdp:1795456714627:93')
+        view = tdp_amd_failure_receipt_evidence(list(enumerate([result, failed, conflicting, echo], 1)))
+        self.assertEqual(view['requestGroupsByClass'], {'ambiguous-or-conflicting': 2})
+        self.assertEqual(view['textEchoCandidates'], 0)
+
+
+class TdpAutofloatLaneTests(unittest.TestCase):
+    def test_explicit_failure_witness_and_repeat_route_in_both_directions(self):
+        row = dict(event='tdp.failed', schemaVersion=1, source='autofloat', pid=37,
+                   runId='ymcc:37:123', operationId='tdp:1795456714627:92')
+        first = dict(row, repeatCount=1, failureWitness='first-observation')
+        reoffer = dict(row, repeatCount=32, failureWitness='reoffered-after-unconfirmed-append')
+        repeat = dict(row, repeatCount=64, failureRepeatAfterRetainedObservation=32)
+        legacy = dict(row, repeatCount=64)
+        conflict = dict(repeat, failureWitness='first-observation')
+        bad = [dict(repeat, failureRepeatAfterRetainedObservation=value) for value in (True, 0, 32.0, 64, None)]
+        bad += [dict(repeat, repeatCount=True), dict(repeat, runId='ymcc:38:123'), dict(first, repeatCount=2)]
+        helper = dict(repeat, event='tdp.helper-result', rc=7)
+        success = dict(helper, rc=0, ok=True)
+        other = [dict(repeat, source='schedule'), dict(repeat, event=['tdp.failed']), success]
+
+        def encode(rows):
+            return b''.join((json.dumps(item) + '\r\n').encode() for item in rows)
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'tdp.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('YeManCC-export-manifest.txt', 'processId=37\n')
+                archive.writestr('tdp.log.1', b'bad\n' + encode([repeat, first, reoffer, legacy, conflict, helper, *bad, *other]))
+                archive.writestr('tdp-detail.log.previous', encode([repeat, first, reoffer, legacy, helper, *other]))
+                archive.writestr('nested/tdp.log', encode([repeat]))
+            report = audit_zip(path, {'baseEvents': []})
+        hits = {(item['file'], item['event'], item['witnessState']): (item['exampleLines'], item['rawRowBytes'])
+                for item in report['violations'] if item['kind'] in ('tdp-failure-repeat-in-low', 'tdp-failure-witness-in-detail')}
+        self.assertEqual(hits, {('tdp.log.1', 'tdp.failed', 'detail-repeat'): ([2], len(encode([repeat]))),
+                                ('tdp.log.1', 'tdp.helper-result', 'detail-repeat'): ([7], len(encode([helper]))),
+                                ('tdp-detail.log.previous', 'tdp.failed', 'resident-first'): ([2], len(encode([first]))),
+                                ('tdp-detail.log.previous', 'tdp.failed', 'resident-reoffer'): ([3], len(encode([reoffer])))})
+        views = {file['file']: file['tdpAutofloatLaneEvidence']['failureWitnessRouting']['counts']
+                 for file in report['files'] if 'tdpAutofloatLaneEvidence' in file}
+        self.assertEqual(views['tdp.log.1'], {'detail-repeat': 2, 'resident-first': 1, 'resident-reoffer': 1,
+                                             'unmarked': 1, 'unverified': 1 + len(bad)})
+        self.assertEqual(views['tdp-detail.log.previous'], {'detail-repeat': 2, 'resident-first': 1,
+                                                           'resident-reoffer': 1, 'unmarked': 1})
+        self.assertNotIn('nested/tdp.log', views)
+
+    def test_root_rotations_detect_raw_steps_without_relabeling_terminals(self):
+        row = dict(event='tdp.lifecycle', schemaVersion=1, source='autofloat', pid=37,
+                   runId='ymcc:37:123', operationId='tdp:1795456714627:92', phase='ready')
+        helper = dict(row, event='tdp.helper-result', rc=0, ok=True)
+        completed = dict(row, event='tdp.completed')
+        unknown_or_other = [dict(row, source='schedule'), dict(row, schemaVersion=True),
+                            dict(row, runId='ymcc:38:123'), dict(row, operationId=''),
+                            dict(row, event='tdp.unknown'), dict(row, stale=True),
+                            dict(helper, rc=0.0), dict(helper, ok=1), dict(helper, rc=7), dict(helper, ok=False),
+                            dict(row, event='tdp.failed'), dict(row, event='tdp.skipped'),
+                            dict(row, event='tdp.unverified'), dict(row, event='tdp.runtime-identity')]
+        summary = dict(event='tdp.autofloat-summary', pid=37, runId=row['runId'], completedCount=32,
+                       lastOperationId=row['operationId'], verificationScope='software-receipts-only-not-continuous-power-proof')
+        negative_summary = dict(summary, completedCount=33)
+
+        def encode(rows):
+            return b''.join((json.dumps(item)+'\r\n').encode() for item in rows)
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'tdp.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('YeManCC-export-manifest.txt', 'processId=37\n')
+                archive.writestr('tdp.log.1', b'bad\n'+encode([row, *unknown_or_other, helper, completed, summary, negative_summary]))
+                archive.writestr('tdp-detail.log', encode([row, helper, completed]))
+                archive.writestr('nested/tdp.log', encode([row]))
+            report = audit_zip(path, {'baseEvents': []})
+        hits = {item['event']: item for item in report['violations'] if item['kind'] == 'tdp-autofloat-step-in-low'}
+        self.assertEqual({key: value['exampleLines'] for key, value in hits.items()},
+                         {'tdp.lifecycle': [2], 'tdp.helper-result': [17], 'tdp.completed': [18]})
+        for hit in hits.values():
+            self.assertEqual((hit['file'], hit['archiveEntryOccurrence'], hit['counts']['currentPidMatch']), ('tdp.log.1', 0, 1))
+            self.assertFalse(hit['writerLifetimeVerified'])
+        evidence = {file['file']: file['tdpAutofloatLaneEvidence'] for file in report['files'] if 'tdpAutofloatLaneEvidence' in file}
+        self.assertEqual(evidence['tdp.log.1']['counts'], {'routine-detail': 3, 'unverified': 7,
+                         'explicit-failure': 2, 'protected-event': 4, 'completion-summary': 1, 'unverified-summary': 1})
+        self.assertEqual(evidence['tdp-detail.log']['counts'], {'routine-detail': 3})
+        self.assertNotIn('nested/tdp.log', evidence)
+
+
+class VirtualJournalWriterCopiesTests(unittest.TestCase):
+    def test_writer_projection_keeps_raw_and_rejects_invalid_or_conflicting_fields(self):
+        from ai_log_reader import payload_records, virtual_journal_writer_copies as project
+
+        row = dict(event='virtual-adaptation-witness', schema='ymcc.model-adaptation/1', writerPid=17,
+                   writerProcessCreation100ns='18446744073709551615', journalWriterCopiesV1=1)
+        restored = {'state': 'restorable', 'restoredFields': {
+            'writerInstanceId': 'native:17:18446744073709551615', 'writerIdentityStatus': 'pid-and-process-creation-known'}}
+        self.assertEqual(project(row), restored)
+        for fields in ({'writerPid': True}, {'writerPid': 0}, {'writerPid': 1 << 32},
+                       {'writerProcessCreation100ns': None}, {'writerProcessCreation100ns': '017'},
+                       {'writerProcessCreation100ns': '18446744073709551616'}, {'writerProcessCreation100ns': '١'},
+                       {'journalWriterCopiesV1': True}, {'journalWriterCopiesV1': 1.0}):
+            self.assertEqual(project({**row, **fields}), {'state': 'invalid-envelope'})
+        self.assertEqual(project({**row, 'writerInstanceId': None}),
+                         {'state': 'conflicting-inline-fields', 'fields': ['writerInstanceId']})
+        self.assertIsNone(project({**row, 'event': 'model-adaptation-unique'}))
+        self.assertIsNone(project({k: v for k, v in row.items() if k != 'journalWriterCopiesV1'}))
+        raw = (json.dumps(row) + '\n').encode()
+        for name in ('virtual-adaptation.log', 'virtual-adaptation-session.jsonl', 'nested/virtual-adaptation.log'):
+            evidence, = payload_records(name, raw, 1, 'json-lines')
+            self.assertEqual(evidence['value'], row)
+            self.assertEqual(evidence.get('virtualJournalWriterCopies'), restored if name == 'virtual-adaptation.log' else None)
+
+
 class AiReaderTests(unittest.TestCase):
+    def test_battery_get_pairs_respect_clock_identity_and_member_boundaries(self):
+        import warnings
+
+        def row(event, stamp, pid=4, build='build-a', **detail):
+            if event == 'request-result':
+                detail = {'ok': False, 'elapsedMs': 1, **detail}
+            return json.dumps(dict(event=event, schema=1, pid=pid, build=build,
+                                   time='2026-11-27T01:13:' + stamp,
+                                   detail={'operation': 'get', **detail})).encode('ascii') + b'\r\n'
+
+        def pair(begin, end, **fields):
+            return row('request-start', begin, **fields) + row('request-result', end, **fields)
+
+        first = pair('01.000', '01.010')
+        boundary = pair('01.260', '01.261')
+        too_late = pair('01.512', '01.513')
+        reversed_clock = pair('01.400', '01.410')
+        too_early_result = pair('01.421', '01.420')
+        mixed_pid = row('request-start', '01.422') + row('request-result', '01.423', pid=5)
+        mixed_build = row('request-start', '01.424') + row('request-result', '01.425', build='build-b')
+        gap = row('request-start', '01.430') + b'{bad\r\n' + row('request-result', '01.431')
+        unsupported = pair('01.432', '01.433', operation='refresh')
+        unknown = row('request-start', '01.440') + row('request-result', '01.441', ok='false').rstrip(b'\r\n')
+
+        with tempfile.TemporaryDirectory() as directory, warnings.catch_warnings():
+            warnings.simplefilter('ignore', UserWarning)
+            path = Path(directory) / 'battery.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('battery-charge-client.log', first + boundary + too_late + reversed_clock +
+                                 too_early_result + mixed_pid + mixed_build + gap + unsupported + unknown)
+                archive.writestr('battery-charge-client.previous.log', row('request-start', '01.450'))
+                archive.writestr('battery-charge-client.previous.log', row('request-result', '01.451'))
+                archive.writestr('nested/battery-charge-client.log', first + boundary)
+                archive.writestr('battery-charge-host.log', first + boundary)
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            report = audit_zip(path, {'baseEvents': []})
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), digest)
+
+        views = {(item['file'], item['archiveEntryOccurrence']): item['batteryChargeReadCadence']
+                 for item in report['files'] if 'batteryChargeReadCadence' in item}
+        self.assertEqual(set(views), {('battery-charge-client.log', 0), ('battery-charge-client.previous.log', 0),
+                                      ('battery-charge-client.previous.log', 1)})
+        view = views[('battery-charge-client.log', 0)]
+        self.assertEqual((view['startRows'], view['resultRows'], view['adjacentPairs']), (9, 9, 5))
+        self.assertEqual(view['pairedResultOutcomes'], dict(ok=0, failed=4, unknown=1))
+        self.assertEqual((view['closeSuccessorPairs'], view['closeSuccessorRawBytes']), (1, len(boundary)))
+        self.assertEqual(view['examples'], [dict(previousResultLine=2, startLine=3, resultLine=4, localClockGapMs=250)])
+        self.assertEqual([views[('battery-charge-client.previous.log', n)]['adjacentPairs'] for n in range(2)], [0, 0])
+        self.assertFalse(view['callerInferred'] or view['writerLifetimeVerified'] or view['periodicSamplingInferred'])
+        self.assertEqual(report['violations'], [])
+
+    def test_battery_get_sources_require_matching_allowlisted_tags(self):
+        def row(index, result, **extra):
+            detail = dict(operation='get', **extra)
+            if result:
+                detail.update(ok=False, elapsedMs=1)
+            return (json.dumps(dict(event='request-result' if result else 'request-start', schema=1,
+                                    pid=1, build='fixture', time=f'2026-11-27T01:13:10.{index:03}', detail=detail))+'\n')
+
+        pairs = [('settings-edge', 'settings-edge'), ('settings-poll', 'settings-poll'),
+                 ('settings-retry', 'settings-retry'), ('boot-capture', 'boot-capture'),
+                 ('boot-preflight', 'boot-preflight'), ('settings-retry', 'settings-poll'),
+                 ('boot-capture', None), (None, 'boot-preflight'), ('unknown', 'unknown'),
+                 (True, True), (None, None)]
+        data = ''.join(row(i*2+j, j==1, **({'readSource': value} if value is not None else {}))
+                       for i, pair in enumerate(pairs) for j, value in enumerate(pair)).encode()
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'charge-sources.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('battery-charge-client.log', data)
+            report = audit_zip(path, {'baseEvents': []})
+        view = report['files'][0]['batteryChargeReadCadence']
+        expected = dict.fromkeys([pair[0] for pair in pairs[:5]], 1)
+        self.assertEqual(view['reportedSources'], dict(adjacentPairs=expected,
+                         closeSuccessorPairs={key: value for key, value in expected.items() if key != 'settings-edge'},
+                         unresolvedTaggedPairs=5, untaggedPairs=1))
+        self.assertEqual(view['adjacentPairs'], len(pairs))
+        self.assertEqual([example.get('readSource') for example in view['examples']],
+                         ['settings-poll', 'settings-retry', 'boot-capture', 'boot-preflight', None, None, None, None])
+        self.assertEqual(report['violations'], [])
+
+    def test_battery_client_identity_is_only_restored_from_its_own_runtime(self):
+        runtime = dict(componentPath='test/component.dll', nativePath='test/ymcc.exe', execution='in-process',
+                       implementation='fixture', sourceId='revision', protocol=2, pollingIntervalMs=60000)
+        host = dict(ok=True, component='YeManBatteryHost', processId=37, version='fixture-module-version')
+        detail = dict(runtime=runtime, hostIdentity=host, hostIdentitySharesRuntimeV1=True, operation='get',
+                      ok=False, reason='unsupported')
+        row = dict(event='request-result', schema=1, detail=detail, pid=37)
+        rows = [row, dict(row, event='request-start'), dict(row, schema=True),
+                dict(row, detail=dict(detail, hostIdentitySharesRuntimeV1=1)),
+                dict(row, detail=dict(detail, hostIdentity=dict(host, protocol=2))),
+                dict(row, detail=dict(detail, runtime=dict(runtime, protocol=True))),
+                dict(row, detail=dict(detail, runtime=dict(runtime, pollingIntervalMs=60000.0))),
+                dict(row, detail=dict(detail, runtime={key: val for key, val in runtime.items() if key != 'nativePath'})),
+                dict(row, detail={key: val for key, val in detail.items() if key != 'hostIdentitySharesRuntimeV1'})]
+        encoded = ''.join(json.dumps(item)+'\r\n' for item in rows).encode()
+        member = 'battery-charge-client.log.1'
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'charge.zip'
+            with zipfile.ZipFile(path, 'w') as z:
+                for name in (member, 'battery-charge-host.log', 'nested/'+member):
+                    z.writestr(name, encoded)
+            ids, records = {}, {}
+            for receipt in iter_ai_records(path):
+                if receipt['record'] == 'file_begin':
+                    ids[receipt['fileId']] = receipt['entry']
+                elif receipt['record'] == 'json_record':
+                    records.setdefault(ids[receipt['fileId']], []).append(receipt)
+        field = 'batteryChargeClientIdentity'
+        for name, entries in records.items():
+            self.assertEqual([entry['value'] for entry in entries], rows)
+            if name != member:
+                self.assertTrue(all(field not in entry for entry in entries))
+                continue
+            self.assertEqual(entries[0][field], {'state': 'restorable', 'restoredHostIdentityFields': {
+                'assemblyPath': 'test/component.dll', 'processPath': 'test/ymcc.exe', 'execution': 'in-process',
+                'implementation': 'fixture', 'sourceId': 'revision', 'protocol': 2, 'pollingIntervalMs': 60000}})
+            self.assertEqual([entry[field]['state'] for entry in entries[1:8]],
+                             ['invalid-envelope']*3 + ['conflicting-inline-fields'] + ['unsupported-runtime']*3)
+            self.assertNotIn(field, entries[8])
+
+    def test_frontend_preview_from_message_preserves_nested_window_and_low_lane_detection(self):
+        metric = dict(count=1, saturated=False, maxMs=0.25, buckets=[1, 0, None])
+        trace = dict(schemaVersion=1, stage='window', policy='VC-PREVIEW-TRACE-20261024-R1',
+                     endedBy='window-budget', partial=False, windowSequence=2, finalizationOverrunMs=0.25,
+                     gamepadStateDeliveryCount=1, presentedCount=1, updateCount=1, patchStartWithoutCompletionAtEnd=False,
+                     overwrittenPatchStartCount=0, updateWithoutPatchStartCount=0, context=dict(changed=0, mixed=False),
+                     raf=dict(pendingWhenEnding=False, missingCallbackCount=0, outsideWindowCallbackCount=0,
+                              cancelFailedCount=0, unavailableCount=0), timeout=dict(cancelFailed=False),
+                     latestReceiptAgeAtPatch=metric, patchSpan=metric, patchToRafCallback=metric,
+                     note='\u4e2d\n')
+        def wire(value):
+            return dict(event='frontend-trace', where='controller-preview', lane='event', traceParseStatus='parsed',
+                        messageTruncated=False, frontendPreviewTraceFromMessageV1=True, message=json.dumps(value))
+        row = wire(trace)
+        duplicate = dict(row, message=row['message'].replace('"changed": 0', '"changed": 0, "changed": 1'))
+        depth = wire(dict(trace, unsupported='x'))
+        depth['message'] = depth['message'].replace('"x"', '[' * 12 + 'null' + ']' * 12)
+        records = [row, wire(dict(trace, windowSequence=1)), duplicate, depth,
+                   wire(dict(trace, unsupported=[0] * 512)), wire(dict(trace, windowSequence=1 << 53)),
+                   dict(row, trace=dict(trace, windowSequence=1)), dict(row, frontendTraceFromMessageV1=True),
+                   dict(row, lane='detail'), dict(row, messageTruncated=True)]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'preview.zip'
+            body = ''.join(json.dumps(item) + '\n' for item in records).encode()
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('frontend-trace.log.1', body)
+                archive.writestr('nested/frontend-trace.log', body)
+            report = audit_zip(path, {'baseEvents': []})
+            originals = [entry for entry in iter_ai_records(path) if entry['record'] == 'json_record']
+        self.assertEqual([entry['value'] for entry in originals], records * 2)
+        self.assertEqual([entry['frontendTraceFromMessage']['state'] for entry in originals[:10]],
+                         ['restorable'] * 2 + ['unsupported-message'] * 4 +
+                         ['conflicting-inline-fields'] + ['invalid-envelope'] * 3)
+        self.assertEqual(originals[0]['frontendTraceFromMessage']['restoredFields']['trace'], trace)
+        self.assertTrue(all('frontendTraceFromMessage' not in entry for entry in originals[10:]))
+        # The existing audit also flags the explicit detail lane at line 9,
+        # even though that row is ineligible for payload reconstruction.
+        self.assertEqual([(v['file'], v['exampleLines']) for v in report['violations']],
+                         [('frontend-trace.log.1', [1, 9])])
+
+    def test_frontend_trace_from_message_restores_audit_without_overwriting_raw_value(self):
+        owner = FrontendOwnerTransitionTests.row()['trace']
+        nav = dict(stage='entry-pass', action='page-prev', admissionEpoch=8, engineReady=True,
+                   qSeq=1, note='\u4e2d\n', owner=None)
+        def wire(trace):
+            return dict(event='frontend-trace', where='gamepad-admission', lane='event',
+                        traceParseStatus='parsed', messageTruncated=False, frontendTraceFromMessageV1=True,
+                        message=json.dumps(trace, ensure_ascii=False))
+        a, b = wire(owner), wire(nav)
+        conflict = dict(a, trace=dict(owner, epoch=1))
+        malformed = [dict(b, message=b['message'][:-1] + ', "qSeq": 2}'),
+                     wire(dict(nav, note=[])), wire(dict(nav, qSeq=1.0)), wire(dict(nav, qSeq=1 << 53)),
+                     dict(b, message=b['message'].replace('\u4e2d', '\\ud800')), wire({'small': True}),
+                     dict(b, message=b['message'] + ' ' * 8192)]
+        invalid = [dict(b, messageTruncated=True), dict(a, frontendTraceFromMessageV1=1),
+                   dict(b, frontendMessageFromTraceV1=True)]
+        records = [a, b, conflict, *malformed, *invalid]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'frontend.zip'
+            encoded = ''.join(json.dumps(record) + '\r\n' for record in records).encode()
+            with zipfile.ZipFile(path, 'w') as archive:
+                for member in ('frontend-trace.1.log', 'frontend-trace.log.2', 'nested/frontend-trace.log'):
+                    archive.writestr(member, encoded)
+            report = audit_zip(path, {'baseEvents': []})
+            with zipfile.ZipFile(path) as archive:
+                self.assertEqual(archive.read('frontend-trace.1.log'), encoded)
+            ids, results = {}, {}
+            for record in iter_ai_records(path):
+                if record['record'] == 'file_begin':
+                    ids[record['fileId']] = record['entry']
+                elif record['record'] == 'json_record':
+                    results.setdefault(ids[record['fileId']], []).append(record)
+        field = 'frontendTraceFromMessage'
+        for name, projected in results.items():
+            self.assertEqual([record['value'] for record in projected], records)
+            if name.startswith('nested/'):
+                self.assertTrue(all(field not in record for record in projected))
+                continue
+            self.assertEqual([record[field]['restoredFields']['trace'] for record in projected[:2]], [owner, nav])
+            self.assertEqual([record[field]['state'] for record in projected[2:]],
+                             ['conflicting-inline-fields'] + ['unsupported-message']*7 + ['invalid-envelope']*3)
+        self.assertCountEqual([(v['file'], v['exampleLines']) for v in report['violations']],
+                              [('frontend-trace.1.log', [2]), ('frontend-trace.log.2', [2])])
+        entry = next(item for item in report['files'] if item['file'] == 'frontend-trace.1.log')
+        self.assertEqual(entry['frontendTraceFromMessageCounts'], {'restorable': 2, 'conflicting-inline-fields': 1,
+                                                                  'unsupported-message': 7, 'invalid-envelope': 3})
+        self.assertEqual(entry['ownerTransitionEvidence']['counts']['after-call'], 2)
+
+    def test_frontend_canonical_message_preserves_raw_rows_and_reconstructs_exact_text(self):
+        trace = {'phase': 'a\"\u4e2d\x00\n\x7f\u2028', 'stage': 'restored', 'generation': -(2**53-1),
+                 'z': 2**53-1, 'output': None, 'enabled': False}
+        expected = '{"enabled":false,"generation":-9007199254740991,"output":null,"phase":"a\\\"\u4e2d\\u0000\\n\x7f\u2028","stage":"restored","z":9007199254740991}'
+        row = dict(event='frontend-trace', where='monitor-hud-startup', traceParseStatus='parsed',
+                   messageTruncated=False, frontendMessageFromTraceV1=True, trace=trace)
+        legacy = {key: value for key, value in row.items() if key != 'frontendMessageFromTraceV1'}
+        legacy['message'] = expected
+        rows = [row, dict(row, where='monitor-notice-lifecycle'), legacy,
+                dict(row, message='original'), dict(row, frontendMessageFromTraceV1=1),
+                dict(row, where='gamepad-admission'), dict(row, messageTruncated=True),
+                dict(row, trace={'float': 1.0}), dict(row, trace={'big': 2**53}),
+                dict(row, trace={'nested': {}}), dict(row, trace={'invalidUnicode': '\ud800'})]
+        encoded = ''.join(json.dumps(item)+'\r\n' for item in rows).encode()
+        root = 'frontend-trace.log.previous'
+        accepted = (root, 'frontend-trace-detail.1.log')
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'frontend.zip'
+            with zipfile.ZipFile(path, 'w') as z:
+                for name in (*accepted, 'nested/frontend-trace.log', 'frontend-errors.log', 'native-lifecycle.log'):
+                    z.writestr(name, encoded)
+            ids, records = {}, {}
+            for receipt in iter_ai_records(path):
+                if receipt['record'] == 'file_begin':
+                    ids[receipt['fileId']] = receipt['entry']
+                elif receipt['record'] == 'json_record':
+                    records.setdefault(ids[receipt['fileId']], []).append(receipt)
+        field = 'frontendCanonicalMessage'
+        for name, entries in records.items():
+            self.assertEqual([entry['value'] for entry in entries], rows)
+            if name not in accepted:
+                self.assertTrue(all(field not in entry for entry in entries))
+                continue
+            self.assertEqual([entry[field]['restoredFields']['message'] for entry in entries[:2]], [expected] * 2)
+            self.assertNotIn(field, entries[2])
+            self.assertEqual(entries[3][field], {'state': 'conflicting-inline-fields', 'fields': ['message']})
+            self.assertEqual([entry[field]['state'] for entry in entries[4:]], ['invalid-envelope']*3 + ['unsupported-trace']*4)
+
+    def test_msi_wmi_compact_defaults_preserve_raw_values_and_scope(self):
+        compact = {'schemaVersion': 1, 'event': 'tdp.oem-call-result', 'route': 'msi-g3e-wmi',
+                   'msiWmiCallDefaultsV1': True, 'error': 'return not observed', 'outcomeUnknown': True,
+                   'method': 'Set_Data', 'blockId': 81, 'operationId': 'fixture-282'}
+        legacy = {k: v for k, v in compact.items() if k != 'msiWmiCallDefaultsV1'}
+        rows = [compact, {**compact, 'event': 'tdp.oem-call-start'}, legacy,
+                {**compact, 'msiWmiCallDefaultsV1': 1}, {**compact, 'schemaVersion': True},
+                {**compact, 'route': 'daemon'}, {**compact, 'event': 'tdp.native-result'},
+                {**compact, 'processStarted': False}, {**compact, 'physicalPowerVerified': None}]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'tdp.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                for member in ('tdp.log.1', 'tdp-detail.log', 'nested/tdp.log', 'native-lifecycle.log'):
+                    archive.writestr(member, ''.join(json.dumps(row)+'\r\n' for row in rows))
+            file_ids, by_entry = {}, {}
+            for frame in iter_ai_records(path):
+                if frame['record'] == 'file_begin':
+                    file_ids[frame['fileId']] = frame['entry']
+                elif frame['record'] == 'json_record':
+                    by_entry.setdefault(file_ids[frame['fileId']], []).append(frame)
+        field = 'msiWmiCallDefaults'
+        for member, records in by_entry.items():
+            self.assertEqual([frame['value'] for frame in records], rows)
+            if member not in ('tdp.log.1', 'tdp-detail.log'):
+                self.assertTrue(all(field not in frame for frame in records))
+                continue
+            self.assertNotIn(field, records[2])
+            for frame in records[:2]:
+                self.assertEqual(frame[field], {'state': 'restorable', 'restoredFields': {
+                    'owner': 'YMCC-native-MSI-TDP', 'verificationScope': 'existing-WMI-call-boundary-only',
+                    'machineIdentitySource': 'existing-native-startup-cache', 'runtimeHelperRelevant': False,
+                    'processStarted': False, 'physicalPowerVerified': False}})
+            for frame in records[3:7]:
+                self.assertEqual(frame[field], {'state': 'invalid-envelope'})
+            self.assertEqual(records[7][field], {'state': 'conflicting-inline-fields', 'fields': ['processStarted']})
+            self.assertEqual(records[8][field], {'state': 'conflicting-inline-fields', 'fields': ['physicalPowerVerified']})
+
     @staticmethod
     def mismatch_rescue_index(entries):
         frames=[{'record':'bundle_begin','schema':'ymcc-ai-log-index/1'}]
@@ -10001,6 +13505,34 @@ class StagedInspectionExceptionTests(unittest.TestCase):
 
 
 class WindowsQueryDomainTests(unittest.TestCase):
+    def test_query_context_gate_requires_an_exact_refusal_receipt(self):
+        from log_lane_audit import windows_export_query_record
+
+        row = {'schema': 'ymcc.sleep-export-diagnostics.v1', 'status': 'UNKNOWN', 'reportAvailable': False,
+               'queryAttempts': 0, 'reason': 'export-context-not-current'}
+        def read(value):
+            return windows_export_query_record({'windowsSleepDiagnostics': value})
+        self.assertNotIn('queryContextGate', read(row))
+        for reason, attempts, checkpoint in (
+                ('export-context-not-current', 0, 'before-query-selection'),
+                ('export-context-changed', 0, 'after-cooldown-selection'),
+                ('export-context-changed', 1, 'after-query-return')):
+            for blocker in ('native-exit-requested', 'power-not-ready', 'power-generation-changed'):
+                value = {**row, 'reason': reason, 'queryAttempts': attempts,
+                         'queryContextGate': {'schema': 1, 'blocker': blocker, 'private': 'not projected'}}
+                gate = read(value)['queryContextGate']
+                self.assertEqual((gate['state'], gate['blocker'], gate['checkpoint']), ('reported-blocker', blocker, checkpoint))
+                self.assertNotIn('private', gate)
+        good = {**row, 'queryContextGate': {'schema': 1, 'blocker': 'power-not-ready'}}
+        for extra in ({'reportAvailable': True}, {'queryAttempts': False}, {'queryAttempts': 1},
+                      {'query': None}, {'reportFile': None}, {'querySuppressed': False}, {'reason': 'recent-query-deadline'}):
+            self.assertEqual(read({**good, **extra})['queryContextGate'], {'state': 'contradictory-gate-receipt'})
+        for scalar in (True, 0, 1.0, None):
+            self.assertEqual(read({**row, 'queryContextGate': {'schema': scalar, 'blocker': 'power-not-ready'}})
+                             ['queryContextGate'], {'state': 'invalid-gate-schema'})
+        self.assertEqual(read({**row, 'queryContextGate': {'schema': 1, 'blocker': []}})['queryContextGate'],
+                         {'state': 'invalid-gate-blocker'})
+
     @staticmethod
     def document(**query):
         return {'queryAttempts':1,'timeoutMs':10000,'status':'UNKNOWN','reportAvailable':False,
@@ -10059,6 +13591,54 @@ class WindowsQueryDomainTests(unittest.TestCase):
             file=Path(folder)/'windows-domain.zip'
             with zipfile.ZipFile(file,'w') as z:z.writestr('log-export-availability.json',json.dumps(source))
             view=audit_zip(file,{'baseEvents':[]})['commonEvidence']['windowsExportQueryEvidence']['outcomeAndTiming'];self.assertEqual(view['current']['configuredCaptureTimeoutMs'],10000);self.assertIsNone(view['current']['reportedChildExitCode'])
+
+
+class WindowsPowerReceiptComparisonTests(unittest.TestCase):
+    NAME = 'windows-systempowerreport-{12345678-1234-ABCD-5678-123456789ABC}.json'
+    RECEIPT = {'schema': 'ymcc.sleep-export-diagnostics.v1', 'diagnostic': 'WindowsSystemPowerReport',
+               'status': 'UNKNOWN', 'query': {'ran': True, 'completion': 'deadline', 'elapsedMs': 10000,
+                                              'exitCode': 1460, 'win32Error': 0}}
+
+    def read(self, members, add_availability=True):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'fixture.zip'
+            with zipfile.ZipFile(path, 'w') as bundle:
+                if add_availability:
+                    bundle.writestr('log-export-availability.json', json.dumps({'windowsSleepDiagnostics': self.RECEIPT}))
+                for member, content in members:
+                    bundle.writestr(member, content)
+            return audit_zip(path, {'baseEvents': []})['commonEvidence']
+
+    def test_compare_selected_receipts_without_promoting_outcome(self):
+        from hashlib import sha256
+        raw = json.dumps(self.RECEIPT, indent=2).encode()
+        same = self.read([(self.NAME, raw)])
+        agreement = same['windowsPowerReceiptComparison']
+        self.assertEqual((agreement['state'], agreement['archiveEntryOccurrence'], agreement['sha256']),
+                         ('copies-agree', 0, sha256(raw).hexdigest()))
+        changed = {**self.RECEIPT, 'query': {**self.RECEIPT['query'], 'ran': 1}}
+        result = self.read([(self.NAME, json.dumps(changed))])
+        conflict = result['windowsPowerReceiptComparison']
+        self.assertEqual((conflict['state'], conflict['changedTimingOrOutcomeFields']), ('copies-conflict', ['query']))
+        self.assertEqual(result['windowsExportQueryEvidence'], same['windowsExportQueryEvidence'])
+
+    def test_missing_ambiguous_unsupported_and_invalid_members(self):
+        import warnings
+        raw = json.dumps(self.RECEIPT).encode()
+        cases = [([('nested/' + self.NAME, raw)], True, 'member-not-retained'),
+                 ([(self.NAME, raw), (self.NAME, raw)], True, 'ambiguous-members'),
+                 ([(self.NAME, raw), (self.NAME.replace('12345678-', '87654321-'), raw)], True, 'ambiguous-members'),
+                 ([(self.NAME, b'{"x":1,"x":2}')], True, 'invalid-member-json'),
+                 ([(self.NAME, b' ' * (128 * 1024 + 1))], True, 'member-parse-byte-limit'),
+                 ([(self.NAME, b'{}')], True, 'unsupported-member-receipt'),
+                 ([(self.NAME, raw)], False, 'availability-not-selected')]
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', message='Duplicate name:', category=UserWarning)
+            for members, availability, state in cases:
+                with self.subTest(state=state):
+                    view = self.read(members, availability)['windowsPowerReceiptComparison']
+                    self.assertEqual(view['state'], state)
+        self.assertNotIn('windowsPowerReceiptComparison', self.read([], False))
 
 
 class ExportPhaseAndDeadlineTests(unittest.TestCase):
@@ -11056,6 +14636,265 @@ class PreviousAttemptTerminalTests(unittest.TestCase):
                 value=export_copy_failure_evidence([('native-lifecycle.log',[(1,row)],{})],37)['observations'][0]
                 self.assertNotIn(key,value['reported']);self.assertIn(key+':invalid-type-range-or-length',value['fieldIssues'])
 
+class ForegroundStaticScopeTests(unittest.TestCase):
+    def test_xusb_root_copy_restores_only_a_valid_singleton(self):
+        from log_lane_audit import native_foreground_helper_record, restore_foreground_xusb_targets
+
+        marker = 'foregroundXusbRootCopyV1'
+        for event in ('native-foreground-isolation', 'msi-native-foreground-isolation'):
+            row = {'event': event, 'phase': 'refresh-failed', 'sourceRoot': 'USB\\SOURCE-ABC-12345-67890123',
+                   'helperExitCode': 5}
+            compact = {**row, marker: 1}
+            old = {**row, 'xusbGameTargets': [row['sourceRoot']]}
+            self.assertEqual(restore_foreground_xusb_targets(compact), (old, 'restored'))
+            view = native_foreground_helper_record(compact)
+            self.assertEqual(view.pop('xusbRootCopy'), {'state': 'restored'})
+            self.assertEqual(view, native_foreground_helper_record(old))
+            self.assertNotIn('xusbGameTargets', compact)
+
+        row = {'event': 'native-foreground-isolation', 'sourceRoot': 'X' * 24, marker: 1}
+        for value in (True, False, 1.0, 0, 2, None):
+            bad = {**row, marker: value}
+            self.assertEqual(restore_foreground_xusb_targets(bad), (bad, 'invalid-xusb-root-marker'))
+        for value in (None, 5, '', 'X' * 23, 'X' * 2049, '\x7f' * 24, '\ud800' * 24, '\u00e9' * 24):
+            bad = {**row, 'sourceRoot': value}
+            self.assertEqual(restore_foreground_xusb_targets(bad), (bad, 'invalid-xusb-root-source'))
+        for value in (None, [], ['X' * 24]):
+            conflict = {**row, 'xusbGameTargets': value}
+            self.assertEqual(restore_foreground_xusb_targets(conflict), (conflict, 'conflicting-xusb-root-marker'))
+        unrelated = {**row, 'event': 'msi-foreground-isolation'}
+        self.assertEqual(restore_foreground_xusb_targets(unrelated), (unrelated, None))
+
+    def test_helper_target_copy_is_lossless_and_local_to_the_marker(self):
+        from log_lane_audit import native_foreground_helper_record, restore_foreground_helper_target
+
+        for event in ('native-foreground-isolation', 'msi-native-foreground-isolation'):
+            for marker, key in ((1, 'sourceRoot'), (2, 'gameSourceCandidate')):
+                row = {'event': event, 'phase': 'restore-wait', 'foregroundHelperTargetCopyV1': marker,
+                       'sourceRoot': 'USB\\SOURCE-ABC-12345-67890123',
+                       'gameSourceCandidate': 'HID\\CANDIDATE-ABC-12345-67890123'}
+                old = {k: v for k, v in row.items() if k != 'foregroundHelperTargetCopyV1'}
+                old['helperGameTarget'] = row[key]
+                self.assertEqual(restore_foreground_helper_target(row), (old, key))
+                view = native_foreground_helper_record(row)
+                self.assertEqual(view.pop('helperTargetCopy'), {'state': 'restored', 'sourceField': key})
+                self.assertEqual(view, native_foreground_helper_record(old))
+                self.assertNotIn('helperGameTarget', row)
+
+        row = {'event': 'native-foreground-isolation', 'foregroundHelperTargetCopyV1': 1,
+               'sourceRoot': 'USB\\SOURCE-ABC-12345-67890123'}
+        for extra, reason in [({'foregroundHelperTargetCopyV1': value}, 'invalid-target-copy-marker')
+                              for value in (True, 1.0, 0, 3, None)] + [
+                ({'helperGameTarget': None}, 'conflicting-target-copy-marker'),
+                ({'sourceRoot': 'short'}, 'invalid-target-copy-source'),
+                ({'sourceRoot': 'X' * 2049}, 'invalid-target-copy-source'),
+                ({'sourceRoot': '\ud800' * 24}, 'invalid-target-copy-source'),
+                ({'foregroundHelperTargetCopyV1': 2}, 'invalid-target-copy-source')]:
+            bad = {**row, **extra}
+            self.assertEqual(restore_foreground_helper_target(bad), (bad, reason))
+            self.assertEqual(native_foreground_helper_record(bad)['helperTargetCopy'], {'state': reason})
+        other = {**row, 'event': 'other'}
+        self.assertEqual(restore_foreground_helper_target(other), (other, None))
+
+    def test_static_scope_defaults_keep_old_nested_projection_and_terminal_evidence(self):
+        from log_lane_audit import (FOREGROUND_STATIC_SCOPES, native_foreground_helper_record,
+                                    restore_foreground_static_scopes)
+        row={'event':'native-foreground-isolation','phase':'refresh-failed','helperExitCode':5,
+             'foregroundScopeDefaultsV1':1,'inputBoundary':{'source':'cached'}}
+        compact={**row,'foregroundStaticScopesV1':1}
+        legacy={**row,**FOREGROUND_STATIC_SCOPES}
+        self.assertEqual(restore_foreground_static_scopes(compact),(legacy,'reported-defaults'))
+        view=native_foreground_helper_record(compact)
+        self.assertEqual(view.pop('staticScopeDefaults'),{'state':'reported-defaults','restored':FOREGROUND_STATIC_SCOPES})
+        self.assertEqual(view,native_foreground_helper_record(legacy))
+
+    def test_static_scope_defaults_reject_mixed_or_invalid_markers(self):
+        from log_lane_audit import restore_foreground_static_scopes, native_foreground_helper_record
+        row={'event':'msi-native-foreground-isolation','foregroundStaticScopesV1':1}
+        cases=[({'foregroundStaticScopesV1':v},'invalid-static-scope-marker') for v in (True,1.0,0,2,None)]
+        cases += [({k:None},'conflicting-static-scope-marker') for k in
+                  ('verificationScope','helperIdentityScope','xusbTargetEvidence')]
+        for update,state in cases:
+            bad={**row,**update}
+            original=bad.copy()
+            self.assertEqual(restore_foreground_static_scopes(bad),(original,state))
+            self.assertEqual(native_foreground_helper_record(bad)['staticScopeDefaults'],{'state':state,'restored':{}})
+            self.assertEqual(bad,original)
+        other={**row,'event':'other'}
+        self.assertEqual(restore_foreground_static_scopes(other),(other,None))
+
+
+class ForegroundBoundaryClockCopiesTests(unittest.TestCase):
+    def test_round_trip_and_helper_view(self):
+        from log_lane_audit import restore_foreground_boundary_clocks as restore, native_foreground_helper_record
+        for event in ('native-foreground-isolation', 'msi-native-foreground-isolation'):
+            boundary = {'captured': True, 'clockCopiesV1': 15, 'captureBeginTick': 0, 'readStartedTick': (1 << 64)-1,
+                        'powerGeneration': 17, 'topologyGeneration': 41, 'readContextStable': False}
+            row = {'event': event, 'inputBoundary': boundary, 'foregroundScopeDefaultsV1': 1}
+            expanded, result = restore(row)
+            copies = {'captureEndTick': 0, 'readCompletedTick': (1 << 64)-1,
+                      'currentPowerGeneration': 17, 'currentTopologyGeneration': 41}
+            self.assertEqual(result, {'state': 'restored', 'fields': copies})
+            self.assertEqual(expanded['inputBoundary'], {**{k: v for k, v in boundary.items() if k != 'clockCopiesV1'}, **copies})
+            self.assertEqual(native_foreground_helper_record(row)['inputBoundaryClockCopies'], result)
+            self.assertEqual(native_foreground_helper_record(row)['scopeDefaults']['state'], 'reported-defaults')
+            self.assertNotIn('captureEndTick', boundary)
+
+    def test_reject_conflicts_and_invalid_types_without_partial_restore(self):
+        from log_lane_audit import restore_foreground_boundary_clocks as restore
+        seed = {'captured': True, 'clockCopiesV1': 5, 'captureBeginTick': 0, 'powerGeneration': 7}
+        def check(update, state):
+            row = {'event': 'native-foreground-isolation', 'inputBoundary': {**seed, **update}}
+            expanded, result = restore(row)
+            self.assertIs(expanded, row)
+            self.assertNotIn('captureEndTick', row['inputBoundary'])
+            self.assertEqual(result['state'], state)
+        for invalid in (None, False, 1.0, '1', 0, -1, 16):
+            check({'clockCopiesV1': invalid}, 'invalid-mask')
+        for invalid in (None, True, 7.0, '7', -1, 1 << 64):
+            check({'powerGeneration': invalid}, 'invalid-source')
+        check({'currentPowerGeneration': None}, 'conflicting-destination')
+        check({'captured': 1}, 'capture-not-reported')
+        for row in ({'event': 'native-foreground-isolation', 'inputBoundary': {'captured': True}},
+                    {'event': 'controller-isolation-boundary', 'inputBoundary': seed}):
+            self.assertEqual(restore(row), (row, None))
+
+
+class ForegroundBoundaryZeroFieldsTests(unittest.TestCase):
+    def test_round_trip_both_formats_and_clock_copies(self):
+        from log_lane_audit import native_foreground_helper_record, restore_foreground_boundary_zero_fields as restore
+        for event in ('native-foreground-isolation', 'msi-native-foreground-isolation'):
+            seed = {'captured': True, 'clockCopiesV1': 1, 'captureBeginTick': 7, 'live': False}
+            for value in (1, 3):
+                boundary = {**seed, 'zeroFieldsV1': value}
+                fields = dict.fromkeys(('lx', 'ly', 'rx', 'ry', 'lt', 'rt'), 0)
+                if value == 3:
+                    fields.update(buttons=0, guide=False)
+                else:
+                    boundary.update(buttons=4, guide=True)
+                row = {'event': event, 'inputBoundary': boundary}
+                expanded, result = restore(row)
+                without_marker = {k: v for k, v in boundary.items() if k != 'zeroFieldsV1'}
+                self.assertEqual(expanded['inputBoundary'], {**without_marker, **fields})
+                self.assertEqual(result, {'state': 'restored', 'fields': fields})
+                view = native_foreground_helper_record(row)
+                self.assertEqual(view['inputBoundaryZeroFields'], result)
+                self.assertEqual(view['inputBoundaryClockCopies']['fields'], {'captureEndTick': 7})
+                self.assertIn('zeroFieldsV1', row['inputBoundary'])
+
+    def test_reject_invalid_markers_or_explicit_destinations_atomically(self):
+        from log_lane_audit import restore_foreground_boundary_zero_fields as restore
+        base = {'captured': True, 'zeroFieldsV1': 3}
+        def check(updates, state):
+            row = {'event': 'native-foreground-isolation', 'inputBoundary': {**base, **updates}}
+            expanded, status = restore(row)
+            self.assertIs(expanded, row)
+            self.assertEqual(status['state'], state)
+            self.assertNotIn('ly', row['inputBoundary'])
+        for value in (True, False, None, 1.0, '1', 0, 2, 4, -1):
+            check({'zeroFieldsV1': value}, 'invalid-mask')
+        for value in (0, 1, None, False):
+            check({'captured': value}, 'capture-not-reported')
+        for key, value in (('lx', 0), ('guide', None), ('buttons', 8)):
+            check({key: value}, 'conflicting-destination')
+        for row in ({'event': 'native-foreground-isolation', 'inputBoundary': {'captured': True}},
+                    {'event': 'controller-isolation-boundary', 'inputBoundary': base}):
+            self.assertEqual(restore(row), (row, None))
+
+
+class ForegroundConfigurationLimitsTests(unittest.TestCase):
+    def test_round_trip_and_phase_reader(self):
+        from log_lane_audit import restore_foreground_configuration_limits, native_foreground_helper_record
+        row = {'event': 'native-foreground-isolation', 'foregroundConfigurationLimitsV1': 5,
+               'foregroundScopeDefaultsV1': 4, 'beforeConfigurationEvidence': {'schema': 1, 'snapshotRead': False},
+               'returnConfigurationEvidence': {'schema': 1, 'scope': 'explicit return'}}
+        expanded, result = restore_foreground_configuration_limits(row)
+        self.assertEqual(result['state'], 'reported-defaults')
+        for key in ('beforeConfigurationEvidence', 'returnConfigurationEvidence'):
+            self.assertIs(expanded[key]['externalInputDeliveryProven'], False)
+            self.assertIs(expanded[key]['inheritedEntryOwnershipProven'], False)
+            self.assertNotIn('externalInputDeliveryProven', row[key])
+        self.assertEqual(expanded['returnConfigurationEvidence']['scope'], 'explicit return')
+        self.assertNotIn('foregroundConfigurationLimitsV1', expanded)
+        self.assertEqual(native_foreground_helper_record(row)['configurationLimits'], result)
+        self.assertEqual(native_foreground_helper_record(row)['scopeDefaults']['state'], 'reported-defaults')
+
+    def test_a_conflict_prevents_any_restore(self):
+        from log_lane_audit import restore_foreground_configuration_limits as restore
+        seed = {'event': 'msi-native-foreground-isolation', 'foregroundConfigurationLimitsV1': 3,
+                'beforeConfigurationEvidence': {'schema': 1}}
+        for child in (None, [], {}, {'schema': True}, {'schema': 1.0}, {'schema': 2},
+                      {'schema': 1, 'externalInputDeliveryProven': True},
+                      {'schema': 1, 'inheritedEntryOwnershipProven': None}):
+            with self.subTest(child=child):
+                row = {**seed, 'hiddenConfigurationEvidence': child}
+                expanded, outcome = restore(row)
+                self.assertIs(expanded, row)
+                self.assertEqual(outcome, {'state': 'conflicting-default-mask', 'restored': {},
+                                           'conflicts': ['hiddenConfigurationEvidence']})
+
+    def test_bad_masks_and_legacy_rows(self):
+        from log_lane_audit import restore_foreground_configuration_limits as restore
+        seed = {'event': 'native-foreground-isolation', 'beforeConfigurationEvidence': {'schema': 1}}
+        for mask in (True, 1.0, '1', None, 0, -1, 8):
+            row = {**seed, 'foregroundConfigurationLimitsV1': mask}
+            expanded, state = restore(row)
+            self.assertIs(expanded, row)
+            self.assertEqual(state['state'], 'invalid-default-mask')
+        self.assertEqual(restore(seed), (seed, None))
+        tagged = {**seed, 'event': 'unrelated', 'foregroundConfigurationLimitsV1': 1}
+        self.assertEqual(restore(tagged), (tagged, None))
+
+
+class ForegroundHelperEmptyStdoutTests(unittest.TestCase):
+    def test_valid_marker_is_equivalent_to_explicit_diagnostic(self):
+        from log_lane_audit import restore_foreground_helper_empty_stdout as restore, native_foreground_helper_record
+        diagnostic = {'state': 'record-missing', 'transport': 'delete-on-close-stdout',
+                      'scope': 'helper-self-reported-existing-call-facts', 'stdoutBytes': 0,
+                      'hardwareSuccessProven': False}
+        for event in ('native-foreground-isolation', 'msi-native-foreground-isolation'):
+            seed = {'event': event, 'reason': 'same-helper-terminal-receipt', 'helperExitCode': 6,
+                    'nativeRefreshWriter': {'attemptId': 'unchanged', 'jobName': 'unchanged', 'writerFence': 'unchanged'}}
+            coded = {**seed, 'foregroundHelperEmptyStdoutV1': 1}
+            explicit = {**seed, 'helperDiagnostic': diagnostic}
+            with self.subTest(event=event):
+                self.assertEqual(restore(coded), (explicit, 'restored'))
+                self.assertEqual(native_foreground_helper_record(coded), native_foreground_helper_record(explicit))
+                self.assertNotIn('helperDiagnostic', coded)
+
+    def test_conflicting_or_invalid_markers_keep_explicit_evidence(self):
+        from log_lane_audit import restore_foreground_helper_empty_stdout as restore, native_foreground_helper_record
+        seed = {'event': 'native-foreground-isolation'}
+        flag = 'foregroundHelperEmptyStdoutV1'
+        explicit = {'state': 'record-accepted', 'reportedFacts': {'Stage': 'prepare', 'Result': 6}}
+        for row, state in [({**seed, flag: 1, 'helperDiagnostic': value}, 'conflicting-helper-empty-stdout-marker')
+                           for value in (None, {}, explicit)] + [
+                               ({**seed, flag: marker}, 'invalid-helper-empty-stdout-marker')
+                               for marker in (False, True, 1.0, '1', None, 0, 2)]:
+            with self.subTest(row=row):
+                restored, actual = restore(row)
+                self.assertIs(restored, row)
+                self.assertEqual(actual, state)
+                view = native_foreground_helper_record(row)
+                self.assertEqual(view.pop('helperEmptyStdout'), {'state': state})
+                self.assertEqual(view, native_foreground_helper_record({k: v for k, v in row.items() if k != flag}))
+
+    def test_no_marker_does_not_conflate_missing_null_or_unavailable(self):
+        from log_lane_audit import restore_foreground_helper_empty_stdout as restore, native_foreground_helper_record
+        seed = {'event': 'msi-native-foreground-isolation'}
+        unavailable = {**seed, 'helperDiagnostic': {'state': 'capture-read-unavailable'}}
+        for row, expected in ((seed, 'missing'), ({**seed, 'helperDiagnostic': None}, 'null'),
+                              (unavailable, 'object'),
+                              ({'event': 'input-host.native-helper-diagnostic', 'foregroundHelperEmptyStdoutV1': 1}, 'missing')):
+            with self.subTest(row=row):
+                self.assertEqual(restore(row), (row, None))
+                view = native_foreground_helper_record(row)
+                self.assertNotIn('helperEmptyStdout', view)
+                self.assertEqual(view['helperDiagnostic']['containerState'], expected)
+        self.assertEqual(native_foreground_helper_record(unavailable)['helperDiagnostic']['reported']['state'],
+                         'capture-read-unavailable')
+
+
 class ForegroundPhaseSnapshotTests(unittest.TestCase):
     @staticmethod
     def snapshot(**updates):
@@ -11362,7 +15201,88 @@ class NativeControlWindowReaderTests(unittest.TestCase):
             self.assertIn('nativeForegroundHelperEvidence',view)
 
 
+class InputHostSubmitStatsEvidenceTests(unittest.TestCase):
+    def test_same_row_request_and_stats_keep_different_sequence_scopes(self):
+        from log_lane_audit import input_host_submit_stats_record
+        detail = dict(ok=True, runId='run', epoch=2, persona='steamdeck', frameOk=21, frameFail=1,
+                      neutralOk=2, neutralFail=0, lastSequence=39, lastDetail='report-submitted')
+        request = dict(schema=1, requestId='request', sequence=40, persona='steamdeck', protocolPowerGeneration=11)
+        row = dict(ok=True, runId='run', hostInstanceId='host', epoch=2, persona='elite', phase='wake-recover',
+                   queryPowerGeneration=10, queryCompletedPowerGeneration=12,
+                   submitStatsReceipt=request, detail=json.dumps(detail))
+        record = input_host_submit_stats_record(row)
+        self.assertEqual(record['state'], 'reported-bound-accepted-request')
+        self.assertEqual(record['acceptedRequest']['sequence'], 40)
+        self.assertEqual(record['hostStats']['lastSequence'], 39)
+        self.assertTrue(record['nativePowerChangedDuringQuery'])
+        self.assertEqual(record['nativeScope']['persona'], 'elite')
+        for change, expected in ((dict(submitStatsReceipt=None, persona='steamdeck'), 'accepted-request-identity-unavailable'),
+                                 (dict(ok=False, submitStatsReceipt=None), 'query-failed'),
+                                 (dict(ok=False), 'contradictory-failed-query'),
+                                 (dict(submitStatsReceipt={**request, 'sequence':True}), 'invalid-accepted-request'),
+                                 (dict(detail=json.dumps({**detail, 'runId':'different'})), 'same-row-scope-unresolved'),
+                                 (dict(detail='{"ok":true,'+json.dumps(detail)[1:]), 'invalid-or-missing-host-stats')):
+            self.assertEqual(input_host_submit_stats_record({**row, **change})['state'], expected)
+        legacy = {k:v for k,v in row.items() if k!='submitStatsReceipt'}
+        self.assertEqual(input_host_submit_stats_record({**legacy,'persona':'steamdeck'})['state'], 'legacy-identity-unavailable')
+
+    def test_archive_reports_only_ordered_resident_rows_with_original_locations(self):
+        import warnings
+
+        rows = [dict(event='input-host-submit-stats', ok=False, phase='release-window-close'),
+                dict(event='unrelated'), dict(event='input-host-submit-stats', ok=True, detail='{}')]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stats.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log.1', ''.join(json.dumps(row)+'\n' for row in rows))
+                with warnings.catch_warnings():
+                    warnings.simplefilter('ignore', UserWarning)
+                    archive.writestr('native-lifecycle.log.1', json.dumps(rows[0])+'\n')
+                archive.writestr('native-lifecycle.1.log', '\n'+json.dumps(rows[0])+'\n')
+                archive.writestr('native-lifecycle.previous.log', json.dumps(rows[0])+'\n')
+                archive.writestr('native-detail.log', json.dumps(rows[0])+'\n')
+                archive.writestr('nested/native-lifecycle.1.log', json.dumps(rows[0])+'\n')
+                archive.writestr('native-lifecycle.log.pending', json.dumps(rows[0])+'\n')
+            evidence = audit_zip(path, {'baseEvents':['input-host-submit-stats']})['commonEvidence']['inputHostSubmitStatsEvidence']
+        self.assertEqual(evidence['rowsByState'], {'query-failed':4, 'invalid-or-missing-host-stats':1})
+        self.assertEqual([(o['file'],o['archiveEntryOccurrence'],o['line']) for o in evidence['observations']],
+                         [('native-lifecycle.log.1',0,1), ('native-lifecycle.log.1',0,3),
+                          ('native-lifecycle.log.1',1,1), ('native-lifecycle.1.log',0,2),
+                          ('native-lifecycle.previous.log',0,1)])
+
+
 class ConnectionTruthLogRecoveryTests(unittest.TestCase):
+    def test_truth_scope_round_trip_and_detail_lane_findings(self):
+        normal = {**self.row(), 'buttonMask': 0, 'diagnosticRecoveryReoffer': False}
+        recovered = {**normal, 'diagnosticRecoveryReoffer': True, 'guide': True, 'buttonMask': 1024}
+        encoded = {key: value for key, value in recovered.items() if key != 'observationScope'}
+        encoded['connectionTruthScopeV1'] = 1
+        self.assertEqual(self.view(encoded), self.view(recovered))
+        conflict = {**encoded, 'observationScope': normal['observationScope']}
+        for bad in (conflict, {**encoded, 'connectionTruthScopeV1': True},
+                    {**encoded, 'diagnosticRecoveryReoffer': 1}):
+            self.assertEqual(self.view(bad)['state'], 'invalid-connection-truth-fields')
+        legacy = {key: value for key, value in normal.items() if key != 'diagnosticRecoveryReoffer'}
+        rows = [normal, encoded, conflict, legacy, {**encoded, 'buttonMask': 0},
+                {**normal, 'connectedMask': True}, {**encoded, 'connectionTruthScopeV1': 1.0}]
+        raw = [(json.dumps(row) + '\r\n').encode() for row in rows]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'connection.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-detail.log.1', b'bad\n' + b''.join(raw))
+                archive.writestr('native-lifecycle.log', raw[1])
+                archive.writestr('nested/native-detail.log.1', raw[0])
+            audit = audit_zip(path, {'baseEvents': ['domain-pad-truth']})
+            payloads = [item for item in iter_ai_records(path) if 'connectionTruthScope' in item]
+        findings = [row for row in audit['violations'] if row['kind'] == 'connection-truth-resident-in-native-detail']
+        self.assertEqual([(r['file'], r['exampleLines']) for r in findings], [('native-detail.log.1', [2, 3])])
+        footprint = findings[0]['nativeDetailFindingWriterFootprint']
+        self.assertEqual(sum(bucket['bytes'] for bucket in footprint['buckets'].values()), sum(map(len, raw[:2])))
+        self.assertCountEqual([r['value'] for r in payloads if r['connectionTruthScope']['state'] == 'restorable'],
+                         [encoded, rows[4], encoded])
+        summary = audit['commonEvidence']['connectionTruthLogEvidence']
+        self.assertEqual(summary['rowsByState'], {'reported-current-truth-after-log-recovery': 1})
+
     @staticmethod
     def row():return {'event':'domain-pad-truth','pid':37,'writerProcessCreation100ns':'9007199254740993','guide':False,'connected':True,'multipleActive':False,'ymccForeground':False,'hostPrepared':True,'connectedMask':1,'virtualEndpointMask':0,'admittedMask':1,'primarySlot':0,'leftTrigger':0,'rightTrigger':0,'diagnosticRecoveryReoffer':True,'observationScope':'current-connection-truth;not-input-edge-or-device-recovery'}
     @staticmethod
@@ -11378,6 +15298,47 @@ class ConnectionTruthLogRecoveryTests(unittest.TestCase):
     def test_middle_recovery_witness_and_private_identity_are_bounded(self):
         from log_lane_audit import connection_truth_log_evidence
         normal=self.row();normal['diagnosticRecoveryReoffer']=False;reoffer=self.row();reoffer['pid']={'private':'secret'*10000};reoffer['writerProcessCreation100ns']='9'*10000;rows=[normal]*100+[reoffer]+[normal]*100;value=connection_truth_log_evidence([('native-lifecycle.log',list(enumerate(rows,1)),{})],37);self.assertEqual(value['rowsObserved'],201);self.assertTrue(any(q['record']['state']=='reported-current-truth-after-log-recovery' for q in value['observations']));self.assertLessEqual(len(value['observations']),19);self.assertNotIn('secret',json.dumps(value));self.assertFalse(value['completeHistoryProven'])
+
+
+    def test_archive_writer_birth_and_low_member_occurrence_are_preserved(self):
+        import warnings
+
+        row = self.row()
+        original = {**row, 'diagnosticRecoveryReoffer': False}
+        old_same_pid = {**row, 'writerProcessCreation100ns': '123'}
+        other = {**row, 'pid': 38}
+        unknown = {**row, 'writerProcessCreation100ns': None}
+        operation = dict(schema=1, id='37-8-1', writerPid=37,
+                         writerProcessCreation100ns=row['writerProcessCreation100ns'],
+                         ordinal='1', startedTickMs='8', scope='admitted-ordinary-log-export;diagnostic-correlation-only')
+        manifest = 'processId=37\nexportOperation=' + json.dumps(operation) + '\n'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'connection.zip'
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', UserWarning)
+                with zipfile.ZipFile(path, 'w') as bundle:
+                    bundle.writestr('YeManCC-export-manifest.txt', manifest)
+                    bundle.writestr('native-lifecycle.log', '\n' + json.dumps(original) + '\n')
+                    bundle.writestr('native-lifecycle.1.log', json.dumps(old_same_pid) + '\n')
+                    bundle.writestr('native-lifecycle.1.log', json.dumps(other) + '\n')
+                    for name in ('native-lifecycle.log.previous', 'native-lifecycle.log.pending',
+                                 'native-detail.log', 'nested/native-lifecycle.1.log'):
+                        bundle.writestr(name, json.dumps(unknown) + '\n')
+            view = audit_zip(path, {'baseEvents': ['domain-pad-truth']})['commonEvidence']['connectionTruthLogEvidence']
+        self.assertEqual(view['rowsObserved'], 4)
+        self.assertEqual(view['rowsByWriterRelation'], {'export-writer': 1, 'same-pid-other-birth': 1,
+                                                       'other-writer': 1, 'writer-unresolved': 1})
+        self.assertEqual(view['reportedExportWriter'], {'writerPid': 37,
+                                                      'writerProcessCreation100ns': row['writerProcessCreation100ns']})
+        self.assertEqual([(o['file'], o['archiveEntryOccurrence'], o['line'], o['writerRelation'])
+                          for o in view['observations']], [
+            ('native-lifecycle.log', 0, 2, 'export-writer'),
+            ('native-lifecycle.1.log', 0, 1, 'same-pid-other-birth'),
+            ('native-lifecycle.1.log', 1, 1, 'other-writer'),
+            ('native-lifecycle.log.previous', 0, 1, 'writer-unresolved')])
+        self.assertEqual(view['observations'][1]['pidRelation'], 'current-pid-match')
+        no_writer = common_evidence_summary({}, [('native-lifecycle.log', [(1, original)], {})], 37)
+        self.assertEqual(no_writer['connectionTruthLogEvidence']['rowsByWriterRelation'], {'export-writer-unresolved': 1})
 
 
 class ControllerLocalVisibilityTests(unittest.TestCase):
@@ -11433,6 +15394,49 @@ class ControllerLocalVisibilityTests(unittest.TestCase):
     def test_slot_reports_are_bounded_typed_and_not_hid_enumeration(self):
         row=self.slots();row['hidGamepads']=[{'path':'private'*100000}];value=self.view(row);self.assertEqual(value['state'],'reported-native-xinput-slot-results');self.assertFalse(value['hidPathOrHidControllerCountInspected']);self.assertNotIn('private',json.dumps(value));row['slots'][1]=dict(row['slots'][0]);self.assertEqual(self.view(row)['state'],'invalid-native-slot-fields')
         row=self.slots();row['slots']*=10000;self.assertEqual(self.view(row)['state'],'invalid-native-slot-fields');row=self.slots();row['connectedMask']=2;self.assertEqual(self.view(row)['state'],'invalid-native-slot-fields')
+    def test_packed_xinput_slots_restore_results_and_hid_evidence(self):
+        from log_lane_audit import restore_xinput_slot_results
+        original = self.slots()
+        original['slots'][0]['paths'] = ['test-path']
+        original['slots'][2]['result'] = 5
+        original['slots'][3]['newField'] = None
+        original['hidGamepads'] = []
+        original['hidEnumeration'] = dict(schema=1, state='partial-device-read', pathLimit=12,
+                                          sizeCount=1, listCount=1, scannedCount=1, deviceReadFailures=1,
+                                          firstFailureStage='device-info', firstWin32Error=5)
+        self.assertEqual(restore_xinput_slot_results(original), (original, None))
+        packed = dict(original)
+        slots = packed.pop('slots')
+        packed['slotResultsV1'] = [slots[0], 1167, slots[2], slots[3]]
+        before = json.dumps(packed, sort_keys=True)
+        self.assertEqual(restore_xinput_slot_results(packed), (original, 'restored'))
+        result = self.view(packed)
+        self.assertEqual(result.pop('slotResultsV1State'), 'restored')
+        self.assertEqual(result, self.view(original))
+        self.assertEqual(result['hidEnumeration']['state'], 'partial-device-read')
+        self.assertEqual(result['reportedConnectedXinputSlots'], [0])
+        inconsistent = self.view(dict(packed, connectedMask=2))
+        self.assertIn('slots:success-results-disagree-with-connected-mask', inconsistent['fieldIssues'])
+        self.assertEqual(json.dumps(packed, sort_keys=True), before)
+
+    def test_packed_xinput_slots_reject_invalid_types_positions_and_conflicts(self):
+        row = self.slots()
+        success = row.pop('slots')[0]
+        for bad in [True, 1167.0, '1167', 5, None, {'slot': 0, 'result': 1167},
+                    {'slot': True, 'result': 1167}, {'slot': 1, 'result': False},
+                    {'slot': 1, 'result': -1}, {'slot': 1, 'result': 1 << 32}]:
+            with self.subTest(entry=bad):
+                result = self.view(dict(row, slotResultsV1=[success, bad, 1167, 1167]))
+                self.assertEqual(result['slotResultsV1State'], 'invalid')
+                self.assertEqual(result['state'], 'invalid-native-slot-fields')
+        for bad in [None, {}, [success, 1167, 1167]]:
+            self.assertEqual(self.view(dict(row, slotResultsV1=bad))['slotResultsV1State'], 'invalid')
+        conflict = self.view(dict(self.slots(), slotResultsV1=[success, 1167, 1167, 1167]))
+        self.assertEqual(conflict['slotResultsV1State'], 'conflict')
+        self.assertEqual(conflict['state'], 'invalid-native-slot-fields')
+        self.assertIn('slots:packed-conflict', conflict['fieldIssues'])
+        self.assertIn('slots:missing-invalid-or-duplicate-entry', conflict['fieldIssues'])
+
     def test_middle_pending_witness_and_current_bank_survive_noise(self):
         rows=[]
         for i in range(100):row=self.readback();row['pid']=38;rows.append(row)
@@ -11632,6 +15636,49 @@ class IpcRecoveryReofferReaderTests(unittest.TestCase):
             result=audit_zip(path,{'baseEvents':[]})
         violations=[v for v in result['violations'] if v['kind']=='ipc-repeated-or-untracked-detail-in-native-low']
         self.assertEqual(len(violations),1);self.assertEqual(violations[0]['counts']['all'],3);self.assertEqual(violations[0]['exampleLines'],[2,4,6])
+
+    def test_resident_ipc_witnesses_are_flagged_only_in_root_detail(self):
+        import warnings
+
+        events = ('ipc-response-delivery-failed', 'ipc-response-delivery-exception', 'ipc-response-serialization-failed')
+        qualified = [dict(self.row(reason), event=event, pid=37, writerProcessCreation100ns='123')
+                     for event in events
+                     for reason in ('first-type', 'capacity-first-witness', 'unclassified-first-witness',
+                                    'type-recovery-witness', 'capacity-recovery-witness', 'unclassified-recovery-witness')]
+        qualified.append(dict(AuditTests.ipc_row(), pid=37, writerProcessCreation100ns='123'))
+        detail = [self.row(reason) for reason in ('repeat-type', 'capacity-detail', 'unclassified-detail')]
+        invalid = [self.row(epoch=0), dict(self.row(), event='unrelated'),
+                   {k: v for k, v in self.row().items() if k != 'failureLogSelection'}]
+        for key, bad in (('recoveryEpoch', False), ('scope', 'future'), ('schema', True), ('typeIndex', None), ('extra', True)):
+            row = self.row()
+            row['failureLogSelection'][key] = bad
+            invalid.append(row)
+
+        def wire(row):
+            return (json.dumps(row) + '\r\n').encode('ascii')
+
+        names = ('native-detail.log', 'native-detail.log.previous', 'native-detail.2.log', 'native-detail.2.log')
+        payload = b'{partial\r\n' + b''.join(map(wire, (*qualified, *detail, *invalid)))
+        with tempfile.TemporaryDirectory(prefix='ymcc-ipc-witness-lanes-') as root:
+            path = Path(root) / 'ipc-witnesses.zip'
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', UserWarning)
+                with zipfile.ZipFile(path, 'w') as z:
+                    for name in (*names, 'nested/native-detail.log'):
+                        z.writestr(name, payload)
+                    z.writestr('native-lifecycle.log', b''.join(map(wire, qualified)))
+            result = audit_zip(path, {'baseEvents': list(events)})
+        findings = [(v['file'], v['archiveEntryOccurrence'], v['event'], v['exampleLines'], v['counts']['all'],
+                     sum(part['bytes'] for part in v['nativeDetailFindingWriterFootprint']['buckets'].values()))
+                    for v in result['violations'] if v['kind'] == 'ipc-failure-witness-in-native-detail']
+        expected = []
+        for idx, name in enumerate(names):
+            for event in events:
+                selected = [(line, row) for line, row in enumerate(qualified, 2) if row['event'] == event]
+                expected.append((name, int(idx == 3), event, [line for line, _ in selected],
+                                 len(selected), sum(len(wire(row)) for _, row in selected)))
+        self.assertCountEqual(findings, expected)
+
     def test_middle_rare_recovery_witness_survives_original_summary_bound(self):
         rows=[self.row('repeat-type') for _ in range(5000)];rows[2500]=self.row('type-recovery-witness',27)
         result=self.summary(rows);self.assertLessEqual(len(result['observations']),result['maxListedObservations']);self.assertIn(2501,[r['line'] for r in result['observations']])
@@ -12997,6 +17044,65 @@ class FiniteNativeOutcomeTests(unittest.TestCase):
 
 
 class TouchpadRecoveryReaderTests(unittest.TestCase):
+    def test_cursor_policy_requires_exact_version_and_no_conflicting_fields(self):
+        from log_lane_audit import TOUCHPAD_CURSOR_POLICY_DEFAULTS, restore_touchpad_cursor_policy
+        row = dict(event='screen-touchpads-state', callSite='screenTouchpads.get', touchpadCursorPolicyV1=1,
+                   screenReadRepeat=True, state=dict(cursorPolicyVersion=19, ok=False, nativeTransportChanges=12))
+        value, status = restore_touchpad_cursor_policy(row)
+        self.assertEqual(status, 'restored')
+        self.assertEqual(value['state'], dict(row['state'], **TOUCHPAD_CURSOR_POLICY_DEFAULTS))
+        self.assertNotIn('touchpadCursorPolicyV1', value)
+        self.assertTrue(value['screenReadRepeat'])
+        self.assertEqual(len(row['state']), 3)
+        for mark in (0, 2, True, 1.0, '1', None):
+            malformed = {**row, 'touchpadCursorPolicyV1': mark}
+            value, status = restore_touchpad_cursor_policy(malformed)
+            self.assertIs(value, malformed)
+            self.assertEqual(status, 'invalid-cursor-policy-marker')
+        for state in (dict(cursorPolicyVersion=19.0), dict(cursorPolicyVersion=20), None, []):
+            malformed = {**row, 'state': state}
+            self.assertEqual(restore_touchpad_cursor_policy(malformed)[1], 'invalid-cursor-policy-marker')
+        for key, default in TOUCHPAD_CURSOR_POLICY_DEFAULTS.items():
+            malformed = {**row, 'state': {**row['state'], key: default}}
+            value, status = restore_touchpad_cursor_policy(malformed)
+            self.assertIs(value, malformed)
+            self.assertEqual(status, 'conflicting-cursor-policy-marker')
+        unmarked = {k: v for k, v in row.items() if k != 'touchpadCursorPolicyV1'}
+        self.assertEqual(restore_touchpad_cursor_policy(unmarked), (unmarked, None))
+        self.assertEqual(restore_touchpad_cursor_policy({**row, 'callSite': 'screenTouchpads.set'})[1],
+                         'invalid-cursor-policy-marker')
+
+    def test_scope_defaults_restore_only_named_fields_and_reject_conflicts_atomically(self):
+        from log_lane_audit import TOUCHPAD_SCOPE_DEFAULTS, restore_touchpad_scope_defaults
+        row = dict(event='screen-touchpads-state', callSite='screenTouchpads.get', touchpadScopeDefaultsV1=7,
+                   state=dict(ok=False, cursorVisibilityContext={'total': 4},
+                              cursorVisibilityObserver={'eventTrace': {'total': 3}, 'sourceOwnerObservations': {}},
+                              exitInputRelease={'scope': 'custom', 'verified': False}))
+        original = json.dumps(row)
+        restored, status = restore_touchpad_scope_defaults(row)
+        self.assertEqual(status, 'restored')
+        self.assertNotIn('touchpadScopeDefaultsV1', restored)
+        self.assertEqual(restored['state']['cursorVisibilityContext']['total'], 4)
+        self.assertFalse(restored['state']['ok'])
+        for bit, path, text in TOUCHPAD_SCOPE_DEFAULTS:
+            node = restored['state']
+            for key in path:
+                node = node[key]
+            self.assertEqual(node['scope'], text if bit & 7 else 'custom')
+        self.assertEqual(json.dumps(row), original)
+        for mask in (0, 16, -1, True, 1.0, '7', None):
+            malformed = {**row, 'touchpadScopeDefaultsV1': mask}
+            value, reason = restore_touchpad_scope_defaults(malformed)
+            self.assertIs(value, malformed)
+            self.assertEqual(reason, 'invalid-default-mask')
+        for observer in ({'eventTrace': []}, {'eventTrace': {'scope': None}}, None):
+            conflict = {**row, 'state': {**row['state'], 'cursorVisibilityObserver': observer}}
+            value, reason = restore_touchpad_scope_defaults(conflict)
+            self.assertIs(value, conflict)
+            self.assertEqual(reason, 'conflicting-default-mask')
+        self.assertEqual(restore_touchpad_scope_defaults({**row, 'callSite': 'screenTouchpads.set'})[1],
+                         'invalid-default-mask')
+
     @staticmethod
     def sample(status='failed'):
         return {'schemaVersion':1,'state':{'ok':True,'available':True,'enabled':False,'visible':False,'autoHidden':False,'error':0,
@@ -13276,6 +17382,57 @@ class UiPresentationReaderTests(unittest.TestCase):
 
 
 
+class WebViewPostShowNudgeReaderTests(unittest.TestCase):
+    @staticmethod
+    def row(**changes):
+        return {'event': 'post-show-nudge', 'writerEnvelopeSchema': 1, 'writerPid': 37,
+                'writerProcessCreation100ns': '9007199254740993', **changes}
+
+    def test_writer_and_mode_never_fall_back_to_pid_or_truthiness(self):
+        from log_lane_audit import webview_post_show_nudge_evidence
+        rows = [self.row(firstMainReveal=True), self.row(firstMainReveal=False), self.row(),
+                self.row(firstMainReveal=None), self.row(firstMainReveal=1),
+                self.row(firstMainReveal=True, writerProcessCreation100ns='9007199254740992'),
+                self.row(firstMainReveal=False, writerPid=38),
+                self.row(firstMainReveal=False, writerEnvelopeSchema=True, pid=37),
+                self.row(firstMainReveal=False, writerProcessCreation100ns=None, browserProcessId=37)]
+        members = [('webview-failures.log', list(enumerate(rows, 1)), {'archiveEntryOccurrence': 0})]
+        view = webview_post_show_nudge_evidence(members, ('37', '9007199254740993'))
+        self.assertEqual(view['rowCountsByWriterAndMode'], {
+            'export-writer': {'first-main-reveal': 1, 'ordinary-refresh': 1, 'not-reported': 1,
+                              'reported-null': 1, 'invalid-type': 1},
+            'same-pid-other-birth': {'first-main-reveal': 1}, 'other-writer': {'ordinary-refresh': 1},
+            'writer-unresolved': {'ordinary-refresh': 2}})
+        unknown = webview_post_show_nudge_evidence(members, None)
+        self.assertNotIn('export-writer', unknown['rowCountsByWriterAndMode'])
+        self.assertEqual(unknown['rowCountsByWriterAndMode']['export-writer-unresolved']['ordinary-refresh'], 2)
+        self.assertFalse(view['comResultOrVisiblePixelsOrInputRecoveryProven'])
+
+    def test_zip_manifest_rotations_and_duplicate_occurrences(self):
+        op = {'id': '37-12-1', 'schema': 1, 'ordinal': '1', 'startedTickMs': '12', 'writerPid': 37,
+              'writerProcessCreation100ns': '9007199254740993',
+              'scope': 'admitted-ordinary-log-export;diagnostic-correlation-only'}
+        manifest = ('processId=37\nexportOperation=' + json.dumps(op) + '\n').encode()
+        first = (json.dumps(self.row(firstMainReveal=True)) + '\n').encode()
+        normal = (json.dumps(self.row(firstMainReveal=False, extra='private-path')) + '\n').encode()
+        failure = b'{"event":"process-failed","kind":"browser"}\n'
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'nudge.zip'
+            AuditTests.receipt_selection_write(path, [('YeManCC-export-manifest.txt', manifest),
+                ('webview-failures.log', failure + first), ('webview-failures.log', b'\n' + normal),
+                ('webview-failures.log.1', first), ('foreign/webview-failures.log', first),
+                ('webview-failures.log.\uff11', first), ('native-lifecycle.log', first)])
+            common = audit_zip(path, {'baseEvents': []})['commonEvidence']
+            view = common['webviewPostShowNudgeEvidence']
+            self.assertEqual(common['uiPresentationEvidence']['rowCountsByReportedSignal'], {'reported-process-failure': 1})
+            self.assertEqual(view['rowsObserved'], 3)
+            self.assertEqual(view['rowCountsByWriterAndMode'], {'export-writer': {'first-main-reveal': 2, 'ordinary-refresh': 1}})
+            first, second = view['firstWitnessPerWriterRelationAndMode']
+            self.assertEqual([(first['archiveEntryOccurrence'], first['line']),
+                              (second['archiveEntryOccurrence'], second['line'])], [(0, 2), (1, 2)])
+            self.assertNotIn('private-path', json.dumps(view))
+
+
 class OverlayRendererProbeReaderTests(unittest.TestCase):
     def row(self, phase, **fields):
         return {'event':'game-overlay-surface','pid':89,'writerProcessCreation100ns':'9007199254740993',
@@ -13437,6 +17594,67 @@ class LifecycleFiniteOutcomeReaderTests(unittest.TestCase):
                 self.assertEqual(self.view({**self.rows()[index],key:value})['state'],'invalid-fields')
 
 class CalibrationRestoreEvidenceTests(unittest.TestCase):
+    def test_native_fusion_resident_reason_is_bound_to_valid_wait_and_reported_in_detail(self):
+        from log_lane_audit import CALIBRATION_WAIT_RESIDENT_REASONS, calibration_restore_lane_state
+        context = dict(schema=1, sourceScope='scoped-frame', bindingGeneration='7', choiceGeneration='8',
+                       sessionStartSteadyTicks='42', recheckReason='fusion-session-changed')
+        base = self.row(restoreContext=context)
+        witnesses = [dict(base, calibrationWaitResidentReasonV1=reason) for reason in CALIBRATION_WAIT_RESIDENT_REASONS]
+        valid = witnesses[0]
+        for bad in (dict(valid, calibrationSessionWaitSample=True), dict(valid, calibrationWaitResidentReasonV1=True),
+                    dict(valid, calibrationWaitResidentReasonV1=[]), dict(valid, loaded=True),
+                    dict(valid, restoreContext=None), dict(valid, event='gyro-calibration-restored')):
+            self.assertEqual(calibration_restore_lane_state(bad), 'unverified-marker')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'wait.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                for member in ('native-lifecycle.log', 'native-detail.log'):
+                    archive.writestr(member, ''.join(json.dumps(r)+'\n' for r in witnesses))
+            report = audit_zip(path, {'baseEvents': [base['event']]})
+        self.assertEqual([(f['kind'], f['file'], f['exampleLines']) for f in report['violations']],
+                         [('gyro-calibration-resident-in-native-detail', 'native-detail.log', list(range(1, 7)))])
+        for member in report['files']:
+            if member['file'] in ('native-lifecycle.log', 'native-detail.log'):
+                coverage = member['calibrationRestoreLaneCoverage']['events'][base['event']]['reported-resident-fusion-wait']
+                self.assertEqual(coverage['residentReasons'], dict.fromkeys(CALIBRATION_WAIT_RESIDENT_REASONS, 1))
+
+    def test_calibration_lane_coverage_distinguishes_ineligible_receipts_and_unmarked_waits(self):
+        context = dict(schema=1, sourceScope='scoped-frame', bindingGeneration='7', choiceGeneration='8',
+                       sessionStartSteadyTicks='42', recheckReason='fusion-session-changed')
+        wait = self.row(restoreContext=context)
+        first = dict(wait, restoreContext=dict(context, recheckReason='first-recipe'))
+        capture_owner = dict(wait, restoreContext=dict(context, sourceScope='capture-owner-observation', choiceGeneration=None))
+        sample = dict(wait, calibrationSessionWaitSample=True)
+        contradictory = dict(first, calibrationSessionWaitSample=True)
+        source = self.row('gyro-calibration-awaiting-current-source', sourceCurrent=False, calibrationOwner='none')
+        restored = self.row('gyro-calibration-restored', loaded=True, confidence=.99, weight=12)
+        event = wait['event']
+        rows = [wait, first, capture_owner, sample, contradictory, self.row(), source, restored,
+                {'kind': event}, dict(wait, restoreContext=None)]
+        physical = [json.dumps(row).encode() + b'\r\n' for row in rows]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'calibration.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                for member in ('native-lifecycle.log.1', 'native-detail.2.log', 'nested/native-detail.log'):
+                    archive.writestr(member, b''.join(physical))
+            result = audit_zip(path, {'baseEvents': list({row['event'] for row in rows if 'event' in row})})
+        seen = {(r['kind'], r['file'], r['event']): r['exampleLines'] for r in result['violations']}
+        self.assertEqual(seen, {
+            ('known-detail-in-native-low', 'native-lifecycle.log.1', event): [4],
+            ('gyro-calibration-resident-in-native-detail', 'native-detail.2.log', event): [2, 3],
+            ('gyro-calibration-resident-in-native-detail', 'native-detail.2.log', source['event']): [7],
+            ('gyro-calibration-resident-in-native-detail', 'native-detail.2.log', restored['event']): [8],
+        })
+        coverage = [entry['calibrationRestoreLaneCoverage'] for entry in result['files']
+                    if 'calibrationRestoreLaneCoverage' in entry]
+        self.assertEqual(len(coverage), 2)
+        expected = {'unmarked-scoped-fusion-wait': [1], 'resident-receipt': [2, 3],
+                    'reported-detail-sample': [4], 'unverified-marker': [5], 'no-recheck-context': [6],
+                    'unverified-receipt': [10]}
+        for entry in coverage:
+            self.assertEqual(entry['events'][event], {state: dict(rows=len(lines), exampleLines=lines,
+                bytes=sum(len(physical[line - 1]) for line in lines)) for state, lines in expected.items()})
+
     @staticmethod
     def row(event='gyro-calibration-awaiting-current-recipe',**fields):
         row={'event':event,'pid':71,'writerProcessCreation100ns':'134394066260992255','sourceQualified':True,'loaded':False,'weight':0,'confidence':0,'matrixId':'private-matrix','matrixSourceSha256':'private-digest','deviceId':'private-device'}
@@ -13445,6 +17663,46 @@ class CalibrationRestoreEvidenceTests(unittest.TestCase):
     def view(row):
         from log_lane_audit import calibration_restore_record
         return calibration_restore_record(row)
+    def test_restore_context_requires_exact_shape_without_inventing_identity(self):
+        context = {'schema': 1, 'sourceScope': 'scoped-frame', 'bindingGeneration': '18446744073709551615',
+                   'choiceGeneration': None, 'sessionStartSteadyTicks': '-9223372036854775808',
+                   'recheckReason': 'calibration-owner-changed', 'unknown': 'private'}
+        result = self.view(self.row(restoreContext=context))
+        self.assertEqual(result['restoreContext'], {'state': 'reported-fields', 'reported': {
+            key: value for key, value in context.items() if key not in ('schema', 'unknown')}})
+        self.assertEqual(self.view(self.row())['restoreContext'], {'state': 'not-reported'})
+        self.assertEqual(self.view(self.row(restoreContext=None))['restoreContext'], {'state': 'reported-null'})
+        for key, value in [('bindingGeneration', True), ('bindingGeneration', '0'), ('choiceGeneration', '01'),
+                           ('sessionStartSteadyTicks', '-0'), ('sessionStartSteadyTicks', str(1 << 63)),
+                           ('sourceScope', 'future'), ('recheckReason', ['first-recipe'])]:
+            with self.subTest(key=key, value=value):
+                issue = self.view(self.row(restoreContext={**context, key: value}))
+                self.assertEqual(issue['restoreContext'], {'state': 'invalid-fields', 'fieldIssues': [key]})
+                self.assertEqual(issue['state'], 'reported-fields')
+        invalid_scope = {**context, 'sourceScope': 'capture-owner-observation', 'choiceGeneration': '3'}
+        self.assertEqual(self.view(self.row(restoreContext=invalid_scope))['restoreContext']['fieldIssues'], ['choiceGeneration'])
+        self.assertEqual(self.view(self.row(restoreContext={**context, 'schema': True}))['restoreContext']['state'],
+                         'unsupported-schema')
+        legacy = {'event': 'gyro-calibration-restored', 'offset': {'x': 1, 'y': 2, 'z': 3}, 'weight': 4,
+                  'confidence': 0.5, 'restoreContext': context}
+        self.assertEqual(self.view(legacy)['restoreContext'], {'state': 'not-applicable'})
+
+    def test_zip_restore_context_counts_rows_without_merging_equal_receipts(self):
+        context = {'schema': 1, 'sourceScope': 'capture-owner-observation', 'bindingGeneration': '2',
+                   'choiceGeneration': None, 'sessionStartSteadyTicks': '300', 'recheckReason': 'first-recipe'}
+        reported = self.row(restoreContext=context)
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'restore.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-lifecycle.log.1', json.dumps(reported) + '\n')
+                archive.writestr('native-lifecycle.log', ''.join(json.dumps(row) + '\n' for row in
+                    (self.row(), reported, {**reported, 'loaded': True})))
+            view = audit_zip(path, {'baseEvents': []})['commonEvidence']['calibrationRestoreEvidence']
+        self.assertEqual(view['countsByRestoreContextState'], {'reported-fields': 3, 'not-reported': 1})
+        self.assertEqual(view['countsByRecheckReason'], {'first-recipe': 2})
+        self.assertEqual(view['rowsObserved'], 4)
+        self.assertFalse(view['operationsPaired'])
+
     def test_source_wait_and_storage_wait_are_distinct(self):
         source=self.row('gyro-calibration-awaiting-current-source',sourceCurrent=False,calibrationOwner='none')
         self.assertEqual(self.view(source)['reportedDisposition'],'reported-awaiting-current-source')

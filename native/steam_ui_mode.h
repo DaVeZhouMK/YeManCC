@@ -12,10 +12,21 @@
 #include "decky_update_recovery.h"
 namespace ymcc::steamui {
 using Json = nlohmann::json;
+enum class ReadPath { PreLive, BudgetCache, BudgetPaused, LivePath };
+inline const char* readPathName(ReadPath path) noexcept {
+    switch(path) {
+    case ReadPath::PreLive: return "pre-live";
+    case ReadPath::BudgetCache: return "budget-cache";
+    case ReadPath::BudgetPaused: return "budget-paused";
+    case ReadPath::LivePath: return "live-path";
+    }
+    return nullptr;
+}
 inline Json read(steamsession::Observer& observer, bool force = false, const std::function<bool()>& ownerCurrent = {},
     steamlive::ModeTransportWait modeWait = steamlive::ModeTransportWait::Immediate,
-    steamlive::ModeTransportObservation* modeObservation = nullptr) {
+    steamlive::ModeTransportObservation* modeObservation = nullptr, ReadPath* readPath = nullptr) {
     if(modeObservation)*modeObservation={};
+    if(readPath)*readPath=ReadPath::PreLive;
     const auto identity = observer.identitySnapshot();
     const auto session = identity ? identity->session : steamsession::Session{};
     const int presence = identity ? identity->presence : -1;
@@ -54,11 +65,14 @@ inline Json read(steamsession::Observer& observer, bool force = false, const std
             if (!observer.sameIdentityEpoch(identity)) {
                 state["known"] = false; state["reason"] = "steam-session-changed"; return state;
             }
+            if(readPath)*readPath=ReadPath::BudgetCache;
             return cached;
         }
+        if(readPath)*readPath=ReadPath::BudgetPaused;
         state["reason"] = "ui-auto-query-paused"; return state;
     }
     const auto stillCurrent = [&] { return ownerAlive() && observer.sameIdentityEpoch(identity); };
+    if(readPath)*readPath=ReadPath::LivePath;
     const auto result = steamlive::runOwned(observer,session.root, {{"operation", "ui.mode.get"}}, {}, 4000, stillCurrent, &session,
         false, nullptr, modeWait, modeObservation);
     // Preserve only this read's existing safe error before a late identity
@@ -94,6 +108,8 @@ inline Json read(steamsession::Observer& observer, bool force = false, const std
             if(backendState!=result.end()&&backendState->is_string()&&deckyfrontend::backendState(backendState->get_ref<const std::string&>()))state["deckyBackendState"]=*backendState;
             const auto clientState=result.find("deckyClientState");
             if(clientState!=result.end()&&clientState->is_string()&&deckyfrontend::clientState(clientState->get_ref<const std::string&>()))state["deckyClientState"]=*clientState;
+            const auto qamPanelState=result.find("deckyQamPanelState");
+            if(mode=="bigpicture"&&qamPanelState!=result.end()&&qamPanelState->is_string()&&deckyfrontend::qamPanelState(qamPanelState->get_ref<const std::string&>()))state["deckyQamPanelState"]=*qamPanelState;
             const auto residue=ymcc::deckyupdate::residue(result.value("deckyUpdateResidue",Json()));
             if(!residue.empty())state["deckyUpdateResidue"]=residue;
             const auto empty=result.value("deckyEmptyFrontend",Json());

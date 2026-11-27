@@ -45,7 +45,7 @@ function fixture(options: { timeout?: number; content?: boolean; child?: boolean
     showRouteFallback: () => { state.fallback = true; },
     reportError: (where: string) => state.errors.push(where),
     invoke: async (cmd: string, receipt: any) => {
-      if (cmd === 'window.renderContext') return { generation: '7', navigationId: '9007199254740999' };
+      if (cmd === 'window.renderContext') return { generation: '7', navigationId: '9007199254740999', documentNavigationId: '9007199254741001' };
       state.receipts.push(receipt);
       if (options.ipcFail) throw new Error('simulated lost acknowledgement');
       return { ok: true };
@@ -69,6 +69,7 @@ async function main() {
   check(a.state.receipts[0]?.routeReady === true, 'all frontend prerequisites release');
   check(a.state.preloadCalls === 0, 'unopened pages do not participate in native readiness');
   check(a.state.receipts[0]?.navigationId === '9007199254740999', '64-bit navigation identity stays string');
+  check(a.win.__YMCC_STARTUP_READY__?.documentNavigationId === '9007199254741001', 'cached document identity is distinct from the first-frame gate');
   check(a.win.__YMCC_STARTUP_READY__ === a.state.receipts[0], 'lost-message probe sees same durable receipt');
 
   const b = fixture(); const br = b.run();

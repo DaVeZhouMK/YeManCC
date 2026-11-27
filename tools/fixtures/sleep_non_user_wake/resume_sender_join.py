@@ -14,7 +14,7 @@ def run(c, prepared):
     args, source, function = c['args'], c['source'], c['function']
     selected = args.resume_sender_case
     choices = re.findall(r'^\s*run\("([a-z0-9-]+)",', Path(__file__).with_suffix('.inc').read_text(encoding='utf-8'), re.M)
-    if len(choices)!=126 or len(set(choices))!=126:raise RuntimeError('joined case catalog changed')
+    if len(choices)!=133 or len(set(choices))!=133:raise RuntimeError('joined case catalog changed')
     exact = selected[5:] if selected and selected.startswith('from:') else selected
     if selected is not None and (not exact or exact not in choices):raise RuntimeError('unknown or empty joined selector')
     out = args.output.resolve()
@@ -133,6 +133,7 @@ void publishSharedPowerLifecycle(const char*){++softwareReadyNotices;}
     };''')
     boundary_guard=r'''const auto wakeSleepSequence = g_sleepPowerDispatch\.observedSleepBoundarySequence\(\);\s*
     const auto wakeSuspendSerial = g_sharedPowerSuspendSerial\.load\(std::memory_order_acquire\);\s*
+    const std::pair<uint64_t,uint64_t> wakeBoundary\{wakeSleepSequence,wakeSuspendSerial\};\s*
     if\(delivery&&!delivery->wakeBoundaryMatches\(wakeSleepSequence,wakeSuspendSerial\)\)return false;\s*
     const auto stillAdmitted = \[&\] \{\s*
     const auto phase = g_powerLifecycle\.load\(std::memory_order_acquire\);\s*
@@ -143,17 +144,19 @@ void publishSharedPowerLifecycle(const char*){++softwareReadyNotices;}
     wakeSuspendSerial == g_sharedPowerSuspendSerial\.load\(std::memory_order_acquire\);\s*\};\s*
     '''+focus_reader+r'''\s*
     const bool crossedSleepBoundary = g_sgWakeRecovery\.crossedSleepBoundary\(wakeSleepSequence, wakeSuspendSerial\);\s*
-    if \(g_sgLastGameWakeGeneration == generation && sgWakeGameRecoveryCanWaitForNextWakeUnlocked\(\) &&\s*
-        (?:crossedSleepBoundary|wakeSleepSequence != g_sgWakeRecovery\.wakeSleepSequence) &&\s*
-        std::none_of\(g_sgWakeRecovery\.entries\.begin\(\), g_sgWakeRecovery\.entries\.end\(\),\s*
-            \[\]\(const auto& e\) \{ return !e\.done; \}\)\) \{\s*
-        g_sgLastGameWakeGeneration = 0;\s*\}\s*'''
+    const bool duplicateGeneration = g_sgLastGameWakeGeneration == generation;\s*
+    const bool rebuild = duplicateGeneration && g_sgZeroDispatchWakeBoundary &&\s*
+        \*g_sgZeroDispatchWakeBoundary != wakeBoundary &&\s*
+        \(!sgWakeGameRecoveryCanWaitForNextWakeUnlocked\(\) \|\|\s*
+         std::none_of\(g_sgWakeRecovery\.entries\.begin\(\), g_sgWakeRecovery\.entries\.end\(\),\s*
+            \[\]\(const auto& e\) \{ return !e\.done; \}\)\);\s*'''
     boundary_guard=re.sub(r'\n +','',boundary_guard)
-    guard=r'\s*std::lock_guard<std::mutex> opLock\(g_sgOpMtx\);\s*if\s*\([^{};]*\)\s*return false;\s*'+boundary_guard+r'if\s*\(g_sgLastGameWakeGeneration == generation\)\s*'
-    if not re.fullmatch(guard+r'return true;\s*',masked_prefix,re.S):
+    guard=r'\s*std::lock_guard<std::mutex> opLock\(g_sgOpMtx\);\s*if\s*\([^{};]*\)\s*return false;\s*'+boundary_guard+r'if\s*\(duplicateGeneration && !rebuild\)\s*'
+    final_guard=r'\s*if \(!stillAdmitted\(\)\) return false;\s*'
+    if not re.fullmatch(guard+r'return true;'+final_guard,masked_prefix,re.S):
         # The same-generation continuation does not touch process IO, so
         # execute it with the original state types and counted NotifyWork port.
-        if not re.fullmatch(guard+r'\{.*\}\s*',masked_prefix,re.S):
+        if not re.fullmatch(guard+r'\{.*\}'+final_guard,masked_prefix,re.S):
             raise RuntimeError('wake recovery prefix is not exact initial opLock and return guard')
         declarations=re.search(r'^struct SgWakeRecoveryEntry \{.*?^static SgWakeRecoveryBatch g_sgWakeRecovery;$',header,re.M|re.S)
         pending=re.findall(r'^static std::atomic<bool> g_sgWakeRecoveryPending\{false\};$',source,re.M)
@@ -165,12 +168,13 @@ void publishSharedPowerLifecycle(const char*){++softwareReadyNotices;}
             if name+'(' in masked_prefix:
                 p+='\n'+function(name,header)+'\n'
     last_wake=[line for line in header.splitlines() if re.fullmatch(r'static unsigned long long g_sgLastGameWakeGeneration = 0;',line)]
-    if len(last_wake)!=1:raise RuntimeError('wake recovery last generation declaration changed')
+    zero_dispatch=re.findall(r'^static std::optional<std::pair<uint64_t,uint64_t>> g_sgZeroDispatchWakeBoundary;$',header,re.M)
+    if len(last_wake)!=1 or len(zero_dispatch)!=1:raise RuntimeError('wake recovery last boundary declarations changed')
     if not re.search(r'^static std::mutex g_sgOpMtx;',p,re.M):
         operation=[line for line in source.splitlines() if re.fullmatch(r'static std::mutex g_sgOpMtx;[ \t]*(?://[^\r\n]*)?',line)]
         if len(operation)!=1:raise RuntimeError('actual operation mutex declaration missing for header prefix')
         p+='\n'+operation[0]+'\n'
-    p+='\n'+last_wake[0]+'\n'
+    p='#include <optional>\n#include <utility>\n'+p+'\n'+last_wake[0]+'\n'+zero_dispatch[0]+'\n'
     admission_probe='static unsigned joinHeaderAdmissionCount=0;\n'+signature.replace('sgBeginWakeGameRecovery','joinActualWakeRecoveryAdmissionPrefix')+prefix+'    ++joinHeaderAdmissionCount;\n    return true;\n}\n'
     bom=3 if header_bytes.startswith(b'\xef\xbb\xbf') else 0
     header_binding={'source':'native/wake_game_recovery.h','sourcePath':str(header_path.resolve()),
@@ -191,7 +195,8 @@ void publishSharedPowerLifecycle(const char*){++softwareReadyNotices;}
     # Execute the complete original WinEvt callback, with only rendering,
     # journal transport, posts and unrelated consumer leaves controlled.
     kernel_callback = function('sgKernelPowerEventCallback')
-    s4_post = function('sgPostS4Wake') if 'sgPostS4Wake(' in kernel_callback else ''
+    post_name='sgPostKernelWake' if 'sgPostKernelWake(' in kernel_callback else 'sgPostS4Wake'
+    s4_post = function(post_name) if f'{post_name}(' in kernel_callback else ''
     kernel_constants = []
     for name in ['WM_SG_S0_INTENT','WM_SG_S0_WAKE','WM_SG_S4_WAKE']:
         matches = re.findall(r'^#define '+name+r'[^\r\n]*',source,re.M)
@@ -201,15 +206,14 @@ void publishSharedPowerLifecycle(const char*){++softwareReadyNotices;}
         matches = re.findall(r'^static constexpr UINT '+name+r'[^\r\n]*',source,re.M)
         if len(matches)!=1:raise RuntimeError('kernel callback constant not unique: '+name)
         kernel_constants.append(matches[0])
-    structures = re.findall(r'^struct FanKernelPowerFact \{[^\r\n]*',source,re.M)
-    if len(structures)!=1:raise RuntimeError('kernel fact transport declaration not unique')
     kernel_ports = r'''
 #include "sleep_abnormal_resleep.h"
 
 static std::function<void()> joinKernelAfterOriginalWake,joinKernelAfterConfirmedWake;
 static std::function<void()> joinKernelAfterTimeoutRecord;
-static void joinKernelRecordTimeout(int id,int reason,ULONGLONG at,ULONGLONG generation,bool continuing=false,bool sessionEnded=false){
- sgSleepTimeoutRecordKernel(id,reason,at,generation,continuing,sessionEnded);
+static void joinKernelRecordTimeout(int id,int reason,ULONGLONG at,ULONGLONG generation,bool continuing=false,bool sessionEnded=false,
+        ymcc::sleeppower::KernelCycleIdentity identity={}){
+ sgSleepTimeoutRecordKernel(id,reason,at,generation,continuing,sessionEnded,identity);
  auto hook=std::move(joinKernelAfterTimeoutRecord);joinKernelAfterTimeoutRecord=nullptr;if(hook)hook();
 }
 
@@ -237,7 +241,9 @@ static std::string joinKernelXml;
 static std::function<void()> joinKernelBeforeJournal;
 static unsigned joinKernelJournalPoints=0,joinKernelPosts=0,joinKernelOtherConsumers=0;
 static unsigned joinKernelFanPosts=0;
-static FanKernelPowerFact joinLastFanFact{};
+static ULONGLONG joinLastFanFact=0;
+static unsigned joinKernelS0Posts=0;
+static ULONGLONG joinLastS0At=0;
 static bool sgRenderKernelPowerEvent(EVT_HANDLE event,std::string& xml){
  if(event!=reinterpret_cast<EVT_HANDLE>(0xb01))throw std::runtime_error("unadmitted kernel event handle");
  xml=joinKernelXml;return true;
@@ -255,9 +261,11 @@ static void joinKernelRecordFact(const char* event,const json& details){
 static BOOL WINAPI joinKernelPost(HWND window,UINT message,WPARAM,LPARAM value){
  if(window!=g_hwnd)throw std::runtime_error("foreign callback post target");
  if(message==WM_FAN_KERNEL_POWER_FACT){
-  std::unique_ptr<FanKernelPowerFact> fact(reinterpret_cast<FanKernelPowerFact*>(value));
-  if(!fact)throw std::runtime_error("missing Fan kernel fact");
-  joinLastFanFact=*fact;++joinKernelFanPosts;
+  if(!value)throw std::runtime_error("missing Fan kernel fact");
+  joinLastFanFact=static_cast<ULONGLONG>(value);++joinKernelFanPosts;
+ }
+ else if(message==WM_SG_S0_WAKE){
+  joinLastS0At=static_cast<ULONGLONG>(value);++joinKernelS0Posts;
  }
  else if(message!=WM_SG_S0_INTENT&&message!=WM_SG_S0_WAKE&&message!=WM_SG_S4_WAKE)
   throw std::runtime_error("unadmitted callback post");
@@ -265,7 +273,11 @@ static BOOL WINAPI joinKernelPost(HWND window,UINT message,WPARAM,LPARAM value){
 }
 '''
     s4_window_lib = '\n#pragma comment(lib, "user32.lib")\n' if s4_post else ''
-    kernel = s4_window_lib+'\n'.join(kernel_constants+structures)+'\n'+kernel_ports+'''
+    ingress = ''
+    if 'sgRenderKernelPowerIngress(' in kernel_callback:
+        a=source.index('struct SgOriginalWakeDelivery {');b=source.index('static DWORD WINAPI sgKernelPowerEventCallback(',a)
+        ingress=source[a:b]
+    kernel = s4_window_lib+'\n'.join(kernel_constants)+'\n'+kernel_ports+ingress+'''
 #pragma push_macro("sgSleepTimeoutRecordKernel")
 #define sgSleepTimeoutRecordKernel joinKernelRecordTimeout
 #pragma push_macro("publishConfirmedWake")
@@ -298,10 +310,19 @@ static BOOL WINAPI joinKernelPost(HWND window,UINT message,WPARAM,LPARAM value){
     prefix_start=source.index(prefix_signature)+len(prefix_signature)
     prefix_end=source.index(';',prefix_start)+1
     first_statement=source[prefix_start:prefix_end]
-    supported=bool(re.fullmatch(r'\s*sgSleepTimeoutResumeDeferredReentry\(\);',c['mask_cpp'](first_statement)))
-    prefix=first_statement if supported else ''
-    prefix_port='static constexpr bool joinDeferredPrefixSupported='+('true' if supported else 'false')+';\nstatic void joinActualDeferredWndProcPrefix(){'+prefix+'}\n'
-    binding['deferredOriginalWndProcPrefix']={'signature':prefix_signature,'actualFirstStatement':first_statement,'supported':supported,'onlyAddedWrapperName':True,'remainingWndProcExecuted':False}
+    guard=re.match(r'\s*if\s*\(\s*m\s*>=\s*0xC000\s*&&\s*w\s*==\s*0\s*&&\s*l\s*==\s*0\s*&&\s*h\s*==\s*g_hwnd\s*\)\s*\{',c['masked'][prefix_start:prefix_end])
+    leading_guard=''
+    deferred=first_statement
+    if guard:
+        guard_end=c['braced'](prefix_start+guard.end()-1)
+        leading_guard=source[prefix_start:guard_end]
+        deferred=source[guard_end:source.index(';',guard_end)+1]
+    supported=bool(re.fullmatch(r'\s*sgSleepTimeoutResumeDeferredReentry\(\);',c['mask_cpp'](deferred)))
+    prefix=deferred if supported else ''
+    # The maintenance guard cannot run for the timer message used by this replay.
+    scope_proof='static_assert(WM_TIMER < 0xC000);' if leading_guard else ''
+    prefix_port='static constexpr bool joinDeferredPrefixSupported='+('true' if supported else 'false')+';\nstatic void joinActualDeferredWndProcPrefix(){'+scope_proof+prefix+'}\n'
+    binding['deferredOriginalWndProcPrefix']={'signature':prefix_signature,'actualFirstStatement':leading_guard or first_statement,'actualDeferredCall':deferred,'supported':supported,'onlyAddedWrapperName':not leading_guard,'priorGuardExcludedForMessage':'WM_TIMER' if leading_guard else None,'remainingWndProcExecuted':False}
     checks=prefix_port+checks
     cpp = p+'\n'+f+'\n'+h+'\n'+kernel+'\n'+checks
     write_owned('joined.cpp',cpp.encode('utf-8'))

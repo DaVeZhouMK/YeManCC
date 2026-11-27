@@ -37,8 +37,30 @@ class Supervisor {
       return bindingRevision&&bindingRevision<other.bindingRevision&&key==other.key&&identity!=other.identity;
     }
   };
-  struct PlaybackTask {Json claim;PlaybackSource source;uint64_t due=0,expires=0;bool failureRetried=false;};
-  struct PlaybackAttempt {int code=24;const char* stage="exception";DWORD error=0;};
+  struct PlaybackAttempt {
+    int code=24;const char* stage="exception";DWORD error=0;const char* veto=nullptr;
+    sleeppower::SharedPowerV1 power{};
+  };
+  struct PlaybackRetryLog {
+    uint64_t policy=0,binding=0;
+    sleeppower::SharedPowerV1 power{};
+    unsigned vetoKind=0,streak=0;
+    bool observe(const PlaybackAttempt& attempt,bool requeued,uint64_t nextPolicy,uint64_t nextBinding) noexcept {
+      const std::string_view veto=attempt.veto?attempt.veto:"";
+      const unsigned kind=veto=="cpu-busy"?1u:veto=="cpu-recovering"?2u:0u;
+      if(!requeued||attempt.code!=17||attempt.error||!attempt.stage||std::string_view(attempt.stage)!="admission-withdrawn"||
+         !kind||!sleeppower::powerAdmitted(attempt.power)){
+        streak=0;return false;
+      }
+      const bool same=streak&&vetoKind==kind&&policy==nextPolicy&&binding==nextBinding&&
+        sleeppower::samePowerRevocation(power,attempt.power);
+      streak=same?streak+1:1;
+      policy=nextPolicy;binding=nextBinding;power=attempt.power;vetoKind=kind;
+      // Keep a progress witness even if the pending task expires without another attempt.
+      return same&&streak%8!=0;
+    }
+  };
+  struct PlaybackTask {Json claim;PlaybackSource source;uint64_t due=0,expires=0;bool failureRetried=false;PlaybackRetryLog retryLog{};};
   std::mutex playbackMutex_;
   std::deque<PlaybackTask> playbackPending_;
   std::map<std::string,uint64_t> playbackDone_;
@@ -77,23 +99,29 @@ class Supervisor {
     result.append(slashes * 2, L'\\');
     return result + L'\"';
   }
-  bool playbackResources(uint64_t tick,uint64_t policy,int64_t* retry=nullptr) {
+  const char* playbackResourceVeto(uint64_t tick,uint64_t policy,int64_t* retry=nullptr) {
     if(retry)*retry=20000;
-    if(tick-processStartedTick<limits_.startup||!sleeppower::task::allowed()||resources_.ac()!=1)return false;
+    if(tick-processStartedTick<limits_.startup)return "startup-protection";
+    if(!sleeppower::task::allowed())return "shared-power-blocked";
+    const auto ac=resources_.ac();
+    if(ac!=1)return ac==0?"on-battery":"power-unknown";
     const auto threshold=static_cast<int>(policy&0xff);
-    if(!threshold||playbackPolicy_->load(std::memory_order_acquire)!=policy||powerPolicy::blocked())return false;
+    if(!threshold||playbackPolicy_->load(std::memory_order_acquire)!=policy)return "idle-policy-changed";
+    if(powerPolicy::blocked())return "native-power-policy-blocked";
     SYSTEM_POWER_STATUS status{};
-    if(!ymcc::powerSource::read(status)||status.ACLineStatus!=1||status.SystemStatusFlag==1)return false;
+    if(!ymcc::powerSource::read(status))return "power-unknown";
+    if(status.ACLineStatus!=1)return status.ACLineStatus==0?"on-battery":"power-unknown";
+    if(status.SystemStatusFlag==1)return "battery-saver";
     if(!playbackCpuAt_||tick-playbackCpuAt_>=limits_.monitor){
       playbackCpuAt_=tick;
       playbackCpuSample_=resources_.cpu?resources_.cpu(tick):playbackCpu_.read(tick);
     }
-    const auto reason=std::string_view(playbackCpuGate_.observe(playbackCpuSample_,threshold,tick));
+    const auto* reason=playbackCpuGate_.observe(playbackCpuSample_,threshold,tick);
     if(retry){
-      if(reason=="cpu-recovering")*retry=CpuGate::calmWindowMs;
+      if(std::string_view(reason)=="cpu-recovering")*retry=CpuGate::calmWindowMs;
       else if(!playbackCpuSample_)*retry=limits_.monitor;
     }
-    return reason.empty();
+    return *reason?reason:nullptr;
   }
   PlaybackAttempt runPlayback30(const Json& claim,uint64_t policy) {
     if(SourceJob::reap())return {17,"cleanup-pending"};
@@ -113,7 +141,8 @@ class Supervisor {
       L" "+quote(wide(stringField(claim,"revision")))+job.transfer().arguments();
     std::vector<wchar_t> line(command.begin(),command.end());line.push_back(0);
     sleeppower::task::HandleList inherited({job.transfer().handle()});
-    if(!permit->current()||!playbackResources(GetTickCount64(),policy))return {17,"admission-withdrawn"};
+    if(!permit->current())return {17,"admission-withdrawn",0,"shared-power-permit-revoked"};
+    if(const auto* veto=playbackResourceVeto(GetTickCount64(),policy))return {17,"admission-withdrawn",0,veto};
     PROCESS_INFORMATION child{};
     if(!ymcc::processEfficiency::createProcess(executable_.c_str(),line.data(),nullptr,nullptr,TRUE,
         CREATE_NO_WINDOW|CREATE_SUSPENDED|IDLE_PRIORITY_CLASS|EXTENDED_STARTUPINFO_PRESENT,
@@ -123,7 +152,9 @@ class Supervisor {
     if(!sleeppower::task::requestKey(token,request)||!transport->captureOwnedTask(job.power(),child.hProcess,job.get(),request,
         [state=playbackPolicy_,permit,policy](auto purpose){return purpose==sleeppower::remote::Purpose::Observation&&
             state->load(std::memory_order_acquire)==policy&&permit->current();},offer)||
-       !job.transfer().seal(offer)||!permit->current()||!playbackResources(GetTickCount64(),policy))return {17,"grant-withdrawn"};
+       !job.transfer().seal(offer))return {17,"grant-withdrawn",0,"worker-grant-unavailable"};
+    if(!permit->current())return {17,"grant-withdrawn",0,"shared-power-permit-revoked"};
+    if(const auto* veto=playbackResourceVeto(GetTickCount64(),policy))return {17,"grant-withdrawn",0,veto};
     if(ResumeThread(child.hThread)==DWORD(-1))return {24,"resume-process",GetLastError()};
     const auto started=GetTickCount64();
     playback30::Deadline budget;
@@ -139,9 +170,12 @@ class Supervisor {
       const auto until=static_cast<DWORD>((std::min)(uint64_t{1000},budget.expires()-elapsed));
       const auto result=waitOwner(static_cast<DWORD>(std::size(events)),events,FALSE,until);
       if(result==WAIT_OBJECT_0+1){DWORD code=0;if(!GetExitCodeProcess(child.hProcess,&code))return {24,"exit-status",GetLastError()};return {static_cast<int>(code),"child-exit"};}
-      if(result==WAIT_OBJECT_0||result==WAIT_OBJECT_0+2)return {17,"cancelled"};
+      if(result==WAIT_OBJECT_0)return {17,"cancelled",0,"owner-shutdown"};
+      if(result==WAIT_OBJECT_0+2)return {17,"cancelled",0,"shared-power-cancel"};
       if(result==WAIT_FAILED)return {24,"wait-process",GetLastError()};
-      if(!permit->current()||!job.power().current(child.hProcess)||!playbackResources(GetTickCount64(),policy))return {17,"admission-withdrawn"};
+      if(!permit->current())return {17,"admission-withdrawn",0,"shared-power-permit-revoked"};
+      if(!job.power().current(child.hProcess))return {17,"admission-withdrawn",0,"worker-grant-not-current"};
+      if(const auto* veto=playbackResourceVeto(GetTickCount64(),policy))return {17,"admission-withdrawn",0,veto,permit->capturedPower()};
     }
   }
   int64_t servicePlayback30() {
@@ -162,7 +196,7 @@ class Supervisor {
       if(tick<due)return static_cast<int64_t>(due-tick);
     }
     int64_t retry=0;
-    if(!playbackResources(tick,policy,&retry))return retry;
+    if(playbackResourceVeto(tick,policy,&retry))return retry;
     {
       std::lock_guard lock(playbackMutex_);
       const auto next=std::find_if(playbackPending_.rbegin(),playbackPending_.rend(),[&](const auto& pending){return tick>=pending.due;});
@@ -175,7 +209,8 @@ class Supervisor {
     const auto code=attempt.code;
     std::string observedId;
     if(resources_.playbackAttempt)observedId=stringField(task.claim,"id");
-    bool requeued=false,hasPending=false;
+    bool requeued=false,hasPending=false,repeatLog=false;
+    unsigned retryStreak=0;
     {
       std::lock_guard lock(playbackMutex_);
       playbackActive_={};
@@ -186,6 +221,10 @@ class Supervisor {
       if(retryable&&playbackPending_.size()<8&&std::none_of(playbackPending_.begin(),playbackPending_.end(),
           [&](const auto& pending){return task.source.olderThan(pending.source);})){
         if(code==24)task.failureRetried=true;
+        if(resources_.playbackAttempt){
+          repeatLog=task.retryLog.observe(attempt,true,policy,task.source.bindingRevision);
+          retryStreak=task.retryLog.streak;
+        }
         task.due=completed+retryMs;playbackPending_.push_front(std::move(task));requeued=true;
       }else{
         if(playbackDone_.size()>=64){const auto earliest=std::min_element(playbackDone_.begin(),playbackDone_.end(),[](const auto& a,const auto& b){return a.second<b.second;});playbackDone_.erase(earliest);}
@@ -193,7 +232,7 @@ class Supervisor {
       }
       hasPending=!playbackPending_.empty();
     }
-    if(resources_.playbackAttempt)try{resources_.playbackAttempt(observedId,code,attempt.stage,attempt.error,completed-tick,requeued);}catch(...){ }
+    if(resources_.playbackAttempt)try{resources_.playbackAttempt(observedId,code,attempt.stage,attempt.error,completed-tick,requeued,attempt.veto,retryStreak,repeatLog);}catch(...){ }
     return hasPending?1000:-1;
   }
   std::string resourceReason(const std::string &token = {}) {
@@ -481,7 +520,7 @@ class Supervisor {
         if(armed_.load()&&identityRecheckPending_){
           identityRecheckPending_=false;
           const auto source=ymcc::steaminfo::acquireSourceV2();
-          queue_.recoverIdentityPrerequisites(executable_.parent_path()/L"SteamArtworkLab.exe",[&](const Json& target){return readShortcutCurrentSource(target,source);},true);
+          queue_.recoverIdentityPrerequisites(executable_.parent_path()/L"SteamArtworkLab.exe",[&](const Json& target){return readShortcutCurrentSource(target,source,nullptr,queue_.root());},true);
         }
         const auto playback=servicePlayback30();
         delay = armed_.load() ? queue_.delay() : -1;
@@ -658,12 +697,20 @@ public:
     if(request.value("catalog",false)&&request.value("enabled",false)) owner_.queue().requestCatalog();
     if(request.value("manual",false))owner_.queue().requestSupplement(true);
     if(request.value("cancelManual",false))owner_.queue().cancelManual();
+    const bool wake=request.contains("enabled")||request.value("manual",false)||request.value("cancelManual",false)||request.value("recheck",false);
+    const auto status=request.find("replyStatus");
+    const bool admissionOnly=request.contains("targets")&&!wake&&!hasPlaybackPolicy&&
+        !request.contains("catalog")&&!request.contains("inventoryRequestId");
+    const bool needsStatus=!admissionOnly||status==request.end()||!status->is_boolean()||status->get<bool>();
+    Json unchangedSnapshot;
     if (request.contains("targets"))
-      owner_.queue().enqueue(request["targets"],{},request);
+      owner_.queue().enqueue(request["targets"],{},request,{},
+          needsStatus&&!wake&&!request.contains("inventoryRequestId")?&unchangedSnapshot:nullptr);
     if(request.contains("inventoryRequestId"))owner_.queue().inventoryReady(request.value("inventoryRequestId",std::string{}));
-    if (request.contains("enabled")||request.value("manual",false)||request.value("cancelManual",false)||request.value("recheck",false))
-      owner_.wake(true);
+    if(wake)owner_.wake(true);
     if(!steamDemand::allowed(request))return steamDemand::inactive();
+    if(!needsStatus)return nullptr;
+    if(!unchangedSnapshot.is_null())return unchangedSnapshot;
     return owner_.queue().snapshot();
   }
   bool finishForExit() noexcept {

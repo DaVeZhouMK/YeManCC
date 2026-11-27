@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cctype>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <set>
 #include <stdexcept>
@@ -282,11 +283,16 @@ inline bool resumeValid(const Json& p,const std::string& url,const std::string& 
 // policy. Their old JSON/schema/annotations or a preimage copy cannot veto a
 // valid replacement; callers still provide the existing atomic writer.
 template<class Validator,class Writer,class Reader=decltype(&read)>
-inline void save(const std::wstring& path,Json next,std::size_t maximum,Validator valid,Writer writer,bool preserveValid=false,Reader readImage=&read){
+inline bool save(const std::wstring& path,Json next,std::size_t maximum,Validator valid,Writer writer,bool preserveValid=false,Reader readImage=&read,
+                 const std::function<bool()>& current={},bool repairReadOnlyCache=false){
     (void)preserveValid;next.erase("configReadError");
     const auto text=next.dump();if(text.size()>maximum||!valid(next))throw std::runtime_error("Invalid updater replacement configuration");
     if(!std::filesystem::path(path).is_absolute()||!ordinaryParents(std::filesystem::path(path)))throw std::runtime_error("Updater configuration path is unsafe");
+    if(current&&!current())return false;
     const auto before=readImage(path,maximum);
+    // Only disposable cache metadata may opt in to read-only repair under a revocable scope.
+    const bool readOnly=(before.info.dwFileAttributes&FILE_ATTRIBUTE_READONLY)!=0;
+    if(current&&(!current()||before.kind==Kind::unavailable||(readOnly&&!repairReadOnlyCache)))return false;
     if(before.kind==Kind::unavailable){
         const auto attributes=GetFileAttributesW(path.c_str());
         if(attributes==INVALID_FILE_ATTRIBUTES)throw std::runtime_error("Updater configuration source is unavailable");
@@ -296,9 +302,17 @@ inline void save(const std::wstring& path,Json next,std::size_t maximum,Validato
         if(!MoveFileExW(path.c_str(),retired.c_str(),MOVEFILE_WRITE_THROUGH))throw std::runtime_error("Updater legacy configuration path is busy");
     }else if(before.kind!=Kind::missing){
         if(!sameImage(before,readImage(path,maximum)))throw std::runtime_error("Updater source changed before publication");
-        if(before.info.dwFileAttributes&FILE_ATTRIBUTE_READONLY)if(!SetFileAttributesW(path.c_str(),before.info.dwFileAttributes&~FILE_ATTRIBUTE_READONLY))throw std::runtime_error("Updater legacy configuration attributes unavailable");
+        if(readOnly){
+            if(current&&!current())return false;
+            if(!SetFileAttributesW(path.c_str(),before.info.dwFileAttributes&~FILE_ATTRIBUTE_READONLY))throw std::runtime_error("Updater legacy configuration attributes unavailable");
+        }
     }
-    if(!writer(path,text))throw std::runtime_error("Cannot persist updater configuration");
+    if(current&&!current())return false;
+    if(!writer(path,text)){
+        if(current&&!current())return false;
+        throw std::runtime_error("Cannot persist updater configuration");
+    }
     const auto actual=readImage(path,maximum);if(actual.kind!=Kind::ready||actual.raw!=text||!valid(actual.value))throw std::runtime_error("Updater configuration readback failed");
+    return !current||current();
 }
 } // namespace ymcc::updateconfig

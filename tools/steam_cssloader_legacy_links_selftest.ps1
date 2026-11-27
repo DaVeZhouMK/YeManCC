@@ -26,6 +26,7 @@ $taskSources=@($PSCommandPath,(Join-Path $PSScriptRoot 'steam_cssloader_use_self
 $taskPins=@($taskSources|ForEach-Object{@{path=$_;sha256=(Get-TaskLegacyHash $_)}})
 $recipe=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'steam_cssloader_use_selftest.ps1') -Raw
 $recipe=$recipe.Substring($recipe.IndexOf('@"')+3);$recipe=$recipe.Substring(0,$recipe.IndexOf('"@'))
+$recipe=$recipe.Replace('$sharedFlags','').Replace('$consumerArguments',('"'+$taskLegacyWork+'"'))
 $recipe=$recipe.Replace('$root',$repo).Replace('$OutputDirectory',$taskLegacyWork).Replace('steam_cssloader_use_selftest.cpp','steam_cssloader_legacy_links_selftest.cpp')
 $file=Join-Path $taskLegacyWork 'compile.cmd';[IO.File]::WriteAllText($file,$recipe,[Text.Encoding]::ASCII)
 $taskError=$null;$taskNativeExit=$null

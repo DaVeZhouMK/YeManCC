@@ -7,7 +7,6 @@ import BatteryChargeSettings from '@/components/BatteryChargeSettings.vue';
 import CcdCard from '@/components/CcdCard.vue';
 import UndervoltCard from '@/components/UndervoltCard.vue';
 import GpuDedicatedMemorySettings from '@/components/GpuDedicatedMemorySettings.vue';
-import AmdFsrUpgradeSettings from '@/components/AmdFsrUpgradeSettings.vue';
 import UsbipUpgradeStatus from '@/components/UsbipUpgradeStatus.vue';
 import BackgroundEffectPreview from '@/components/BackgroundEffectPreview.vue';
 import Slider from '@/components/Slider.vue';
@@ -105,7 +104,7 @@ async function onRadialTestingChange(enabled: boolean): Promise<void> {
   catch (error) { errMsg.value = (error as Error).message; }
   finally { radialTestingBusy.value = false; }
 }
-const settingsSections=[{id:'appearance',title:'外观',description:'',icon:'layers'},{id:'device',title:'设备',description:'',icon:'battery'},{id:'diagnostics',title:'日志修复',description:'',icon:'signal'},{id:'updates',title:'更新',description:'',icon:'tools'}];
+const settingsSections=[{id:'appearance',title:'外观',description:'',icon:'layers'},{id:'device',title:'设备',description:'',icon:'battery'},{id:'diagnostics',title:'日志修复',description:'',icon:'signal'},{id:'updates',title:'更新反馈',description:'',icon:'tools'}];
 async function onUpdatePredownloadChange(enabled:boolean){try{await setUpdatePredownloadEnabled(enabled);}catch(error){errMsg.value=(error as Error).message;}}
 const backgroundFileLabel=ref('未选择背景文件'),backgroundPreviewUrl=ref('');
 
@@ -846,29 +845,27 @@ async function exportSleepLogs(): Promise<void> {
   }
 }
 
-// ── 以下原属「支持」页 ──
-async function openSupport() {
+const manualDownloadUrl = 'https://pan.baidu.com/s/5w37oG35AwVki5E7PNWWyWA#list';
+const projectAiUrl = 'https://blameupstream.com/home';
+const feedbackGroups = [
+  { name: 'PC掌机大乱斗一群', id: '805978517', url: 'https://qm.qq.com/q/rrM1znVO80' },
+  { name: 'PC掌机大乱斗二群', id: '859893073', url: 'https://qm.qq.com/q/33iYFg4iow' },
+  { name: 'PC掌机大乱斗三群', id: '686744512', url: 'https://qm.qq.com/q/ynt3Mimr7O' },
+] as const;
+const feedbackLinkError = ref('');
+let feedbackLinkRequest = 0;
+
+async function openFeedbackLink(url: string, failureMessage: string) {
+  const request = ++feedbackLinkRequest;
+  feedbackLinkError.value = '';
   try {
-    await shell.open('C:\\SOFT\\YeMan\\YeManCC\\YeMan-Support.html');
-  } catch {
-    /* ignore */
-  }
+    if (await shell.open(url)) return;
+  } catch { /* Show the failure in place without opening a dialog. */ }
+  if (request === feedbackLinkRequest) feedbackLinkError.value = failureMessage;
 }
 
-async function openHome() {
-  try {
-    await shell.open('https://link3.cc/yeman');
-  } catch {
-    /* ignore */
-  }
-}
-
-async function openGithub() {
-  try {
-    await shell.open('https://github.com/DaVeZhouMK/YeManCC');
-  } catch {
-    /* ignore */
-  }
+function openFeedbackGroup(group: (typeof feedbackGroups)[number]) {
+  return openFeedbackLink(group.url, `无法打开 QQ 群邀请链接，可在 QQ 中搜索群号 ${group.id}。`);
 }
 
 function syncAppearanceSettings(): void {
@@ -879,8 +876,24 @@ function syncAppearanceSettings(): void {
   if (!bgPositionEditing) bgPosition.value=getBackgroundPosition();
   videoBatteryPause.value=getUiSetting('videoBatteryPause');dynamicEnabled.value=getDynamicBackgroundConfig().enabled;
 }
+const maintenanceAvailable = ref(false);
+const maintenanceOpening = ref(false);
+const maintenanceError = ref('');
+async function openUninstall() {
+  if (maintenanceOpening.value) return;
+  maintenanceOpening.value = true;
+  maintenanceError.value = '';
+  try {
+    if (!await invoke<boolean>('app.openUninstall')) maintenanceError.value = '无法打开卸载程序，请从 Windows「已安装的应用」重试。';
+  } catch {
+    maintenanceError.value = '无法打开卸载程序，请从 Windows「已安装的应用」重试。';
+  } finally {
+    maintenanceOpening.value = false;
+  }
+}
 onMounted(async () => {
   settingsActive.value = true;
+  void invoke<boolean>('app.maintenanceAvailable').then(value => { maintenanceAvailable.value = value === true; }).catch(() => {});
   const fanSettings = await initializeFanFeature();
   await initializeInputDiagnosticsUi();
   await refreshNativeInputLogFiles();
@@ -959,7 +972,6 @@ onBeforeUnmount(() => {
  <GpuDedicatedMemorySettings v-if="active" />
  <CcdCard v-if="active" />
  <UndervoltCard v-if="active" />
- <AmdFsrUpgradeSettings v-if="active" />
     <section v-if="msiControllerShield.supported" class="card msi-controller-shield-card" aria-label="微星专属修复">
       <h3 class="card-title">微星专属修复</h3>
       <Toggle :model-value="msiControllerShield.enabled" label="微星前端屏蔽" color="accent" :disabled="msiShieldBusy" data-msi-controller-shield-toggle @update:model-value="onMsiControllerShieldToggle" />
@@ -1044,11 +1056,27 @@ onBeforeUnmount(() => {
         <span class="update-feature-state" role="status">{{ updateCacheState.message || '删除已下载的更新包和断点缓存；开启自动预下载时，约 10 分钟后再检查' }}<template v-if="updateCacheState.bytesFreed > 0">（已删除 {{ formatBytes(updateCacheState.bytesFreed) }}）</template></span>
       </div>
     </section>
+<section v-if="maintenanceAvailable" class="card" aria-label="安装维护">
+      <h3 class="card-title"><InlineIcon name="tools" /> 安装维护</h3>
+      <button class="action-btn outline" type="button" :disabled="maintenanceOpening" @click="openUninstall">卸载 YeManCC…</button>
+      <p v-if="maintenanceError" class="muted body" role="status">{{ maintenanceError }}</p>
+    </section>
 <section class="card support-settings-card">
       <h3 class="card-title"><InlineIcon name="globe" /> 野蛮系统支持</h3>
-      <button class="action-btn outline" @click="openSupport"><InlineIcon name="rocket" /> 支持和软件官网 ↗</button>
-      <button class="action-btn outline" @click="openHome"><InlineIcon name="home" /> 野蛮系统主页 ↗</button>
-      <button class="action-btn outline" @click="openGithub"><InlineIcon name="link" /> github免费开源地址 ↗</button>
+      <button class="action-btn outline" type="button" @click="openFeedbackLink('https://link3.cc/yeman', '无法打开野蛮系统主页。')"><InlineIcon name="home" /> 野蛮系统主页 ↗</button>
+      <button class="action-btn outline" type="button" @click="openFeedbackLink('https://github.com/DaVeZhouMK/YeManCC', '无法打开 GitHub 项目页。')"><InlineIcon name="link" /> github免费开源地址 ↗</button>
+      <button class="action-btn outline" type="button" @click="openFeedbackLink(manualDownloadUrl, '无法打开百度网盘下载页。')"><InlineIcon name="package" /> 百度网盘手动下载 <span aria-hidden="true">↗</span></button>
+      <div class="feedback-link-group" role="group" aria-labelledby="feedback-qq-title">
+        <h4 id="feedback-qq-title" class="feedback-link-title">问题和反馈QQ群</h4>
+        <button v-for="group in feedbackGroups" :key="group.id" class="action-btn outline feedback-qq-btn" type="button" @click="openFeedbackGroup(group)">
+          <span>{{ group.name }}</span><span class="feedback-qq-number">{{ group.id }}</span><span aria-hidden="true">↗</span>
+        </button>
+      </div>
+      <div class="feedback-link-group" role="group" aria-labelledby="feedback-ai-title">
+        <h4 id="feedback-ai-title" class="feedback-link-title">项目AI支持[中转网址]</h4>
+        <button class="action-btn outline" type="button" @click="openFeedbackLink(projectAiUrl, '无法打开项目 AI 支持网站。')"><InlineIcon name="link" /> blameupstream.com <span aria-hidden="true">↗</span></button>
+      </div>
+      <p v-if="feedbackLinkError" class="muted body feedback-link-error" role="status">{{ feedbackLinkError }}</p>
     </section></div></template>
 </SettingsSections></div></IntegratedPage>
 </template>
@@ -1741,7 +1769,12 @@ onBeforeUnmount(() => {
 .settings-density-preview .fan-log-actions{gap:8px;margin-top:0}
 .settings-density-preview .fan-log-actions>button,.settings-density-preview .fan-log-actions :deep(.diagnostic-log-delete-button){height:36px;min-height:36px;font-size:13px;padding:5px 6px}
 .settings-density-preview .support-settings-card{gap:8px}
-.settings-density-preview .support-settings-card>.action-btn{height:36px;min-height:36px;margin:0;font-size:14px;padding:6px 10px}
+.settings-density-preview .support-settings-card .action-btn{min-height:38px;margin:0;font-size:14px;padding:6px 10px}
+.feedback-link-group{display:grid;gap:8px;min-width:0;border-top:1px solid var(--console-line);padding-top:10px;margin-top:2px}
+.feedback-link-title{margin:0;font-size:14px;font-weight:650;color:var(--text)}
+.feedback-qq-btn{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center}
+.feedback-qq-number{font-variant-numeric:tabular-nums;color:var(--text-dim)}
+.feedback-link-error{margin:0}
 .settings-density-preview .update-version-summary{padding:10px;gap:10px;margin:10px 0}
 .settings-density-preview .update-main-row .update-check-btn{height:36px;min-height:36px;font-size:14px;padding:6px 10px}
 .settings-density-preview .update-background-option{margin-top:10px;padding-top:10px}
@@ -1894,10 +1927,6 @@ onBeforeUnmount(() => {
 
 .modern-settings-page.settings-density-preview .settings-layout-b .update-check-btn { height:100%; min-height:36px; }
 
-.modern-settings-page.settings-density-preview .settings-layout-b .support-settings-card { grid-template-columns:1fr 1fr; }
-
-.modern-settings-page.settings-density-preview .settings-layout-b .support-settings-card>.card-title,
-.modern-settings-page.settings-density-preview .settings-layout-b .support-settings-card>.action-btn:last-child { grid-column:1/-1; }
 
 
 

@@ -134,7 +134,7 @@ def verify_sources(source, contract, mask):
     return scope
 
 
-def variants(scope, historical, serial_only=False):
+def variants(scope, historical, *, serial_only=False, host_only=False):
     current = {name: scope[name] for name in ('readyCase', 'messageLoop')}
     remove_ready = dict(current)
     anchor = '||!inputHostExitLocalOwnershipReleased()'
@@ -149,6 +149,8 @@ def variants(scope, historical, serial_only=False):
               ('historical-before-host-gate', historical, ['ready', 'no-window-loop'], 'legacy'),
               ('delete-ready-host-gate', remove_ready, ['ready'], 'legacy'),
               ('delete-no-window-host-gate', remove_loop, ['no-window-loop'], 'legacy')]
+    if host_only:
+        return [result[0], *result[2:]]
     for route, block, anchor in (
         ('ready', 'readyCase', '||!gamepadSerialExitOwnershipReleased()'),
         ('no-window-loop', 'messageLoop',
@@ -188,6 +190,7 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--source-only', action='store_true', help='Verify/extract only; exit 12, never a passing runtime receipt')
     mode.add_argument('--serial-only', action='store_true', help='Explicit serial memory-port baseline and four gate deletions only; original Host/historical controls NOT_RUN')
+    mode.add_argument('--host-only', action='store_true', help='Current baseline and two Host gate deletions only; historical control NOT_RUN')
     mode.add_argument('--build-only-current', action='store_true', help='Compile both current profiles; no scenario is executed')
     parser.add_argument('--build-profile', choices=('Release', 'Checked'), help='Limit an explicit current build-only observation')
     parser.add_argument('--fixed-native-build', action='store_true', help='Use the pinned compiler environment and validate actual header/library inputs before runtime')
@@ -198,6 +201,7 @@ def main():
         parser.error('--build-profile requires --build-only-current')
     if args.source_only and args.fixed_native_build:
         parser.error('--source-only cannot validate a fixed Native build')
+    directed = args.serial_only or args.host_only
     source_names = (*SOURCES, FIXED_PROFILE, FIXED_MODULE) if args.fixed_native_build else SOURCES
     out = args.output_root.resolve()
     need(not out.is_relative_to(ROOT), 'Evidence must be outside repository')
@@ -210,7 +214,8 @@ def main():
                'realSerialWorkerExecuted': False, 'realSerialWaitOrJoinProven': False,
                'serialOwnershipPort': 'explicit memory fact only; actual serial getter/worker not executed',
                'selectionScope': ('current-builds-only' if args.build_only_current else
-                                  'serial-only' if args.serial_only else 'default-with-original-host-controls'),
+                                  'serial-only' if args.serial_only else
+                                  'host-only' if args.host_only else 'default-with-original-host-controls'),
                'originalHostAndHistoricalControlsExecuted': False,
                'privateCleanupThreadHandleIsReal': True, 'processExitUsedAsCleanup': False,
                'startedAt': dt.datetime.now().astimezone().isoformat()}
@@ -222,10 +227,15 @@ def main():
     try:
         source = {name: (ROOT / name).read_bytes() for name in source_names}
         contract = json.loads(source[CONTRACT])
-        historical_path = Path(contract['historicalMain']['path'])
-        historical_bytes = historical_path.read_bytes()
-        need(sha(historical_bytes) == contract['historicalMain']['sha256'], 'Preserved historical whole-main raw identity changed')
-        source['historical/native/main.cpp'] = historical_bytes
+        historical_path = None
+        historical_bytes = historical = None
+        if not directed:
+            historical_path = Path(contract['historicalMain']['path'])
+            historical_bytes = historical_path.read_bytes()
+            need(sha(historical_bytes) == contract['historicalMain']['sha256'], 'Preserved historical whole-main raw identity changed')
+            source['historical/native/main.cpp'] = historical_bytes
+        else:
+            receipt['historicalSourceStatus'] = 'NOT_RUN_UNSELECTED'
         snapshot = run / 'source'
         for name, data in source.items():
             path = snapshot / name
@@ -237,15 +247,18 @@ def main():
         spec.loader.exec_module(helper)
         need(Path(helper.__file__).resolve() == (snapshot / ADAPTER).resolve(), 'Utilities escaped immutable snapshot')
         scope = verify_sources(source, contract, helper.mask_cpp)
-        historical = main_blocks(historical_bytes.decode('utf-8-sig'), helper.mask_cpp)
-        need({n: sha(v.encode()) for n, v in historical.items()} == contract['historicalMain']['scopeRawHashes'],
-             'Preserved complete historical case/loop identity changed')
+        if historical_path is not None:
+            historical = main_blocks(historical_bytes.decode('utf-8-sig'), helper.mask_cpp)
+            historical_hashes = {n: sha(v.encode()) for n, v in historical.items()}
+            need(historical_hashes == contract['historicalMain']['scopeRawHashes'],
+                 'Preserved complete historical case/loop identity changed')
+            receipt['historicalScopeRawHashes'] = historical_hashes
         receipt.update(actualScopeRawHashes={n: sha(v.encode()) for n, v in scope.items()},
-                       historicalScopeRawHashes={n: sha(v.encode()) for n, v in historical.items()},
                        dependencyRawHashes=contract['dependencyHashes'], syntaxR2Provenance=contract['syntaxR2Provenance'],
                        leaves=contract['leaves'], exclusiveSourceContract=True)
         save(run / 'COMPLETE-SCOPE-START.json', scope)
-        save(run / 'HISTORICAL-COMPLETE-BLOCKS.json', historical)
+        if historical_path is not None:
+            save(run / 'HISTORICAL-COMPLETE-BLOCKS.json', historical)
         publish()
 
         def stable(label):
@@ -255,7 +268,8 @@ def main():
                     need(live[name] == source[name], 'Consumer/dependency source drift ' + label + ': ' + name)
             live_scope = capture_scope(live, helper.mask_cpp)
             need(live_scope == scope, 'Complete tested source scope changed ' + label)
-            need(historical_path.read_bytes() == historical_bytes, 'Historical raw source changed ' + label)
+            if historical_path is not None:
+                need(historical_path.read_bytes() == historical_bytes, 'Historical raw source changed ' + label)
             return live, live_scope
 
         stable('before compilation')
@@ -281,7 +295,7 @@ def main():
             receipt['compiler'] = {'path': str(compiler), 'sha256': sha(compiler.read_bytes()),
                                   'vcvarsPath': str(helper.VCVARS), 'vcvarsSha256': sha(helper.VCVARS.read_bytes()),
                                   'sdkVersion': env.get('WindowsSDKVersion')}
-        selected = variants(scope, historical, args.serial_only)
+        selected = variants(scope, historical, serial_only=args.serial_only, host_only=args.host_only)
         if args.build_only_current:
             selected = [variant for variant in selected if variant[0] == 'current']
             need(len(selected) == 1, 'Expected exactly one current build variant')
@@ -297,6 +311,7 @@ def main():
                 body = source[TEMPLATE].decode('utf-8-sig')
                 for marker, text in {'GLOBALS': globals_text, 'HOST_PREDICATE': scope['hostLocalPredicate'],
                                      'CAPTURE_PREDICATE': scope['capturePredicate'],
+                                     'CHECK_SUCCESSOR_READY_PORTS': 'false' if route == 'historical-before-host-gate' else 'true',
                                      'READY_CASE': blocks['readyCase'], 'MESSAGE_LOOP': blocks['messageLoop']}.items():
                     need(body.count('@' + marker + '@') == 1, 'Unique exclusive fixture marker required: ' + marker)
                     body = body.replace('@' + marker + '@', text, 1)
@@ -398,8 +413,10 @@ def main():
                            finishedAt=dt.datetime.now().astimezone().isoformat())
             publish()
             return 0
-        receipt.update(status=('PASS_ACTUAL_SERIAL_UI_COMPLETION_GATES' if args.serial_only else 'PASS_ACTUAL_EXIT_COMPLETION_GATES'),
-                       originalHostAndHistoricalControlsExecuted=not args.serial_only,
+        receipt.update(status=('PASS_ACTUAL_SERIAL_UI_COMPLETION_GATES' if args.serial_only else
+                               'PASS_CURRENT_HOST_EXIT_COMPLETION_GATES_ONLY' if args.host_only else
+                               'PASS_ACTUAL_EXIT_COMPLETION_GATES'),
+                       originalHostAndHistoricalControlsExecuted=not directed,
                        runtimeEvidenceComplete=True, sourceStable=True,
                        sourceScopeRawUnchanged=True, sourceEndHashes={n: sha(b) for n, b in live.items()},
                        wholeMainSourceStable=live['native/main.cpp'] == source['native/main.cpp'],

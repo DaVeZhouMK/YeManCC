@@ -1,3 +1,4 @@
+import {openSharedLeafReview} from '../sleep-native-recovery-consumer/shared-leaf-successor.mjs';
 import {verifyCompilerSourceReview,verifyWorkerEsmCoverage} from '../sleep-exit-inflight-consumer/compiler-source-review.mjs';
 import fs from'node:fs';import path from'node:path';import{spawnSync}from'node:child_process';import{createHash}from'node:crypto';import{fileURLToPath}from'node:url';
 import{REPO,MODULE,CASE_ID,inputFiles,toolchainSpec}from'./adapter.mjs';
@@ -15,15 +16,10 @@ const adapterSuccessors=new Map([
   before:'plus3 marker parsers.19 direct callouts (16 memory ports and3 exact pure parsers using memory sgReadFile). PID/session/marker/process handles and owned counted NT function pointer.26 positive groups and5 private production source faults must compile/start then fail preserved fixture assertions. Portable import guard refuses real process/power/network ports; no real NT/user process/Host/Steam/device acceptance',
   after:'and three marker parsers. Process, marker, startup inventory and file lease ports are memory-only. The original 26 positive groups and five private source faults must compile and run with preserved assertions. The portable import guard refuses real process, power and network ports',
  }],
- ['tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs',{
-  predecessor:'15d5bc0ebb5b0e6791a5822abf7eeed131b7724444835a8662189b73bd67c476',current:'bfd5a530a9080c46dadb490388588746557e10fe55defb4f9b51dbd18af65f4d',
-  before:"export function inputFiles(repo=REPO){const spec=JSON.parse(fs.readFileSync(path.join(repo,MODULE,'spec.json'),'utf8'));return [...new Set([...moduleSources(),...spec.productSources,...spec.sharedLeaves])];}",
-  after:"export function inputFiles(repo=REPO){const spec=JSON.parse(fs.readFileSync(path.join(repo,MODULE,'spec.json'),'utf8')),inputSuccessor=spec.publicWakeSourceReview?.inputSuccessor;return [...new Set([...moduleSources(),...spec.productSources,...spec.sharedLeaves,...(inputSuccessor?[inputSuccessor.manifest]:[])])];}",
-  boundaryDescriptionOnly:false,
- }],
 ]);
 export function verifySessionMarkerPinnedSources(specPath,specBytes,readBytes){
  const spec=JSON.parse(specBytes.toString('utf8').replace(/^\uFEFF/,'')),captureIdentities=new Map([[specPath,digest(specBytes)]]),exactAdapterSuccessors=[];
+ const sharedReview=openSharedLeafReview(spec,readBytes);
  const fixture=spec.fixture;
  need(digest(readBytes(fixture.path))===fixture.sha256,'SESSION_MARKER_FILES_FIXTURE_NEEDS_REVIEW');
  captureIdentities.set(fixture.path,fixture.sha256);
@@ -31,7 +27,8 @@ export function verifySessionMarkerPinnedSources(specPath,specBytes,readBytes){
   const bytes=readBytes(row.path),sha=digest(bytes);
   if(sha!==row.sha256){
    const review=adapterSuccessors.get(row.path),message='SESSION_MARKER_FILES_SHARED_LEAF_CHANGED:'+row.path;
-   need(review?.predecessor===row.sha256&&review.current===sha,message);
+   if(!review){sharedReview.verify(row,bytes,message);captureIdentities.set(row.path,sha);continue;}
+   need(review.predecessor===row.sha256&&review.current===sha,message);
    const after=Buffer.from(review.after),offset=review.offset??bytes.indexOf(after),end=offset+after.length;
    need(offset>=0&&bytes.subarray(offset,end).equals(after),message);
    if(review.offset===undefined)need(bytes.indexOf(after,offset+1)===-1,message);
@@ -41,7 +38,8 @@ export function verifySessionMarkerPinnedSources(specPath,specBytes,readBytes){
   }
   captureIdentities.set(row.path,sha);
  }
- return {captureIdentities,sourceReview:{status:'PASS',exactAdapterSuccessors,sourceApproval:false}};
+ for(const [name,sha256] of sharedReview.pins)captureIdentities.set(name,sha256);
+ return {captureIdentities,sourceReview:{status:'PASS',exactAdapterSuccessors,sharedLeafReview:sharedReview.receipt(),sourceApproval:false}};
 }
 export function verifySessionMarkerSourceCapture(sources,captureIdentities){
  const copied=new Map(sources.map(row=>[row.path,row.sha256]));

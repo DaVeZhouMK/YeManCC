@@ -1,5 +1,6 @@
 import { isControllerPersona, migrateControllerPersona } from './controllerPersona';
 import { powerSourceMode } from './powerSource';
+import { beginSharedPowerLifecycleReadback, getSharedPowerLifecycle, isSharedPowerLifecycleAdmitted, onSharedPowerLifecycle, sharedPowerWriteScope, type SharedPowerLifecycleSnapshot, type SharedPowerWriteScope } from './powerLifecycleState';
 import { performanceConsumptionSignature, normalizeHyperThreadMode, normalizeControlPowerSchemes, type ControlPowerSchemes, defaultContinuousBank, normalizeContinuousControls, normalizeContinuousBank, patchContinuousBank, automaticCpuControls, manualCpuMinimum, continuousCoreAt, stepContinuousCore, toPowerCoreMode, type ContinuousCoreState,
   type ContinuousControls, type ContinuousSideControls, type ContinuousSidePatch, type ContinuousPerformanceIdentity as ControlsIdentity, type ContinuousPerformanceSnapshot as ControlsSnapshot } from './performanceControls';
 import { detectGameCorePolicy, applyGameCorePolicy, clearGameCorePolicy } from './gameCorePolicy';
@@ -14,8 +15,8 @@ import {
   detectPowerMode, detectPerformanceTemplate,
   detectPowerModeReliable, applyManualPowerParams, getTdpHardwareMinimum, getTdpHardwareMaximum, getTdpExecutionCapability, getActiveScheme, PW, setActiveScheme,
   ensureRememberedYemanSchemeActive, ensureSelectedPowerScheme,
-  setCoreModeAc,
-  setCoreModeDc,
+  setCoreModeForPowerScope,
+  setActiveSchemeForPowerScope,
   detectCoreArchitecture,
   rebuildYemanScheme,
   setTdp,
@@ -524,23 +525,55 @@ const POWER_TRANSITION_WRITE_BLOCKED = /hardware writes (?:are|were) blocked (?:
 const POWER_GATE_RETRY_DELAY_MS = 250;
 const POWER_GATE_RETRY_PROBES = 4;
 const POWER_LIFECYCLE_QUERY_TIMEOUT_MS = 500;
+let schedulePowerRetry: AbortController | null = null;
 
 function isPowerTransitionWriteBlocked(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? '');
   return POWER_TRANSITION_WRITE_BLOCKED.test(message);
 }
-async function waitForPowerWritesReady(): Promise<boolean> {
-  for (let attempt = 0; attempt < POWER_GATE_RETRY_PROBES; attempt += 1) {
-    const state = await powerLifecycle.get(POWER_LIFECYCLE_QUERY_TIMEOUT_MS).catch(() => null);
-    if (state?.phase === 'ready' && state.hardwareWritesAllowed) return true;
-    if (attempt + 1 < POWER_GATE_RETRY_PROBES) {
-      await new Promise<void>((resolve) => setTimeout(resolve, POWER_GATE_RETRY_DELAY_MS));
+function matchesSchedulePower(scope: SharedPowerWriteScope, state: SharedPowerLifecycleSnapshot | null): boolean {
+  return !!state && !state.scopeReadbackPending && state.generation === scope[0] &&
+    state.suspendSerial === scope[1] && state.observedNotificationSequence === scope[2];
+}
+async function waitForPowerWritesReady(scope: SharedPowerWriteScope, operation: number): Promise<boolean> {
+  const controller = new AbortController(), { signal } = controller;
+  const current = () => !signal.aborted && operation === scheduleOpGen && matchesSchedulePower(scope, getSharedPowerLifecycle());
+  if (!current()) return false;
+  schedulePowerRetry = controller;
+  const stop = onSharedPowerLifecycle(state => {
+    if (!matchesSchedulePower(scope, state)) controller.abort();
+  }, { observeNotificationSequence: true, observeSuspendSerial: true });
+  try {
+    for (let attempt = 0; current() && attempt < POWER_GATE_RETRY_PROBES; attempt += 1) {
+      const accept = beginSharedPowerLifecycleReadback();
+      const state = await powerLifecycle.get(POWER_LIFECYCLE_QUERY_TIMEOUT_MS, signal).catch(() => null);
+      if (!current()) return false;
+      accept(state);
+      if (!current()) return false;
+      if (matchesSchedulePower(scope, state) && isSharedPowerLifecycleAdmitted(state) &&
+          isSharedPowerLifecycleAdmitted(getSharedPowerLifecycle())) return true;
+      if (attempt + 1 < POWER_GATE_RETRY_PROBES) {
+        await new Promise<void>(resolve => {
+          const timer = setTimeout(finish, POWER_GATE_RETRY_DELAY_MS);
+          function finish() {
+            clearTimeout(timer);
+            signal.removeEventListener('abort', finish);
+            resolve();
+          }
+          signal.addEventListener('abort', finish, { once: true });
+        });
+      }
     }
+    return false;
+  } finally {
+    if (schedulePowerRetry === controller) schedulePowerRetry = null;
+    stop();
   }
-  return false;
 }
 async function withScheduleOp<T>(_enabled: boolean, fn: () => Promise<T>, retryBlockedWrite = true): Promise<T> {
+  const scope = retryBlockedWrite ? sharedPowerWriteScope(getSharedPowerLifecycle()) : null;
   const gen = ++scheduleOpGen;
+  schedulePowerRetry?.abort();
   pendingScheduleOps += 1;
   let resolveNext: (() => void) | null = null;
   const ticket = new Promise<void>((resolve) => { resolveNext = resolve; });
@@ -553,8 +586,10 @@ async function withScheduleOp<T>(_enabled: boolean, fn: () => Promise<T>, retryB
     try {
       return await fn();
     } catch (error) {
-      if (!retryBlockedWrite || !isPowerTransitionWriteBlocked(error) || !(await waitForPowerWritesReady())) throw error;
+      if (!scope || !isPowerTransitionWriteBlocked(error) || !(await waitForPowerWritesReady(scope, gen))) throw error;
       if (gen !== scheduleOpGen) throw new SkipApplyError();
+      const state = getSharedPowerLifecycle();
+      if (!matchesSchedulePower(scope, state) || !isSharedPowerLifecycleAdmitted(state)) throw error;
       return await fn();
     }
   } finally {
@@ -620,6 +655,10 @@ export interface PerformanceScheduleRestoreOptions {
   forceRemembered?: boolean;
   /** One App startup pass may reuse its latest successful intent; never pass this for wake/AC/DC recovery. */
   completedStartupIntent?: () => string;
+  /** A queued restore belongs to its original shared power observation. */
+  ownsPowerRequest?: () => boolean;
+  /** Release retired observations without interrupting writes or their receipts. */
+  powerReadSignal?: AbortSignal;
 }
 
 export async function disablePerformanceSchedule(config?: PerformanceScheduleConfig): Promise<void> {
@@ -678,33 +717,95 @@ export function restorePerformanceScheduleIfConfigured(expectedSide?: PowerSide,
 export async function restorePerformanceScheduleIfConfigured(expectedSide?: PowerSide, options: PerformanceScheduleRestoreOptions & { withReceipt?: true } = {}): Promise<PerformanceScheduleOwnership | PerformanceRestoreReceipt> {
   const none: PerformanceRestoreReceipt = { ownership: 'none', scope: 'none', applied: false };
   if (scheduleSuspended) return options.withReceipt ? none : 'none';
-  return withScheduleOp(true, async () => {
+  const requestCurrent = options.ownsPowerRequest;
+  const signal = requestCurrent ? options.powerReadSignal : undefined;
+  let accepted = false, finished = false;
+  // The admission predicate can outlive this queued request in the resident controller.
+  const current = () => !signal?.aborted && requestCurrent?.() !== false;
+  const admitted = () => accepted || (!finished && current());
+  const scoped = requestCurrent ? { ...options, ownsPowerRequest: admitted } : options;
+  const check = () => { if (!admitted()) throw new SkipApplyError(); };
+  let retire!: () => void;
+  const retired = signal && new Promise<never>((_, reject) => { retire = () => reject(new SkipApplyError()); });
+  if (retired) {
+    void retired.catch(() => {});
+    signal!.addEventListener('abort', retire, { once: true });
+  }
+  const reads: WakePerformanceAttempt | undefined = retired && {
+    admitted, check, beginActions: check,
+    async read(work) {
+      if (accepted) return work();
+      check();
+      const value = await Promise.race([work(signal), retired]);
+      check();
+      return value;
+    },
+  };
+  const work = withScheduleOp(true, async () => {
+    check();
     let receipt: PerformanceRestoreReceipt | undefined;
-    const ownership = await restorePerformanceScheduleUnsafe(expectedSide, options, (scope, actual, application, reused) => {
+    const ownership = await restorePerformanceScheduleUnsafe(expectedSide, scoped, (scope, actual, application, reused) => {
       receipt = { ownership: actual, scope, applied: reused === true || application?.tdp.ok === true && application.cpu !== 'unconfirmed',
         ...(application ? { application: structuredClone(application) } : {}), ...(reused ? { reusedCompletedIntent: true } : {}) };
-    });
+    }, undefined, reads);
+    check();
+    accepted = true;
     return options.withReceipt ? receipt ?? { ...none, ownership } : ownership;
-  });
+  }, !requestCurrent);
+  return requestCurrent ? work.finally(() => { finished = true; signal?.removeEventListener('abort', retire); }) : work;
 }
 
-export type WakePerformanceResult = 'settled' | 'retry-on-ready' | 'unconfirmed';
+export type WakePerformanceResult = 'settled' | 'retry-on-ready' | 'retry-on-game-ready' | 'unconfirmed';
+
+class WakeGameTargetPending extends SkipApplyError {}
 
 interface WakePerformanceAttempt {
   admitted: () => boolean;
+  check: () => void;
+  read<T>(work: (signal?: AbortSignal) => Promise<T>): Promise<T>;
   beginActions: () => void;
+}
+
+function readWakePerformance<T>(wake: WakePerformanceAttempt | undefined, work: (signal?: AbortSignal) => Promise<T>): Promise<T> {
+  return wake ? wake.read(work) : work();
 }
 
 export async function restorePerformanceScheduleAfterWake(expectedSide: PowerSide, dedicatedOnly: boolean,
   ownsWake: () => boolean): Promise<WakePerformanceResult> {
+  const origin = getSharedPowerLifecycle();
+  if (!ownsWake()) return 'retry-on-ready';
+  if (!origin || !isSharedPowerLifecycleAdmitted(origin)) return 'unconfirmed';
+  const controller = new AbortController();
+  const current = () => {
+    const state = getSharedPowerLifecycle();
+    return !controller.signal.aborted && ownsWake() && isSharedPowerLifecycleAdmitted(state) &&
+      state?.generation === origin.generation && state.suspendSerial === origin.suspendSerial &&
+      state.observedNotificationSequence === origin.observedNotificationSequence;
+  };
+  let retire!: () => void;
+  const retired = new Promise<never>((_, reject) => { retire = () => reject(new SkipApplyError()); });
+  void retired.catch(() => {});
+  const off = onSharedPowerLifecycle(() => {
+    if (!current()) { controller.abort(); retire(); }
+  }, { observeNotificationSequence: true, observeSuspendSerial: true });
   let beganActions = false;
   let accepted = false;
   let finished = false;
   const wake: WakePerformanceAttempt = {
     // After successful handoff the resident policy uses its normal owner checks.
-    admitted: () => accepted || (!finished && ownsWake()),
-    beginActions() {
+    admitted: () => accepted || (!finished && current()),
+    check() {
       if (!wake.admitted()) throw new SkipApplyError();
+    },
+    async read(work) {
+      if (accepted) return work(); // Resident checks no longer belong to this wake attempt.
+      wake.check();
+      const value = await Promise.race([work(controller.signal), retired]);
+      wake.check();
+      return value;
+    },
+    beginActions() {
+      wake.check();
       beganActions = true;
     },
   };
@@ -714,16 +815,18 @@ export async function restorePerformanceScheduleAfterWake(expectedSide: PowerSid
       await restorePerformanceScheduleUnsafe(expectedSide, {
         dedicatedOnly, automaticOnly: true, restoreRemembered: true, forceRemembered: true,
       }, undefined, undefined, wake);
-      if (!ownsWake()) return beganActions ? 'unconfirmed' : 'retry-on-ready';
+      if (!current()) return beganActions ? 'unconfirmed' : 'retry-on-ready';
       accepted = true;
       return 'settled';
     }, false);
   } catch (error) {
-    if (!beganActions && !ownsWake()) return 'retry-on-ready';
+    if (!beganActions && !current()) return 'retry-on-ready';
+    if (!beganActions && error instanceof WakeGameTargetPending) return 'retry-on-game-ready';
     if (!(error instanceof SkipApplyError)) console.error('[wake performance restore]', error);
     return 'unconfirmed';
   } finally {
     finished = true;
+    off();
   }
 }
 
@@ -732,28 +835,44 @@ async function restorePerformanceScheduleUnsafe(expectedSide?: PowerSide, option
   startup?: ContinuousPerformanceApplicationContext, wake?: WakePerformanceAttempt,
 ): Promise<PerformanceScheduleOwnership> {
     if (scheduleSuspended) return 'none';
-    const side = await detectPowerModeReliable();
-    if (wake?.admitted() === false || !side || (expectedSide && side !== expectedSide)) throw new SkipApplyError();
+    const admitted = wake?.admitted ?? options.ownsPowerRequest;
+    const side = await readWakePerformance(wake, () => detectPowerModeReliable());
+    if (admitted?.() === false || !side || (expectedSide && side !== expectedSide)) throw new SkipApplyError();
     const master = await loadPerformanceSchedule();
+    wake?.check();
     if (scheduleSuspended || master.suspended) return 'none';
-    const game = await detectPolicyGame();
-    if (!isGameStatusCurrent()) throw new SkipApplyError();
+    const requireGameReadiness = () => {
+      if (options.ownsPowerRequest?.() === false) throw new SkipApplyError();
+      if (isGameStatusCurrent()) return;
+      if (wake) throw new WakeGameTargetPending();
+      throw new SkipApplyError();
+    };
+    const game = await readWakePerformance(wake, () => detectPolicyGame()).catch(error => {
+      wake?.check();
+      if (wake) requireGameReadiness();
+      throw error;
+    });
+    requireGameReadiness();
     const custom = await loadGameCustomConfig();
-    if (!isGameStatusCurrent() || (game ? !isCurrentGameTarget(game) : getPolicyGame() !== null)) throw new SkipApplyError();
+    wake?.check();
+    requireGameReadiness();
+    if (game ? !isCurrentGameTarget(game) : getPolicyGame() !== null) throw new SkipApplyError();
     const key = game ? gamePolicyKey(game) : '';
     const restoreManualScheme = async (snapshot: ContinuousPerformanceSnapshot) => {
+      if (options.ownsPowerRequest?.() === false) throw new SkipApplyError();
       if (getFloatInfo().enabled) await disableFloat();
       await ensureSelectedPowerScheme(snapshot.powerScheme, async () => {
-        return currentPerformanceTarget(snapshot.identity) && getSettingsGeneration() === snapshot.identity.generation &&
+        return options.ownsPowerRequest?.() !== false && currentPerformanceTarget(snapshot.identity) && getSettingsGeneration() === snapshot.identity.generation &&
           (await detectPowerModeReliable()) === side &&
           normalizeControlPowerSchemes((await loadPerformanceSchedule()).powerSchemes)[side] === snapshot.powerScheme;
       });
     };
     const entry = key ? custom.entries[key] : undefined;
     if (entry && entry.enabled !== false) {
-      const snapshot = await getContinuousPerformanceSnapshot('dedicated');
+      const snapshot = await getContinuousPerformanceSnapshot('dedicated', undefined, undefined, 'ensure', undefined, wake);
       if (!snapshot.bank) return 'none';
-      if (!isGameStatusCurrent() || !isCurrentGameTarget(game!)) throw new SkipApplyError();
+      requireGameReadiness();
+      if (!isCurrentGameTarget(game!)) throw new SkipApplyError();
       if (options.automaticOnly && !options.restoreRemembered && snapshot.bank.mode === 'manual') {
         await restoreManualScheme(snapshot);
         return 'manual';
@@ -761,16 +880,17 @@ async function restorePerformanceScheduleUnsafe(expectedSide?: PowerSide, option
       let application: ContinuousPerformanceApplication | undefined, reused: true | undefined;
       const applied = await applyContinuousBankUnsafe(side, snapshot.bank, {
         ...snapshot.identity, policyTarget: true,
-      }, snapshot.frameRates, undefined, wake?.admitted, snapshot.bank.mode === 'manual' && options.restoreRemembered
-        ? options.forceRemembered ? undefined : () => rememberedManualIntent : options.completedStartupIntent, value => { application = value; reused = value === undefined ? true : undefined; }, startup, wake?.beginActions);
+      }, snapshot.frameRates, undefined, admitted, snapshot.bank.mode === 'manual' && options.restoreRemembered
+        ? options.forceRemembered ? undefined : () => rememberedManualIntent : options.completedStartupIntent, value => { application = value; reused = value === undefined ? true : undefined; }, startup, wake);
       if (!applied) throw new SkipApplyError();
       const ownership = snapshot.bank.mode === 'auto' ? 'auto' : 'manual';
       accepted?.('dedicated', ownership, application, reused);
       return ownership;
     }
     const config = await loadPerformanceSchedule();
+    wake?.check();
     if (!config.configured) return 'none';
-    const snapshot = await getContinuousPerformanceSnapshot('global');
+    const snapshot = await getContinuousPerformanceSnapshot('global', undefined, undefined, 'ensure', undefined, wake);
     if (!snapshot.bank) return 'none';
     if ((options.automaticOnly || options.dedicatedOnly) && !options.restoreRemembered && snapshot.bank.mode === 'manual') {
       // Legacy passive callers without restoreRemembered only restore the plan.
@@ -779,13 +899,14 @@ async function restorePerformanceScheduleUnsafe(expectedSide?: PowerSide, option
     }
     if (options.dedicatedOnly === true && !options.restoreRemembered) return 'none';
     if (options.automaticOnly && !options.restoreRemembered && !config.enabled) {
+      if (options.ownsPowerRequest?.() === false) throw new SkipApplyError();
       if (getFloatInfo().enabled) await disableFloat();
       return 'manual';
     }
     let application: ContinuousPerformanceApplication | undefined, reused: true | undefined;
-    const applied = await applyContinuousBankUnsafe(side, snapshot.bank, undefined, snapshot.frameRates, undefined, wake?.admitted,
+    const applied = await applyContinuousBankUnsafe(side, snapshot.bank, undefined, snapshot.frameRates, undefined, admitted,
       snapshot.bank.mode === 'manual' && options.restoreRemembered
-        ? options.forceRemembered ? undefined : () => rememberedManualIntent : options.completedStartupIntent, value => { application = value; reused = value === undefined ? true : undefined; }, startup, wake?.beginActions);
+        ? options.forceRemembered ? undefined : () => rememberedManualIntent : options.completedStartupIntent, value => { application = value; reused = value === undefined ? true : undefined; }, startup, wake);
     if (!applied) throw new SkipApplyError();
     const ownership = snapshot.bank.mode === 'auto' ? 'auto' : 'manual';
     accepted?.('global', ownership, application, reused);
@@ -906,10 +1027,23 @@ export async function reconcileInvalidPerformanceTdp(admit: () => boolean): Prom
  * game may use global TDP only when no enabled dedicated owner can conflict. */
 export async function reconcilePerformanceScheduleTdp(admit: () => boolean = () => true): Promise<boolean> {
   if (scheduleSuspended || isPerformanceScheduleBusy() || !admit()) return false;
+  const origin = getSharedPowerLifecycle();
+  const powerCurrent = () => {
+    const state = getSharedPowerLifecycle();
+    return admit() && (origin ? isSharedPowerLifecycleAdmitted(state) && state?.generation === origin.generation &&
+      state.suspendSerial === origin.suspendSerial && state.observedNotificationSequence === origin.observedNotificationSequence : !state);
+  };
   return withScheduleOp(false, async () => {
     const generation = getSettingsGeneration(), operation = runningScheduleOpGen;
+    if (!powerCurrent()) return false;
+    const acceptReadback = beginSharedPowerLifecycleReadback();
     const lifecycle = await powerLifecycle.get().catch(() => null);
-    if (lifecycle?.phase !== 'ready' || !lifecycle.hardwareWritesAllowed) return false;
+    if (!powerCurrent() || operation !== scheduleOpGen) return false;
+    acceptReadback(lifecycle);
+    if (!powerCurrent() || !lifecycle || !isSharedPowerLifecycleAdmitted(lifecycle) ||
+        (origin && (lifecycle.generation !== origin.generation ||
+          (lifecycle.suspendSerial !== undefined && lifecycle.suspendSerial !== origin.suspendSerial) ||
+          (lifecycle.observedNotificationSequence !== undefined && lifecycle.observedNotificationSequence !== origin.observedNotificationSequence)))) return false;
     const side = await detectPowerModeReliable();
     if (!side) return false;
     const config = await loadPerformanceSchedule(), revision = getSettingsSectionRevision('performanceSchedule');
@@ -924,7 +1058,7 @@ export async function reconcilePerformanceScheduleTdp(admit: () => boolean = () 
     if (!dedicated && !config.configured) return false;
     const bank = (dedicated ? continuousControlsForEntry(entry, config) : continuousControlsFromSchedule(config))[side];
     if (bank.tdpValid === false || !Number.isFinite(bank.tdp) || bank.tdp < getTdpHardwareMinimum() || bank.tdp > getTdpHardwareMaximum()) return false;
-    const current = () => admit() && operation === scheduleOpGen && runningScheduleOpGen === operation &&
+    const current = () => powerCurrent() && operation === scheduleOpGen && runningScheduleOpGen === operation &&
       generation === getSettingsGeneration() && revision !== null && getSettingsSectionRevision('performanceSchedule') === revision &&
       !scheduleSuspended && configCache?.suspended !== true &&
       powerSourceMode.value === side && gameCustomRecovery.status === 'ready' &&
@@ -955,47 +1089,69 @@ export async function reconcilePerformanceScheduleTdp(admit: () => boolean = () 
   });
 }
 
-export async function refreshPerformanceScheduleCoreMode(): Promise<boolean> {
-  if (scheduleSuspended) return false;
+export async function refreshPerformanceScheduleCoreMode(origin: SharedPowerWriteScope): Promise<boolean> {
+  const matches = (power: SharedPowerLifecycleSnapshot | null) => {
+    const scope = sharedPowerWriteScope(power);
+    return !!scope && scope[0] === origin[0] && scope[1] === origin[1] && scope[2] === origin[2];
+  };
+  const current = () => !scheduleSuspended && matches(getSharedPowerLifecycle());
+  if (!current()) return false;
   return withScheduleOp(true, async () => {
+    if (!current()) return false;
     const snapshot = await getContinuousPerformanceSnapshot();
     if (scheduleSuspended || (await loadPerformanceSchedule()).suspended || !snapshot.side || !snapshot.bank || !snapshot.configured || snapshot.bank.mode !== 'auto') return false;
     const architecture = await detectCoreArchitecture();
-    if (!architecture?.heterogeneous) return false;
+    if (!architecture?.heterogeneous || !current()) return false;
+    const acceptReadback = beginSharedPowerLifecycleReadback();
     const lifecycle = await powerLifecycle.get();
-    if (lifecycle.phase !== 'ready' || !lifecycle.hardwareWritesAllowed) return false;
+    assertScheduleOpCurrent();
+    if (!current()) return false;
+    acceptReadback(lifecycle);
+    if (!current() || !matches(lifecycle)) return false;
     if ((await getActiveScheme()).toLowerCase() !== PW.YEMAN.toLowerCase()) return false;
     const latest = await getContinuousPerformanceSnapshot();
     assertScheduleOpCurrent();
-    if (!currentPerformanceTarget(snapshot.identity) || continuousIdentityKey(snapshot.identity) !== continuousIdentityKey(latest.identity)) return false;
+    if (!current() || !currentPerformanceTarget(snapshot.identity) || continuousIdentityKey(snapshot.identity) !== continuousIdentityKey(latest.identity)) return false;
     const float = getFloatInfo();
     const watts = float.enabled && float.tdpApplied > 0 ? float.tdpApplied : snapshot.bank.tdp;
     const mode = toPowerCoreMode(continuousCoreAt(snapshot.bank, watts));
-    if (snapshot.side === 'ac') await setCoreModeAc(mode); else await setCoreModeDc(mode);
+    await setCoreModeForPowerScope(snapshot.side, mode, origin);
     // The delayed boot check refreshes core policy only. Reapplying the whole
     // bank here resets the live float experiment and replays TDP/CPU writes.
+    if (!current()) return false;
+    const activeScheme = await getActiveScheme();
     assertScheduleOpCurrent();
-    if ((await getActiveScheme()).toLowerCase() === PW.YEMAN.toLowerCase()) await setActiveScheme(PW.YEMAN);
-    return true;
-  }).catch(() => false);
+    if (!current()) return false;
+    if (activeScheme.toLowerCase() === PW.YEMAN.toLowerCase()) await setActiveSchemeForPowerScope(PW.YEMAN, origin);
+    return current();
+  }, false).catch(() => false);
 }
 
 /** Controller repeats use the panel/mirror CAS path. Each admitted delta is saved
  * in the current bank; the old mode-switch cooldown must not drop held-button steps. */
-export async function adjustContinuousPerformanceTdp(delta: number): Promise<{
+interface ScopedPerformanceEdit {
+  admit(): boolean;
+  read<T>(work: () => Promise<T>): Promise<T>;
+  confirm(): Promise<void>;
+}
+
+export async function adjustContinuousPerformanceTdp(delta: number, edit?: ScopedPerformanceEdit): Promise<{
   applied: boolean; side: PowerSide; tdp?: number; blocked?: 'disabled' | 'cooldown' | 'boundary';
 }> {
   if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > 20) throw new Error('TDP 调节步长无效');
   // Do not wrap this in withScheduleOp: updateContinuousPerformanceControls
   // owns that queue. Nesting an operation here waits on its own unreleased ticket.
-  const snapshot = await getContinuousPerformanceSnapshot('effective');
+  const snapshot = edit
+    ? await edit.read(() => getContinuousPerformanceSnapshot('effective', undefined, undefined, 'read-only'))
+    : await getContinuousPerformanceSnapshot('effective');
+  if (edit && !edit.admit()) throw new SkipApplyError();
   const side = snapshot.side;
   if (!side) throw new SkipApplyError();
   if (!snapshot.bank || snapshot.bank.tdpValid === false) return { applied: false, side, blocked: 'disabled' };
   const upper = Math.min(snapshot.hardwareMaximum, snapshot.bank.tdpCeiling);
   const next = Math.max(snapshot.hardwareMinimum, Math.min(upper, snapshot.bank.tdp + delta));
   if (next === snapshot.bank.tdp) return { applied: false, side, blocked: 'boundary' };
-  const updated = await updateContinuousPerformanceControls(snapshot.identity, { tdp: next });
+  const updated = await updateContinuousPerformanceControls(snapshot.identity, { tdp: next }, edit?.admit, edit);
   const proof = updated.tdpWriteReceipt;
   return { applied: proof?.ok === true && proof.proof === 'write-ack' && proof.requested === next && proof.accepted === next,
     side, tdp: updated.bank?.tdp };
@@ -1852,7 +2008,9 @@ export type ContinuousPerformanceReadStage = 'performanceSchedule'|'performanceG
 export async function getContinuousPerformanceSnapshot(scope: 'effective' | 'global' | 'dedicated' = 'effective', editSide?: PowerSide,
   onTiming?: (stage:ContinuousPerformanceReadStage,elapsedMs:number)=>void,
   frameRateAccess: 'ensure' | 'read-only' = 'ensure',
-  displayReads?: {generation:number;schedule?:PerformanceScheduleConfig|Promise<PerformanceScheduleConfig>;custom?:GameCustomConfig|Promise<GameCustomConfig>;globalFrameRates:Promise<FrameRatePair>}): Promise<ContinuousPerformanceSnapshot> {
+  displayReads?: {generation:number;schedule?:PerformanceScheduleConfig|Promise<PerformanceScheduleConfig>;custom?:GameCustomConfig|Promise<GameCustomConfig>;globalFrameRates:Promise<FrameRatePair>},
+  wake?: WakePerformanceAttempt, gameReadMode: 'default' | 'observe' = 'default'): Promise<ContinuousPerformanceSnapshot> {
+
   const observe=<T>(stage:ContinuousPerformanceReadStage,task:Promise<T>):Promise<T>=>{
     if(!onTiming)return task;
     const started=Date.now();
@@ -1871,7 +2029,7 @@ export async function getContinuousPerformanceSnapshot(scope: 'effective' | 'glo
     ? Promise.resolve(value).then(snapshot=>structuredClone(snapshot)) : Promise.resolve(structuredClone(value as T));
   const globalRead=observe('performanceSchedule',display?.schedule ? displayRead(display.schedule) : loadPerformanceSchedule());
   const customRead=observe('performanceGameConfig',display?.custom ? displayRead(display.custom) : loadGameCustomConfig(frameRateAccess));
-  const gameRead=observe('performanceGame',detectPolicyGame());
+  const gameRead=observe('performanceGame',readWakePerformance(wake, () => detectPolicyGame(wake ? 'default' : gameReadMode)));
   // Modern Decky controls already contain CPU values. Read legacy profiles only
   // when the selected original conversion actually consumes them; never cache.
   // Ordinary YMCC/action reads retain their original eager CPU-owner read.
@@ -1883,10 +2041,17 @@ export async function getContinuousPerformanceSnapshot(scope: 'effective' | 'glo
       return observe('performanceCpuProfiles',needed?loadCpuProfiles():Promise.resolve(undefined));
     })
     : observe('performanceCpuProfiles',loadCpuProfiles());
-  const [global, custom, actualSide, game, architecture, capability, legacyCpu] = await Promise.all([
-    globalRead, customRead, observe('performancePowerMode',detectPowerModeReliable()), gameRead,
-    observe('performanceCore',detectGameCorePolicy()), observe('performanceTdpCapability',getTdpExecutionCapability().catch(() => null)), cpuRead,
-  ]);
+  const reads = [
+    globalRead, customRead, observe('performancePowerMode',readWakePerformance(wake, () => detectPowerModeReliable())), gameRead,
+    observe('performanceCore',readWakePerformance(wake, detectGameCorePolicy)),
+    observe('performanceTdpCapability',readWakePerformance(wake, () => getTdpExecutionCapability().catch(() => null))), cpuRead,
+  ] as const;
+  const [global, custom, actualSide, game, architecture, capability, legacyCpu] = await Promise.all(reads).catch(async error => {
+    // Config owners may already be repairing persistent data. Let them finish.
+    if (wake) await Promise.allSettled(reads);
+    throw error;
+  });
+  wake?.check();
   assertSettingsGeneration(generation);
   const exe = game ? gamePolicyKey(game) : '', entry = exe ? custom.entries[exe] : undefined;
   const owner = scope === 'effective' ? entry && entry.enabled !== false ? 'dedicated' : 'global' : scope;
@@ -1896,6 +2061,7 @@ export async function getContinuousPerformanceSnapshot(scope: 'effective' | 'glo
   // Decky display must not join the FPS writer queue or persist a legacy
   // migration. Explicit actions retain the original ensure/save boundary.
   const globalFrameRates = await observe('performanceFrameRates',frameRateAccess === 'read-only' ? display?.globalFrameRates ?? loadGlobalFrameRates() : ensureGlobalFrameRates());
+  wake?.check();
   if(display)assertSettingsGeneration(display.generation);
   const frameRates = owner === 'dedicated' ? dedicatedFrameRatePair(custom.rtss[exe], globalFrameRates) : globalFrameRates;
   const hyperThreadMode = scope === 'dedicated'
@@ -1910,11 +2076,16 @@ export async function getContinuousPerformanceSnapshot(scope: 'effective' | 'glo
     hyperThreadMode, configured: owner === 'dedicated' ? !!entry : global.configured };
 }
 
-export async function updateContinuousPerformanceControls(expected: ContinuousPerformanceIdentity, patch: ContinuousSidePatch, admit?: () => boolean): Promise<ContinuousPerformanceSnapshot> {
+export async function updateContinuousPerformanceControls(expected: ContinuousPerformanceIdentity, patch: ContinuousSidePatch, admit?: () => boolean,
+  edit?: ScopedPerformanceEdit): Promise<ContinuousPerformanceSnapshot> {
   expected = { ...expected };
+  const read = <T>(work: () => Promise<T>) => edit ? edit.read(work) : work();
+  const snapshot = () => getContinuousPerformanceSnapshot(expected.followEffective ? 'effective' : expected.scope, expected.side ?? undefined,
+    undefined, edit ? 'read-only' : 'ensure');
+  const smtPowerScope = patch.hyperThreadMode === undefined ? null : sharedPowerWriteScope(getSharedPowerLifecycle());
   return withScheduleOp(false, async () => {
     if (!currentPerformanceTarget(expected) || (admit && !admit())) throw new SkipApplyError();
-    const current = await getContinuousPerformanceSnapshot(expected.followEffective ? 'effective' : expected.scope, expected.side ?? undefined);
+    const current = await read(snapshot);
     if (!expected.side || continuousIdentityKey(current.identity) !== continuousIdentityKey(expected)) throw new Error('供电、游戏或配置已变化，请重新调整');
     const verifyContext = () => {
       if (!currentPerformanceTarget(expected)) throw new SkipApplyError();
@@ -1969,7 +2140,7 @@ export async function updateContinuousPerformanceControls(expected: ContinuousPe
     bank.tdp = Math.min(bank.tdpCeiling, bank.tdp);
     if (bank.tdp < current.hardwareMinimum) bank.tdpValid = false;
     bank.auto.coreSplit = Math.min(bank.auto.coreSplit, bank.tdpCeiling);
-    const master = await loadPerformanceSchedule();
+    const master = await read(() => loadPerformanceSchedule());
     const resumeRequested = patch.mode !== undefined && (master.suspended === true || scheduleSuspended);
     const withoutCore = (value: ContinuousSideControls) => JSON.stringify({ ...value, auto: { ...value.auto, coreSplit: 0, coreLow: 'bigFirst', coreHigh: 'bigFirst' } });
     const coreOnly = !resumeRequested && current.configured && withoutCore(bank) === withoutCore(current.controls[side]);
@@ -1983,13 +2154,14 @@ export async function updateContinuousPerformanceControls(expected: ContinuousPe
       ? await activeCoreRule.prepareTdp?.(current.controls[side], bank) ?? null : null;
     try {
     const globalForMigration = master;
-    const legacyCpu = await loadCpuProfiles();
-    const custom = await loadGameCustomConfig();
+    const legacyCpu = await read(() => loadCpuProfiles());
+    const custom = await read(() => loadGameCustomConfig(edit ? 'read-only' : 'ensure', { requireReady: !!edit }));
     const entry = expected.exe ? custom.entries[expected.exe] : undefined;
     const globalSmt = expected.scope === 'global' || expected.followEffective === true;
     if (patch.hyperThreadMode !== undefined && (!current.smtAvailable || (!globalSmt && !expected.exe) || !['default', 'on', 'off'].includes(patch.hyperThreadMode))) throw new Error('当前游戏或处理器不支持超线程策略');
     assertScheduleOpCurrent();
-    if ((await detectPowerModeReliable()) !== (expected.actualSide ?? side) || getSettingsGeneration() !== expected.generation) throw new SkipApplyError();
+    if ((await read(() => detectPowerModeReliable())) !== (expected.actualSide ?? side) || getSettingsGeneration() !== expected.generation) throw new SkipApplyError();
+    if (edit) { await edit.confirm(); assertScheduleOpCurrent(); verifyContext(); }
     if (expected.scope === 'dedicated') {
       if (!entry) throw new Error('请先从顶部创建当前游戏的专属配置');
       if (performanceChanged || patch.frameRate) await mutateContinuousGameConfig(expected.generation, latest => {
@@ -2025,7 +2197,7 @@ export async function updateContinuousPerformanceControls(expected: ContinuousPe
         }
         rememberGlobalPerformance(settings, before, latest);
       });
-      if (performanceChanged) emitPerformanceSchedule(await loadPerformanceSchedule());
+      if (performanceChanged) emitPerformanceSchedule(await read(() => loadPerformanceSchedule()));
     }
     if (patch.hyperThreadMode !== undefined) {
       const mode = normalizeHyperThreadMode(patch.hyperThreadMode);
@@ -2054,22 +2226,27 @@ export async function updateContinuousPerformanceControls(expected: ContinuousPe
       const activeEntry = latest.entries[expected.exe];
       const ownsSmt = globalSmt ? !activeEntry || activeEntry.enabled === false : activeEntry?.enabled !== false;
       if (expected.pid && ownsSmt) {
-        if (!isPolicyTargetCurrent(expected)) throw new SkipApplyError();
+        assertScheduleOpCurrent();
+        verifyContext();
+        const currentPower = sharedPowerWriteScope(getSharedPowerLifecycle());
+        if (!isPolicyTargetCurrent(expected) || !smtPowerScope || !currentPower ||
+            smtPowerScope.some((value, index) => value !== currentPower[index])) throw new SkipApplyError();
         if (mode === 'off') {
-          const applied = await applyGameCorePolicy(expected, 'default', mode);
+          const applied = await applyGameCorePolicy(expected, 'default', mode, smtPowerScope);
           if (!applied.ok || !applied.applied) throw new Error(applied.error || '超线程策略未应用');
-        } else if (!await clearGameCorePolicy(expected)) throw new Error('恢复游戏默认超线程失败');
+        } else if (!await clearGameCorePolicy(smtPowerScope, expected)) throw new Error('恢复游戏默认超线程失败');
       }
     }
     assertScheduleOpCurrent();
-    const latestCustom = await loadGameCustomConfig(), activeEntry = expected.exe ? latestCustom.entries[expected.exe] : undefined;
+    const latestCustom = await read(() => loadGameCustomConfig(edit ? 'read-only' : 'ensure', { requireReady: !!edit })), activeEntry = expected.exe ? latestCustom.entries[expected.exe] : undefined;
     let tdpWriteReceipt: ContinuousPerformanceSnapshot['tdpWriteReceipt'];
     const owns = expected.scope === 'dedicated' ? activeEntry?.enabled !== false : !activeEntry || activeEntry.enabled === false;
     if (resumeRequested) {
       if (expected.scope === 'dedicated') await savePerformanceSchedule({ ...(await loadPerformanceSchedule()), suspended: false, enabled: true }, { origin: 'runtime' });
       scheduleSuspended = false;
     }
-    if (owns && performanceChanged && side === (expected.actualSide ?? side) && !scheduleSuspended && !(await loadPerformanceSchedule()).suspended) {
+    if (owns && performanceChanged && side === (expected.actualSide ?? side) && !scheduleSuspended && !(await read(() => loadPerformanceSchedule())).suspended) {
+      if (edit) { await edit.confirm(); assertScheduleOpCurrent(); verifyContext(); }
       if (coreOnly) {
         const key = coreOwnerKey(side, expected.pid, expected.processCreated, expected.generation, expected.path, expected.identityGeneration);
         if (activeCoreRule?.key === key) await activeCoreRule.update(bank);
@@ -2085,20 +2262,22 @@ export async function updateContinuousPerformanceControls(expected: ContinuousPe
     let frameRateApplied: boolean | undefined;
     if (patch.frameRate) {
       publishFrameRatesChanged((await getContinuousPerformanceSnapshot(expected.followEffective ? 'effective' : expected.scope, side)).frameRates);
-      frameRateApplied = await applyIndependentFrameRates();
+      // The setting is already committed. A retired action must not start a new runtime apply.
+      frameRateApplied = (!admit || admit()) && await applyIndependentFrameRates(admit);
     }
-    const snapshot = await getContinuousPerformanceSnapshot(expected.followEffective ? 'effective' : expected.scope, side);
-    return { ...snapshot, ...(patch.frameRate ? { frameRateApplied } : {}), ...(tdpWriteReceipt ? { tdpWriteReceipt } : {}) };
+    const updated = await read(snapshot);
+    return { ...updated, ...(patch.frameRate ? { frameRateApplied } : {}), ...(tdpWriteReceipt ? { tdpWriteReceipt } : {}) };
     } finally { tdpEdit?.release(); }
-  });
+  }, !edit);
 }
 
 async function applyContinuousBankUnsafe(side: PowerSide, requested: ContinuousSideControls,
   expectedTarget?: PerformanceScheduleTarget, frameRates?: FrameRatePair, onTdpWrite?: (receipt: NonNullable<ContinuousPerformanceSnapshot['tdpWriteReceipt']>) => void, admit?: () => boolean, completedStartupIntent?: () => string,
   onCompleted?: (application?: ContinuousPerformanceApplication) => void, startup?: ContinuousPerformanceApplicationContext,
-  beginActions?: () => void): Promise<boolean> {
+  wake?: WakePerformanceAttempt): Promise<boolean> {
   const bank = normalizeContinuousBank(requested, side), generation = getSettingsGeneration(), operation = runningScheduleOpGen;
-  const game = await detectPolicyGame(), gameKey = game ? gamePolicyKey(game) : '';
+  const bankPower = sharedPowerWriteScope(getSharedPowerLifecycle());
+  const game = await readWakePerformance(wake, () => detectPolicyGame()), gameKey = game ? gamePolicyKey(game) : '';
   const tdpDataReady = () => bank.tdpValid !== false && (!game || gameCustomRecovery.status === 'ready');
   const selectedScheme = normalizeControlPowerSchemes((await loadPerformanceSchedule()).powerSchemes)[side];
   let tdpCheckpointRevision: number | null = null;
@@ -2179,7 +2358,7 @@ async function applyContinuousBankUnsafe(side: PowerSide, requested: ContinuousS
   };
   const checkpoint = async () => {
     if (!isGameStatusCurrent() || scheduleSuspended || (admit && !admit())) return false;
-    if (generation !== getSettingsGeneration() || (await detectPowerModeReliable()) !== side) return false;
+    if (generation !== getSettingsGeneration() || (await readWakePerformance(wake, () => detectPowerModeReliable())) !== side) return false;
     if (game ? !isCurrentGameTarget(game) : getPolicyGame() !== null) return false;
     const now = getPolicyGame();
     if ((now?.pid || 0) !== (game?.pid || 0) || String(now?.processCreated || '') !== String(game?.processCreated || '')) return false;
@@ -2222,7 +2401,7 @@ async function applyContinuousBankUnsafe(side: PowerSide, requested: ContinuousS
     onCompleted?.(); // Reuse only this service's existing complete application witness.
     return true;
   }
-  beginActions?.();
+  wake?.beginActions();
   // A later failed rewrite cannot leave an earlier success acknowledged.
   invalidateContinuousPerformanceApplied();
   await disableFloat(); // drain old CPU writes before the new bank can own the hardware.
@@ -2236,7 +2415,7 @@ async function applyContinuousBankUnsafe(side: PowerSide, requested: ContinuousS
   } else if (bank.mode === 'manual') {
     await ensureSelectedPowerScheme('yeman', checkpoint);
   } else {
-    await ensureRememberedYemanSchemeActive();
+    await ensureRememberedYemanSchemeActive(wake && { current: wake.admitted, read: wake.read });
   }
   if (!await checkpoint()) return false;
   const watts = Math.max(getTdpHardwareMinimum(), Math.min(150, getTdpHardwareMaximum(), bank.tdp));
@@ -2278,32 +2457,53 @@ async function applyContinuousBankUnsafe(side: PowerSide, requested: ContinuousS
   let coreState: ContinuousCoreState | null = null;
   let currentWatts: number | null = acceptedWatts;
   let liveCheckpoint: (() => Promise<boolean>) | null = null;
-  const applyCore = async (watts: number, immediate = false) => {
+  const corePower = () => {
+    const current = sharedPowerWriteScope(getSharedPowerLifecycle());
+    return bankPower && current && current[0] === bankPower[0] && current[1] === bankPower[1] ? current : null;
+  };
+  const applyCore = async (watts: number, immediate = false, origin = corePower()) => {
     const current = immediate || !liveCheckpoint ? checkpoint : liveCheckpoint;
-    if (!architecture?.heterogeneous || !await current()) return;
+    const powerCurrent = () => origin !== null && corePower()?.[2] === origin[2];
+    if (!architecture?.heterogeneous || !origin || !powerCurrent() || !await current() || !powerCurrent()) return;
     currentWatts = watts;
     const now = Date.now();
     const next = immediate || !coreState ? { mode: continuousCoreAt(bank, watts), changedAt: now } : stepContinuousCore(bank, coreState, watts, now);
     if (coreState?.mode === next.mode) { coreState = next; if (next.pending) holdContinuousFloatAfterCoreChange(); return; }
     const mode = toPowerCoreMode(next.mode);
-    if (side === 'ac') await setCoreModeAc(mode); else await setCoreModeDc(mode);
-    if (!await current()) return;
-    await setActiveScheme(PW.YEMAN);
-    const changed = coreState !== null;
-    coreState = next;
-    if (changed) holdContinuousFloatAfterCoreChange();
+    const previous = coreState;
+    let confirmed = false;
+    try {
+      await setCoreModeForPowerScope(side, mode, origin);
+      if (!powerCurrent() || !await current() || !powerCurrent()) return;
+      await setActiveSchemeForPowerScope(PW.YEMAN, origin);
+      if (!powerCurrent()) return;
+      coreState = next;
+      confirmed = true;
+      if (previous) holdContinuousFloatAfterCoreChange();
+    } catch (error) {
+      if (powerCurrent() && !isPowerTransitionWriteBlocked(error) &&
+          (error instanceof Error ? error.message : String(error)) !== 'power policy write scope expired') throw error;
+    } finally {
+      // The batch may have written before the activation was revoked.
+      if (!confirmed && coreState === previous) coreState = null;
+    }
   };
   activeCoreRule = { key: coreOwnerKey(side, game?.pid || 0, String(game?.processCreated || ''), generation, game?.path, game?.identityGeneration),
     async update(next) {
       Object.assign(bank.auto, { coreSplit: next.auto.coreSplit, coreLow: next.auto.coreLow, coreHigh: next.auto.coreHigh });
       fingerprint = JSON.stringify(bank);
       updateContinuousFloatCoreRules(bank);
+      const origin = corePower();
+      if (!origin) return;
+      const acceptReadback = beginSharedPowerLifecycleReadback();
       const lifecycle = await powerLifecycle.get();
-      if (lifecycle.phase === 'ready' && lifecycle.hardwareWritesAllowed && (await getActiveScheme()).toLowerCase() === PW.YEMAN.toLowerCase() &&
-          currentWatts !== null && (!getFloatInfo().enabled || getFloatInfo().tdpApplied > 0) && await checkpoint()) await applyCore(currentWatts, true);
+      const observed = sharedPowerWriteScope(lifecycle);
+      acceptReadback(lifecycle);
+      if (observed && observed.every((value, index) => value === origin[index]) && (await getActiveScheme()).toLowerCase() === PW.YEMAN.toLowerCase() &&
+          currentWatts !== null && (!getFloatInfo().enabled || getFloatInfo().tdpApplied > 0)) await applyCore(currentWatts, true, origin);
     } };
   const bankOwner = activeCoreRule;
-  if (acceptedWatts !== null) await applyCore(acceptedWatts);
+  if (acceptedWatts !== null) await applyCore(acceptedWatts, false, bankPower);
   if (!await checkpoint()) return false;
   receiptFrames = frameRates ?? await ensureGlobalFrameRates();
   const target = receiptFrames[side].fps;
@@ -2365,6 +2565,7 @@ async function applyContinuousBankUnsafe(side: PowerSide, requested: ContinuousS
       return {
         release: () => paused?.release(),
         async apply(receipt, editAdmit) {
+          const coreOrigin = corePower();
           const editCurrent = () => editOperation === scheduleOpGen && runningScheduleOpGen === editOperation && residentContextCurrent() && (!editAdmit || editAdmit()) && (!paused || paused.current());
           if (!editCurrent()) return false;
           assertScheduleOpCurrent();
@@ -2383,7 +2584,7 @@ async function applyContinuousBankUnsafe(side: PowerSide, requested: ContinuousS
           if (!editCurrent() || !await checkpoint() || !editCurrent()) return false;
           currentWatts = accepted;
           paused?.accept(watts, accepted);
-          if (accepted !== null) await applyCore(accepted, true);
+          if (accepted !== null) await applyCore(accepted, true, coreOrigin);
           const current = await residentCheckpoint();
           if (current) notifyApplied();
           return current;

@@ -17,7 +17,7 @@ Canonical development source consolidated from already-tested observation eviden
 - Explicit source execution by a developer only, during development/production of optimized builds. Nothing is installed or embedded in YMCC. No product IPC, UI/menu/tray action, startup integration, service or autorun exists for this module. The explicitly requested portable ROG field kit adds a manual external launcher only; it is kept outside product payloads and never runs automatically.
 - Existing publisher/deployer assemble built Web assets, explicitly selected Native binaries and declared payloads; they do not copy this source `tools/cpu-optimization` directory. No build/package/deploy configuration was changed. This is source inspection, **not installation acceptance** or inspection of a newly built R8 package.
 - The scripts never launch, stop, restart, configure or control YMCC, Steam, games or devices. The developer/user owns application state, sleep and hardware. A read-only target query is not permission to change anything. Capture starts/stops only its own explicitly requested WPR recording, not the application. It does not elevate itself.
-- Only the selected native `YeManCC.exe` root contributes target CPU counters. Observer discovery requires exactly one same-name native root. Capture supports an explicit PID, so the developer must supply the correct native root; its native image/birth/hash checks remain intact. Child processes and WebView CPU are **excluded**. There is no application-wide CPU claim.
+- Only the selected native `YeManCC.exe` root contributes target CPU counters. Observer discovery requires exactly one same-name native root. Capture supports an explicit PID, so the developer must supply the correct native root; its native image/birth/hash checks remain intact. The counter observer excludes child processes and WebView CPU; the separate short-peak mode uses ETW to measure the observed process tree.
 
 ## Explicit interface contract
 
@@ -97,6 +97,36 @@ retained input namespace per command invocation. Original `--self-test` and
 
 
 Official Microsoft CPU Analysis and SystemProvider pages were retrieved and archived in the MethodUpgrade-20261102 evidence directory, including CPU Usage(Precise) details. Existing sampled-only traces cannot gain missing scheduling events by changing the parser.
+
+## Short CPU peaks in the YMCC process tree
+
+Use this mode for a bounded diagnostic reproduction. It uses the existing Scheduling file profile, with sampled stacks and context-switch events, and does not wait for a host-only CPU threshold. No CPU polling loop runs while recording. The default observation is 20 seconds, with an explicit range of 10-60 seconds. Start from an administrator PowerShell with no active WPR session:
+
+```powershell
+./Capture-YmccCpuStacks.ps1 -Mode Capture -PeakSweep -MaximumSeconds 20 `
+  -TargetProcessId <pid> -ExpectedIdentityPath <json-with-exeSha256> -EvidenceRoot <existing-evidence-directory>
+```
+
+With the .NET 10 SDK, analyze the returned capture directory, using a fresh output path:
+
+```powershell
+dotnet run -c Release --project ./PreciseCpu -- --peak-sweep <capture-directory> <fresh-output-directory>
+```
+
+`PEAKS.json` ranks host, WebView and observed process-tree residency separately over sliding 25, 100 and 250 ms windows. It keeps up to three non-overlapping peaks per scope and duration, with roles, threads and same-window sampled stacks. Scheduled milliseconds include possible interrupts. `percentOfOneLogicalCpu` may exceed 100 when work runs in parallel; `percentOfAllLogicalCpus` has a separate denominator. Module offsets and PDB identity provide a lookup key for later symbol resolution. Samples without a matching running thread instance are counted separately, and sample weights are never used to rank windows.
+
+For a producer such as HWiNFO that can restart outside the YMCC tree, append `--focus <verified-process-receipt.json>`. Use one receipt per trace: `pid`, `birthFileTime`, `imagePath`, `beforeUtc`, `afterUtc`, and `sameInstance` must describe the verified process spanning the recording window. The focus report keeps the best covered 25 ms window in each burst (at least 15 scheduled CPU-ms, 1 ms scan step, candidates merged within 250 ms), with that process's threads and matched stacks. Compare its cadence and CPU time independently of ancestry. A subthreshold or uncovered cycle can be absent, so a long gap alone does not establish a cadence change.
+
+Append `--focus-all-stacks` after the receipt to write `FOCUS-STACKS.json` without changing `PEAKS.json`. Use its whole-interval stack weights to check whether a sampled call path moved out of the burst windows. Match module path, image size and nonzero checksum before comparing RVAs; the logged PE build stamp is not proof of a build date. `bestCovered25ms` measures the exact best covered positive window even below the burst threshold. A null window supplies no positive estimate; it does not prove absence of CPU work in an uncovered interval.
+
+The parser refuses lost events, missing scheduling data and inconsistent root identity. It excludes windows that intersect a scheduling gap or unbound running owner, and reports an incomplete capture even when some peak windows are usable. Pre-existing child ownership comes from ETW rundown; detached services and unrelated WebViews are outside this tree. The capture does not prove why a task fired and is not a product CPU acceptance test. ETL may include machine-wide activity; retain it as local diagnostic evidence. The analysis removes its temporary index and retains the original trace unchanged.
+
+### Evidence cycle
+
+1. Capture two or more bounded windows for one named scene. Record the version, scene, child roles and the question each capture is intended to answer.
+2. Run `Compare-YmccCpuPeaks.ps1 -PeakReport @(<PEAKS-A.json>, <PEAKS-B.json>) -OutputPath <fresh-replay.json>`. It verifies independent traces, the same installed instance and collector profile, and highlights repeated owners without treating them as a common cause. Compare tree membership before comparing total CPU.
+3. Locate a repeated operation and its trigger with matching symbols and a controlled reproduction. If evidence is missing, name the missing field and add only that observation (for example an event when entering a fallback, rather than a periodic log); verify the observer on a positive and a negative control. If no next observation can distinguish the possibilities, stop that branch.
+4. Change behavior only after the trigger and work are bound. Re-run the same scene with a matched control, include correctness checks, and report any unmeasured paths. Preserve original traces, loss/coverage, build identity and outcomes. Clean up only the temporary files owned by the round.
 
 For a bounded filesystem diagnosis, explicitly select `-ProfileMode FileIO
 -FileMode`. `YmccCpuFileIo.wprp` records CPU samples, scheduling and file

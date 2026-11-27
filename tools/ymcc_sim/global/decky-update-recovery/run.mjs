@@ -20,7 +20,7 @@ import {startCssAppearanceWorker,CSS_APPEARANCE_WORKER_SOURCE_INPUTS} from './cs
 import {getCssAppearanceInputs} from './css-appearance-sequence.mjs';
 import {forwardCssRequiredReceipts} from './css-required-forwarding.mjs';
 const baselineStartedAt=Date.now();
-import {verifyPackageFixtureTools} from './package-fixture-tools.mjs';import path from 'node:path';import crypto from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';import {fileURLToPath} from 'node:url';import {readTests} from './read-selftest.mjs';import {clientTests} from './client-selftest.mjs';import {noRepeatContextTests} from '../../../decky_no_repeat_context_selftest.mjs';
+import {verifyPackageFixtureTools,PACKAGE_BASELINE_BUDGET,packageBaselineBudgetArgs} from './package-fixture-tools.mjs';import path from 'node:path';import crypto from 'node:crypto';import {execFileSync,spawnSync} from 'node:child_process';import {fileURLToPath} from 'node:url';import {readTests} from './read-selftest.mjs';import {clientTests} from './client-selftest.mjs';import {noRepeatContextTests} from '../../../decky_no_repeat_context_selftest.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url)),root=path.resolve(here,'../../../..'),args=process.argv.slice(2),at=args.indexOf('--evidence-dir'),out=path.resolve(at<0?process.env.YMCC_DECKY_ARTIFACT_ROOT||'work/decky-update-recovery':args[at+1]);fs.mkdirSync(out,{recursive:true});
 const hash=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
@@ -45,19 +45,18 @@ try{
  const nativeSource=prepareNativeSource({main,template:fs.readFileSync(path.join(here,'native-fixture.cpp'),'utf8'),repairHeader:fs.readFileSync(path.join(root,'native/decky_sidebar_manual_repair.h'),'utf8'),automaticHeader:fs.readFileSync(path.join(root,'native/decky_sidebar_automatic_repair.h'),'utf8'),mainSha256:hash(path.join(root,'native/main.cpp'))});
  report.nativeCallbackExtraction=nativeSource.extraction;
  report.nativeSourceAdmission={beforeHeavyProducers:true,elapsedMs:performance.now()-admissionStartedAt,preparedFiles:nativeSource.outputs.size,compilations:0,businessRuns:0};
- nativeLaunchWorker=startNativeLaunchWorker({repo:root,callerEvidence:out,deadlineMs:baselineStartedAt+240000});
- cssAppearanceWorker=startCssAppearanceWorker({repo:root,callerEvidence:out,deadlineMs:baselineStartedAt+240000});
  report.communityRegressionSources=JSON.parse(fs.readFileSync(path.join(here,'field-record-community-maintenance-20261023.json'),'utf8'));
  const packageOut=path.join(out,'package-maintenance');
- // Original package stage stays30000ms. Runtime/preparation <=25000ms;
- // at most5000ms remains for this test's own child retirement, never added.
+ // In the baseline the busy filesystem can exhaust the standalone 25s
+ // test window. The 5s retirement reserve and parent deadline stay fixed.
+ const {totalMs,runMs,cleanupMs}=PACKAGE_BASELINE_BUDGET;
  const packageFile=path.join(root,'tools/decky_package_maintenance_selftest.ps1');
  const packageShell=path.join(process.env.SystemRoot||'C:/Windows','System32/WindowsPowerShell/v1.0/powershell.exe');
- const packageArgs=['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',packageFile,'-EvidenceDir',packageOut,'-TotalBudgetMs','30000','-RunBudgetMs','25000','-CleanupReserveMs','5000'];
+ const packageArgs=['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',packageFile,'-EvidenceDir',packageOut,...packageBaselineBudgetArgs()];
  const fixtureCompilerAuthority=verifyPackageFixtureTools();
  const packageSourceBefore={path:packageFile,sha256:hash(packageFile)},packageToolBefore={path:packageShell,sha256:hash(packageShell)};
  const packageStartedAt=new Date().toISOString(),packageStart=performance.now();
- const packageRun=spawnSync(packageShell,packageArgs,{windowsHide:true,timeout:30000,maxBuffer:16*1024*1024});
+ const packageRun=spawnSync(packageShell,packageArgs,{windowsHide:true,timeout:totalMs,maxBuffer:16*1024*1024});
  const packageHashAfter=file=>{try{return{sha256:hash(file),error:null};}catch(error){return{sha256:null,error:{name:error.name,code:error.code,message:error.message}};}};
  const sourceAfter=packageHashAfter(packageFile),toolAfter=packageHashAfter(packageShell);
  verifyPackageFixtureTools();
@@ -66,14 +65,14 @@ try{
    pid:packageRun.pid??null,status:packageRun.status,signal:packageRun.signal,
    error:packageRun.error?{name:packageRun.error.name,code:packageRun.error.code,errno:packageRun.error.errno,message:packageRun.error.message,stack:packageRun.error.stack}:null,
    fixtureCompilerAuthority:{manifestSha256:fixtureCompilerAuthority.manifestSha256,compiler:fixtureCompilerAuthority.compiler,inputs:fixtureCompilerAuthority.files.length,files:fixtureCompilerAuthority.files,osLoadedModulesComplete:false},
-   stageBudgetMs:30000,innerTotalBudgetMs:30000,runBudgetMs:25000,cleanupReserveMs:5000,registeredAdapterBudgetMs:240000,
+   stageBudgetMs:totalMs,innerTotalBudgetMs:totalMs,runBudgetMs:runMs,cleanupReserveMs:cleanupMs,registeredAdapterBudgetMs:240000,
    timedOut:packageRun.error?.code==='ETIMEDOUT',outputLimitBytes:16*1024*1024,stdoutBytes:packageRun.stdout?.length??0,stderrBytes:packageRun.stderr?.length??0,
-   descendantExitProven:false,scope:'Original30s gate; any incomplete mutation/retirement stays non-PASS.'};
+   descendantExitProven:false,scope:'Bounded package fixture; any incomplete mutation/retirement stays non-PASS.'};
  fs.writeFileSync(path.join(out,'package-maintenance-process.json'),JSON.stringify(packageResult,null,2)+'\n');
  fs.writeFileSync(path.join(out,'package-maintenance.stdout.raw'),packageRun.stdout||Buffer.alloc(0));
  fs.writeFileSync(path.join(out,'package-maintenance.stderr.raw'),packageRun.stderr||Buffer.alloc(0));
  fs.writeFileSync(path.join(out,'package-maintenance.log'),Buffer.concat([packageRun.stdout||Buffer.alloc(0),packageRun.stderr||Buffer.alloc(0)]));
- if(packageResult.timedOut||packageResult.elapsedMs>30000)throw Error('Decky package-maintenance TIMEOUT at original30000ms; INCOMPLETE');
+ if(packageResult.timedOut||packageResult.elapsedMs>totalMs)throw Error('Decky package-maintenance TIMEOUT at '+totalMs+'ms; INCOMPLETE');
  if(packageRun.error)throw Error('Decky package-maintenance process error: '+packageRun.error.code);
  if(packageRun.signal)throw Error('Decky package-maintenance process terminated: '+packageRun.signal);
  if(packageRun.status!==0)throw Error('Decky package-maintenance consumer nonzero exit: '+packageRun.status);
@@ -83,6 +82,9 @@ try{
  const packagePin=file=>({path:path.resolve(file),sha256:hash(file),bytes:fs.statSync(file).size});
  report.packageMaintenanceExecution={schemaVersion:1,process:packagePin(path.join(out,'package-maintenance-process.json')),result:packagePin(path.join(packageOut,'result.json')),stdout:packagePin(path.join(out,'package-maintenance.stdout.raw')),stderr:packagePin(path.join(out,'package-maintenance.stderr.raw')),negativeResults:report.packageMaintenance.mutationRetirement.map(row=>({name:row.name,result:packagePin(path.join(row.independentRoot,'evidence/result.json'))}))};
  report.additionalFieldRegressions.push('decky-automatic-managed-package-20261023');
+ // Keep the short package stage clear of both workers without resetting the parent deadline.
+ nativeLaunchWorker=startNativeLaunchWorker({repo:root,callerEvidence:out,deadlineMs:baselineStartedAt+240000});
+ cssAppearanceWorker=startCssAppearanceWorker({repo:root,callerEvidence:out,deadlineMs:baselineStartedAt+240000});
  // Each original complete resource producer runs once; all receipts remain under this child.
  Object.assign(report,await executeBaselineResources({repo:root,out,sourceInputs:inputs,deadlineEpochMs:baselineStartedAt+240000}));
  report.additionalFieldRegressions.push('decky-local-resource-repair-and-owned-worker-20261023');

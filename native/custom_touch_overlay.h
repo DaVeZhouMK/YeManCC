@@ -285,6 +285,8 @@ inline void refresh(){
     }
     
     for(const auto& item:next){if(refreshEpoch!=epoch||!live.load()||displayTransitionFence.pending)return;const bool show=itemWanted(*item);const auto r=item->rect;
+        // Keep layout metadata for a later reveal or edit without creating a hidden surface.
+        if(!show&&!item->window&&!item->outline)continue;
         if(!item->window)item->window=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_NOREDIRECTIONBITMAP,L"YeManCustomTouch",L"YMCC 自定义触控",WS_POPUP,r.left,r.top,r.right-r.left,r.bottom-r.top,nullptr,nullptr,instance,item.get());
         if(!item->window){error=GetLastError();continue;}if(!item->outline)item->outline=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED|WS_EX_TRANSPARENT,L"YeManScreenTouchpadOutline",L"YMCC 自定义触控图形",WS_POPUP|WS_DISABLED,r.left,r.top,r.right-r.left,r.bottom-r.top,item->window,nullptr,instance,nullptr);
         EnableWindow(item->window,TRUE);SetWindowPos(item->window,HWND_TOPMOST,r.left,r.top,r.right-r.left,r.bottom-r.top,SWP_NOACTIVATE);

@@ -24,8 +24,7 @@ declare const __YMCC_DECKY_PANEL_STYLE__: string;
 declare const SP_REACT: any;
 declare const SP_REACTDOM: any;
 declare const DFL: any;
-declare global { interface Window { __YMCC_DECKY_MIRROR__?: Bootstrap; __YMCC_DECKY_FRONTEND__?: {buildId:string;active:boolean;connectionReady?:boolean;connectionVerified?:boolean;connectionChecking?:boolean;connectionState?:string;qamReady?:boolean}; } }
-declare global { interface Window { __YMCC_DECKY_MIRROR__?: Bootstrap; __YMCC_DECKY_FRONTEND__?: {buildId:string;active:boolean;connectionReady?:boolean;connectionVerified?:boolean;connectionChecking?:boolean;connectionState?:string;qamReady?:boolean}; } }
+declare global { interface Window { __YMCC_DECKY_MIRROR__?: Bootstrap; __YMCC_DECKY_FRONTEND__?: {buildId:string;active:boolean;connectionReady?:boolean;connectionVerified?:boolean;connectionChecking?:boolean;connectionState?:string;qamReady?:boolean;qamPanelState?:string}; } }
 // Import evaluation may finish after the public Loader timeout. Acquire owners
 // only when Decky actually invokes its plugin factory, so an abandoned module
 // cannot leave a socket, timer, tab or ready receipt without onDismount ownership.
@@ -122,6 +121,7 @@ const consoleIcon = <svg aria-label="野蛮系统控制台" role="img" viewBox="
 </svg>;
 let placement:ReturnType<typeof installConsoleTab>|undefined;
 let directConsoleInstalled=false;
+const committedQamPanels=new Map<object,{runId:string;nativeReady:boolean}>();
 const fieldLabels: Record<string, string> = { audioOptimization:'掌机专用低音强化', monitor:'监控总开关', padPersona: '虚拟手柄', gyroEnabled: '陀螺仪', gyroPreset: '陀螺仪预设', speedFactor: '游戏变速', losslessScaling: 'LosslessScaling 插帧' };
 const labelStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px', width: '100%', fontSize: '12px', lineHeight: '16px' };
 const smallLabel = (label: string) => <span className="ymcc-field-label">{label}</span>;
@@ -225,6 +225,16 @@ function Content() {
   React.useEffect(() => { client.setVisible(sessionVisible,visibilityOwner.current); return () => client.setVisible(false,visibilityOwner.current); }, [sessionVisible]);
   React.useEffect(() => () => { performancePage.current.visible=false; performancePage.current={visible:false,focusClaimed:true}; if (menu.current?.timer) clearTimeout(menu.current.timer); menu.current = null; intents.detach(); }, []);
   const snapshot = (state as ClientState).snapshot;
+  const panelRun=window.__YMCC_DECKY_MIRROR__?.runId;
+  const panelNativeReady=state.connected===true&&snapshot?.ready===true&&snapshot.runId===panelRun&&snapshot.provenance?.kind==='ymcc-native';
+  // Observe a React commit, not a render attempt or a matching transport.
+  // Do not force layout or infer whether Steam presented the popup on screen.
+  React.useLayoutEffect(()=>{
+    if(dismounted||!visible||!panelRun||sidebarRoot.current?.isConnected!==true)return;
+    const owner=visibilityOwner.current;
+    committedQamPanels.set(owner,{runId:panelRun,nativeReady:panelNativeReady});
+    return()=>{committedQamPanels.delete(owner);};
+  },[visible,panelRun,panelNativeReady]);
   React.useEffect(()=>{if(!visible){frameStart.current=null;setFrameDraft(null);}else if(!sameFrameSource(frameStart.current,snapshot))setFrameDraft(null);},[snapshot?.revision,snapshot?.powerSource,snapshot?.game?.identity,visible]);
   const disabled = !visible || menuActive || !state.connected || !snapshot?.ready || state.busy;
   const entryTdp=snapshot?.performance?.controls.find(control=>control.key==='tdp'&&control.kind==='slider');
@@ -486,6 +496,7 @@ function dismount(source:'plugin-disposed'|'plugin-pagehide'|'plugin-initializat
   cleanup('wallpaper',()=>disposeWallpaper?.());
   cleanup('monitor-hud',()=>disposeMonitorHud?.());
   cleanup('hud-probe',()=>disposeHudProbe?.());
+  committedQamPanels.clear();
   for(const intents of activeContentIntents)cleanup('content-intents',()=>intents.dispose());
   activeContentIntents.clear();
   cleanup('client',()=>client.dispose(source));
@@ -496,7 +507,17 @@ const frontendReceipt=Object.freeze({buildId:__YMCC_DECKY_BUILD_ID__,active:true
   get connectionVerified(){return !dismounted && client.connectionVerified(window.__YMCC_DECKY_MIRROR__?.runId);},
   get connectionChecking(){return !dismounted && client.connectionChecking(window.__YMCC_DECKY_MIRROR__?.runId);},
   get connectionState(){return dismounted?'module-dismounted':client.connectionDiagnostic(window.__YMCC_DECKY_MIRROR__?.runId);},
-  get qamReady(){return !dismounted && (!directConsoleInstalled || placement?.active===true);}});
+  get qamReady(){return !dismounted && (!directConsoleInstalled || placement?.active===true);},
+  get qamPanelState(){
+    const binding=window.__YMCC_DECKY_MIRROR__;
+    if(dismounted||!binding?.runId||binding.revoked===true)return 'unobserved';
+    let committed=false;
+    for(const panel of committedQamPanels.values())if(panel.runId===binding.runId){
+      if(panel.nativeReady)return 'native-ready-commit';
+      committed=true;
+    }
+    return committed?'committed':'unobserved';
+  }});
 try {
   if(typeof __YMCC_HUD_PROBE_BUILD__ !== 'undefined' && __YMCC_HUD_PROBE_BUILD__)
     disposeHudProbe=installSteamHudProbe({host:window,react:React,reactDom:typeof SP_REACTDOM==='undefined'?undefined:SP_REACTDOM,ui:DFL,routerHook});

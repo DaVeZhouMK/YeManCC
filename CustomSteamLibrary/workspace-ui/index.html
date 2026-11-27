@@ -207,6 +207,7 @@
           ><button id="confirm-confirm" class="button secondary" type="button">
             确认
           </button>
+          <button id="confirm-alternative" class="button danger hidden" type="button">同时从 Steam 移除</button>
         </div>
       </section>
     </div>
@@ -292,6 +293,7 @@
                 </div>
               </section>
             </div>
+            <button id="edit-repair-steam-artwork" class="button hidden" type="button">修复本卡 Steam 素材</button>
             <p id="artwork-status" class="form-help hidden"></p>
           </section>
           <form id="identity-form" class="edit-form">
@@ -364,36 +366,73 @@
                 >
               </section>
             </div>
+            <section id="edit-launch-fields" class="edit-detail-block edit-launch-fields hidden" aria-label="启动配置">
+              <label class="field" data-edit-row="launch-source"><span>启动方式</span>
+                <select id="edit-launch-mode">
+                  <option value="direct">普通启动</option>
+                  <option value="auto">VBS 高级启动（自动）</option>
+                  <option value="manual">VBS 高级启动（手动）</option>
+                </select>
+              </label>
+              <div id="edit-launch-source-fields" class="field" data-edit-row="launch-source">
+                <span>启动文件</span>
+                <div class="edit-launch-source-row">
+                  <output id="edit-launch-source" aria-label="启动文件"></output>
+                  <button id="edit-launch-pick" class="button" type="button">选择文件</button>
+                  <button id="edit-launch-reset" class="button" type="button">默认</button>
+                </div>
+              </div>
+              <label id="edit-launch-manual-fields" class="field hidden" data-edit-row="launch-source"><span>启动代码（CMD）</span>
+                <textarea id="edit-launch-command" data-controller-input readonly rows="3" maxlength="16000" spellcheck="false"></textarea>
+              </label>
+              <p id="edit-launch-feedback" class="form-help hidden" role="status"></p>
+            </section>
             <div class="modal-actions edit-actions" data-edit-row="actions">
-              <button id="edit-folder" class="button ghost" type="button">
+              <button id="edit-folder" class="button" type="button">
                 打开目录</button
               ><button
                 id="edit-search-game"
-                class="button secondary"
+                class="button"
                 type="submit"
               >
                 自动识别</button
               ><button
                 id="edit-save-content"
-                class="button secondary"
+                class="button"
                 type="button"
               >
                 保存内容</button
-              ><button
+              ><button id="edit-launch-open" class="button hidden" type="button" aria-haspopup="dialog" aria-controls="edit-launch-modal" aria-expanded="false">启动文件 VBS</button><button
                 id="edit-add-to-steam"
-                class="button steam"
+                class="button"
                 type="button"
               >
                 加入Steam</button
               ><button
                 id="edit-back-button"
-                class="button back-danger"
+                class="button"
                 type="button"
               >
                 返回
               </button>
             </div>
           </form>
+        </div>
+      </section>
+    </div>
+    <div id="edit-launch-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="edit-launch-title">
+      <section class="modal-card artwork-action-card">
+        <div class="modal-heading">
+          <h2 id="edit-launch-title">启动文件 VBS</h2>
+          <button id="edit-launch-close" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+        <p id="edit-launch-script" class="path"></p>
+        <p id="edit-launch-status" class="form-help" role="status" aria-live="polite"></p>
+        <div class="artwork-action-buttons launch-action-buttons">
+          <button id="edit-launch-main" class="button" type="button" disabled>新建</button>
+          <button id="edit-launch-update" class="button" type="button" disabled>更新</button>
+          <button id="edit-launch-delete" class="button" type="button" disabled>删除</button>
+          <button id="edit-launch-cancel" class="button" type="button">取消</button>
         </div>
       </section>
     </div>
@@ -490,6 +529,24 @@
           >
             返回
           </button>
+        </div>
+      </section>
+    </div>
+    <div id="shared-wallpaper-playback-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="shared-wallpaper-playback-title">
+      <section class="modal-card wallpaper-playback-card">
+        <div class="modal-heading">
+          <h2 id="shared-wallpaper-playback-title">动态壁纸播放设置</h2>
+          <button id="shared-wallpaper-playback-close" class="icon-button" type="button" aria-label="关闭播放设置">×</button>
+        </div>
+        <div id="shared-wallpaper-playback" class="shared-wallpaper-playback">
+          <label><span>播放形式</span><select id="shared-wallpaper-start-mode" aria-label="播放形式"><option value="random">随机播放</option><option value="from-start">从头播放</option></select></label>
+          <label><span>跳过片头</span><select id="shared-wallpaper-skip" aria-label="跳过片头"></select></label>
+          <label><span>播放时长</span><select id="shared-wallpaper-length" aria-label="播放时长" aria-describedby="shared-wallpaper-duration-hint"></select></label>
+        </div>
+        <p id="shared-wallpaper-duration-hint" class="form-help"></p>
+        <p id="shared-wallpaper-playback-feedback" class="form-help hidden" role="status"></p>
+        <div class="modal-actions">
+          <button id="shared-wallpaper-playback-back" class="button" type="button">返回</button>
         </div>
       </section>
     </div>

@@ -104,6 +104,7 @@ async function fixture(options = {}) {
   const reads = { input: 0, config: 0 };
   let quickBusy = !!options.quickBusy, powerPhase = options.powerPhase || 'ready', coreProbeFailures = options.coreProbeFailures || 0;
   const calls = { cas: [], performance: [], core: [], clearCore: 0, conflicts: options.conflicts || 0, writeFailures: options.writeFailures || 0 };
+  if (options.wakeTdpReplay) calls.tdp = [];
   let settings = options.input || base();
   let config = { version: 1, entries: { 'a.exe': profile('steamdeck', 'fps'), 'b.exe': profile('follow', 'off') }, ...options.config };
   let rawCurrent = null, rawInitialized = false;
@@ -118,6 +119,7 @@ async function fixture(options = {}) {
   const detector = {
     getCurrentGame() { return rawCurrent ? { ...rawCurrent } : null; },
     isGameStatusInitialized() { return rawInitialized; },
+    isGameStatusPowerCurrent() { return true; },
     isGameStatusCurrent() { return rawInitialized && !strictFailure; },
     subscribeGameTargetReadiness(cb) { readinessListeners.add(cb); cb(detector.isGameStatusCurrent()); return () => readinessListeners.delete(cb); },
     isCurrentGameTarget(target) { return !!rawCurrent && rawCurrent.pid===target.pid && rawCurrent.processCreated===target.processCreated; },
@@ -160,6 +162,7 @@ async function fixture(options = {}) {
   };
 
   const powerListeners=new Map();let nativePower={phase:'ready',generation:100,known:true,hardwareWritesAllowed:true,inputReady:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:1};
+  if(options.wakeTdpReplay)nativePower.suspendSerial=7;
   const powerModule=load('src/bridge/powerLifecycleState.ts',{'./ipc':{invoke:()=>{throw Error('Use original fixture power read');},on:()=>()=>{}}},clock);
   const sharedPower=powerModule.createSharedPowerLifecycleSource({read:async()=>({...nativePower}),listen:(name,listener)=>{if(!powerListeners.has(name))powerListeners.set(name,new Set());powerListeners.get(name).add(listener);return()=>powerListeners.get(name).delete(listener);},clock});
   const stopPowerProbe=sharedPower.onSharedPowerLifecycle(()=>{});
@@ -172,15 +175,16 @@ async function fixture(options = {}) {
     const serviceRepository={...repository,loadSettings:async()=>({input:structuredClone(settings),performanceSchedule:{configured:false,enabled:false},extensions:{}}),SETTINGS_FILE:'Q:\\C129\\PowerControl\\yeman-settings.json',getSettingsGeneration:()=>1,assertSettingsGeneration:g=>assert.equal(g,1),getSettingsSectionRevision:()=>1,readSettingsSection:async()=>({}),replaceSettingsSection:async()=>{throw Error('Unexpected config migration');},saveSettingsSection:async()=>{throw Error('Unexpected durable user write');},updateSettings:async()=>{throw Error('Unexpected settings write');},rememberOrdinaryPerformancePreferences(){}};
     const coreModel=load('src/bridge/performanceControls.ts');
     actualConfigService=load('src/bridge/performanceSchedule.ts',{
+      './powerLifecycleState':{...sharedPower,isSharedPowerLifecycleAdmitted:powerModule.isSharedPowerLifecycleAdmitted},
       './settingsSnapshot':load('src/bridge/settingsSnapshot.ts'),'./controllerPersona':personas,'./performanceControls':coreModel,'./powerSource':{powerSourceMode:vue.ref('ac')},'./gamePolicyTarget':target,'./gamedetect':detector,
       './gameCorePolicy':{},'./api':{powerLifecycle:{get:async()=>({...nativePower})},fs:{exists:async p=>store.has(p),readTextFile:async p=>{if(configPort.fault==='read'&&p===file)throw Error('Owned config read denied after wake');if(configPort.fault==='hold'&&p===file){const raw=store.get(p);return new Promise(resolve=>configPort.releaseRead=()=>resolve(raw));}return store.get(p);},writeTextFileAtomic:async(p,v)=>{configPort.writes.push({path:p,content:v});store.set(p,v);}}},
-      './settingsRepository':serviceRepository,'./bootModeGlobalPreferences':load('src/bridge/bootModeGlobalPreferences.ts',{'./inputConfigHash':hash,'./settingsBaseline':baseline}),
+      './settingsRepository':{...serviceRepository,validateSettingsRead:async()=>{}},'./bootModeGlobalPreferences':load('src/bridge/bootModeGlobalPreferences.ts',{'./inputConfigHash':hash,'./settingsBaseline':baseline}),
       './frameRateLimits':{...frameModel,ensureGlobalFrameRates:async()=>frameModel.frameRatePair({}),loadGlobalFrameRates:async()=>frameModel.frameRatePair({})},
       './yeman':{getTdpHardwareMinimum:()=>2,getTdpHardwareMaximum:()=>150,detectPerformanceTemplate:async()=> 'portable'},'./cpuProfiles':{loadCpuProfiles:async()=>({profiles:{}})},'./autofloat':{},
     },clock);
     Object.assign(perf,{loadGameCustomConfig:actualConfigService.loadGameCustomConfig,onGameCustomConfigChanged:actualConfigService.onGameCustomConfigChanged,clearGameInputRestoreSnapshot:actualConfigService.clearGameInputRestoreSnapshot,
       loadPerformanceSchedule:actualConfigService.loadPerformanceSchedule,continuousControlsFromSchedule:actualConfigService.continuousControlsFromSchedule,continuousControlsForEntry:actualConfigService.continuousControlsForEntry,
-      reconcilePerformanceScheduleTdp:async()=>true,getInvalidPerformanceTdpTarget:()=>null,reconcileInvalidPerformanceTdp:async()=>false});
+      reconcilePerformanceScheduleTdp:async()=>{if(options.wakeTdpReplay)calls.tdp.push(nativePower.suspendSerial);return true;},getInvalidPerformanceTdpTarget:()=>null,reconcileInvalidPerformanceTdp:async()=>false});
   }
 
   const broadcastPower=async changes=>{nativePower={...nativePower,...changes};for(const cb of [...powerListeners.get('power.lifecycleChanged')||[]])cb({...nativePower});await flush();};
@@ -203,7 +207,7 @@ async function fixture(options = {}) {
       applyGameCorePolicy: async (game, mode, hyper) => { calls.core.push([game.pid, mode, hyper]); return { ok: true, applied: true }; },
       clearGameCorePolicy: async () => { calls.clearCore++; return true; },
     },
-  }, clock);
+  }, options.wakeTdpReplay?{...clock,Date:class extends Date{static now(){return now;}}}:clock);
   async function emit(game) { raw = game; rawCurrent=game ? { ...game } : null; rawInitialized=true; for (const cb of rawListeners) cb(detector.getCurrentGame()); await flush(); }
   async function tick(ms) {
     const end = now + ms; let limit = 100;
@@ -461,6 +465,33 @@ if(inputOwnerOnly)await check('公共睡眠配置：真实配置读取失败不�
    inputOwnerEvidence.push({kind,actualConfigService:true,pass:true,originalRetryMs:2000,finalInput:f.state(),finalResident:f.residentState()});
   }finally{f.stop();await flush();f.assertClosed();}
  }
+});
+
+if(inputOwnerOnly)await check('resident TDP repeats bounded checks only for a new committed sleep scope',async()=>{
+ const entry=profile('steamdeck','fps');entry.ac.tdpMax=25;entry.dc.tdpMax=15;
+ const f=await fixture({actualConfig:true,actualConfigResident:true,wakeTdpReplay:true,config:{entries:{'a.exe':entry}}});
+ try{
+  await f.pokeRetry();await f.tick(4000);await f.pokeRetry();await f.tick(8000);await f.pokeRetry();
+  const settled=f.calls.tdp.slice();
+  assert(settled.length>=2&&settled.every(serial=>serial===7),JSON.stringify({settled,resident:f.residentState()}));
+  assert.equal(f.residentState().tdpPending,false);
+  const same={publicationRevision:2,observedNotificationSequence:2};
+  await f.broadcastPower(same);await f.pokeRetry();
+  assert.deepEqual(f.calls.tdp,settled,'notification-only updates cannot reopen healthy hardware checks');
+  await f.broadcastPower({publicationRevision:3,suspendSerial:8});await f.pokeRetry();
+  assert.deepEqual(f.calls.tdp,[...settled,8],'same-generation committed Ready must verify TDP after a new physical sleep');
+  await f.broadcastPower({publicationRevision:4});await f.pokeRetry();
+  assert.deepEqual(f.calls.tdp,[...settled,8]);
+  await f.tick(4000);await f.pokeRetry();await f.tick(8000);await f.pokeRetry();
+  assert.deepEqual(f.calls.tdp,[...settled,8,8,8]);assert.equal(f.residentState().tdpPending,false);
+  await f.broadcastPower({publicationRevision:5,suspendSerial:9,notificationPending:true,hardwareWritesAllowed:false});await f.pokeRetry();
+  assert.deepEqual(f.calls.tdp,[...settled,8,8,8],'a new serial cannot start hardware checks before public admission');
+  await f.broadcastPower({publicationRevision:6,notificationPending:false,hardwareWritesAllowed:true});await f.pokeRetry();
+  assert.deepEqual(f.calls.tdp,[...settled,8,8,8,9],'commit after a denied snapshot must retain the new serial');
+  await f.broadcastPower({publicationRevision:7,suspendSerial:8});await f.pokeRetry();
+  assert.deepEqual(f.calls.tdp,[...settled,8,8,8,9],'an old Ready cannot reopen its checks');
+  inputOwnerEvidence.push({kind:'resident-tdp-public-suspend-boundary',checksBySuspendSerial:f.calls.tdp,hardwareIo:false});
+ }finally{f.stop();await flush();f.assertClosed();}
 });
 
 if(inputOwnerOnly)await check('公共睡眠输入覆盖：旧配置读取未归还时同游戏新Ready可接续',async()=>{
@@ -762,7 +793,7 @@ await check('常驻轮询/重试不随窗口隐藏暂停；原始终止游戏动
   const quick=fs.readFileSync(path.join(root,'src/components/GameQuickActions.vue'),'utf8');assert(quick.includes(':game="policyGame"'));// Validation moved behind ensureTarget -> captureAndLockGameTarget. Keep
   // the same immediate/current-identity invariant instead of a stale direct-import token.
   const close=quick.match(/^async function closeCurrentGame\(\)[^]*?^\}/m)?.[0];assert(close);
-  assert.match(close,/target = await ensureTarget\(\);\s*assertActionTarget\(target\);\s*const result = await closeGame\(target.pid, target.name, target.processCreated\)/);
+  assert.match(close,/target = await ensureTarget\(\);\s*assertActionTarget\(target\);[^]*?const result = await closeGame\(target.pid, target.name, target.processCreated, target\)/);
   assert(!/setTimeout|setInterval|registerScheduledTask/.test(close));
   assert(quick.includes("await captureAndLockGameTarget(candidate, 'action')"));
   const session=fs.readFileSync(path.join(root,'src/bridge/gameQuickSession.ts'),'utf8');
@@ -791,12 +822,14 @@ function detectionFixture(detectorSource = null, { sharedTransport = false } = {
   });
   const win = eventTarget(events), doc = { ...eventTarget(documentEvents), visibilityState:'hidden' };
   const f = { native:null, hold:false, messages, timers, events, scheduler:null, detector:null, policy:null, schedules:[] };
+  f.menuWindow=win;
   f.abortRecords=[];class ReadAbortController extends AbortController {constructor(){super();const signal=this.signal,record={signal,callbacks:new Set()},add=signal.addEventListener.bind(signal),remove=signal.removeEventListener.bind(signal);f.abortRecords.push(record);signal.addEventListener=(type,listener,options)=>{if(type==='abort')record.callbacks.add(listener);return add(type,listener,options);};signal.removeEventListener=(type,listener,options)=>{if(type==='abort')record.callbacks.delete(listener);return remove(type,listener,options);};}}
-  const clock = {AbortController:ReadAbortController,performance:{now:()=>now},setTimeout(fn,ms){const id=++seq;timers.set(id,{at:now+ms,fn});return id;},clearTimeout(id){timers.delete(id);},
+  f.readAbortController=ReadAbortController;
+  const clock = {AbortController:ReadAbortController,crypto:globalThis.crypto,performance:{now:()=>now},setTimeout(fn,ms){const id=++seq;timers.set(id,{at:now+ms,fn});return id;},clearTimeout(id){timers.delete(id);},
     window:win,document:doc,CustomEvent:class{constructor(type,opts){this.type=type;this.detail=opts?.detail;}},queueMicrotask};
   Object.assign(win,{setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,chrome:{webview:{
     addEventListener(_name,cb){bridgeListeners.push(cb);},
-    postMessage(msg){messages.push(structuredClone(msg));if(f.metadata && msg.cmd==='gameSteam.context.get')return;if(msg.cmd!=='game.detect')throw Error('Unexpected native IO '+msg.cmd);if(f.hold)return;
+    postMessage(msg){messages.push(structuredClone(msg));if(f.pauseFilePort?.(msg))return;if(f.metadata && msg.cmd==='gameSteam.context.get')return;if(msg.cmd!=='game.detect')throw Error('Unexpected native IO '+msg.cmd);if(f.hold)return;
       const value=msg.args?.pid && f.native?.valid!==false && msg.args.pid!==f.native?.pid?null:structuredClone(f.native);
       queueMicrotask(()=>f.reply(msg.id,value));},
   }}});
@@ -807,6 +840,10 @@ function detectionFixture(detectorSource = null, { sharedTransport = false } = {
   f.show=()=>{visible=true;doc.visibilityState='visible';doc.dispatchEvent({type:'visibilitychange'});};
   f.advance=async(ms)=>{const end=now+ms;for(let guard=0;guard<1000;guard++){const due=[...timers].filter(([,t])=>t.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!due)break;now=Math.max(now,due[1].at);timers.delete(due[0]);due[1].fn();await flushDetection();}now=end;await flushDetection();};
   const ipc=load('src/bridge/ipc.ts',{},clock);
+  f.loadGameControl=(detector=f.detector)=>{
+    const api=load('src/bridge/api.ts',{'./ipc':ipc,'./steamInstallationFacts':{createSteamInstallationReader:()=>()=>{}},'./bootModeGlobalPreferences':{captureBootPreferenceWrite(options){assert.equal(options.bootContext,undefined);return {origin:options.origin};}}},clock);
+    return load('src/bridge/gameproc.ts',{'./ipc':ipc,'./api':api,'./gamedetect':detector,'./powerLifecycleState':{...f.powerModule,...f.sharedPower}},clock);
+  };
   f.power={phase:'ready',generation:100,known:true,hardwareWritesAllowed:true,inputReady:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:1};
   const powerModule=load('src/bridge/powerLifecycleState.ts',{'./ipc':{invoke:()=>{throw Error('Unexpected shared singleton read');},on:()=>()=>{}}},clock);
   f.sharedPower=powerModule.createSharedPowerLifecycleSource({read:async()=>{const state={...f.power};return f.powerReadHook?f.powerReadHook(state):state;},listen:sharedTransport?ipc.on:(name,listener)=>{if(!events.has('public:'+name))events.set('public:'+name,new Set());events.get('public:'+name).add(listener);return()=>events.get('public:'+name).delete(listener);},clock:{setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}});
@@ -822,6 +859,1074 @@ function detectionFixture(detectorSource = null, { sharedTransport = false } = {
 }
 const TMNT={pid:11752,processCreated:'134372974230246308',name:'tmnt',title:"Teenage Mutant Ninja Turtles: Shredder's Revenge",path:'E:\\GAME\\Teenage Mutant Ninja Turtles Shredders Revenge Radical Reptiles\\TMNT.exe',source:'whitelist',whitelistRule:'tmnt',ts:1792823823460};
 function blockDisplayScheduler(f) { return f.scheduler.registerScheduledTask('inert-slow-policy',2000,()=>new Promise(()=>{}),{runImmediately:true,pauseWhenHidden:false}); }
+function quickMenuControlFixture(f, { actualSuspend = false, ensureTarget = async () => f.detector.getCurrentGame() } = {}) {
+ const raw=fs.readFileSync(path.join(root,'src/components/GameQuickActions.vue'),'utf8');
+ const ts=require('typescript'),descriptor=parse(raw).descriptor;
+ const ast=ts.createSourceFile('GameQuickActions.ts',descriptor.scriptSetup.content,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
+ const names=new Set(['refreshMenuState','flushMenuStateRefresh','refreshControlState','retireControlStateRead','togglePause','closeCurrentGame','onTargetReadiness','onWakeGameRecovery','onSuspendedStateSync']);
+ const states=new Set(['disposed','menuStateEpoch','taskViewSessionEpoch','controlStateRead','resumePreflight','targetEpoch','losslessReadEpoch','menuStateRefreshPending','stopTargetReadiness','stopPolicyGame','stopWakeGameRecovery','wakeGameRecoveryRevision']);
+ const state=ast.statements.filter(ts.isVariableStatement).flatMap(n=>[...n.declarationList.declarations]).filter(d=>states.has(d.name.getText(ast))).map(d=>'let '+d.getText(ast)+';');
+ const calls=ast.statements.filter(ts.isExpressionStatement).filter(n=>ts.isCallExpression(n.expression)).filter(n=>{
+  const call=n.expression,name=call.expression.getText(ast),first=call.arguments[0]?.getText(ast);
+  return ['onMounted','onBeforeUnmount'].includes(name)||name==='watch'&&(first==='() => props.open'||first==='disabledForAction');
+ });
+ const funcs=ast.statements.filter(n=>ts.isFunctionDeclaration(n)&&names.has(n.name?.text));
+ assert(calls.some(n=>n.expression.expression.getText(ast)==='onMounted')&&funcs.length>=4,'extract actual menu lifecycle and control reads');
+ const props=vue.reactive({open:true}),busy=vue.ref(false),pauseBusy=vue.ref(false),closeBusy=vue.ref(false),paused=vue.ref(false),reads=[],stops=[];
+ const disabledForAction=vue.computed(()=>busy.value||pauseBusy.value);
+ let unmount,hold=null,holdCommand='fs.exists',stateSuspended=true;
+ const original=JSON.stringify({root:TMNT.pid,processes:[{pid:TMNT.pid,processCreated:TMNT.processCreated}]});
+ const gameControl=f.loadGameControl();
+ f.pauseFilePort=msg=>{
+  if(msg.cmd==='game.resume')return true;
+  if(msg.cmd==='game.pauseRecord.settle'){
+   const actual=stateSuspended?original:null;
+   const answer=actual===msg.args.raw||actual===msg.args.expected?'committed':'changed';
+   if(answer==='committed')stateSuspended=msg.args.raw!==null;
+   queueMicrotask(()=>f.reply(msg.id,answer));return true;
+  }
+  if(!['fs.exists','fs.readTextFile'].includes(msg.cmd))return false;
+  assert(msg.args.path.endsWith('quickapp_suspended.json')||msg.args.path.endsWith('manual-suspended\\'+TMNT.pid+'.txt'));
+  const send=()=>f.reply(msg.id,msg.cmd==='fs.exists'?stateSuspended:original);
+  if(hold&&msg.cmd===holdCommand){const pending=hold;hold=null;void pending.then(value=>f.reply(msg.id,value));}
+  else queueMicrotask(send);
+  return true;
+ };
+ const source=[...state,...funcs.map(n=>n.getText(ast)),...calls.map(n=>n.getText(ast)),'export {togglePause,closeCurrentGame};'].join(String.fromCharCode(10));
+ const noop=()=>{};
+ const action=evaluate(source,{}, {props,paused,pauseBusy,closeBusy,locked:{value:null},disabledForAction,
+  nextTick:vue.nextTick,watch:(...args)=>stops.push(vue.watch(...args)),onMounted:callback=>callback(),onBeforeUnmount:callback=>{unmount=callback;},
+  window:f.menuWindow,AbortController:f.readAbortController,
+  getCurrentGame:f.detector.getCurrentGame,isGameStatusCurrent:f.detector.isGameStatusCurrent,subscribeGameTargetReadiness:f.detector.subscribeGameTargetReadiness,
+  onSharedPowerLifecycle:f.sharedPower.onSharedPowerLifecycle,isSharedPowerLifecycleAdmitted:f.powerModule.isSharedPowerLifecycleAdmitted,
+  getSharedPowerLifecycle:f.sharedPower.getSharedPowerLifecycle,sharedPowerWriteScope:f.powerModule.sharedPowerWriteScope,
+  // Use the authoritative identity stream directly so the app's permanent
+  // policy subscriber is not part of this owned menu's cleanup check.
+  subscribePolicyGameStatus:f.detector.subscribeGameStatus,isTargetCurrent:target=>target?f.detector.isCurrentGameTarget(target):f.detector.getCurrentGame()===null,
+  targetGame:{get value(){return f.detector.getCurrentGame();}},getLockedGameTarget:()=>null,syncCurrentTarget:noop,
+  hasSuspendedState:(pid,birth,signal)=>{const read={pid,birth,signal,settled:false};reads.push(read);return gameControl.hasSuspendedState(pid,birth,signal).finally(()=>{read.settled=true;});},
+  resumeGame:gameControl.resumeGame,suspendGame:actualSuspend?gameControl.suspendGame:()=>{throw Error('unexpected suspend');},status:noop,
+  closeGame:gameControl.closeGame,releaseTarget:noop,refreshGameStatusStrict:f.detector.refreshGameStatusStrict,
+  ensureTarget,assertActionTarget:target=>assert(f.detector.isCurrentGameTarget(target)),isActionTargetCurrent:f.detector.isCurrentGameTarget,
+  taskViewTouch:{cancel:noop},trainerMenuOpen:{value:false},trainerCancelRequested:{value:false},trainerStateRevision:{value:0},
+  stopLosslessObservation:noop,stopLosslessState:noop,stopTrainerState:noop,retainLosslessObservation:()=>noop,onLosslessScalingChanged:()=>noop,
+  subscribeGameTrainerState:()=>noop,refreshLosslessState:noop,refreshSpeedState:noop,closeLosslessMenu:noop,fsrResolve:null,
+  onGamepadBack:noop,resizeOptiDialog:noop,onTargetLost:noop,refreshGame:noop,QUICKAPP_SUSPENDED_EVENT:'quickapp:suspended-state',
+ });
+ return {props,busy,paused,pauseBusy,closeBusy,reads,togglePause:action.togglePause,closeCurrentGame:action.closeCurrentGame,closeGame:gameControl.closeGame,setSuspended(value){stateSuspended=value;},holdRead(promise,cmd='fs.exists'){hold=promise;holdCommand=cmd;},close(){unmount();for(const stop of stops)stop();}};
+}
+await check('non-Steam quick menu rereads pause after coalesced Ready without a feature receipt',async()=>{
+ const f=detectionFixture(),block=blockDisplayScheduler(f),seen=[];
+ f.broadcastPower({...f.power,suspendSerial:0});f.native=versionedGame(TMNT,10,10);
+ const stop=f.detector.subscribeGameStatus(game=>seen.push(game));let menu,releaseOld,releaseClosed;
+ try{
+  await f.detector.refreshGameStatusStrict();await flushDetection();assert(f.detector.isGameStatusCurrent());
+  menu=quickMenuControlFixture(f);await flushDetection();
+  assert.equal(menu.paused.value,true);assert.equal(menu.reads.length,1);
+  menu.holdRead(new Promise(resolve=>{releaseOld=resolve;}));
+  f.signal('quickapp:suspended-state');await flushDetection();assert.equal(menu.reads.length,2);
+  const identityPublications=seen.length,previous={...f.power};
+  menu.busy.value=true;menu.setSuspended(false);
+  f.native=versionedGame(TMNT,12,10);
+  f.broadcastPower({...previous,publicationRevision:2,suspendSerial:1});await f.advance(1250);
+  assert(f.detector.isGameStatusCurrent());assert.equal(seen.length,identityPublications);
+  assert.equal(menu.reads.length,2,'the recovered read must wait for the busy menu');
+  assert.equal(menu.reads[1].settled,true,'public readiness loss retained the old pause read');
+  assert.equal(menu.reads[1].signal?.aborted,true);
+  const beforeLate=f.messages.length;
+  releaseOld(false);await flushDetection();
+  assert.equal(f.messages.length,beforeLate,'old exists reply started another file query');
+  assert.equal(menu.paused.value,true,'old pause read overwrote the current target before the successor read');
+  menu.busy.value=false;await flushDetection();
+  assert.equal(menu.reads.length,3,'same game and public Ready must reread once without a feature receipt');
+  assert.equal(menu.paused.value,false);
+  assert(menu.reads.every(row=>row.pid===TMNT.pid&&row.birth===TMNT.processCreated));
+  menu.props.open=false;await flushDetection();
+  f.native=versionedGame(TMNT,13,10);
+  f.broadcastPower({...f.power,publicationRevision:3,suspendSerial:2});await f.advance(1250);
+  assert.equal(menu.reads.length,3,'a closed menu did not release its read demand');
+  menu.setSuspended(true);menu.holdRead(new Promise(resolve=>{releaseClosed=resolve;}),'fs.readTextFile');
+  menu.props.open=true;await flushDetection();assert.equal(menu.reads.length,4);assert.equal(menu.reads[3].settled,false);
+  assert.equal(f.messages.at(-1).cmd,'fs.readTextFile');
+  menu.props.open=false;await flushDetection();
+  assert.equal(menu.reads[3].settled,true,'closing the menu retained the old record read');
+  assert.equal(menu.reads[3].signal?.aborted,true);
+  releaseClosed(JSON.stringify({root:TMNT.pid,processes:[{pid:TMNT.pid,processCreated:TMNT.processCreated}]}));await flushDetection();
+  assert.equal(menu.paused.value,false,'late file content changed the closed menu');
+ }finally{releaseOld?.(false);releaseClosed?.('');menu?.close();stop();block();f.stopPowerProbe();}
+ await flushDetection();
+ assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);
+ assert.equal(f.timers.size,0);
+ assert(f.abortRecords.every(r=>r.callbacks.size===0),'pause status retained an abort listener');
+});
+await check('non-Steam menu receives completed wake from the public snapshot',async()=>{
+ const f=detectionFixture(null,{sharedTransport:true}),block=blockDisplayScheduler(f);
+ const initial={...f.power,suspendSerial:0};
+ f.broadcastPower(initial);f.native=versionedGame(TMNT,10,10);
+ const off=f.detector.subscribeGameStatus(()=>{});let menu,releaseOld;
+ const commands=cmd=>f.messages.filter(m=>m.cmd===cmd);
+ try{
+  await f.detector.refreshGameStatusStrict();menu=quickMenuControlFixture(f);await flushDetection();assert(menu.paused.value);
+  menu.holdRead(new Promise(resolve=>{releaseOld=resolve;}),'fs.readTextFile');
+  f.native=versionedGame(TMNT,11,10);
+  const ready={...initial,publicationRevision:2,suspendSerial:1,observedNotificationSequence:2};
+  f.broadcastPower(ready);await flushDetection();
+  const old=menu.reads.at(-1);assert(old&&!old.settled);
+  const observed=menu.reads.length;
+  menu.setSuspended(false);
+  const completed={...ready,gameWakeRecoveryRevision:1};
+  f.broadcastPower(completed);await flushDetection();
+  assert(old.signal.aborted,'a lost private completion must retire the in-flight old pause read');
+  assert.equal(menu.reads.length,observed+1);
+  assert.equal(menu.paused.value,false);
+  releaseOld(JSON.stringify({root:TMNT.pid,processes:[{pid:TMNT.pid,processCreated:TMNT.processCreated}]}));
+  f.broadcastPower(ready);f.broadcastPower(completed);await flushDetection();
+  assert.equal(menu.reads.length,observed+1,'old and duplicate snapshots must not reread');
+  assert.equal(menu.paused.value,false);
+
+  const pending={...completed,publicationRevision:3,suspendSerial:2,observedNotificationSequence:3,
+   phase:'resuming',hardwareWritesAllowed:false,notificationPending:true,gameWakeRecoveryRevision:2};
+  f.broadcastPower(pending);await flushDetection();
+  assert.equal(menu.reads.length,observed+1,'a terminal notice cannot grant current read admission');
+  f.native=versionedGame(TMNT,12,10);
+  f.broadcastPower({...pending,publicationRevision:4,phase:'ready',hardwareWritesAllowed:true,notificationPending:false});
+  await f.detector.refreshGameStatusStrict();await flushDetection();
+  assert.equal(menu.reads.length,observed+2,'the current Ready observes the retained change once');
+  assert.equal(commands('game.resume').length,0);
+  assert.equal(commands('game.pauseRecord.settle').length,0);
+ }finally{releaseOld?.('');menu?.close();off();block();f.stopPowerProbe();}
+ await flushDetection();assert.equal(f.timers.size,0);assert(f.abortRecords.every(r=>r.callbacks.size===0));
+});
+await check('non-Steam pause button cannot reuse an older click after target validation',async()=>{
+ for(const boundary of ['coalesced-ready','notification-only','metadata-only']){
+  const f=detectionFixture(null,{sharedTransport:true}),block=blockDisplayScheduler(f);
+  const initial={...f.power,suspendSerial:0};f.broadcastPower(initial);f.native=versionedGame(TMNT,10,10);
+  const stop=f.detector.subscribeGameStatus(()=>{});let menu,release;
+  const commands=()=>f.messages.filter(msg=>msg.cmd==='game.resume'||msg.cmd==='game.suspend');
+  const settled=()=>f.messages.filter(msg=>msg.cmd==='game.pauseRecord.settle');
+  try{
+   await f.detector.refreshGameStatusStrict();
+   const target=f.detector.getCurrentGame();let pending=new Promise(resolve=>{release=()=>resolve(target);});
+   menu=quickMenuControlFixture(f,{ensureTarget:async()=>{const waiting=pending;pending=null;return waiting?await waiting:f.detector.getCurrentGame();}});
+   await flushDetection();assert(menu.paused.value);
+   const file=f.pauseFilePort;f.pauseFilePort=msg=>{
+    if(msg.cmd!=='game.resume')return file(msg);
+    queueMicrotask(()=>f.reply(msg.id,{resumed:1,failedPids:[],stalePids:[]}));return true;
+   };
+   const old=menu.togglePause();await flushDetection();assert(menu.pauseBusy.value);assert.equal(commands().length,0);
+   f.native=versionedGame(TMNT,11,10);
+   f.broadcastPower({...initial,publicationRevision:2,suspendSerial:boundary==='coalesced-ready'?1:0,
+     observedNotificationSequence:boundary==='metadata-only'?1:2});
+   await f.detector.refreshGameStatusStrict();await flushDetection();
+   assert(f.detector.isCurrentGameTarget(target),'same PID, birth and identity remain current');
+   release();await old;await flushDetection();
+   assert.equal(menu.pauseBusy.value,false,boundary+' must release the old button action');
+   const valid=boundary==='metadata-only';
+   assert.equal(commands().length,valid?1:0,boundary+' must not submit a click from an older public scope');
+   assert.equal(settled().length,valid?1:0,boundary+' must not settle an unsent command');
+   if(!valid){assert(menu.paused.value);await menu.togglePause();await flushDetection();}
+   assert.equal(commands().length,1,boundary+' current explicit resume submits once');
+   assert.equal(settled().length,1);assert.equal(menu.paused.value,false);
+  }finally{release?.();menu?.close();stop();block();f.stopPowerProbe();}
+  await flushDetection();assert.equal(f.timers.size,0);assert(f.abortRecords.every(record=>record.callbacks.size===0));
+ }
+});
+for(const stage of ['menu target validation','bridge target validation']){
+ await check(`non-Steam close retires a click across ${stage}`,async()=>{
+  for(const changed of [true,false]){
+   const f=detectionFixture(null,{sharedTransport:true}),block=blockDisplayScheduler(f);
+   const initial={...f.power,suspendSerial:0};f.broadcastPower(initial);f.native=versionedGame(TMNT,10,10);
+   const stop=f.detector.subscribeGameStatus(()=>{});let menu,release;
+   const closePosts=()=>f.messages.filter(msg=>msg.cmd==='game.close');
+   try{
+    await f.detector.refreshGameStatusStrict();
+    const target=f.detector.getCurrentGame();assert(target);let entered=false;
+    const held=new Promise(resolve=>{release=resolve;});
+    const delayOnce=async value=>{if(!entered){entered=true;await held;}return value;};
+    let click;
+    if(stage==='menu target validation'){
+     menu=quickMenuControlFixture(f,{ensureTarget:()=>delayOnce(f.detector.getCurrentGame())});
+     click=menu.closeCurrentGame;
+    }else{
+     const game=f.loadGameControl({...f.detector,detectGame:async (...args)=>delayOnce(await f.detector.detectGame(...args))});
+     click=()=>game.closeGame(target.pid,target.name,target.processCreated,target);
+    }
+    const file=f.pauseFilePort;f.pauseFilePort=msg=>{
+     if(msg.cmd!=='game.close')return file?.(msg);
+     queueMicrotask(()=>f.reply(msg.id,{ok:false,attempted:false,exited:false}));return true;
+    };
+    const old=click();await flushDetection();assert(entered);assert.equal(closePosts().length,0);
+    f.native=versionedGame(TMNT,11,10);
+    f.broadcastPower({...initial,publicationRevision:2,suspendSerial:Number(changed),observedNotificationSequence:changed?2:1});
+    await f.detector.refreshGameStatusStrict();await flushDetection();
+    assert(f.detector.isCurrentGameTarget(target),'the same game is still the current target');
+    release();await old;await flushDetection();
+    if(menu)assert.equal(menu.closeBusy.value,false,'closing state is released');
+    assert.equal(closePosts().length,changed?0:1,'only a current power scope can close a game');
+    if(changed){await click();await flushDetection();assert.equal(closePosts().length,1,'a fresh click can close the same game');}
+    assert.equal(f.messages.filter(msg=>msg.cmd==='game.pauseRecord.settle').length,0);
+   }finally{release?.();menu?.close();stop();block();f.stopPowerProbe();}
+   await flushDetection();assert.equal(f.timers.size,0);
+  }
+ });
+}
+await check('non-Steam resume retires unsent preflight and waits for a submitted receipt',async()=>{
+ const f=detectionFixture(),block=blockDisplayScheduler(f);f.broadcastPower({...f.power,suspendSerial:0});f.native=versionedGame(TMNT,10,10);
+ const stop=f.detector.subscribeGameStatus(()=>{});let menu,releaseOld,releaseTimed,releaseUnreadable;
+ const resumeMessages=()=>f.messages.filter(msg=>msg.cmd==='game.resume');
+ const recordChanges=()=>f.messages.filter(msg=>msg.cmd==='game.pauseRecord.settle'||msg.cmd==='fs.writeTextFileAtomic');
+ const payload=JSON.stringify({root:TMNT.pid,pids:[TMNT.pid],processes:[{pid:TMNT.pid,processCreated:TMNT.processCreated}]});
+ try{
+  await f.detector.refreshGameStatusStrict();menu=quickMenuControlFixture(f);await flushDetection();assert(menu.paused.value);
+  menu.holdRead(new Promise(resolve=>{releaseOld=resolve;}));
+  const first=menu.togglePause();await flushDetection();assert(menu.pauseBusy.value);assert.equal(f.messages.at(-1).cmd,'fs.exists');
+  f.native=versionedGame(TMNT,11,10);f.broadcastPower({...f.power,publicationRevision:2,observedNotificationSequence:2,suspendSerial:1});await flushDetection();
+  assert(!menu.pauseBusy.value,'a coalesced Ready retained the unsent resume preflight');await first;
+  assert(menu.paused.value);assert.equal(resumeMessages().length,0);
+  releaseOld(true);await flushDetection();assert.equal(resumeMessages().length,0,'an old file reply dispatched resume');
+
+  menu.holdRead(new Promise(resolve=>{releaseTimed=resolve;}),'fs.readTextFile');
+  const timed=menu.togglePause();await flushDetection();assert.equal(f.messages.at(-1).cmd,'fs.readTextFile');
+  await f.advance(4999);assert(menu.pauseBusy.value);await f.advance(1);
+  assert(!menu.pauseBusy.value,'missing record read kept the control queue busy past its budget');await timed;
+  assert(menu.paused.value);assert.equal(resumeMessages().length,0);
+  releaseTimed(payload);await flushDetection();assert.equal(resumeMessages().length,0);
+
+  menu.holdRead(new Promise(resolve=>{releaseUnreadable=resolve;}),'fs.readTextFile');
+  const unreadable=menu.togglePause();await flushDetection();
+  const unreadableRequest=f.messages.at(-1);assert.equal(unreadableRequest.cmd,'fs.readTextFile');
+  f.fail(unreadableRequest.id,'fixture sharing denied');await unreadable;
+  assert(!menu.pauseBusy.value);assert(menu.paused.value);
+  assert.equal(resumeMessages().length,0);assert.equal(recordChanges().length,0);
+  releaseUnreadable(payload);await flushDetection();assert.equal(resumeMessages().length,0);
+
+  const submitted=menu.togglePause();await flushDetection();assert.equal(resumeMessages().length,1);
+  const request=resumeMessages()[0];assert.deepEqual(request.args.pids,[{pid:TMNT.pid,processCreated:TMNT.processCreated}]);
+  f.native=versionedGame(TMNT,12,10);f.broadcastPower({...f.power,publicationRevision:3,observedNotificationSequence:3,suspendSerial:2});await flushDetection();
+  assert(menu.pauseBusy.value,'power change released an already submitted command');
+  await menu.togglePause();assert.equal(resumeMessages().length,1);
+  const file=f.pauseFilePort;
+  f.pauseFilePort=msg=>msg.cmd==='game.resume.status'||file(msg);
+  const result={resumed:1,failedPids:[],stalePids:[]};
+  f.reply(request.id,result);await submitted;await flushDetection();
+  assert(menu.paused.value);assert.equal(recordChanges().length,0);
+  const receipts=f.messages.filter(msg=>msg.cmd==='game.resume.status');assert.equal(receipts.length,1);
+  assert.equal(receipts[0].args.requestId,request.args.requestId);
+  f.reply(receipts[0].id,{requestId:request.args.requestId,state:'completed',result});await flushDetection();
+  assert(!menu.pauseBusy.value);assert(!menu.paused.value);assert.equal(resumeMessages().length,1);
+  assert.equal(recordChanges().length,1);assert.equal(recordChanges()[0].cmd,'game.pauseRecord.settle');assert.equal(recordChanges()[0].args.raw,null);
+ }finally{releaseOld?.(true);releaseTimed?.(payload);releaseUnreadable?.(payload);for(const request of resumeMessages())f.reply(request.id,{resumed:1});menu?.close();stop();block();f.stopPowerProbe();}
+ await flushDetection();assert.equal(f.timers.size,0);assert(f.abortRecords.every(record=>record.callbacks.size===0));
+});
+await check('non-Steam resume resolves a lost reply by receipt without replay',async()=>{
+ for(const outcome of ['ready','completed-event','changed-record','unknown','expired']){
+  const f=detectionFixture();f.broadcastPower({...f.power,suspendSerial:0});f.native=versionedGame(TMNT,10,10);
+  const stop=f.detector.subscribeGameStatus(()=>{});let menu;
+  const requests=command=>f.messages.filter(msg=>msg.cmd===command);
+  const result={resumed:1,failedPids:[],stalePids:[]};
+  try{
+   await f.detector.refreshGameStatusStrict();menu=quickMenuControlFixture(f);await flushDetection();assert(menu.paused.value);
+   const file=f.pauseFilePort;let state='running',different=false;
+   f.pauseFilePort=msg=>{
+    if(msg.cmd==='game.resume.status'){
+     const response={requestId:msg.args.requestId,state};
+     if(state==='completed')response.result=result;
+     if(state==='expired'){response.state='completed';response.error='expired before execution';}
+     queueMicrotask(()=>f.reply(msg.id,response));return true;
+    }
+    if(different&&msg.cmd==='game.pauseRecord.settle'){
+     queueMicrotask(()=>f.reply(msg.id,'changed'));return true;
+    }
+    return file(msg);
+   };
+   const first=menu.togglePause();await flushDetection();
+   const [submitted]=requests('game.resume');assert(submitted);assert(menu.pauseBusy.value);
+   await f.advance(7999);assert(menu.pauseBusy.value);await f.advance(1);
+   assert(!menu.pauseBusy.value,'lost reply kept the menu busy');await first;
+   assert.equal(requests('game.resume.status').length,1);assert.equal(requests('game.pauseRecord.settle').length,0);
+   await menu.togglePause();assert.equal(requests('game.resume').length,1);assert.equal(requests('game.resume.status').length,2);
+   state=outcome==='unknown'||outcome==='expired'?outcome:'completed';
+   different=outcome==='changed-record';
+   if(outcome==='ready'){
+    f.native=versionedGame(TMNT,11,10);f.broadcastPower({...f.power,publicationRevision:2,observedNotificationSequence:2,suspendSerial:1});
+   } else if(outcome==='completed-event'||outcome==='changed-record'){
+    f.emitNative('game.resume.completed',{requestId:'other-request'});await flushDetection();
+    assert.equal(requests('game.resume.status').length,2);
+    f.emitNative('game.resume.completed',{requestId:submitted.args.requestId});
+   } else await menu.togglePause();
+   await flushDetection();
+   assert.equal(requests('game.resume').length,1);
+   assert.deepEqual(requests('game.resume.status').map(row=>row.args.requestId),Array(3).fill(submitted.args.requestId));
+   f.reply(submitted.id,result);await flushDetection();
+   const cleaned=outcome==='ready'||outcome==='completed-event';
+   assert.equal(requests('game.pauseRecord.settle').length,Number(cleaned||outcome==='changed-record'),outcome);
+   assert.equal(menu.paused.value,!cleaned,outcome);
+   assert.equal(f.events.get('ipc:game.resume.completed')?.size??0,0);
+  }finally{menu?.close();stop();f.stopPowerProbe();}
+  await flushDetection();assert.equal(f.timers.size,0);
+ }
+ for(const operation of ['write','delete'])for(const committedBeforeLoss of [false,true]){
+  const f=detectionFixture();f.broadcastPower({...f.power,suspendSerial:0});f.native=versionedGame(TMNT,10,10);
+  const stop=f.detector.subscribeGameStatus(()=>{});let menu;
+  const saved=JSON.stringify({root:TMNT.pid,pids:[TMNT.pid,33],processes:[{pid:TMNT.pid,processCreated:TMNT.processCreated},{pid:33,processCreated:'321'}]});
+  const requests=cmd=>f.messages.filter(msg=>msg.cmd===cmd);
+  let observed=saved,attempts=0,writes=0;
+  try{
+   await f.detector.refreshGameStatusStrict();menu=quickMenuControlFixture(f);await flushDetection();
+   const file=f.pauseFilePort;
+   f.pauseFilePort=msg=>{
+    if(msg.cmd==='game.resume'){
+     queueMicrotask(()=>f.reply(msg.id,{resumed:1,failedPids:operation==='write'?[33]:[],stalePids:[]}));return true;
+    }
+    if(msg.cmd==='game.pauseRecord.settle'){
+     attempts++;assert.equal(msg.args.expected,saved);
+     if(attempts>1||committedBeforeLoss){
+      if(observed!==msg.args.raw){assert.equal(observed,msg.args.expected);observed=msg.args.raw;writes++;}
+     }
+     if(attempts>1)queueMicrotask(()=>f.reply(msg.id,'committed'));
+     return true;
+    }
+    if(msg.cmd==='fs.readTextFile'){queueMicrotask(()=>f.reply(msg.id,observed));return true;}
+    if(msg.cmd==='fs.exists'){queueMicrotask(()=>f.reply(msg.id,observed!==null));return true;}
+    return file(msg);
+   };
+   const first=menu.togglePause();await flushDetection();assert(menu.pauseBusy.value);assert.equal(attempts,1);
+   await f.advance(4999);assert(menu.pauseBusy.value);await f.advance(1);await first;
+   assert(!menu.pauseBusy.value);assert.equal(writes,Number(committedBeforeLoss));
+   if(committedBeforeLoss){
+    f.native=versionedGame(TMNT,11,10);f.broadcastPower({...f.power,publicationRevision:2,observedNotificationSequence:2,suspendSerial:1});
+   }else await menu.togglePause();
+   await flushDetection();
+   assert.equal(requests('game.resume').length,1);assert.equal(requests('game.resume.status').length,0);
+   const commits=requests('game.pauseRecord.settle');assert.equal(commits.length,2);assert.deepEqual(commits[1].args,commits[0].args);
+   assert.equal(writes,1);assert.equal(observed,commits[0].args.raw);
+   if(operation==='write')assert.deepEqual(JSON.parse(observed).processes,[{pid:33,processCreated:'321'}]);
+   else assert.equal(observed,null);
+   assert.equal(f.events.get('ipc:game.resume.completed')?.size??0,0);
+  }finally{menu?.close();stop();f.stopPowerProbe();}
+  await flushDetection();assert.equal(f.timers.size,0);
+ }
+ // The request outlives both the menu and game detection. A replacement Ready
+ // can arrive while the original status query still holds the old result.
+ for(const interrupted of [false,true]){
+  const f=detectionFixture(),game=f.loadGameControl();
+  const req=cmd=>f.messages.filter(m=>m.cmd===cmd);
+  const saved=JSON.stringify({root:TMNT.pid,pids:[TMNT.pid],processes:[{pid:TMNT.pid,processCreated:TMNT.processCreated}]});
+  const initial={...f.power,suspendSerial:0};let disk=saved,held;
+  try{
+   f.broadcastPower(initial);
+   await flushDetection();
+   f.pauseFilePort=msg=>{
+    const reply=value=>queueMicrotask(()=>f.reply(msg.id,value));
+    if(msg.cmd==='game.resume')return true;
+    if(msg.cmd==='fs.exists'){reply(disk!==null);return true;}
+    if(msg.cmd==='fs.readTextFile'){reply(disk);return true;}
+    if(msg.cmd==='game.resume.status'){
+     const i=req('game.resume.status').length,requestId=msg.args.requestId;
+     if(i===1)reply({requestId,state:'running'});
+     else if(interrupted&&i===2)held=msg;
+     else reply({requestId,state:'completed',result:{resumed:1,failedPids:[],stalePids:[]}});
+     return true;
+    }
+    if(msg.cmd==='game.pauseRecord.settle'){
+     assert.equal(msg.args.expected,disk);assert.equal(msg.args.raw,null);disk=null;reply('committed');return true;
+    }
+    return false;
+   };
+   const first=game.resumeGame();await flushDetection();await f.advance(8000);await first;
+   assert.equal(req('game.resume.status').length,1);
+   f.broadcastPower({...initial,publicationRevision:2});await flushDetection();
+   assert.equal(req('game.resume.status').length,1,'publication-only update consumed a retry');
+   const firstReady={...initial,publicationRevision:3,observedNotificationSequence:2,suspendSerial:1};
+   f.broadcastPower(firstReady);await flushDetection();
+   assert.equal(req('game.resume.status').length,2);
+   if(interrupted){
+    assert(held);
+    const nextReady={...firstReady,publicationRevision:4,observedNotificationSequence:3,suspendSerial:2};
+    f.broadcastPower(nextReady);f.broadcastPower(firstReady);await flushDetection();
+    assert.equal(req('game.resume.status').length,3,'new Ready must not wait for the retired IPC reply');
+    assert.equal(f.timers.size,0,'the retired status read must release its timeout');
+    f.reply(held.id,{requestId:held.args.requestId,state:'running'});await flushDetection();
+    assert.equal(req('game.resume.status').length,3,'new Ready was lost behind an old read');
+   }
+   assert.equal(req('game.resume').length,1);assert.equal(req('game.pauseRecord.settle').length,1);assert.equal(disk,null);
+   const requestId=req('game.resume')[0].args.requestId;
+   assert(req('game.resume.status').every(m=>m.args.requestId===requestId));
+   assert.equal(f.events.get('ipc:game.resume.completed')?.size??0,0);
+   assert.equal(req('game.detect').length,0);
+  }finally{f.stopPowerProbe();}
+  await flushDetection();assert.equal(f.timers.size,0);assert.equal(f.events.get('public:power.lifecycleChanged')?.size??0,0);
+ }
+});
+await check('non-Steam resume checks one receipt after both deliveries are lost',async()=>{
+ for(const scenario of ['lost','new-boundary','budget']){
+  const f=detectionFixture(),game=f.loadGameControl();
+  const calls=cmd=>f.messages.filter(m=>m.cmd===cmd);
+  const saved=JSON.stringify({root:TMNT.pid,pids:[TMNT.pid],processes:[{pid:TMNT.pid,processCreated:TMNT.processCreated}]});
+  const initial={...f.power,suspendSerial:0};let disk=saved,nativeDone=false;
+  f.broadcastPower(initial);
+  await flushDetection();
+  f.pauseFilePort=msg=>{
+   const reply=value=>queueMicrotask(()=>f.reply(msg.id,value));
+   if(msg.cmd==='game.resume')return true;
+   if(msg.cmd==='fs.exists'){reply(disk!==null);return true;}
+   if(msg.cmd==='fs.readTextFile'){reply(disk);return true;}
+   if(msg.cmd==='game.resume.status'){
+    const requestId=msg.args.requestId;
+    reply(nativeDone?{requestId,state:'completed',result:{resumed:1,failedPids:[],stalePids:[]}}:{requestId,state:'running'});return true;
+   }
+   if(msg.cmd==='game.pauseRecord.settle'){
+    assert.equal(msg.args.expected,disk);assert.equal(msg.args.raw,null);disk=null;reply('committed');return true;
+   }
+   return false;
+  };
+  try{
+   const first=game.resumeGame();await flushDetection();await f.advance(8000);await first;
+   assert.equal(calls('game.resume.status').length,1);
+   if(scenario==='new-boundary'){
+    f.broadcastPower({...initial,phase:'suspended',hardwareWritesAllowed:false,publicationRevision:2,suspendSerial:1});
+    nativeDone=true;await f.advance(10000);
+    assert.equal(calls('game.resume.status').length,1,'suspension must stop the status retry');
+    assert.equal(calls('game.pauseRecord.settle').length,0);
+    f.broadcastPower({...initial,publicationRevision:3,suspendSerial:1,observedNotificationSequence:2});
+   }else if(scenario==='budget'){
+    await f.advance(20000);
+    assert.equal(calls('game.resume.status').length,4,'only three fallback reads');
+    assert.equal(calls('game.pauseRecord.settle').length,0);
+    assert.equal(f.timers.size,0,'exhausted fallback must not keep a timer');
+    nativeDone=true;
+    f.broadcastPower({...initial,publicationRevision:3,suspendSerial:1,observedNotificationSequence:2});
+   }else{
+    nativeDone=true;await f.advance(500);
+   }
+   await flushDetection();
+   assert.equal(disk,null,scenario+' must settle without replaying the original command');
+   assert.equal(calls('game.resume').length,1);
+   assert(calls('game.resume.status').every(m=>m.args.requestId===calls('game.resume')[0].args.requestId));
+   assert.equal(calls('game.pauseRecord.settle').length,1);
+   assert.equal(f.events.get('ipc:game.resume.completed')?.size??0,0);
+  }finally{f.stopPowerProbe();}
+  await flushDetection();assert.equal(f.timers.size,0);assert.equal(f.events.get('public:power.lifecycleChanged')?.size??0,0);
+ }
+});
+await check('non-Steam lost resume reply waits for public readmission',async()=>{
+ for(const boundary of ['suspended','hint-first']){
+  const f=detectionFixture(null,{sharedTransport:true}),game=f.loadGameControl();
+  const calls=cmd=>f.messages.filter(m=>m.cmd===cmd);
+  const initial={...f.power,suspendSerial:0};
+  const next={...initial,publicationRevision:3,suspendSerial:1,observedNotificationSequence:2};
+  const saved=JSON.stringify({root:TMNT.pid,pids:[TMNT.pid],processes:[{pid:TMNT.pid,processCreated:TMNT.processCreated}]});
+  let disk=saved;
+  try{
+   f.broadcastPower(initial);await flushDetection();
+   f.pauseFilePort=msg=>{
+    const reply=value=>queueMicrotask(()=>f.reply(msg.id,value));
+    if(msg.cmd==='game.resume')return true;
+    if(msg.cmd==='fs.exists'){reply(disk!==null);return true;}
+    if(msg.cmd==='fs.readTextFile'){reply(disk);return true;}
+    if(msg.cmd==='game.resume.status'){
+     reply({requestId:msg.args.requestId,state:'completed',result:{resumed:1,failedPids:[],stalePids:[]}});return true;
+    }
+    if(msg.cmd!=='game.pauseRecord.settle')return false;
+    assert.equal(msg.args.expected,saved);assert.equal(msg.args.raw,null);disk=null;reply('committed');return true;
+   };
+   const first=game.resumeGame();await flushDetection();
+   assert.equal(calls('game.resume').length,1);
+   if(boundary==='suspended')f.broadcastPower({...next,publicationRevision:2,phase:'suspended',hardwareWritesAllowed:false});
+   else f.emitNative('power.resumed',{generation:next.generation,readbackScope:{suspendSerial:1,notificationSequence:2}});
+   await f.advance(8000);assert.equal((await first).ok,false);
+   assert.equal(calls('game.resume.status').length,0,boundary+' must not start a read when the command times out');
+   assert.equal((await game.resumeGame()).ok,false);
+   assert.equal(calls('game.resume.status').length,0,'a repeat click must leave the same request waiting for Ready');
+   assert.equal(calls('game.pauseRecord.settle').length,0);assert.equal(disk,saved);
+   f.emitNative('game.resume.completed',{requestId:calls('game.resume')[0].args.requestId});await flushDetection();
+   assert.equal(calls('game.resume.status').length,0,'completion alone cannot retire the wait');
+   f.broadcastPower(next);await flushDetection();
+   assert.equal(calls('game.resume').length,1);assert.equal(calls('game.resume.status').length,1);
+   assert.equal(calls('game.resume.status')[0].args.requestId,calls('game.resume')[0].args.requestId);
+   assert.equal(calls('game.pauseRecord.settle').length,1);assert.equal(disk,null);
+   assert.equal(f.events.get('ipc:game.resume.completed')?.size??0,0);
+  }finally{f.stopPowerProbe();}
+  await flushDetection();assert.equal(f.timers.size,0);
+ }
+});
+await check('non-Steam resume completion releases the missing command reply',async()=>{
+ for(const boundary of ['current','suspended']){
+  const f=detectionFixture(null,{sharedTransport:true}),game=f.loadGameControl();
+  const calls=cmd=>f.messages.filter(m=>m.cmd===cmd);
+  const initial={...f.power,suspendSerial:0};
+  const current={...initial,publicationRevision:3,suspendSerial:1,observedNotificationSequence:2};
+  const saved=JSON.stringify({root:TMNT.pid,pids:[TMNT.pid],processes:[{pid:TMNT.pid,processCreated:TMNT.processCreated}]});
+  const completed={resumed:1,failedPids:[],stalePids:[]};
+  let disk=saved,settled=0,answer;
+  try{
+   f.broadcastPower(initial);await flushDetection();
+   f.menuWindow.addEventListener(game.QUICKAPP_SUSPENDED_EVENT,()=>settled++);
+   f.pauseFilePort=msg=>{
+    const reply=value=>queueMicrotask(()=>f.reply(msg.id,value));
+    if(msg.cmd==='game.resume')return true;
+    if(msg.cmd==='fs.exists'){reply(disk!==null);return true;}
+    if(msg.cmd==='fs.readTextFile'){reply(disk);return true;}
+    if(msg.cmd==='game.resume.status'){
+     reply({requestId:msg.args.requestId,state:'completed',result:completed});return true;
+    }
+    if(msg.cmd!=='game.pauseRecord.settle')return false;
+    assert.equal(msg.args.expected,saved);assert.equal(msg.args.raw,null);disk=null;reply('committed');return true;
+   };
+   const first=game.resumeGame().then(value=>{answer=value;return value;});await flushDetection();
+   const command=calls('game.resume')[0];assert(command);
+   f.emitNative('game.resume.completed',{requestId:'another-command'});await flushDetection();
+   assert.equal(answer,undefined);assert.equal(calls('game.resume.status').length,0);
+   if(boundary==='suspended')f.broadcastPower({...current,publicationRevision:2,phase:'suspended',hardwareWritesAllowed:false});
+   f.emitNative('game.resume.completed',{requestId:command.args.requestId});
+   f.emitNative('game.resume.completed',{requestId:command.args.requestId});await flushDetection();
+   assert.equal(answer?.ok,boundary==='current','matched completion must release the command wait before its timeout');
+   if(boundary==='suspended'){
+    assert.equal(calls('game.resume.status').length,0);assert.equal(calls('game.pauseRecord.settle').length,0);assert.equal(disk,saved);
+    f.broadcastPower(current);await flushDetection();
+   }
+   assert.equal(calls('game.resume.status').length,1);
+   assert.equal(calls('game.resume.status')[0].args.requestId,command.args.requestId);
+   assert.equal(disk,null);assert.equal(settled,1);
+   f.reply(command.id,completed);f.emitNative('game.resume.completed',{requestId:command.args.requestId});await first;await flushDetection();
+   assert.equal(calls('game.resume').length,1);assert.equal(calls('game.pauseRecord.settle').length,1);
+   assert.equal(f.events.get('ipc:game.resume.completed')?.size??0,0);
+  }finally{f.stopPowerProbe();}
+  await flushDetection();assert.equal(f.timers.size,0);
+ }
+});
+await check('non-Steam completion retires its held pre-completion status read',async()=>{
+ for(const scenario of ['held','late-running','suspended']){
+  const f=detectionFixture(null,{sharedTransport:true}),game=f.loadGameControl();
+  const calls=cmd=>f.messages.filter(m=>m.cmd===cmd);
+  const initial={...f.power,suspendSerial:0};
+  const next={...initial,publicationRevision:3,suspendSerial:1,observedNotificationSequence:2};
+  const saved=JSON.stringify({root:TMNT.pid,pids:[TMNT.pid],processes:[{pid:TMNT.pid,processCreated:TMNT.processCreated}]});
+  const completed={resumed:1,failedPids:[],stalePids:[]};
+  let disk=saved,settled=0;
+  try{
+   f.broadcastPower(initial);await flushDetection();
+   f.menuWindow.addEventListener(game.QUICKAPP_SUSPENDED_EVENT,()=>settled++);
+   f.pauseFilePort=msg=>{
+    const reply=value=>queueMicrotask(()=>f.reply(msg.id,value));
+    if(msg.cmd==='game.resume')return true;
+    if(msg.cmd==='fs.exists'){reply(disk!==null);return true;}
+    if(msg.cmd==='fs.readTextFile'){reply(disk);return true;}
+    if(msg.cmd==='game.resume.status'){
+     if(calls('game.resume.status').length>1)reply({requestId:msg.args.requestId,state:'completed',result:completed});
+     return true;
+    }
+    if(msg.cmd==='game.pauseRecord.settle'){
+     assert.equal(msg.args.expected,saved);assert.equal(msg.args.raw,null);
+     disk=null;reply('committed');return true;
+    }
+    return false;
+   };
+   const original=game.resumeGame();await flushDetection();await f.advance(8000);
+   const [old]=calls('game.resume.status');assert(old,'lost original reply reached the held receipt read');
+   const notice={requestId:old.args.requestId};
+   f.emitNative('game.resume.completed',{requestId:'other-request'});await flushDetection();
+   assert.equal(calls('game.resume.status').length,1,'a foreign completion cannot retire or repeat the old read');
+   assert.equal(f.timers.size,1,'foreign completion leaves the original read pending');
+   const [oldTimeout]=f.timers.keys();
+   if(scenario==='suspended')f.broadcastPower({...next,publicationRevision:2,phase:'suspended',hardwareWritesAllowed:false});
+   if(scenario==='late-running')f.reply(old.id,{...notice,state:'running'});
+   f.emitNative('game.resume.completed',notice);f.emitNative('game.resume.completed',notice);await flushDetection();
+   if(scenario==='suspended'){
+    assert.equal(calls('game.resume.status').length,1,'no follow-up while suspended');
+    assert.equal(disk,saved);assert.equal(f.timers.has(oldTimeout),false,'suspend releases the old IPC timeout');
+    f.broadcastPower(next);await flushDetection();
+   }
+   assert.equal(calls('game.resume.status').length,2,scenario+' must reread before the retired 2 second timeout');
+   assert.equal(f.timers.size,0,'the held read and retry timer must both be gone');
+   assert(calls('game.resume.status').every(m=>m.args.requestId===notice.requestId));
+   assert.equal(disk,null);assert.equal(settled,1);
+   f.reply(old.id,{...notice,state:'unknown'});
+   f.emitNative('game.resume.completed',notice);await original;await flushDetection();
+   assert.equal(calls('game.resume').length,1);assert.equal(calls('game.resume.status').length,2);
+   assert.equal(calls('game.pauseRecord.settle').length,1);assert.equal(settled,1);
+   assert.equal(f.events.get('ipc:game.resume.completed')?.size??0,0);
+  }finally{f.stopPowerProbe();}
+  await flushDetection();assert.equal(f.timers.size,0);assert(f.abortRecords.every(r=>r.callbacks.size===0));
+ }
+});
+await check('non-Steam resume retires a status reply across the public power boundary',async()=>{
+ for(const change of ['suspended','coalesced','same-scope-return']){
+  const f=detectionFixture(),game=f.loadGameControl();
+  const calls=cmd=>f.messages.filter(m=>m.cmd===cmd);
+  const initial={...f.power,suspendSerial:0};
+  const saved=JSON.stringify({root:TMNT.pid,pids:[TMNT.pid],processes:[{pid:TMNT.pid,processCreated:TMNT.processCreated}]});
+  let disk=saved,settled=0;
+  const completed={resumed:1,failedPids:[],stalePids:[]};
+  try{
+   f.broadcastPower(initial);await flushDetection();
+   f.menuWindow.addEventListener(game.QUICKAPP_SUSPENDED_EVENT,()=>settled++);
+   f.pauseFilePort=msg=>{
+    const reply=value=>queueMicrotask(()=>f.reply(msg.id,value));
+    if(msg.cmd==='game.resume'||msg.cmd==='game.resume.status')return true;
+    if(msg.cmd==='fs.exists'){reply(disk!==null);return true;}
+    if(msg.cmd==='fs.readTextFile'){reply(disk);return true;}
+    if(msg.cmd!=='game.pauseRecord.settle')return false;
+    assert.equal(msg.args.expected,saved);assert.equal(msg.args.raw,null);disk=null;reply('committed');return true;
+   };
+   const first=game.resumeGame();await flushDetection();await f.advance(8000);
+   const old=calls('game.resume.status').at(-1);assert(old);
+   const oldWait=f.abortRecords.find(record=>record.callbacks.size>0);assert(oldWait);
+   const ready={...initial,publicationRevision:3,...(change==='same-scope-return'?{}:{suspendSerial:1,observedNotificationSequence:2})};
+   if(change!=='coalesced')f.broadcastPower({...initial,phase:'suspended',hardwareWritesAllowed:false,publicationRevision:2});
+   if(change!=='suspended')f.broadcastPower(ready);
+   await flushDetection();
+   assert.equal(oldWait.signal.aborted,true,'the retired read must release its IPC wait');
+   assert.equal(oldWait.callbacks.size,0,'the retired read must clear its abort listener');
+   assert.equal(calls('game.resume.status').length,change==='suspended'?1:2,'only current Ready can start a successor read');
+   f.reply(old.id,{requestId:old.args.requestId,state:'completed',result:completed});await first;await flushDetection();
+   assert.equal(calls('game.pauseRecord.settle').length,0,change+' must not let a retired status read settle the record');
+   assert.equal(settled,0);assert.equal(disk,saved);
+   if(change==='suspended'){
+    assert.equal(calls('game.resume.status').length,1,'no extra read while suspended');
+    f.broadcastPower(ready);await flushDetection();
+   }
+   assert.equal(calls('game.resume.status').length,2);
+   const current=calls('game.resume.status').at(-1);
+   assert.equal(current.args.requestId,old.args.requestId);
+   f.reply(current.id,{requestId:current.args.requestId,state:'completed',result:completed});await flushDetection();
+   assert.equal(calls('game.resume').length,1);assert.equal(calls('game.pauseRecord.settle').length,1);
+   assert.equal(disk,null);assert.equal(settled,1);
+   assert.equal(f.events.get('ipc:game.resume.completed')?.size??0,0);
+  }finally{f.stopPowerProbe();}
+  await flushDetection();assert.equal(f.timers.size,0);
+ }
+});
+await check('non-Steam resume rechecks its late command reply before settling',async()=>{
+ for(const change of ['coalesced','hint-first','same-scope']){
+  const f=detectionFixture(null,{sharedTransport:true}),game=f.loadGameControl();
+  const calls=cmd=>f.messages.filter(m=>m.cmd===cmd);
+  const initial={...f.power,suspendSerial:0};
+  const current={...initial,publicationRevision:2,suspendSerial:1,observedNotificationSequence:2};
+  const saved=JSON.stringify({root:TMNT.pid,pids:[TMNT.pid],processes:[{pid:TMNT.pid,processCreated:TMNT.processCreated}]});
+  const completed={resumed:1,failedPids:[],stalePids:[]};
+  let disk=saved,settled=0;
+  try{
+   f.broadcastPower(initial);await flushDetection();
+   f.menuWindow.addEventListener(game.QUICKAPP_SUSPENDED_EVENT,()=>settled++);
+   f.pauseFilePort=msg=>{
+    const reply=value=>queueMicrotask(()=>f.reply(msg.id,value));
+    if(msg.cmd==='game.resume'||msg.cmd==='game.resume.status')return true;
+    if(msg.cmd==='fs.exists'){reply(disk!==null);return true;}
+    if(msg.cmd==='fs.readTextFile'){reply(disk);return true;}
+    if(msg.cmd!=='game.pauseRecord.settle')return false;
+    assert.equal(msg.args.expected,saved);assert.equal(msg.args.raw,null);
+    disk=null;reply('committed');return true;
+   };
+   const first=game.resumeGame();await flushDetection();
+   const command=calls('game.resume').at(-1);assert(command);
+   if(change==='coalesced')f.broadcastPower(current);
+   if(change==='hint-first')f.emitNative('power.resumed',{generation:current.generation,
+    readbackScope:{suspendSerial:current.suspendSerial,notificationSequence:current.observedNotificationSequence}});
+   if(change==='same-scope')f.broadcastPower({...initial,publicationRevision:2});
+   f.reply(command.id,completed);const firstReply=await first;await flushDetection();
+   if(change!=='same-scope'){
+    assert.equal(calls('game.pauseRecord.settle').length,0,change+' cannot settle from an old command reply');
+    assert.equal(firstReply.ok,false);assert.equal(disk,saved);assert.equal(settled,0);
+    if(change==='hint-first'){
+     assert.equal(calls('game.resume.status').length,0,'an unconfirmed scope cannot start a receipt read');
+     f.broadcastPower(current);await flushDetection();
+    }
+    assert.equal(calls('game.resume.status').length,1);
+    const receipt=calls('game.resume.status').at(-1);assert.equal(receipt.args.requestId,command.args.requestId);
+    f.reply(receipt.id,{requestId:command.args.requestId,state:'completed',result:completed});await flushDetection();
+   }else{
+    assert.equal(firstReply.ok,true);assert.equal(calls('game.resume.status').length,0);
+   }
+   assert.equal(calls('game.resume').length,1);assert.equal(calls('game.pauseRecord.settle').length,1);
+   assert.equal(disk,null);assert.equal(settled,1);
+   assert.equal(f.events.get('ipc:game.resume.completed')?.size??0,0);
+  }finally{f.stopPowerProbe();}
+  await flushDetection();assert.equal(f.timers.size,0);
+ }
+});
+await check('non-Steam resume rechecks a late settlement in the current public scope',async()=>{
+ const f=detectionFixture(),game=f.loadGameControl();
+ const calls=cmd=>f.messages.filter(m=>m.cmd===cmd);
+ const initial={...f.power,suspendSerial:0};
+ const saved=JSON.stringify({root:TMNT.pid,pids:[TMNT.pid],processes:[{pid:TMNT.pid,processCreated:TMNT.processCreated}]});
+ let disk=saved,settled=0;
+ try{
+  f.broadcastPower(initial);await flushDetection();
+  f.menuWindow.addEventListener(game.QUICKAPP_SUSPENDED_EVENT,()=>settled++);
+  f.pauseFilePort=msg=>{
+   const reply=value=>queueMicrotask(()=>f.reply(msg.id,value));
+   if(msg.cmd==='game.resume'){reply({resumed:1,failedPids:[],stalePids:[]});return true;}
+   if(msg.cmd==='fs.exists'){reply(disk!==null);return true;}
+   if(msg.cmd==='fs.readTextFile'){reply(disk);return true;}
+   if(msg.cmd!=='game.pauseRecord.settle')return false;
+   assert.equal(msg.args.expected,saved);assert.equal(msg.args.raw,null);
+   if(calls('game.pauseRecord.settle').length===1)disk=null;
+   return true;
+  };
+  const first=game.resumeGame();await flushDetection();
+  const held=calls('game.pauseRecord.settle').at(-1);assert(held);
+  f.broadcastPower({...initial,publicationRevision:2,suspendSerial:1,observedNotificationSequence:2});await flushDetection();
+  assert.equal(calls('game.pauseRecord.settle').length,1,'do not overlap compare-and-set calls');
+  f.reply(held.id,'committed');await first;await flushDetection();
+  assert.equal(settled,0,'a retired commit reply cannot publish the current pause state');
+  assert.equal(calls('game.pauseRecord.settle').length,2,'new scope must verify the original settlement again');
+  f.reply(calls('game.pauseRecord.settle').at(-1).id,'committed');await flushDetection();
+  assert.equal(calls('game.resume').length,1);assert.equal(calls('game.resume.status').length,0);
+  assert.equal(disk,null);assert.equal(settled,1);
+  assert.equal(f.events.get('ipc:game.resume.completed')?.size??0,0);
+ }finally{f.stopPowerProbe();}
+ await flushDetection();assert.equal(f.timers.size,0);
+});
+await check('non-Steam resume settles the original pause record after a lost settlement reply',async()=>{
+ for(const scenario of ['reply-lost','new-boundary','changed-record','budget']){
+  const f=detectionFixture(),game=f.loadGameControl();
+  const initial={...f.power,suspendSerial:0};
+  const saved=JSON.stringify({root:TMNT.pid,pids:[TMNT.pid],processes:[{pid:TMNT.pid,processCreated:TMNT.processCreated}]});
+  const replacement=JSON.stringify({root:999,pids:[999]});
+  let disk=saved,writes=0,settlements=0,invalidations=0,attempts=0;
+  const calls=cmd=>f.messages.filter(m=>m.cmd===cmd);
+  try{
+   f.broadcastPower(initial);await flushDetection();
+   f.menuWindow.addEventListener(game.QUICKAPP_SUSPENDED_EVENT,event=>{
+    if(typeof event.detail?.suspended==='boolean')settlements++;
+    else invalidations++;
+   });
+   f.pauseFilePort=msg=>{
+    const reply=value=>queueMicrotask(()=>f.reply(msg.id,value));
+    if(msg.cmd==='game.resume'){reply({resumed:1,failedPids:[],stalePids:[]});return true;}
+    if(msg.cmd==='fs.exists'){reply(disk!==null);return true;}
+    if(msg.cmd==='fs.readTextFile'){reply(disk);return true;}
+    if(msg.cmd!=='game.pauseRecord.settle')return false;
+    ++attempts;
+    assert.equal(msg.args.expected,saved);assert.equal(msg.args.raw,null);
+    if(scenario==='budget'&&attempts<5){reply('unavailable');return true;}
+    if(attempts===1&&scenario==='new-boundary')return true;
+    if(disk!==null&&disk!==saved){reply('changed');return true;}
+    if(disk!==null){disk=null;++writes;}
+    if(attempts>1)reply('committed');
+    return true;
+   };
+   const first=game.resumeGame();await flushDetection();
+   if(scenario!=='budget')await f.advance(5000);
+   assert.equal((await first).ok,false);
+   assert.equal(attempts,1);
+   assert.equal(settlements,0);
+   if(scenario==='new-boundary'){
+    f.broadcastPower({...initial,phase:'suspended',hardwareWritesAllowed:false,publicationRevision:2,suspendSerial:1});
+    await f.advance(20000);assert.equal(attempts,1,'a suspended owner must not retry settlement');
+    f.broadcastPower({...initial,publicationRevision:3,suspendSerial:1,observedNotificationSequence:2});
+   }else if(scenario==='budget'){
+    await f.advance(20000);assert.equal(attempts,4,'only three fallback settlements');
+    assert.equal(f.timers.size,0);assert.equal(writes,0);
+    f.broadcastPower({...initial,publicationRevision:2,suspendSerial:1,observedNotificationSequence:2});
+   }else{
+    if(scenario==='changed-record')disk=replacement;
+    await f.advance(500);
+   }
+   await flushDetection();
+   assert.equal(attempts,scenario==='budget'?5:2,scenario+' must finish the original settlement without another click');
+   assert.equal(disk,scenario==='changed-record'?replacement:null);
+   assert.equal(writes,1);assert.equal(settlements,Number(scenario!=='changed-record'));
+   assert.equal(invalidations,Number(scenario==='changed-record'));
+   assert.equal(calls('game.resume').length,1);assert.equal(calls('game.resume.status').length,0);
+   assert.equal(f.events.get('ipc:game.resume.completed')?.size??0,0);
+  }finally{f.stopPowerProbe();}
+  await flushDetection();assert.equal(f.timers.size,0);assert.equal(f.events.get('public:power.lifecycleChanged')?.size??0,0);
+ }
+});
+await check('non-Steam pause-record conflict refreshes only the current menu state',async()=>{
+ for(const replacement of ['cleared-by-wake','another-game','new-pause-for-current-game']){
+  const f=detectionFixture(null,{sharedTransport:true});
+  const initial={...f.power,suspendSerial:0};
+  f.broadcastPower(initial);f.native=versionedGame(TMNT,10,10);
+  const stop=f.detector.subscribeGameStatus(()=>{});let menu;
+  const calls=cmd=>f.messages.filter(msg=>msg.cmd===cmd);
+  const rootOwner={pid:TMNT.pid,processCreated:TMNT.processCreated};
+  const saved=JSON.stringify({root:TMNT.pid,pids:[TMNT.pid,33],processes:[rootOwner,{pid:33,processCreated:'321'}],ts:1});
+  let disk=saved;
+  try{
+   await f.detector.refreshGameStatusStrict();menu=quickMenuControlFixture(f);await flushDetection();assert(menu.paused.value);
+   const base=f.pauseFilePort;
+   f.pauseFilePort=msg=>{
+    const reply=value=>queueMicrotask(()=>f.reply(msg.id,value));
+    if(msg.cmd==='game.resume'||msg.cmd==='game.pauseRecord.settle')return true;
+    if(msg.cmd==='fs.exists'){
+     reply(msg.args.path.endsWith('quickapp_suspended.json')&&disk!==null);return true;
+    }
+    if(msg.cmd==='fs.readTextFile'){reply(disk);return true;}
+    return base(msg);
+   };
+   const action=menu.togglePause();await flushDetection();
+   const [submitted]=calls('game.resume');assert(submitted);
+   f.reply(submitted.id,{resumed:1,failedPids:[TMNT.pid],stalePids:[]});await flushDetection();
+   const [oldCommit]=calls('game.pauseRecord.settle');assert(oldCommit?.args.raw);
+   f.native=versionedGame(TMNT,11,10);
+   f.broadcastPower({...initial,publicationRevision:2,suspendSerial:1,observedNotificationSequence:2});
+   f.reply(oldCommit.id,'unavailable');await action;await flushDetection();
+   const currentCommit=calls('game.pauseRecord.settle').at(-1);
+   assert.notEqual(currentCommit?.id,oldCommit.id);
+   assert.deepEqual(currentCommit.args,oldCommit.args,'retry must compare the exact original pause record');
+   assert(menu.paused.value,'the new scope observed the old record before native settlement completed');
+   const readsBefore=menu.reads.length;
+   disk=replacement==='cleared-by-wake'?null:replacement==='another-game'?
+    JSON.stringify({root:999,pids:[999],processes:[{pid:999,processCreated:'654'}],ts:2}):
+    JSON.stringify({root:TMNT.pid,pids:[TMNT.pid],processes:[rootOwner],ts:2});
+   const retained=disk;
+   f.reply(currentCommit.id,'changed');await flushDetection();
+   assert.equal(menu.reads.length,readsBefore+1,replacement+' must trigger one current-menu read');
+   assert.equal(menu.paused.value,replacement==='new-pause-for-current-game',replacement);
+   f.reply(oldCommit.id,'committed');await flushDetection();
+   assert.equal(menu.reads.length,readsBefore+1,'late older settlement cannot refresh the menu again');
+   assert.equal(disk,retained);
+   assert.equal(calls('game.resume').length,1);
+   assert.equal(calls('game.pauseRecord.settle').length,2);
+   assert.equal(f.events.get('ipc:game.resume.completed')?.size??0,0);
+  }finally{menu?.close();stop();f.stopPowerProbe();}
+  await flushDetection();assert.equal(f.timers.size,0);assert(f.abortRecords.every(r=>r.callbacks.size===0));
+ }
+});
+await check('non-Steam reopened menu can reconcile a committed pause-record deletion after retries exhaust',async()=>{
+ for(const action of ['pause','close']){
+ const f=detectionFixture(),block=blockDisplayScheduler(f);
+ f.broadcastPower({...f.power,suspendSerial:0});f.native=versionedGame(TMNT,10,10);
+ const stop=f.detector.subscribeGameStatus(()=>{});
+ const calls=cmd=>f.messages.filter(msg=>msg.cmd===cmd);
+ const saved=JSON.stringify({root:TMNT.pid,pids:[TMNT.pid],processes:[{pid:TMNT.pid,processCreated:TMNT.processCreated}]});
+ let menu,disk=saved,settlements=0;
+ try{
+  await f.detector.refreshGameStatusStrict();menu=quickMenuControlFixture(f,{actualSuspend:true});
+  f.menuWindow.addEventListener('quickapp:suspended-state',()=>settlements++);
+  f.pauseFilePort=msg=>{
+   const reply=value=>queueMicrotask(()=>f.reply(msg.id,value));
+   if(msg.cmd==='fs.exists'){reply(disk!==null);return true;}
+   if(msg.cmd==='fs.readTextFile'){reply(disk);return true;}
+   if(msg.cmd==='game.resume'){reply({resumed:1,failedPids:[],stalePids:[]});return true;}
+   if(msg.cmd==='game.suspend'){reply({paused:false});return true;}
+   if(msg.cmd==='game.close'){reply({ok:false,attempted:false,exited:false});return true;}
+   if(msg.cmd!=='game.pauseRecord.settle')return false;
+   assert.equal(msg.args.expected,saved);assert.equal(msg.args.raw,null);
+   if(calls(msg.cmd).length===1)disk=null; // Committed, but the acknowledgement was lost.
+   if(calls(msg.cmd).length>4)reply('committed');else if(calls(msg.cmd).length>1)reply('unavailable');
+   return true;
+  };
+  await flushDetection();assert(menu.paused.value);
+  const first=menu.togglePause();await flushDetection();await f.advance(5000);await first;
+  await f.advance(20000);assert.equal(calls('game.pauseRecord.settle').length,4);
+  assert.equal(settlements,0);assert.equal(disk,null);assert.equal(f.timers.size,0);
+  menu.props.open=false;await flushDetection();menu.props.open=true;await flushDetection();
+  assert(!menu.paused.value,'reopened menu reads the already deleted record');
+  const click=action==='pause'?menu.togglePause:()=>{
+   const target=f.detector.getCurrentGame();assert(target);
+   return menu.closeGame(target.pid,target.name,target.processCreated,target);
+  };
+  const firstClick=await click();await flushDetection();
+  assert.equal(calls('game.pauseRecord.settle').length,5,'manual control must reconcile the same committed deletion');
+  assert.equal(calls('game.resume').length,1);assert.equal(calls('game.resume.status').length,0);
+  assert.equal(calls('game.suspend').length,0,'the reconciliation click must not suspend');
+  assert.equal(calls('game.close').length,0,'the reconciliation click must not close');
+  if(action==='close')assert.equal(firstClick?.ok,false,'settlement must not masquerade as a successful close');
+  assert.equal(settlements,1);assert.equal(f.events.get('ipc:game.resume.completed')?.size??0,0);
+  await click();await flushDetection();
+  assert.equal(calls(action==='pause'?'game.suspend':'game.close').length,1,'a fresh action can proceed after the old receipt settles');
+ }finally{menu?.close();stop();block();f.stopPowerProbe();}
+ await flushDetection();assert.equal(f.timers.size,0);assert.equal(f.events.get('public:power.lifecycleChanged')?.size??0,0);
+ }
+});
+await check('non-Steam resume retries a rejected post without querying or replaying it',async()=>{
+ for(const original of [null,'unreadable pause record']){
+  const f=detectionFixture();f.broadcastPower({...f.power,suspendSerial:0});f.native=versionedGame(TMNT,10,10);
+  const stop=f.detector.subscribeGameStatus(()=>{});let menu;
+  try{
+   await f.detector.refreshGameStatusStrict();menu=quickMenuControlFixture(f);await flushDetection();
+   let saved=original,failBeforePost=true;
+   const base=f.pauseFilePort;
+   f.pauseFilePort=msg=>{
+    if(msg.cmd==='game.resume.status')throw Error('a rejected post has no native receipt');
+    if(msg.cmd==='game.resume'){
+     if(failBeforePost)throw Error('post refused locally');
+     assert(Array.isArray(msg.args.pids) && msg.args.pids.length===0);
+     menu.setSuspended(false);
+     queueMicrotask(()=>f.reply(msg.id,{resumed:1,failedPids:[],stalePids:[]}));return true;
+    }
+    const inScope=msg.args?.path?.endsWith('quickapp_suspended.json');
+    if(msg.cmd==='game.pauseRecord.settle'){
+     assert(saved===msg.args.expected||saved===msg.args.raw);saved=msg.args.raw;
+     queueMicrotask(()=>f.reply(msg.id,'committed'));return true;
+    }
+    if(inScope && ['fs.exists','fs.readTextFile'].includes(msg.cmd)){
+     let result=true;
+     if(msg.cmd==='fs.exists')result=saved!==null;
+     if(msg.cmd==='fs.readTextFile')result=saved;
+     queueMicrotask(()=>f.reply(msg.id,result));return true;
+    }
+    return base(msg);
+   };
+   const resumes=()=>f.messages.filter(msg=>msg.cmd==='game.resume');
+   await menu.togglePause();assert(menu.paused.value && !menu.pauseBusy.value);
+   assert.equal(resumes().length,1);
+   assert.equal(JSON.parse(saved).recoveryPending,true);
+   assert.equal(JSON.parse(saved).recoveryOriginalRaw,original??undefined);
+   assert.equal(f.messages.some(msg=>msg.cmd==='game.resume.status'),false);
+   failBeforePost=false;
+   await menu.togglePause();await flushDetection();assert(!menu.paused.value && !menu.pauseBusy.value);
+   assert.equal(resumes().length,2);
+   assert.notEqual(resumes()[0].args.requestId,resumes()[1].args.requestId);
+   assert.equal(saved,null);
+   assert.equal(f.events.get('ipc:game.resume.completed')?.size??0,0);
+  }finally{menu?.close();stop();f.stopPowerProbe();}
+  await flushDetection();assert.equal(f.timers.size,0);
+ }
+});
+await check('non-Steam manual pause releases a lost reply without replaying the command',async()=>{
+ for(const outcome of ['lost','late-after-suspend','confirmed']){
+  const f=detectionFixture(null,{sharedTransport:true}),block=blockDisplayScheduler(f);
+  const ready={...f.power,suspendSerial:0};
+  f.broadcastPower(ready);f.native=versionedGame(TMNT,10,10);
+  const stop=f.detector.subscribeGameStatus(()=>{});
+  let menu,marker=false,completion=false;
+  const calls=cmd=>f.messages.filter(m=>m.cmd===cmd);
+  const receipt={paused:true,pids:[TMNT.pid],processes:[{pid:TMNT.pid,processCreated:TMNT.processCreated}],okCount:1,failCount:0};
+  try{
+   await f.detector.refreshGameStatusStrict();menu=quickMenuControlFixture(f,{actualSuspend:true});
+   f.pauseFilePort=msg=>{
+    const reply=value=>queueMicrotask(()=>f.reply(msg.id,value));
+    const isMarker=msg.args.path?.includes('manual-suspended');
+    if(msg.cmd==='fs.exists'){reply(isMarker&&marker);return true;}
+    if(msg.cmd==='fs.readTextFile'&&isMarker){reply(`pid=${TMNT.pid}|created=${TMNT.processCreated}|state=suspended`);return true;}
+    if(msg.cmd==='game.suspend'){marker=true;if(outcome==='confirmed')reply(receipt);return true;}
+    if(msg.cmd==='game.resume'){
+     assert(marker);marker=false;reply({resumed:1,failedPids:[],stalePids:[]});return true;
+    }
+    if(msg.cmd==='game.pauseRecord.settle'){reply('committed');return true;}
+    if(msg.cmd==='fs.writeTextFileAtomic')return true; // The old renderer can lose a second acknowledgement here.
+    return false;
+   };
+   await flushDetection();assert.equal(menu.paused.value,false);
+   const first=menu.togglePause().then(()=>{completion=true;});await flushDetection();
+   const [command]=calls('game.suspend');assert(command);
+   if(outcome==='late-after-suspend'){
+    f.broadcastPower({...ready,phase:'suspended',hardwareWritesAllowed:false,publicationRevision:2,suspendSerial:1});
+    await flushDetection();assert(menu.pauseBusy.value,'the native operation keeps its original wait');
+    marker=false; // Public recovery has already retired the marker for this case.
+    f.broadcastPower({...ready,publicationRevision:3,suspendSerial:1,observedNotificationSequence:2});
+    f.reply(command.id,receipt);await flushDetection();
+   }
+   if(outcome==='lost'){
+    await f.advance(7999);assert(menu.pauseBusy.value);
+    await f.advance(1);
+   }
+   assert(completion&&!menu.pauseBusy.value,outcome+' must leave the manual game queue usable');
+   await first;await flushDetection();
+   assert.equal(calls('fs.writeTextFileAtomic').length,0,'the WebView cannot publish an old pause record');
+   assert.equal(menu.paused.value,outcome!=='late-after-suspend');
+   if(outcome==='lost'){
+    f.reply(command.id,receipt);await flushDetection();
+    await menu.togglePause();await flushDetection();
+    assert.equal(calls('game.resume').length,1,'the next click can recover the original Native marker');
+    assert(!menu.paused.value);
+   }
+   assert.equal(calls('game.suspend').length,1,'the original pause must never be replayed');
+  }finally{menu?.close();stop();block();f.stopPowerProbe();}
+  await flushDetection();assert.equal(f.timers.size,0);
+ }
+});
+await check('non-Steam manual resume selects the current marker over an old menu record',async()=>{
+ for(const test of ['old-root','reused-pid','no-current-marker','wrong-state','sleep-during-read','lost-reply']){
+  const f=detectionFixture(null,{sharedTransport:true}),block=blockDisplayScheduler(f);
+  const ready={...f.power,suspendSerial:0};f.broadcastPower(ready);f.native=versionedGame(TMNT,10,10);
+  const stop=f.detector.subscribeGameStatus(()=>{}),calls=cmd=>f.messages.filter(msg=>msg.cmd===cmd);
+  const otherPid=test==='old-root'?TMNT.pid+1:TMNT.pid;
+  const disk=JSON.stringify({root:otherPid,pids:[otherPid],processes:[{pid:otherPid,processCreated:'1'}]});
+  const target={pid:TMNT.pid,processCreated:TMNT.processCreated};
+  let menu,marker=true,hold=false,read,requestId;
+  const markerText=()=>`pid=${target.pid}|created=${test==='no-current-marker'?'1':target.processCreated}|state=${test==='wrong-state'?'pending':'suspended'}`;
+  const result={resumed:1,failedPids:[],stalePids:[]};
+  try{
+   await f.detector.refreshGameStatusStrict();menu=quickMenuControlFixture(f,{actualSuspend:true});
+   f.pauseFilePort=msg=>{
+    const reply=value=>queueMicrotask(()=>f.reply(msg.id,value));
+    const isMarker=msg.args.path?.endsWith(`manual-suspended\\${target.pid}.txt`);
+    if(msg.cmd==='fs.exists'){reply(!isMarker||marker);return true;}
+    if(msg.cmd==='fs.readTextFile'){
+     if(isMarker&&hold)read=msg;else reply(isMarker?markerText():disk);
+     return true;
+    }
+    if(msg.cmd==='game.resume'){
+     assert(marker);
+     requestId=msg.args.requestId;marker=false;
+     if(test!=='lost-reply')reply(result);
+     return true;
+    }
+    if(msg.cmd==='game.resume.status'){assert.equal(msg.args.requestId,requestId);reply({requestId,state:'completed',result});return true;}
+    if(msg.cmd==='game.pauseRecord.settle')throw Error('must preserve the unrelated menu record');
+    return false;
+   };
+   await flushDetection();
+   if(test==='no-current-marker'||test==='wrong-state'){
+    assert.equal(menu.paused.value,false,`${test} must not show Continue`);
+    const stale=await f.loadGameControl().resumeGame(undefined,f.detector.getCurrentGame());
+    assert.equal(stale.ok,false);assert.equal(calls('game.resume').length,0);continue;
+   }
+   assert.equal(menu.paused.value,true,`${test}: old menu record must not mask the exact current pause marker`);
+   hold=test==='sleep-during-read';
+   const click=menu.togglePause();await flushDetection();
+   if(hold){
+    assert(read,'click is waiting for the marker read');
+    f.broadcastPower({...ready,phase:'suspended',hardwareWritesAllowed:false,publicationRevision:2,suspendSerial:1,observedNotificationSequence:2});
+    await flushDetection();hold=false;
+    f.reply(read.id,markerText());
+    await click;await flushDetection();
+    assert.equal(calls('game.resume').length,0,'a newer sleep retires the preflight before native dispatch');
+    f.broadcastPower({...ready,publicationRevision:3,suspendSerial:1,observedNotificationSequence:3});
+    await flushDetection();await menu.togglePause();
+   }
+   if(test==='lost-reply'){
+    assert.equal(calls('game.resume').length,1);assert(menu.pauseBusy.value);
+    await f.advance(8000);
+    assert.equal(calls('game.resume.status').length,1);
+   }
+   await click;await flushDetection();
+   assert.equal(calls('game.resume').length,1);assert.equal(calls('game.suspend').length,0);
+   assert.deepEqual(calls('game.resume')[0].args.pids,[target]);
+   assert.equal(calls('game.pauseRecord.settle').length,0);
+   assert.equal(menu.pauseBusy.value,false,`${test}: the menu queue must be available`);
+   assert.equal(menu.paused.value,false,`${test}: the original marker must be settled`);
+  }finally{menu?.close();stop();block();f.stopPowerProbe();}
+  await flushDetection();assert.equal(f.timers.size,0);
+ }
+});
+await check('non-Steam close preserves the pause record until follow-up recovery settles',async()=>{
+ for(const outcome of ['busy','partial','complete']){
+  const f=detectionFixture();f.broadcastPower({...f.power,suspendSerial:0});f.native=versionedGame(TMNT,10,10);
+  const stop=f.detector.subscribeGameStatus(()=>{});let cleared=0;
+  try{
+   await f.detector.refreshGameStatusStrict();const target=f.detector.getCurrentGame();
+   const game=f.loadGameControl();const processes=[{pid:target.pid,processCreated:target.processCreated}];
+   f.menuWindow.addEventListener('quickapp:suspended-state',()=>{cleared++;});
+   let recoveryReturned=false;
+   f.pauseFilePort=msg=>{
+    if(msg.cmd==='game.detect')return false;
+    const values={'game.close':{ok:true,attempted:true,exited:true},'fs.exists':true,
+      'fs.readTextFile':JSON.stringify({root:target.pid,processes}),'game.pauseRecord.settle':'committed',
+      'game.resume':{resumed:0,failedPids:outcome==='partial'?[target.pid]:[],stalePids:outcome==='complete'?[target.pid]:[]}};
+    assert(Object.hasOwn(values,msg.cmd),msg.cmd);
+    queueMicrotask(()=>{
+     if(msg.cmd==='game.resume')recoveryReturned=true;
+     if(msg.cmd==='game.resume'&&outcome==='busy')f.fail(msg.id,'fixture recovery busy');
+     else f.reply(msg.id,values[msg.cmd]);
+    });
+    return true;
+   };
+   const result=await game.closeGame(target.pid,target.name,target.processCreated,target);assert(result.ok,outcome);
+   const requests=f.messages.filter(msg=>msg.cmd==='game.resume');
+   assert.equal(requests.length,1,outcome);assert.deepEqual(requests[0].args.pids,processes);assert(recoveryReturned,outcome);
+   assert.equal(f.messages.filter(msg=>msg.cmd==='game.pauseRecord.settle').length,Number(outcome==='complete'),outcome);
+   assert.equal(cleared,Number(outcome==='complete'),outcome);
+  }finally{stop();f.stopPowerProbe();}
+  await flushDetection();assert.equal(f.timers.size,0);
+ }
+});
 await check('Xbox隐藏且共享调度器等待其他任务时，原生目标通知主动更新顶部与策略缓存',async()=>{
  const f=detectionFixture(),block=blockDisplayScheduler(f),seen=[];const stop=f.detector.subscribeGameStatus(g=>seen.push(g));await f.policy.detectPolicyGame();assert.equal(f.policy.getPolicyGame(),null);
  f.native={...TMNT};f.signal('ipc:game.target.changed',{pid:999999,path:'untrusted event data'});await flushDetection();assert(seen.at(-1),'a committed native target must exist before checking its PID');assert.equal(seen.at(-1).pid,TMNT.pid);assert.equal(f.policy.getPolicyGame().pid,TMNT.pid);assert(f.messages.every(m=>m.cmd==='game.detect'&&!m.args.pid));stop();block();
@@ -1080,6 +2185,46 @@ await check('原始快捷session的A验证晚回包不能复活已解锁目标�
 
 
 
+await check('旧轮游戏校验不等待新轮显式选择的回包',async()=>{
+ const outcomes=[];
+ for(const boundary of ['before-observe','during-admit','same-scope']){
+  const f=detectionFixture(null,{sharedTransport:true});
+  const initial={...f.power,suspendSerial:0};f.broadcastPower(initial);f.native=versionedGame(TMNT,10,10);
+  await f.detector.refreshGameStatusStrict();
+  const session=load('src/bridge/gameQuickSession.ts',{'./gamedetect':f.detector});
+  const locked=session.lockGameTarget(f.detector.getCurrentGame());
+  const start=f.messages.length; f.hold=true;
+  let done=false,selection;
+  const old=session.validateLockedGameTarget().then(target=>{done=true;return target;});
+  const replace=()=>{
+   f.broadcastPower({...initial,publicationRevision:2,
+    suspendSerial:boundary==='same-scope'?0:1,observedNotificationSequence:boundary==='same-scope'?1:2});
+   selection=f.detector.refreshGameStatusStrict(TMNT.pid);
+  };
+  if(boundary==='before-observe')replace();else queueMicrotask(replace);
+  await flushDetection();
+  assert(selection);assert.equal(f.messages.length,start+1);
+  const request=f.messages.at(-1);
+  assert.equal(request.args.pid,TMNT.pid);
+  assert.equal(request.args.expectedPowerSuspendSerial,boundary==='same-scope'?0:1);
+  // Keep the independent new selection pending while checking the old waiter.
+  const doneBeforeReply=done;
+  f.native=versionedGame(TMNT,11,10);
+  f.reply(request.id,f.native);
+  const result=await old;
+  assert((await selection)?.pid===TMNT.pid);
+  outcomes.push({boundary,doneBeforeReply,result:result?.lockGeneration??null});
+  assert.equal(session.getLockedGameTarget()?.lockGeneration,locked.lockGeneration);
+  f.hold=false;
+  assert.equal((await session.validateLockedGameTarget())?.lockGeneration,locked.lockGeneration);
+  f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);
+ }
+ assert.deepEqual(outcomes,[
+  {boundary:'before-observe',doneBeforeReply:true,result:null},
+  {boundary:'during-admit',doneBeforeReply:true,result:null},
+  {boundary:'same-scope',doneBeforeReply:false,result:1},
+ ]);
+});
 await check('风暴：1000个尚未发出的交替显式选择只发送最后一项且全部调用收敛',async()=>{
  const f=detectionFixture();f.hold=true;const reads=[];
  for(let i=0;i<1000;i++)reads.push(f.detector.refreshGameStatusStrict(i%2?NEXT_GAME.pid:TMNT.pid));
@@ -1482,6 +2627,179 @@ await check('game detection renews exhausted recovery only for a new sleep scope
  }finally{stop();f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);}
 });
 
+await check('non-Steam detection rechecks an unconfirmed target on public game recovery completion',async()=>{
+ for(const outcome of ['confirmed','unavailable','closed','superseded','in-flight','in-flight-confirmed','in-flight-revoked']){
+  const f=detectionFixture(null,{sharedTransport:true}),readiness=[];
+  const target=versionedGame(TMNT,10,10);
+  f.broadcastPower({...f.power,suspendSerial:0});f.native=target;
+  await f.detector.refreshGameStatusStrict();
+  const stop=f.detector.subscribeGameTargetReadiness(value=>readiness.push(value));
+  try{
+   let ready={...f.power,generation:101,suspendSerial:1,observedNotificationSequence:2,publicationRevision:2};
+   f.native={...target,observationState:'pending'};
+   const start=f.messages.length;
+   f.broadcastPower(ready);await flushDetection();await f.advance(20000);
+   assert.equal(f.messages.length,start+4,'exhaust the existing three retry slots');
+   assert.equal(f.scheduler.hasScheduledTask('game-status'),false);
+   assert.equal(f.detector.isGameStatusCurrent(),false);
+   assert.equal(f.detector.getCurrentGame()?.pid,TMNT.pid,'unknown is not a game exit');
+   let pending;
+   if(outcome.startsWith('in-flight')){
+    f.hold=true;
+    ready={...ready,observedNotificationSequence:3,publicationRevision:3};
+    f.broadcastPower(ready);await flushDetection();
+    assert.equal(f.messages.length,start+5);
+    pending=f.messages.at(-1);
+   }
+   const exhausted=f.messages.length;
+   const completed={...ready,gameWakeRecoveryRevision:1};
+   if(outcome==='closed')stop();
+   const suspend=()=>f.broadcastPower({...ready,generation:102,suspendSerial:2,
+    observedNotificationSequence:ready.observedNotificationSequence+1,publicationRevision:ready.publicationRevision+1,
+    phase:'suspended',notificationPending:true,hardwareWritesAllowed:false,inputReady:false});
+   if(outcome==='superseded')suspend();
+   if(outcome==='confirmed')f.native=target;
+   f.broadcastPower(completed);await flushDetection();
+   if(pending){
+    assert.equal(f.messages.length,exhausted,'join the current read before using the completion hint');
+    if(outcome==='in-flight-revoked')suspend();
+    f.reply(pending.id,outcome==='in-flight'?{...target,observationState:'pending'}:target);await flushDetection();
+    f.hold=false;f.native=target;
+    await f.advance(3999);assert.equal(f.messages.length,exhausted,'preserve the backoff');
+    await f.advance(1);
+   }
+   const allowed=outcome==='confirmed'||outcome==='unavailable'||outcome==='in-flight';
+   assert.equal(f.messages.length,exhausted+Number(allowed),`terminal projection should recheck only with current demand and admission: ${outcome}`);
+   if(allowed)assert.deepEqual(f.messages.at(-1).args,{automatic:true,expectedPowerGeneration:101,
+     expectedPowerSuspendSerial:1,expectedPowerNotificationSequence:ready.observedNotificationSequence});
+   f.broadcastPower(ready);f.broadcastPower(completed);
+   await f.advance(60000);
+   assert.equal(f.messages.length,exhausted+Number(allowed),'no duplicate read or renewed retry budget');
+   assert.deepEqual(readiness,outcome==='confirmed'||outcome==='in-flight'||outcome==='in-flight-confirmed'?[true,false,true]:[true,false]);
+  }finally{stop();f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);}
+ }
+});
+
+await check('non-Steam recovery completion rechecks a preterminal cold game observation',async()=>{
+ for(const outcome of ['restored','empty','different-target','new-suspend','unsubscribe']){
+  const f=detectionFixture(null,{sharedTransport:true}),readiness=[];
+  const initial={...f.power,suspendSerial:0},restored=versionedGame(TMNT,12,12);
+  f.broadcastPower(initial);f.native=noGame(10,10);
+  await f.detector.refreshGameStatusStrict();
+  const stop=f.detector.subscribeGameTargetReadiness(value=>readiness.push(value));
+  try{
+   const ready={...initial,generation:101,suspendSerial:1,publicationRevision:2,observedNotificationSequence:2};
+   const completed={...ready,gameWakeRecoveryRevision:1};
+   const before=f.messages.length;f.hold=true;
+   f.broadcastPower(ready);await flushDetection();
+   assert.equal(f.messages.length,before+1);
+   const older=f.messages.at(-1);
+   f.broadcastPower(completed);await flushDetection();
+   assert.equal(f.messages.length,before+1,'do not overlap the native read that is already in flight');
+   if(outcome==='new-suspend')f.broadcastPower({...completed,phase:'suspended',generation:102,suspendSerial:2,
+    publicationRevision:3,observedNotificationSequence:3,hardwareWritesAllowed:false,notificationPending:true});
+   if(outcome==='unsubscribe')stop();
+   const oldObservation=outcome==='different-target'?versionedGame(NEXT_GAME,11,11):noGame(11,11);
+   f.reply(older.id,{...oldObservation,observationState:'complete'});await flushDetection();
+   const admitted=outcome!=='new-suspend'&&outcome!=='unsubscribe';
+   assert.equal(f.detector.getCurrentGame(),null,`no stale target changes the cold cache: ${outcome}`);
+   assert.deepEqual(readiness,[true,false],`preterminal reply must not certify the current wake: ${outcome}`);
+   assert.equal(f.messages.length,before+Number(admitted)+1,`current demand receives one recheck: ${outcome}`);
+   if(admitted){
+    const later=f.messages.at(-1);
+    assert.deepEqual(later.args,older.args,'recheck the same admitted scope, without selecting the old PID');
+    f.reply(later.id,outcome==='empty'?noGame(11,11):restored);await flushDetection();
+    assert.equal(f.detector.getCurrentGame()?.pid,outcome==='empty'?undefined:TMNT.pid);
+    assert.deepEqual(readiness,[true,false,true]);
+    f.broadcastPower(ready);f.broadcastPower(completed);
+   }
+   await f.advance(60000);
+   assert.equal(f.messages.length,before+Number(admitted)+1,'no duplicate read or resurrected demand');
+  }finally{stop();f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);}
+ }
+});
+
+await check('non-Steam recovery completion fences an older empty game observation',async()=>{
+ for(const outcome of ['restored','empty','new-suspend','unsubscribe','different-target','different-target-new-suspend']){
+  const f=detectionFixture(null,{sharedTransport:true}),readiness=[];
+  const retained=versionedGame(TMNT,10,10),restored=versionedGame(TMNT,12,12);
+  f.broadcastPower({...f.power,suspendSerial:0});f.native=retained;
+  await f.detector.refreshGameStatusStrict();
+  const stop=f.detector.subscribeGameTargetReadiness(value=>readiness.push(value));
+  try{
+   const ready={...f.power,generation:101,suspendSerial:1,publicationRevision:2,observedNotificationSequence:2};
+   const completed={...ready,gameWakeRecoveryRevision:1};
+   const before=f.messages.length;f.hold=true;
+   f.broadcastPower(ready);await flushDetection();
+   assert.equal(f.messages.length,before+1);
+   const older=f.messages.at(-1);
+   f.broadcastPower(completed);await flushDetection();
+   assert.equal(f.messages.length,before+1,'completion must not start a concurrent scan');
+   if(outcome==='new-suspend'||outcome==='different-target-new-suspend')f.broadcastPower({...completed,phase:'suspended',generation:102,suspendSerial:2,
+    publicationRevision:3,observedNotificationSequence:3,hardwareWritesAllowed:false,notificationPending:true});
+   if(outcome==='unsubscribe')stop();
+   const olderObservation=outcome.startsWith('different-target')?versionedGame(NEXT_GAME,11,11):noGame(11,11);
+   f.reply(older.id,{...olderObservation,observationState:'complete'});await flushDetection();
+   const admitted=outcome==='restored'||outcome==='empty'||outcome==='different-target';
+   assert.equal(f.detector.getCurrentGame()?.pid,TMNT.pid,`do not publish a change from before completion: ${outcome}`);
+   assert.equal(f.messages.length,before+(admitted?2:1),`the current recovery gets one recheck: ${outcome}`);
+   assert.deepEqual(readiness,[true,false]);
+   if(admitted){
+    const later=f.messages.at(-1);
+    assert.deepEqual(later.args,older.args,'retry the same admitted automatic scope');
+    f.reply(later.id,outcome==='empty'?{...noGame(11,11),observationState:'complete'}:restored);await flushDetection();
+    assert.equal(f.detector.getCurrentGame()?.pid,outcome==='empty'?undefined:TMNT.pid);
+    assert.deepEqual(readiness,[true,false,true]);
+    f.broadcastPower(completed);await f.advance(60000);
+    assert.equal(f.messages.length,before+2,'accept the new observation and deduplicate the completion');
+   }else{
+    await f.advance(60000);assert.equal(f.messages.length,before+1);
+   }
+  }finally{stop();f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);}
+ }
+});
+
+await check('non-Steam completion observed by current power readback survives a lost push',async()=>{
+ const f=detectionFixture(null,{sharedTransport:true}),readiness=[],revisions=[],ordinary=[];
+ const target=versionedGame(TMNT,10,10);
+ f.broadcastPower({...f.power,suspendSerial:0});f.native=target;
+ await f.detector.refreshGameStatusStrict();
+ const stop=f.detector.subscribeGameTargetReadiness(value=>readiness.push(value));
+ const offOrdinary=f.sharedPower.onSharedPowerLifecycle(state=>ordinary.push(state));
+ const offRevision=f.sharedPower.onSharedPowerLifecycle(state=>revisions.push(state.gameWakeRecoveryRevision??0),{observeGameWakeRecovery:true});
+ try{
+  const ready={...f.power,generation:101,suspendSerial:1,observedNotificationSequence:2,publicationRevision:2};
+  const completed={...ready,gameWakeRecoveryRevision:1};
+  f.native={...target,observationState:'pending'};
+  f.broadcastPower(ready);await flushDetection();await f.advance(20000);
+  assert.deepEqual(readiness,[true,false]);
+  const exhausted=f.messages.length,business=ordinary.length,at=f.sharedPower.getSharedPowerLifecycleDiagnostics();
+  const accept=f.sharedPower.beginSharedPowerLifecycleReadback();
+  accept({...completed,suspendSerial:0,gameWakeRecoveryRevision:9});
+  accept({...completed,known:false,hardwareWritesAllowed:false,gameWakeRecoveryRevision:9});
+  accept({...completed,hardwareWritesAllowed:false,gameWakeRecoveryRevision:9});
+  await flushDetection();
+  assert.equal(f.messages.length,exhausted,'old scope and denied receipts cannot signal current recovery');
+  assert.deepEqual(revisions,[0,0]);
+  f.native=target;accept({...completed,fanWakeGeneration:99});await flushDetection();
+  assert.equal(f.messages.length,exhausted+1,'same power revision can carry a new game completion');
+  assert.deepEqual(readiness,[true,false,true]);
+  assert.deepEqual(revisions,[0,0,1]);
+  assert.equal(ordinary.length,business,'completion does not replay ordinary Ready');
+  assert.deepEqual(structuredClone(f.sharedPower.getSharedPowerLifecycle()),completed,'readback supplies only the completion field');
+  assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().counters.readStarted,at.counters.readStarted,'no separate public read');
+  accept(completed);f.broadcastPower(completed);await f.advance(60000);
+  assert.equal(f.messages.length,exhausted+1,'readback and delayed push deduplicate');
+  assert.deepEqual(revisions,[0,0,1]);
+  const blocked={...completed,publicationRevision:3,hardwareWritesAllowed:false};
+  f.broadcastPower(blocked);await flushDetection();
+  f.sharedPower.beginSharedPowerLifecycleReadback()({...blocked,hardwareWritesAllowed:true,gameWakeRecoveryRevision:2});
+  await flushDetection();
+  assert.deepEqual(structuredClone(f.sharedPower.getSharedPowerLifecycle()),blocked,'the direct read cannot open a denied snapshot or advance its completion revision');
+  assert.equal(f.messages.length,exhausted+1);
+ }finally{offRevision();offOrdinary();stop();f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);}
+});
+
 if(detectionOnly&&exactCase==='game detection recovers after a stale reply to a new public observation')await check('game detection recovers after a stale reply to a new public observation',async()=>{
  const f=detectionFixture();
  const current=versionedGame(TMNT,10,10), stale=versionedGame(TMNT,9,9);
@@ -1520,13 +2838,13 @@ if(detectionOnly&&exactCase==='game detection recovers after a stale reply to a 
 });
 
 if(detectionOnly&&exactCase==='game profile auto memory resumes after queued work loses public admission')await check('game profile auto memory resumes after queued work loses public admission',async()=>{
- for(const [boundary,coalesced] of [['queued',false],['before-commit',false],['after-commit',false],['before-commit',true]]){
+ for(const [boundary,coalesced,sameScope] of [['queued',false],['before-commit',false],['after-commit',false],['before-commit',true],['before-commit',false,true],['restoring',false,true]]){
   const f=detectionFixture(),power={...f.sharedPower,isSharedPowerLifecycleAdmitted:f.powerModule.isSharedPowerLifecycleAdmitted};
   if(coalesced)f.power.suspendSerial=7;
-  const first=coalesced?7:100,next=coalesced?8:101;
+  const first=coalesced?7:100,next=sameScope?first:coalesced?8:101;
   const scope=()=>coalesced?f.power.suspendSerial:f.power.generation;
   const target=load('src/bridge/gameCustomProfileTarget.ts',{'./gamePolicyHysteresis':hysteresis});
-  const listeners=new Set(),attempts=[],writes=[],restores=[];
+  const listeners=new Set(),attempts=[],writes=[],writeAttempts=[],restores=[];
   let config={autoMemory:false,entries:{},rtss:{}},release;
   const hold=new Promise(resolve=>{release=resolve;});
   const publish=(patch={})=>{config={...config,...patch};for(const cb of listeners)cb(structuredClone(config));};
@@ -1537,15 +2855,21 @@ if(detectionOnly&&exactCase==='game profile auto memory resumes after queued wor
     onGameCustomConfigChanged(cb){listeners.add(cb);return()=>listeners.delete(cb);},
     async createGameCustomProfile(identity,_name,{automatic,admit}){
      assert(automatic&&admit());assert.equal(identity.pid,TMNT.pid);assert.equal(identity.processCreated,TMNT.processCreated);
-     const attempt=scope();attempts.push(attempt);
+     const attempt=scope();attempts.push(attempt);const attemptNumber=attempts.length;
      if(config.entries[identity.exe])return false;
      if(attempts.length===1&&boundary==='before-commit')await hold;
      if(!admit())return false;
-     writes.push(attempt);publish({entries:{[identity.exe]:true}});
+     writes.push(attempt);writeAttempts.push(attemptNumber);publish({entries:{[identity.exe]:true}});
      if(attempts.length===1&&boundary==='after-commit')await hold;
      return true;
     },
-    async restorePerformanceScheduleIfConfigured(){restores.push(scope());},
+    async restorePerformanceScheduleIfConfigured(_side,options){
+     if(boundary==='restoring'){
+      await hold;
+      if(options?.ownsPowerRequest?.()===false)return;
+     }
+     restores.push(scope());
+    },
    },
   });
   try{
@@ -1561,20 +2885,22 @@ if(detectionOnly&&exactCase==='game profile auto memory resumes after queued wor
     f.broadcastPower({...f.power,publicationRevision:2,suspendSerial:next});
     await flushDetection();await f.detector.refreshGameStatusStrict();
    }else{
-   f.broadcastPower({...f.power,notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});
+   f.broadcastPower({...f.power,notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:sameScope?f.power.observedNotificationSequence:2});
    await flushDetection();
    assert(!f.detector.isGameStatusCurrent());assert.equal(f.detector.getCurrentGame()?.pid,TMNT.pid);
-   assert.deepEqual(writes,boundary==='after-commit'?[100]:[]);assert.deepEqual(restores,[]);
+   assert.deepEqual(writes,['after-commit','restoring'].includes(boundary)?[first]:[]);assert.deepEqual(restores,[]);
    if(boundary==='queued')assert.deepEqual(attempts,[],'revoked queued work reached the write port');
-   f.broadcastPower({...f.power,generation:101,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});
+   f.broadcastPower({...f.power,generation:next,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});
    }
    await flushDetection();await f.advance(1250);
    assert(f.detector.isGameStatusCurrent());assert.equal(f.detector.getCurrentGame()?.processCreated,TMNT.processCreated);
    if(boundary!=='queued')assert.deepEqual(attempts,[first],'successor overlapped an unresolved write');
    release();await flushDetection();
-   assert.deepEqual(writes,boundary==='after-commit'?[first]:[next],'same game did not resume after zero-work public revocation');
+   const committedBeforeSleep=['after-commit','restoring'].includes(boundary);
+   assert.deepEqual(writes,committedBeforeSleep?[first]:[next],'same game did not resume after zero-work public revocation');
+   assert.deepEqual(writeAttempts,[committedBeforeSleep||boundary==='queued'?1:2],'retired attempt borrowed a later Ready');
    assert.deepEqual(attempts,boundary==='queued'?[next]:[first,next]);
-   assert.deepEqual(restores,boundary==='after-commit'?[]:[next]);
+   assert.deepEqual(restores,committedBeforeSleep?[]:[next]);
    assert(!auto.getGameProfileAutoMemoryDiagnostics().pending&&!auto.getGameProfileAutoMemoryDiagnostics().busy);
    const settled=attempts.length;
    publish({entries:{}});await flushDetection();
@@ -1584,6 +2910,122 @@ if(detectionOnly&&exactCase==='game profile auto memory resumes after queued wor
    publish({autoMemory:true});auto.stopGameProfileAutoMemory();await flushDetection();
    assert.equal(attempts.length,settled,'queued work survived stop');
   }finally{release();auto.stopGameProfileAutoMemory();f.stopPowerProbe();await flushDetection();assert.equal(listeners.size,0);}
+ }
+});
+
+await check('game profile auto memory rechecks configuration after an interrupted public scope',async()=>{
+ for(const scenario of ['rejected','coalesced-stale-success','stopped','config-update','current-failure']){
+  const f=detectionFixture(),power={...f.sharedPower,isSharedPowerLifecycleAdmitted:f.powerModule.isSharedPowerLifecycleAdmitted};
+  const policyStops=[];
+  const policy=load('src/bridge/gamePolicyTarget.ts',{'./gamePolicyHysteresis':hysteresis,'./gamedetect':{
+   ...f.detector,subscribeGameStatus(cb){const stop=f.detector.subscribeGameStatus(cb);policyStops.push(stop);return stop;},
+  }});
+  const target=load('src/bridge/gameCustomProfileTarget.ts',{'./gamePolicyHysteresis':hysteresis});
+  const listeners=new Set(),reads=[],writes=[],restores=[];
+  let settle,fail;
+  const old=new Promise((resolve,reject)=>{settle=resolve;fail=reject;});
+  const config=autoMemory=>({autoMemory,entries:{},rtss:{}});
+  const auto=load('src/bridge/gameProfileAutoMemory.ts',{
+   './gamePolicyTarget':policy,'./gamedetect':f.detector,'./settingsRepository':{getSettingsGeneration:()=>1},
+   './powerLifecycleState':power,'./gameCustomProfileTarget':target,'./performanceSchedule':{
+    loadGameCustomConfig:async()=>{
+     reads.push(f.power.suspendSerial);
+     return reads.length===1?old:config(scenario==='rejected');
+    },
+    onGameCustomConfigChanged(cb){listeners.add(cb);return()=>listeners.delete(cb);},
+    async createGameCustomProfile(identity,_name,{automatic,admit}){
+     assert(automatic&&admit());assert.equal(identity.pid,TMNT.pid);assert.equal(identity.processCreated,TMNT.processCreated);
+     writes.push(identity.pid);return true;
+    },
+    async restorePerformanceScheduleIfConfigured(_side,options){assert(options.ownsPowerRequest());restores.push(true);},
+   },
+  });
+  try{
+   f.broadcastPower({...f.power,suspendSerial:7});
+   f.native=versionedGame();await f.detector.refreshGameStatusStrict();
+   auto.startGameProfileAutoMemory();await flushDetection();assert.deepEqual(reads,[7]);
+   if(scenario==='current-failure'){
+    fail(Error('the current read failed'));await flushDetection();
+    assert.deepEqual(reads,[7]);assert.equal(auto.getGameProfileAutoMemoryDiagnostics().lastError,'the current read failed');
+    continue;
+   }
+   if(scenario==='coalesced-stale-success')f.broadcastPower({...f.power,suspendSerial:8,publicationRevision:2});
+   else{
+    f.broadcastPower({...f.power,notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2});
+    await flushDetection();assert.deepEqual(reads,[7]);
+    f.broadcastPower({...f.power,notificationPending:false,hardwareWritesAllowed:true,publicationRevision:3});
+   }
+   await flushDetection();await f.detector.refreshGameStatusStrict();
+   assert(f.detector.isGameStatusCurrent());assert.deepEqual(reads,[7],'the current read cannot overlap the original operation');
+   if(scenario==='stopped')auto.stopGameProfileAutoMemory();
+   if(scenario==='config-update')for(const listener of listeners)listener(config(false));
+   if(scenario==='rejected')fail(Error('retired pre-sleep configuration read'));
+   else settle(config(true));
+   await flushDetection();
+   const successor=!['stopped','config-update'].includes(scenario);
+   assert.deepEqual(reads,successor?[7,f.power.suspendSerial]:[7],`${scenario}: the retired operation must release exactly one required current read`);
+   assert.deepEqual(writes,scenario==='rejected'?[TMNT.pid]:[],`${scenario}: only the current opted-in game may be created`);
+   assert.deepEqual(restores,scenario==='rejected'?[true]:[]);
+   assert.equal(auto.getGameProfileAutoMemoryDiagnostics().lastError,'');
+  }finally{
+   settle(config(false));auto.stopGameProfileAutoMemory();for(const stop of policyStops)stop();f.stopPowerProbe();await flushDetection();
+   assert.equal(listeners.size,0);assert.equal(f.timers.size,0);assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);
+  }
+ }
+});
+
+await check('game profile auto memory retries a failed creation only after public readmission',async()=>{
+ for(const scenario of ['same-scope','merged','off','already-exists','restore-failed','reply-lost']){
+  const f=detectionFixture(null,{sharedTransport:true}),initial={...f.power,suspendSerial:7};
+  const power={...f.sharedPower,isSharedPowerLifecycleAdmitted:f.powerModule.isSharedPowerLifecycleAdmitted};
+  const target=load('src/bridge/gameCustomProfileTarget.ts',{'./gamePolicyHysteresis':hysteresis});
+  const listeners=new Set(),attempts=[],writes=[];
+  const config={autoMemory:true,entries:{},rtss:{}};
+  let restored=0;
+  const auto=load('src/bridge/gameProfileAutoMemory.ts',{
+   './gamePolicyTarget':f.policy,'./gamedetect':f.detector,'./settingsRepository':{getSettingsGeneration:()=>1},
+   './powerLifecycleState':power,'./gameCustomProfileTarget':target,'./performanceSchedule':{
+    loadGameCustomConfig:async()=>structuredClone(config),
+    onGameCustomConfigChanged(cb){listeners.add(cb);return()=>listeners.delete(cb);},
+    async createGameCustomProfile(identity,_name,{automatic,admit}){
+     assert(automatic&&admit());assert.equal(identity.pid,TMNT.pid);assert.equal(identity.processCreated,TMNT.processCreated);
+     attempts.push(f.power.suspendSerial);
+     if(attempts.length===1){
+      if(scenario==='already-exists')return false;
+      if(scenario==='reply-lost'){writes.push(identity.pid);throw Error('creation reply was lost');}
+      if(scenario!=='restore-failed')throw Error('configuration observation unavailable before commit');
+     }
+     if(scenario==='reply-lost'&&writes.length>0)return false;
+     writes.push(identity.pid);return true;
+    },
+    async restorePerformanceScheduleIfConfigured(_side,{ownsPowerRequest}){
+     assert(ownsPowerRequest());++restored;
+     if(scenario==='restore-failed')throw Error('restore failed after profile creation');
+    },
+   },
+  });
+  try{
+   f.broadcastPower(initial);f.native=versionedGame();await f.detector.refreshGameStatusStrict();
+   auto.startGameProfileAutoMemory();await flushDetection();
+   assert.deepEqual(attempts,[7]);assert(!auto.getGameProfileAutoMemoryDiagnostics().busy,'the first attempt is already settled');
+   for(const cb of listeners)cb(structuredClone(config));
+   f.broadcastPower(initial);await flushDetection();assert.deepEqual(attempts,[7],'same-scope observations cannot create a retry loop');
+   const merged=scenario==='merged';
+   const ready={...initial,publicationRevision:3,suspendSerial:merged?8:7};
+   if(!merged){
+    f.broadcastPower({...initial,phase:'suspending',hardwareWritesAllowed:false,inputReady:false,publicationRevision:2});
+    await flushDetection();assert.deepEqual(attempts,[7]);
+   }
+   if(scenario==='off')for(const cb of listeners)cb({...config,autoMemory:false});
+   f.broadcastPower(ready);await flushDetection();await f.advance(1250);
+   assert(f.detector.isGameStatusCurrent(),'the same game has been revalidated');
+   const shouldRetry=scenario==='same-scope'||merged||scenario==='reply-lost';
+   assert.deepEqual(attempts,shouldRetry?[7,ready.suspendSerial]:[7],`${scenario}: only unconfirmed creation can retry after readmission`);
+   f.broadcastPower(ready);await flushDetection();
+   assert.equal(attempts.length,shouldRetry?2:1,'duplicate Ready must not repeat creation');
+   assert.deepEqual(writes,shouldRetry||scenario==='restore-failed'?[TMNT.pid]:[]);
+   assert.equal(restored,scenario==='reply-lost'?0:writes.length);
+  }finally{auto.stopGameProfileAutoMemory();f.stopPowerProbe();await flushDetection();assert.equal(listeners.size,0);}
  }
 });
 
@@ -1608,12 +3050,218 @@ await check('公共通知序号立即归还旧识别等待且后继不依赖私�
  }finally{f.fail(message.id,'fixture terminal');await old;stop();f.stopPowerProbe();await flushDetection();assert.equal(f.timers.size,0);assert(f.abortRecords.every(r=>r.callbacks.size===0));}
 });
 
+await check('公共Ready早于识别发出时旧请求不得借新代次选游戏',async()=>{
+ for(const [name,boundary,preferredPid] of [
+  ['coalesced-wake',{generation:101,observedNotificationSequence:2,suspendSerial:2},TMNT.pid],
+  ['same-generation-notification',{observedNotificationSequence:2},TMNT.pid],
+  ['same-generation-suspend',{suspendSerial:2},TMNT.pid],
+  ['ordinary-read',{generation:101,observedNotificationSequence:2,suspendSerial:2},0],
+ ]){
+  const f=detectionFixture(null,{sharedTransport:true});
+  const before={...f.power,suspendSerial:1};f.broadcastPower(before);
+  f.native=versionedGame();await f.detector.refreshGameStatusStrict();
+  const readiness=[],stop=f.detector.subscribeGameTargetReadiness(ready=>readiness.push(ready));
+  const first=f.messages.length;
+  const old=f.detector.refreshGameStatusStrict(preferredPid).then(value=>({value}),error=>({error}));
+  const oldSignal=f.abortRecords.at(-1).signal;
+  try{
+   assert.equal(f.messages.length,first,`${name}: request already reached Native`);
+   f.native=versionedGame(NEXT_GAME,11);
+   f.broadcastPower({...before,...boundary,publicationRevision:2});
+   await flushDetection();
+   const sent=f.messages.slice(first);
+   assert.deepEqual(sent.map(m=>[m.args.automatic,m.args.pid]),[[true,undefined]],`${name}: queued read borrowed the new power scope`);
+   assert((await old).error,`${name}: revoked caller received a successful observation`);
+   assert(oldSignal.aborted,`${name}: queued read retained power ownership`);
+   assert.equal(sent[0].args.expectedPowerGeneration,f.power.generation);
+   assert.equal(sent[0].args.expectedPowerNotificationSequence,f.power.observedNotificationSequence);
+   assert.equal(sent[0].args.expectedPowerSuspendSerial,f.power.suspendSerial);
+   assert.equal(f.detector.getCurrentGame().pid,NEXT_GAME.pid);
+   assert(f.detector.isCurrentGameTarget(f.native));
+   assert.deepEqual(readiness.slice(-3),[true,false,true]);
+  }finally{stop();f.stopPowerProbe();await flushDetection();}
+  assert.equal(f.timers.size,0);assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);
+  assert(f.abortRecords.every(r=>r.callbacks.size===0));
+ }
+});
+
+await check('冷启动识别只绑定首份公共电源事实',async()=>{
+ for(const changed of [false,true]){
+  const f=detectionFixture(null,{sharedTransport:true});
+  f.powerReadHook=()=>new Promise(()=>{});
+  f.native=versionedGame();
+  const old=f.detector.refreshGameStatusStrict(TMNT.pid).then(value=>({value}),error=>({error}));
+  const signal=f.abortRecords.at(-1).signal;
+  try{
+   await flushDetection();
+   assert.equal(f.sharedPower.getSharedPowerLifecycle(),null);
+   assert.equal(f.messages.length,0);
+   f.broadcastPower({...f.power,suspendSerial:1});
+   if(changed)f.broadcastPower({...f.power,suspendSerial:2,publicationRevision:2});
+   const result=await old;
+   if(changed){
+    assert(result.error,'cold request borrowed a later power scope');
+    assert(signal.aborted);
+    assert.equal(f.messages.length,0);
+    assert.equal((await f.detector.refreshGameStatusStrict()).pid,TMNT.pid);
+    assert.equal(f.messages[0].args.expectedPowerSuspendSerial,2);
+   }else{
+    assert.equal(result.value.pid,TMNT.pid);
+    assert.equal(f.messages[0].args.expectedPowerSuspendSerial,1);
+    assert(!signal.aborted);
+   }
+  }finally{f.stopPowerProbe();await flushDetection();}
+  assert.equal(f.timers.size,0);assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);
+  assert(f.abortRecords.every(r=>r.callbacks.size===0));
+ }
+});
+
 await check('公共撤销归还旧识别IPC等待和timer但不伪造Native取消',async()=>{
  for(const preferred of [0,TMNT.pid]){
   const f=detectionFixture();f.native=versionedGame();const stop=f.detector.subscribeGameStatus(()=>{});await flushDetection();f.hold=true;let settled=false,rejected=false;const old=f.detector.refreshGameStatusStrict(preferred).then(()=>{settled=true;},()=>{settled=true;rejected=true;});await flushDetection();const message=f.messages.at(-1),before=f.messages.length;
   f.broadcastPower({...f.power,notificationPending:true,hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2});await flushDetection();
   try{assert.equal(settled,true,'public revocation retained local game IPC wait');assert.equal(rejected,true);assert(![...f.timers.values()].some(t=>t.at===8000),'revoked game IPC timeout retained its private request');assert.equal(f.messages.length,before,'public cancellation sent a native command');f.reply(message.id,versionedGame());await flushDetection();assert.equal(f.detector.isGameStatusCurrent(),false);}
   finally{f.fail(message.id,'fixture release old IO only');await old;stop();f.stopPowerProbe();}
+ }
+});
+
+await check('game status fanout resumes only the undelivered observers after a new power scope',async()=>{
+ for(const outcome of ['same-target','replacement','readiness-revokes']){
+  const f=detectionFixture(null,{sharedTransport:true}),block=blockDisplayScheduler(f);
+  f.broadcastPower({...f.power,suspendSerial:1});f.native=noGame(1);
+  await f.detector.refreshGameStatusStrict();
+  const first=[],second=[],removed=[],readiness=[],revokesInReadiness=outcome==='readiness-revokes';
+  const revoke=()=>{
+   f.hold=true;
+   f.broadcastPower({...f.power,suspendSerial:2,observedNotificationSequence:2,publicationRevision:2});
+  };
+  const stopA=f.detector.subscribeGameStatus(game=>{
+   if(!game)return;
+   first.push([game.pid,f.detector.isGameStatusCurrent()]);
+   if(!revokesInReadiness&&first.length===1)revoke();
+  });
+  const stopB=f.detector.subscribeGameStatus(game=>{if(game)second.push([game.pid,f.detector.isGameStatusCurrent()]);});
+  const stopC=f.detector.subscribeGameStatus(game=>{if(game)removed.push(game.pid);});
+  const stopReady=f.detector.subscribeGameTargetReadiness(value=>{
+   readiness.push(value);
+   if(revokesInReadiness&&value&&readiness.length===3)revoke();
+  });
+  try{
+   f.native=versionedGame(TMNT,10,10);
+   await assert.rejects(f.detector.refreshGameStatusStrict(TMNT.pid),/power admission expired/);
+   await f.advance(100);
+   assert.deepEqual(first,revokesInReadiness?[]:[[TMNT.pid,true]]);
+   assert.deepEqual(second,[],'an old target must not reach a later status observer after a newer suspend');
+   assert.deepEqual(removed,[]);
+   assert.equal(f.detector.getCurrentGame()?.pid,TMNT.pid,'retain the most recent display snapshot');
+   assert.equal(f.messages.length,3,'only one current automatic read may replace the old delivery');
+   const next=f.messages.at(-1);
+   assert.equal(next.args.automatic,true);assert.equal(next.args.expectedPowerSuspendSerial,2);
+   assert.equal(next.args.expectedPowerNotificationSequence,2);assert.equal(next.args.pid,undefined);
+   stopC();
+   const current=outcome==='replacement'?NEXT_GAME:TMNT;
+   f.hold=false;f.native=versionedGame(current,11,outcome==='replacement'?11:10);
+   f.reply(next.id,f.native);await flushDetection();
+   assert.deepEqual(first,outcome==='replacement'?[[TMNT.pid,true],[NEXT_GAME.pid,true]]:[[TMNT.pid,true]]);
+   assert.deepEqual(second,[[current.pid,true]],'the current target must reach a skipped observer once');
+   assert.deepEqual(removed,[]);
+   assert.deepEqual(readiness,[true,false,true,false,true]);
+   f.broadcastPower({...f.power,publicationRevision:3});await f.advance(1000);
+   assert.equal(second.length,1);assert.equal(f.messages.length,3,'same-scope publication must not reopen delivery');
+  }finally{
+   stopReady();stopC();stopB();stopA();block();f.stopPowerProbe();
+   for(const {id} of f.messages)f.fail(id,'fixture cleanup');
+   await flushDetection();assert.equal(f.timers.size,0);
+  }
+ }
+});
+
+await check('非 Steam：策略分发遇到新电源边界后只补交未收到的目标',async()=>{
+ for(const [field,replacement] of [['suspendSerial',false],['observedNotificationSequence',false],['suspendSerial',true]]){
+  const f=detectionFixture(null,{sharedTransport:true}),block=blockDisplayScheduler(f);
+  f.broadcastPower({...f.power,suspendSerial:1});
+  f.native=noGame(1);
+  await f.policy.detectPolicyGame();
+  const delivered=[],later=[],joining=[],unsubscribed=[];
+  let join;
+  const first=f.policy.subscribePolicyGameStatus(game=>{
+   if(!game)return;
+   delivered.push([game.pid,game.processCreated,f.detector.isGameStatusCurrent()]);
+   if(delivered.length!==1)return;
+   f.hold=true;
+   f.broadcastPower({...f.power,[field]:2,publicationRevision:2});
+   join=f.policy.subscribePolicyGameStatus(target=>{if(target)joining.push([target.pid,f.detector.isGameStatusCurrent()]);});
+  });
+  const second=f.policy.subscribePolicyGameStatus(game=>{if(game)later.push([game.pid,f.detector.isGameStatusCurrent()]);});
+  const removed=f.policy.subscribePolicyGameStatus(game=>{if(game)unsubscribed.push(game.pid);});
+  try{
+   f.native=versionedGame(TMNT,10,10);
+   await assert.rejects(f.detector.refreshGameStatusStrict(TMNT.pid),/power admission expired/);
+   await flushDetection();
+   assert.deepEqual(delivered,[[TMNT.pid,TMNT.processCreated,true]]);
+   assert.deepEqual({later,joining},{later:[],joining:[]},`${field}: invalidated target reached a policy listener`);
+   assert.equal(f.policy.getPolicyGame()?.pid,TMNT.pid,'keep the display while policy authority waits');
+   assert.equal(f.messages.length,3);
+   const next=f.messages.at(-1);
+   assert.equal(next.args.pid,undefined,'automatic recovery repeated the explicit selection');
+   assert.equal(next.args.automatic,true);
+   removed();
+   const current=replacement?NEXT_GAME:TMNT;
+   f.hold=false;f.native=versionedGame(current,11,replacement?11:10);
+   f.reply(next.id,f.native);await flushDetection();
+   assert.deepEqual(later,[[current.pid,true]]);
+   assert.deepEqual(joining,[[current.pid,true]]);
+   assert.deepEqual(unsubscribed,[],'a stopped subscriber cannot receive the deferred status');
+   assert.deepEqual(delivered.map(([pid])=>pid),replacement?[TMNT.pid,NEXT_GAME.pid]:[TMNT.pid],
+    'the first subscriber must not reapply the same game or miss its replacement');
+   assert.equal(f.messages.length,3,'delivery recovery must not start another read');
+  }finally{
+   join?.();removed();second();first();block();f.stopPowerProbe();
+   for(const msg of f.messages)f.fail(msg.id,'fixture settlement');
+   await flushDetection();
+  }
+ }
+});
+await check('非 Steam：识别发布中失去公共电源范围时只交付后继就绪',async()=>{
+ for(const [field,preferredPid] of [['suspendSerial',TMNT.pid],['observedNotificationSequence',0]]){
+  const f=detectionFixture(null,{sharedTransport:true});
+  f.broadcastPower({...f.power,suspendSerial:1});
+  f.native=versionedGame(TMNT);
+  let armed=true;
+  const readiness=[];
+  const revoke=f.detector.subscribeGameTargetReadiness(ready=>{
+   if(!ready||!armed)return;
+   armed=false;
+   f.hold=true;
+   f.broadcastPower({...f.power,[field]:2,publicationRevision:2});
+  });
+  const observe=f.detector.subscribeGameTargetReadiness(ready=>readiness.push([ready,f.detector.isGameStatusCurrent()]));
+  try{
+   const result=await f.detector.refreshGameStatusStrict(preferredPid).then(value=>({value}),error=>({error}));
+   await flushDetection();
+   assert.equal(armed,false,'first subscriber did not retire the active power scope');
+   assert.deepEqual({returnedRetiredTarget:!result.error,staleReadiness:readiness.filter(([v,current])=>v&&!current).length},
+    {returnedRetiredTarget:false,staleReadiness:0},`${field}: power revoked during publication`);
+   assert.equal(f.detector.isGameStatusCurrent(),false);
+   assert.equal(f.detector.getCurrentGame()?.pid,TMNT.pid,'revocation must not synthesize game exit');
+   assert.equal(f.messages.length,2,'current scope must obtain exactly one independent read');
+   const [first,next]=f.messages;
+   assert.equal(first.args.pid,preferredPid||undefined);
+   assert.equal(next.args.pid,undefined,'public recovery replayed an old explicit PID');
+   assert.equal(next.args.automatic,true);
+   assert.equal(next.args[field==='suspendSerial'?'expectedPowerSuspendSerial':'expectedPowerNotificationSequence'],2);
+   f.reply(next.id,versionedGame(TMNT,11,10));await flushDetection();
+   assert.deepEqual(readiness.filter(([v])=>v),[[true,true]]);
+   assert.equal(f.detector.getCurrentGame()?.processCreated,TMNT.processCreated);
+   assert.equal(f.detector.isGameStatusCurrent(),true);
+  }finally{
+   observe();revoke();f.stopPowerProbe();
+   for(const msg of f.messages)f.fail(msg.id,'fixture settlement');
+   await flushDetection();
+   assert.equal(f.timers.size,0);
+   assert.equal(f.sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,0);
+   assert(f.abortRecords.every(record=>record.callbacks.size===0));
+  }
  }
 });
 

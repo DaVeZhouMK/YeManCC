@@ -26,6 +26,41 @@ inline Json queryAnomaly(std::uint64_t sequence=1) {
     fact["details"]["values"]["ActiveResidencyInUs"]=600000000u;
     return fact;
 }
+inline Json longScreenOff(std::uint64_t sequence=9) {
+    auto fact=anomaly(sequence);
+    fact["event"]="s0-long-screen-off-not-entered";
+    fact["details"]={{"source","Microsoft-Windows-Kernel-Power/506+507"},
+        {"entryFileTime100ns",134400511910830000ULL},{"exitFileTime100ns",134400598550180000ULL},
+        {"entryReason",12},{"exitReason",1},{"generation",9971},{"screenOffUs",8661077336ULL},
+        {"sessionUs",8661077406ULL},{"windowsSleepEntered",false},{"powerActionAuthorized",false},
+        {"detailLogsRequired",false},{"mandatoryEvidence",true}};
+    return fact;
+}
+inline Json g3eAcScreenOff() {
+    auto fact=longScreenOff(10);
+    fact["event"]="s0-long-screen-off-ac-segment-not-entered";
+    auto& d=fact["details"];
+    d["entryFileTime100ns"]=134399013948900000ULL;
+    d["exitFileTime100ns"]=134399678408347094ULL;
+    d["exitReason"]=28;
+    d["sessionUs"]=66445945042ULL;
+    d["screenOffUs"]=66445944305ULL;
+    d["sessionContinues"]=true;
+    d["windowsPowerStateAc"]=true;
+    return fact;
+}
+inline Json win5ReasonFiveScreenOff(bool continuing) {
+    auto fact=continuing?g3eAcScreenOff():longScreenOff();
+    auto& d=fact["details"];
+    d["entryReason"]=5;
+    d["exitReason"]=continuing?28:8;
+    d["generation"]=6596392;
+    d["entryFileTime100ns"]=continuing?134392400845360000ULL:134392554217850000ULL;
+    d["exitFileTime100ns"]=continuing?134392554155450000ULL:134392584947300000ULL;
+    d["sessionUs"]=continuing?15331011509ULL:3072946969ULL;
+    d["screenOffUs"]=continuing?15331010340ULL:3072946045ULL;
+    return fact;
+}
 inline QueryResult report(const std::string& xml="<?xml version=\"1.0\"?><SleepStudy/>") {
     QueryResult q;q.ran=true;q.completion="child-exit";q.elapsedMs=7;q.xml=xml;return q;
 }
@@ -82,6 +117,38 @@ inline unsigned helperTests() {
     expect(selectAnomaly(valid)==selected,"export selects original completed507 identity at exact120s silent-zero boundary");
     auto later=anomaly(2);auto positive=later;positive["details"]["assessment"]="hardware-residency-recorded";
     expect(selectAnomaly({selected.dump(),later.dump(),positive.dump()})==later,"export chooses latest qualifying historical anomaly despite newer positive record");
+    const auto off=longScreenOff();
+    expect(selectAnomaly({later.dump(),off.dump(),positive.dump()})==off,
+        "export selects the newer confirmed long screen-off failure without any DRIPS counters");
+    auto afterPowerChange=off;
+    auto& segment=afterPowerChange["details"];
+    segment["entryReason"]=28;
+    segment["entryFileTime100ns"]=134399678408350175ULL;
+    segment["exitFileTime100ns"]=134399990201484595ULL;
+    segment["sessionUs"]=31179314305ULL;
+    segment["screenOffUs"]=31179313981ULL;
+    expect(selectAnomaly({later.dump(),afterPowerChange.dump(),positive.dump()})==afterPowerChange,
+        "export keeps the G3E battery segment after the power-source change");
+    const auto ac=g3eAcScreenOff();
+    expect(selectAnomaly({later.dump(),ac.dump(),positive.dump()})==ac,
+        "export associates the G3E continuing AC segment without relight or DRIPS");
+    expect(reportHistoryDays(afterPowerChange,134401466270000000ULL)==3&&
+        reportHistoryDays(later,134401466270000000ULL)==1,
+        "delayed G3E battery export looks back to original segment entry; auxiliary DRIPS keeps default history");
+    for(const auto& change:std::vector<std::pair<std::string,Json>>{{"entryReason",28},{"exitReason",1},
+        {"sessionContinues",false},{"sessionContinues",nullptr},{"windowsPowerStateAc",false},{"windowsPowerStateAc","true"},
+        {"windowsSleepEntered",true},{"powerActionAuthorized",true}}) {
+        auto invalid=ac;invalid["details"][change.first]=change.second;
+        expect(selectAnomaly({later.dump(),invalid.dump()})==later,"export rejects an ambiguous continuing AC segment");
+    }
+    for(const auto& change:std::vector<std::pair<std::string,Json>>{{"source","other"},{"entryReason",1},
+        {"entryReason",4294967324ULL},
+        {"exitReason",20},{"windowsSleepEntered",true},{"powerActionAuthorized",true},
+        {"screenOffUs",1u},{"sessionUs",1u},{"generation",0u},{"entryFileTime100ns",0u},
+        {"exitFileTime100ns",134400511910830000ULL}}) {
+        auto invalid=off;invalid["details"][change.first]=change.second;
+        expect(selectAnomaly({later.dump(),invalid.dump()})==later,"export rejects an incomplete or inconsistent screen-off failure");
+    }
     for(const char* missing:{"HwDripsResidencyInUs","DripsTransitions"}) {
         auto optional=selected;optional["details"]["values"].erase(missing);
         expect(selectAnomaly({optional.dump()})==optional,"missing optional hardware or transitions permits diagnostic without fabricating zero");
@@ -206,6 +273,7 @@ enum class PowerLifecycle {Ready,Suspended};
 static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
 static std::atomic<bool> g_exitRequested{false};
 static std::uint64_t fixtureGeneration=1,tick=100;
+static std::uint64_t fixtureExportFileTime=0;
 static unsigned guidSerial=0,queryCalls=0,cleanupFailures=0;
 static DWORD simulatedQueryMs=0;static bool exitDuringQuery=false;
 static std::uint32_t lastTimeout=0;
@@ -215,6 +283,7 @@ static DWORD commandExit=0,commandError=0;static const char* commandCompletion="
 static std::wstring lastCommand;
 static std::filesystem::path lastReport;
 static std::uint64_t currentPowerGeneration(){return fixtureGeneration;}
+[[maybe_unused]] static std::uint64_t sgNowFileTime(){return fixtureExportFileTime;}
 static std::string W2U(const std::wstring& s){std::string out;for(const auto c:s)out.push_back(static_cast<char>(c));return out;}
 static void appendNativeLifecycleLog(const char*,const json&){++cleanupFailures;}
 static std::wstring quote_windows_arg(const std::wstring& s){return L"\""+s+L"\"";}
@@ -502,6 +571,9 @@ static unsigned adapterTests() {
     }
     reset();g_sgFacts.push_back(sleep_export_fixture::queryAnomaly().dump());g_powerLifecycle=PowerLifecycle::Suspended;
     {auto result=sgExportWindowsSleepEvidence(fixtureRoot.wstring());expect(result.receipt["status"]=="UNKNOWN"&&queryCalls==0&&result.files.empty()&&result.owned.empty(),"nonready native generation performs zero query and creates no files");}
+    {const auto result=sgExportWindowsSleepEvidence(fixtureRoot.wstring());
+        expect(result.receipt.value("queryContextGate",json::object())==json{{"schema",1},{"blocker","power-not-ready"}}&&queryCalls==0,
+               "nonready export reports its context blocker without querying Windows");}
     reset();g_sgFacts.push_back(sleep_export_fixture::queryAnomaly().dump());writeReport=false;
     {auto result=sgExportWindowsSleepEvidence(fixtureRoot.wstring());expect(result.receipt["status"]=="UNKNOWN"&&result.receipt["reportAvailable"]==false&&queryCalls==1&&result.files.size()==1&&std::filesystem::path(result.files[0]).extension()==L".json","native missing-report read failure exports only ordinary UNKNOWN receipt without retry");}
     reset();g_sgFacts.push_back(sleep_export_fixture::queryAnomaly().dump());changeGeneration=true;
@@ -527,6 +599,10 @@ static unsigned adapterTests() {
             else expect(result.receipt["reason"]=="export-context-changed"&&!result.receipt["reportAvailable"].get<bool>()&&
                         result.files.size()==1&&tick-start==9009,
                        "generation or exit during the extended query cancels and rejects the report");
+            if(mode=="generation"||mode=="exit")
+                expect(result.receipt.value("queryContextGate",json::object())==json{{"schema",1},{"blocker",mode=="exit"?"native-exit-requested":"power-generation-changed"}},
+                       "rejected report distinguishes generation change from native exit");
+            else expect(!result.receipt.contains("queryContextGate"),"success and deadline do not attribute a context cancellation");
         }
         expect(std::none_of(own.begin(),own.end(),[](const auto& p){return std::filesystem::exists(p);}),
                "late success timeout and cancellation return only their original owned files");
@@ -570,7 +646,135 @@ static unsigned adapterTests() {
     reset();
     {std::ofstream stream{std::filesystem::path(SG_FACT_LOG)};stream<<sleep_export_fixture::queryAnomaly(8).dump()<<'\n'<<"{partial";}
     {auto result=sgExportWindowsSleepEvidence(fixtureRoot.wstring());expect(result.receipt["reportAvailable"]==true&&queryCalls==1&&result.receipt["selectedEvidenceIdentity"]["writerSequence"]==8,"actual adapter finds completed historical anomaly in bounded ordinary log and ignores partial tail");}
+    reset();const auto off=sleep_export_fixture::longScreenOff();
+    {std::ofstream stream{std::filesystem::path(SG_FACT_LOG)};stream<<off.dump()<<'\n'<<"{partial";}
+    {auto result=sgExportWindowsSleepEvidence(fixtureRoot.wstring());
+        expect(result.receipt["reportAvailable"]==true&&queryCalls==1&&result.receipt["selectedEvidence"]==off&&
+            result.receipt["selectedEvidenceIdentity"]["originalEventFileTime100ns"]==off["details"]["exitFileTime100ns"]&&
+            result.receipt["selectedEvidenceIdentity"]["writerSequence"]==9&&
+            result.receipt["targetPowerState"]=="UNKNOWN"&&result.receipt["selectedSessionInReportVerified"]==false&&
+            result.receipt["automaticRepairAuthorized"]==false&&result.receipt["powerActionAuthorized"]==false,
+            "actual export includes the original long screen-off evidence from disk without claiming report coverage or power authority");}
     std::filesystem::remove(std::filesystem::path(SG_FACT_LOG));
+    for(const bool continuing:{true,false}){
+        reset();const auto reasonFive=sleep_export_fixture::win5ReasonFiveScreenOff(continuing);
+        {std::ofstream stream{std::filesystem::path(SG_FACT_LOG)};stream<<reasonFive.dump()<<'\n';}
+        const auto result=sgExportWindowsSleepEvidence(fixtureRoot.wstring());
+        expect(result.receipt["selectedEvidence"]==reasonFive&&
+            result.receipt["selectedEvidenceIdentity"]["originalEventFileTime100ns"]==reasonFive["details"]["exitFileTime100ns"]&&
+            result.receipt["selectedSessionInReportVerified"]==false&&result.receipt["powerActionAuthorized"]==false,
+            "actual ordinary export carries the correct Win5 Reason 5 segment without power authority");
+        std::filesystem::remove(std::filesystem::path(SG_FACT_LOG));
+    }
+    const auto ac=sleep_export_fixture::g3eAcScreenOff();
+    const auto brief=[&] {
+        auto fact=ac;
+        fact["event"]="s0-long-screen-off-brief-sleep-continuing";
+        auto& d=fact["details"];
+        d["entryReason"]=d["exitReason"]=16777220;
+        d["entryFileTime100ns"]=134401607489550000ULL;
+        d["exitFileTime100ns"]=134401609716680000ULL;
+        d["sessionUs"]=222714334;
+        d["screenOffUs"]=221710008;
+        d["sleepUs"]=1004539;
+        d["windowsSleepEntered"]=true;
+        return fact;
+    }();
+    for(const int entryReason:{1,16777220}){
+        reset();auto expected=brief;
+        auto& d=expected["details"];
+        d["entryReason"]=entryReason;
+        auto wrong=expected;
+        wrong["details"]["powerActionAuthorized"]=true;
+        auto realSleep=expected;
+        realSleep["details"]["sleepUs"]=57913729;
+        auto unrelated=expected;
+        unrelated["details"]["entryReason"]=12;
+        {std::ofstream stream{std::filesystem::path(SG_FACT_LOG)};
+         stream<<expected.dump()<<'\n'<<wrong.dump()<<'\n'<<realSleep.dump()<<'\n'<<unrelated.dump()<<'\n';}
+        const auto result=sgExportWindowsSleepEvidence(fixtureRoot.wstring());
+        expect(result.receipt["selectedEvidence"]==expected&&
+            result.receipt["selectedEvidenceIdentity"]["originalEventFileTime100ns"]==d["exitFileTime100ns"]&&
+            result.receipt["sleepSuccessWitness"]==false&&result.receipt["powerActionAuthorized"]==false,
+            "ordinary export keeps the paired brief-Sleep segment and rejects claims with action authority or sustained Sleep");
+        std::filesystem::remove(std::filesystem::path(SG_FACT_LOG));
+    }
+    const auto entry=ac["details"]["entryFileTime100ns"].get<std::uint64_t>();
+    const auto exit=ac["details"]["exitFileTime100ns"].get<std::uint64_t>();
+    constexpr std::uint64_t day=864000000000ULL;
+    {
+        reset();
+        fixtureExportFileTime=entry+day*2;
+        auto previous=std::filesystem::path(SG_FACT_LOG+L".previous");
+        {std::ofstream stream{previous};stream<<ac.dump()<<'\n';}
+        {std::ofstream stream{std::filesystem::path(SG_FACT_LOG)};stream<<"{\"event\":\"ordinary-writer-noise\"}\n";}
+        const auto result=sgExportWindowsSleepEvidence(fixtureRoot.wstring());
+        std::filesystem::remove(previous);
+        std::filesystem::remove(std::filesystem::path(SG_FACT_LOG));
+        expect(queryCalls==1&&result.receipt["selectedEvidence"]==ac&&result.receipt["historyDays"]==3&&
+            result.receipt["powerActionAuthorized"]==false,
+            "rotated-only G3E paired evidence did not reach the single bounded report selector");
+    }
+    const auto current=std::filesystem::path(SG_FACT_LOG);
+    const auto previous=std::filesystem::path(SG_FACT_LOG+L".previous");
+    for(const auto* paired:{&ac,&brief}) {
+        reset();
+        fixtureExportFileTime=(*paired)["details"]["entryFileTime100ns"].get<std::uint64_t>()+day*2;
+        const auto noise=json{{"event","ordinary-writer-noise"},{"details",{{"text",std::string(3300,'x')}}}}.dump();
+        {std::ofstream stream{previous};stream<<paired->dump()<<'\n';
+         for(unsigned i=0;i<330;++i)stream<<noise<<'\n';
+         stream<<"{partial";}
+        const auto result=sgExportWindowsSleepEvidence(fixtureRoot.wstring());
+        expect(queryCalls==1&&lastTimeout==10000&&result.receipt["historyDays"]==3&&
+            lastCommand.find(L" /duration 3 /output ")!=std::wstring::npos&&result.receipt["selectedEvidence"]==*paired&&
+            result.receipt["selectedEvidenceIdentity"]["originalEventFileTime100ns"]==(*paired)["details"]["exitFileTime100ns"]&&
+            result.receipt["targetPowerState"]=="UNKNOWN"&&result.receipt["selectedSessionInReportVerified"]==false&&
+            result.receipt["sleepSuccessWitness"]==false&&result.receipt["powerActionAuthorized"]==false,
+            "both paired diagnoses survive at the head of a full rotation with one bounded report query");
+    }
+    reset();fixtureExportFileTime=brief["details"]["exitFileTime100ns"].get<std::uint64_t>();
+    {std::ofstream stream{current};stream<<off.dump()<<'\n';}
+    {const auto result=sgExportWindowsSleepEvidence(fixtureRoot.wstring());
+     expect(queryCalls==1&&result.receipt["selectedEvidence"]==off,"current paired evidence takes precedence over rotation");}
+    reset();fixtureExportFileTime=exit;g_sgFacts.push_back(ac.dump());
+    {const auto result=sgExportWindowsSleepEvidence(fixtureRoot.wstring());
+     expect(queryCalls==1&&result.receipt["selectedEvidence"]==ac,"in-memory evidence keeps precedence over both files");}
+    std::filesystem::remove(current);
+    const auto unknownRotation=[&](std::uint64_t now,const std::string& bytes,const char* failure) {
+        reset();fixtureExportFileTime=now;
+        {std::ofstream stream{previous};stream<<bytes;}
+        const auto result=sgExportWindowsSleepEvidence(fixtureRoot.wstring());
+        expect(queryCalls==1&&lastTimeout==10000&&result.receipt["historyDays"]==1&&
+            result.receipt["selectedEvidence"].is_null()&&result.receipt["targetPowerState"]=="UNKNOWN"&&
+            result.receipt["powerActionAuthorized"]==false,failure);
+    };
+    auto unbound=ac;unbound["details"].erase("generation");
+    auto rawCounts=brief;rawCounts["event"]="s0-low-power-residency";
+    unknownRotation(exit,unbound.dump()+'\n'+rawCounts.dump()+"\n{broken}\n",
+        "rotation does not promote unbound, raw or malformed rows into paired evidence");
+    unknownRotation(exit+day*3,ac.dump()+'\n',"rotation rejects evidence at the age limit");
+    unknownRotation(exit-1,ac.dump()+'\n',"rotation rejects a future exit");
+    unknownRotation(exit,ac.dump(),"rotation rejects an unterminated row");
+    unknownRotation(exit,std::string((1024+128)*1024+1,'x')+'\n'+ac.dump()+'\n',
+        "rotation does not select records beyond its bounded read");
+    reset();fixtureExportFileTime=exit;pretendSymlink=previous;
+    {std::ofstream stream{previous};stream<<ac.dump()<<'\n';}
+    {const auto result=sgExportWindowsSleepEvidence(fixtureRoot.wstring());
+     expect(queryCalls==1&&result.receipt["selectedEvidence"].is_null()&&result.receipt["historyDays"]==1,
+        "rotation does not follow a symbolic link");}
+    std::filesystem::remove(previous);
+    for(const auto& [now,days]:std::vector<std::pair<std::uint64_t,unsigned>>{{exit-1,1},{exit,1},
+        {entry+day-1,1},{entry+day,2},{entry+day*2,3},{134401466270000000ULL,3},
+        {entry+day*3,3},{exit+day*3,1}}){
+        reset();fixtureExportFileTime=now;g_sgFacts.push_back(ac.dump());
+        auto result=sgExportWindowsSleepEvidence(fixtureRoot.wstring());
+        expect(queryCalls==1&&lastTimeout==10000&&result.receipt["historyDays"]==days&&
+            lastCommand.find(L" /duration "+std::to_wstring(days)+L" /output ")!=std::wstring::npos&&
+            result.receipt["selectedEvidenceIdentity"]["originalEventFileTime100ns"]==exit&&
+            result.receipt["selectedSessionInReportVerified"]==false&&result.receipt["powerActionAuthorized"]==false,
+            "actual export uses the smallest bounded Windows report duration for the G3E interval");
+    }
+    fixtureExportFileTime=0;
     return checks;
 }
 } // namespace sleep_export_native_fixture

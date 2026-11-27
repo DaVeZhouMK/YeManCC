@@ -239,24 +239,27 @@ static json recheckNetworkAccelerationAfterWake(NetworkAccelerationWakeScope sco
     if (!powerAdmitted(power)) return result(false, statusBeforeLaunch(power));
     const auto previouslyChecked = g_networkAccelerationWakeChecked;
     g_networkAccelerationWakeChecked = scope;
-    const auto deferBeforeLaunch = [&] {
+    const auto retryableBeforeLaunch = [&](const char* reason, DWORD error) {
         g_networkAccelerationWakeChecked = previouslyChecked;
+        return result(false, reason, false, error);
+    };
+    const auto deferBeforeLaunch = [&] {
         SharedPowerV1 current;
         readSharedSystemPower(&current, sizeof(current));
-        return result(false, statusBeforeLaunch(current));
+        return retryableBeforeLaunch(statusBeforeLaunch(current), ERROR_SUCCESS);
     };
     bool enabled = false;
     const bool taskKnown = networkAccelerationWakeTaskEnabled(enabled);
     const DWORD taskError = taskKnown ? ERROR_SUCCESS : GetLastError();
     if (!sharedPowerLifecycleCurrent(power)) return deferBeforeLaunch();
-    if (!taskKnown) return result(false, "startup-state-unavailable", false, taskError);
+    if (!taskKnown) return retryableBeforeLaunch("startup-state-unavailable", taskError);
     if (!enabled) return result(true, "startup-disabled");
     // One fresh receipt from the same owner as updateAccel.get/updateAccel.set.
     // UNKNOWN cannot authorize startup; IgnoreNew arbitrates concurrent task runs.
     const auto running = readUpdateAccelRunning(0);
     const DWORD processError = running.has_value() ? ERROR_SUCCESS : GetLastError();
     if (!sharedPowerLifecycleCurrent(power)) return deferBeforeLaunch();
-    if (!running.has_value()) return result(false, "process-state-unavailable", false, processError);
+    if (!running.has_value()) return retryableBeforeLaunch("process-state-unavailable", processError);
     if (*running) return result(true, "already-running");
     std::error_code error;
     const bool exists = fspath::is_regular_file(g_updateAccelPath, error);

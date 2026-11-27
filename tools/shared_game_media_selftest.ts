@@ -320,7 +320,7 @@ await run('preparation policy coalesces event bursts and has no idle timer',asyn
 
  let reads=0;const f=policyFixture(async()=>{reads++;return {};});for(let n=0;n<100;n++)f.policy.request();equal(f.timers.size,1,'one coalesced native read');await f.fire(250);equal(reads,1,'one filesystem snapshot');equal(f.timers.size,0,'no resident policy polling');
 
- f.policy.game(true);equal(f.states.at(-1),{backgroundBlocked:true,storageBlocked:false,reason:'game-running'},'existing game signal applies synchronously');f.policy.game(false);equal(f.states.at(-1).backgroundBlocked,false,'existing exit signal releases backlog');equal(reads,1,'game changes do not scan disks');f.policy.stop();
+ f.policy.game(true);equal(f.states.at(-1),{backgroundBlocked:true,storageBlocked:false,reason:'game-running',playback30Idle:false},'existing game signal applies synchronously');f.policy.game(false);equal(f.states.at(-1).backgroundBlocked,false,'existing exit signal releases backlog');equal(reads,1,'game changes do not scan disks');f.policy.stop();
 
 });
 
@@ -334,7 +334,7 @@ await run('disk retry exists only for retained blocked demand and disappears aft
 
 await run('power saver retains one slow health check only while demand exists and idle capacity failure stays dormant',async()=>{
 
- const f=policyFixture(async()=>({batterySaver:true}));f.policy.request();await f.fire(250);equal(f.states.at(-1),{backgroundBlocked:true,storageBlocked:false,reason:'battery-saver'},'saver does not falsely claim full disk');f.setQueued(4);f.policy.demand();equal(f.timers.size,1,'retained saver pause gets one slow fallback for lost power events');f.policy.stop();
+ const f=policyFixture(async()=>({batterySaver:true}));f.policy.request();await f.fire(250);equal(f.states.at(-1),{backgroundBlocked:true,storageBlocked:false,reason:'battery-saver',playback30Idle:false},'saver does not falsely claim full disk');f.setQueued(4);f.policy.demand();equal(f.timers.size,1,'retained saver pause gets one slow fallback for lost power events');f.policy.stop();
 
  const bad=policyFixture(async()=>{throw Error('transport disconnected');});bad.policy.request();await bad.fire(250);equal(bad.states.at(-1).storageBlocked,true,'unknown capacity never starts uncapped work');equal(bad.timers.size,0,'idle IPC failure does not spin');bad.setQueued(1);bad.policy.demand();equal(bad.timers.size,1,'pending failed admission gets one retry');bad.setQueued(0);bad.policy.demand();equal(bad.timers.size,0,'last demand removal cancels retry');bad.policy.stop();
 
@@ -415,8 +415,11 @@ await run('playback failure has a finite native deadline and propagates unknown 
 });
 
 await run('stopped media owner cannot arm retry from a late failure receipt',async()=>{
- let finish!:(value:GameMediaEntry)=>void,calls=0,notifications=0;const timers=new Map<number,()=>void>();const owner=new SharedGameMedia({invoke:(async()=>{calls++;return new Promise(resolve=>finish=resolve);}) as any,now:()=>100000,schedule:((fn:()=>void)=>{timers.set(1,fn);return 1;}) as any,cancel:((id:number)=>timers.delete(id)) as any});owner.subscribe(()=>notifications++);
- const report={key:'steam-570',assetId:'old',bindingRevision:1,kind:'video'},pending=owner.playbackFailed(report);owner.stop();finish({key:'steam-570',bindingRevision:2,status:'error',retryAt:200000});await pending;equal(timers.size,0,'late receipt cannot schedule retry after stop');equal(notifications,0,'stopped owner does not announce a late mutation');await assert.rejects(owner.playbackFailed(report),/media-owner-stopped/);equal(calls,1,'stopped owner cannot start another cache write');
+ let finish!:(value:GameMediaEntry)=>void,calls=0,notifications=0;const timers=new Map<number,()=>void>();const owner=new SharedGameMedia({workAllowed:()=>true,invoke:(async()=>{calls++;return new Promise(resolve=>finish=resolve);}) as any,now:()=>100000,schedule:((fn:()=>void)=>{timers.set(1,fn);return 1;}) as any,cancel:((id:number)=>timers.delete(id)) as any});owner.subscribe(()=>notifications++);
+ const report={key:'steam-570',assetId:'old',bindingRevision:1,kind:'video'};
+ const retired=assert.rejects(owner.playbackFailed(report),/wallpaper-power-paused/);
+ equal(calls,1,'the original cache write was in flight');owner.stop();finish({key:'steam-570',bindingRevision:2,status:'error',retryAt:200000});await retired;
+ equal(timers.size,0,'late receipt cannot schedule retry after stop');equal(notifications,0,'stopped owner does not announce a late mutation');await assert.rejects(owner.playbackFailed(report),/media-owner-stopped/);equal(calls,1,'stopped owner cannot start another cache write');
 });
 
 const admissionSamples:any[]=[];
@@ -449,13 +452,15 @@ if(!stabilityRecoveryOnly&&!dcPowerOnly)await foregroundDemandCases();
 if(!dcPowerOnly)await stabilityRecoveryCases();
 if(!stabilityRecoveryOnly)await dcPowerCases();
 // Reuse the shipping refresh body and its retry subscription. Remove only its
-// one erased TypeScript call annotation; do not model the dispatch algorithm.
+// Erase only the TypeScript annotations; do not model the dispatch algorithm.
 async function stabilityRecoveryCases(){
  const sourcePath=process.env.YMCC_SHARED_RETRY_SOURCE||resolveSourcePath('src/bridge/sharedGameMedia.ts');
  const source=readFileSync(sourcePath,'utf8'),begin=source.indexOf('  async function refresh(){'),end=source.indexOf("  const off=on('gameMedia.changed'",begin);
  assert.ok(begin>=0&&end>begin,'exact production refresh function boundaries');
- let body=source.slice(begin,end);const annotation='invoke<{entries:Record<string,GameMediaEntry>;aliases?:Record<string,string>}>';
- assert.equal(body.split(annotation).length,2,'one TS call annotation in actual refresh');body=body.replace(annotation,'invoke');
+ let body=source.slice(begin,end);
+ for(const [annotation,js] of [['invoke<{entries:Record<string,GameMediaEntry>;aliases?:Record<string,string>}>','invoke'],['const recovery:SnapshotRecovery[]','const recovery']]){
+  assert.equal(body.split(annotation).length,2,'one '+annotation+' annotation in actual refresh');body=body.replace(annotation,js);
+ }
  const retryAt=source.indexOf("  const retry=sharedGameMedia.subscribe(reason=>",end),retryEnd=source.indexOf('\n',retryAt);assert.ok(retryAt>=end&&retryEnd>retryAt,'actual retry subscription boundary');
  const makeRefresh=new Function('env','with(env){'+body+source.slice(retryAt,retryEnd)+';return {refresh,stop:retry};}');
  const flush=async()=>{for(let n=0;n<4;n++)await new Promise<void>(r=>setImmediate(r));};
@@ -466,6 +471,8 @@ async function stabilityRecoveryCases(){
   const owner=new ProductionSharedGameMedia({enabled:()=>settings.steam,backgroundEnabled:()=>settings.background,nativeBackground:true,now:()=>clock,schedule,cancel,invoke:(async(command:string,args:any)=>{calls.push({command,args});if(command==='gameMedia.resolve')return {...record};if(command==='gameMedia.background')return {};throw Error('unexpected owner command '+command);}) as any});
   const actualEnsure=owner.ensure.bind(owner);owner.ensure=((...args:any[])=>{ensures.push(args);return (actualEnsure as any)(...args);}) as any;
   const env:any={wallpaperPowerBlocked,captureWallpaperPower,wallpaperPowerCurrent,disposed:false,refreshing:false,refreshAgain:false,revisions:new Map([['steam-570',4]]),aliases:new Map(),reconcileMediaAliases,sharedGameMedia:owner,steamWallpaperEnabled:()=>settings.steam,backgroundDownloadEnabled:()=>settings.background,manualAllowed:()=>false,getUiSetting:()=>settings.ymcc,gameMediaPairComplete,window:{dispatchEvent(){}},CustomEvent:globalThis.CustomEvent,Date:{now:()=>clock},scan(){},invoke:async(command:string)=>{calls.push({command});if(command!=='gameMedia.snapshot')throw Error(command);return {entries:{'steam-570':{...record}},aliases:{}};}};
+  env.admissionSuspended=false;env.refreshWork=null;env.recoveryWork=null;
+  env.retireRecovery=()=>{const work=env.recoveryWork;env.recoveryWork=null;work?.abort();};
   const reader=makeRefresh(env);let host:ReturnType<typeof startSteamWallpaperHost>|null=null,extension:any,foreground:(value:any)=>void=()=>{};
   if(options.attachHost){host=startSteamWallpaperHost({enabled:()=>settings.steam,readForeground:async()=>({source:'native-steam-bigpicture-foreground',known:true,foreground:true,current:true,mode:'bigpicture',pid:77,birth:'12345',window:'789',ownerEpoch:'live-retry',revision:1}),onForeground:handler=>{foreground=handler;return()=>{};},onResume:()=>()=>{},inventory:()=>{},appearance:()=>({opacity:.64,blur:0}),media:owner,now:()=>clock,schedule,cancel,register:value=>{extension=value;return()=>{};},invoke:(async(command:string,args:any)=>{if(command==='gameMedia.shortcut'&&options.shortcut)return {executable:'G:/fixture/game.exe',verified:false};if(command==='deckySidebar.mirrorReply'){if(args.message.type==='wallpaper')frames.push(args.message);return true;}throw Error(command);}) as any});host.ready();extension.connected({connection:'1',runId:'a'.repeat(32)});extension.request({connection:'1',runId:'a'.repeat(32),request:{command:'wallpaper.context',contextSeq:1,appId:options.shortcut?'4294967296':'570',visible:true}});}
   return {owner,reader,calls,ensures,frames,timers,settings,env,foreground,async fire(){const next=[...timers][0];assert.ok(next,'retained failure needs a deadline timer');timers.delete(next[0]);clock+=next[1].ms;next[1].fn();await flush();},setRecord(value:Partial<GameMediaEntry>){record={...record,...value};},async settle(){await flush();},stop(){host?.stop();reader.stop();owner.stop();}};
@@ -524,7 +531,52 @@ async function dcPowerCases(){
  });
  await run('DC power: retired preparation cannot erase a fresh same-game job',async()=>{
   let allowed=true,release!:(v:any)=>void,reads=0,plans=0;const calls:string[]=[];const owner=new ProductionSharedGameMedia({workAllowed:()=>allowed,nativeBackground:false,enabled:()=>true,backgroundEnabled:()=>true,candidates:async()=>{if(++plans===1)return new Promise(r=>release=r);return {name:'fixture',urls:['https://video.steamstatic.com/movie/fresh.mp4']};},invoke:(async command=>{calls.push(command);if(command==='gameMedia.resolve')return ++reads>2?cached(570):{key:'steam-570',bindingRevision:1,status:'missing'};if(command==='gameMedia.begin')return {key:'steam-570',bindingRevision:1,status:'pending',acquired:true,taskSlots:['dynamic'],taskId:'fixture'};if(command==='gameMedia.install')return cached(570);if(command==='gameMedia.finish')return {};throw Error(command);}) as any});
-  try{const old=owner.ensure(target(570),'ymcc',true,true);const retired=Promise.allSettled([old]);for(let n=0;n<8&&!release;n++)await Promise.resolve();equal(typeof release,'function','old preparation is running');allowed=false;owner.reconcilePreparation();allowed=true;owner.reconcilePreparation();let fresh:any;const work=owner.ensure(target(570),'ymcc',true,true).then(v=>fresh=v);for(let n=0;n<8;n++)await Promise.resolve();release({name:'old',urls:[]});await retired;for(let n=0;n<24;n++)await Promise.resolve();equal(fresh?.ready,true,'fresh same-key job completes after retired callback');await work;equal(plans,2,'both owners reached their own candidates');equal(owner.inspect().tasks,0,'all tasks released');}finally{owner.stop();}
+  try{const old=owner.ensure(target(570),'ymcc',true,true);const retired=Promise.allSettled([old]);for(let n=0;n<8&&!release;n++)await Promise.resolve();equal(typeof release,'function','old preparation is running');allowed=false;owner.reconcilePreparation();allowed=true;owner.reconcilePreparation();let fresh:GameMediaEntry|undefined;const work=Promise.allSettled([owner.ensure(target(570),'ymcc',true,true).then(v=>fresh=v)]);await new Promise<void>(r=>setImmediate(r));equal(fresh?.ready,true,'fresh same-key job completes while the retired callback is still held');release({name:'old',urls:[]});await retired;await work;equal(plans,2,'both owners reached their own candidates');equal(owner.inspect().tasks,0,'all tasks released');}finally{owner.stop();release?.({name:'old',urls:[]});}
+ });
+ await run('DC power: merged Shared Ready releases native media IPC waits without replay',async()=>{
+  for(const stage of ['gameMedia.resolve','gameMedia.background','gameMedia.edit']){
+   let waking=false,aborts=0;const calls:string[]=[];
+   const owner=new ProductionSharedGameMedia({workAllowed:()=>true,backgroundEnabled:()=>true,invoke:(async(command,_args,options)=>{
+    calls.push(command);
+    if(!waking&&command===stage)return new Promise((_resolve,reject)=>options?.signal?.addEventListener('abort',()=>{aborts++;reject(Error('IPC request retired'));},{once:true}));
+    if(command==='gameMedia.resolve')return waking?cached(570):{...cached(570),status:'missing',ready:false};
+    throw Error('unexpected replay: '+command);
+   }) as typeof import('../src/bridge/ipc').invoke});
+   try{
+    const old=Promise.allSettled([stage==='gameMedia.edit'?owner.playbackFailed({key:'steam-570',assetId:'before-sleep',bindingRevision:4}):owner.ensure(target(570),'ymcc')]);
+    await new Promise<void>(r=>setImmediate(r));equal(calls.at(-1),stage,'posted '+stage+' before merged Ready');
+    waking=true;owner.sharedPowerChanged(true,true);equal(aborts,1,'retirement releases the local waiter for '+stage);
+    const [result]=await old;
+    equal(result.status==='rejected'||result.value.status==='consumer-inactive',true,'old '+stage+' never returns a current result');
+    equal((await owner.ensure(target(570),'ymcc')).ready,true,'new demand reads current cache');
+    equal(calls.filter(command=>command===stage).length,stage==='gameMedia.resolve'?2:1,'only a fresh read, no replay of '+stage);
+   }finally{owner.stop();}
+  }
+ });
+ await run('DC power: an empty queue recovers a lost post-wake capacity read once',async()=>{
+  for(const outcome of ['ready','denied','lost','sleep','stop']){
+   let reads=0;
+   const f=policyFixture(async()=>{
+    if(++reads===1||outcome==='lost')throw Error('capacity reply lost');
+    return outcome==='denied'?{blockedReason:'media-disk-space-low'}:{};
+   });
+   try{
+    f.policy.suspend();f.policy.resume();await f.fire(250);
+    equal(f.states.at(-1).reason,'capacity-unavailable',outcome+' first lost reply keeps the gate closed');
+    equal(f.timers.size,1,outcome+' one read retry even with an empty queue');
+    const callback=[...f.timers.values()][0].fn;
+    if(outcome==='sleep'||outcome==='stop'){
+     if(outcome==='sleep')f.policy.suspend();else f.policy.stop();
+     callback();await new Promise(resolve=>setImmediate(resolve));
+     equal(reads,1,outcome+' retires the old callback');equal(f.timers.size,0,outcome+' releases the timer');
+    }else{
+     await f.fire(250);
+     equal(reads,2,outcome+' issued exactly one current read');
+     equal(f.states.at(-1).reason,outcome==='ready'?'':outcome==='denied'?'media-disk-space-low':'capacity-unavailable',outcome+' only the current capacity answer decides');
+     equal(f.timers.size,0,outcome+' no empty queue polling');
+    }
+   }finally{f.policy.stop();}
+  }
  });
  await run('DC power: compatibility preparation cancels before playlist and install',async()=>{
   let allowed=true,release!:(v:any)=>void;const calls:string[]=[],network:string[]=[];const owner=new ProductionSharedGameMedia({workAllowed:()=>allowed,nativeBackground:false,enabled:()=>true,backgroundEnabled:()=>true,candidates:()=>new Promise(r=>release=r),request:(async url=>{network.push(String(url));return {body:''};}) as any,invoke:(async command=>{calls.push(command);if(command==='gameMedia.resolve')return {key:'steam-570',bindingRevision:1,status:'missing'};if(command==='gameMedia.begin')return {key:'steam-570',bindingRevision:1,status:'pending',acquired:true,taskSlots:['dynamic'],taskId:'fixture'};throw Error(command);}) as any});

@@ -32,7 +32,74 @@ const results=[];async function test(name,run,hold=false){const f=await fixture(
 await test('initial-unknown-does-not-start-periodic-work',async(f,facts)=>{f.register('cold',100,{pauseWhenHidden:false,runImmediately:true});await flush();assert.equal(f.taskCalls.length,0);assert.equal([...f.timers.values()].filter(t=>t.lane==='scheduler').length,0);await f.releaseRead();assert.equal(f.taskCalls.length,1);facts.initialReads=f.calls.length;assert.equal(f.calls.length,1,'UI and scheduler share the same original source read');},true);
 await test('hidden-ready-background-continues-but-suspend-stops-it',async(f,facts)=>{f.register('background',100,{pauseWhenHidden:false});await f.event('ipc:window.hidden');await f.advance(500);assert.equal(f.taskCalls.length,5);await f.publish(ready(2,2,{phase:'suspending',inputReady:false,hardwareWritesAllowed:false}));const before=f.taskCalls.length;await f.advance(10000);assert.equal(f.taskCalls.length,before,'held power cannot keep background periodic work active');assert.equal([...f.timers.values()].filter(t=>t.lane==='scheduler').length,0);await f.publish(ready(2,3));assert.equal(f.taskCalls.length,before+1,'one current run instead of catch-up');await f.advance(10100);assert.equal(f.taskCalls.length,before+2);facts.heldPeriodicCalls=0;facts.commonPowerReads=f.calls.length;});
 await test('same-generation-pending-pauses-ui-and-all-periodic-display-work',async f=>{f.register('display',100,{pauseWhenHidden:true});await f.advance(100);await f.publish(ready(1,2,{notificationPending:true,hardwareWritesAllowed:false}));assert.equal(f.life.isUiVisible(),false);const before=f.taskCalls.length;await f.advance(1000);assert.equal(f.taskCalls.length,before);await f.publish(ready(1,3));assert.equal(f.life.isUiVisible(),true);assert.equal(f.taskCalls.length,before+1);});
+await test('reentrant-power-visibility-delivers-only-the-current-edge',async(f,facts)=>{
+ const held=(generation,revision)=>ready(generation,revision,{phase:'suspending',hardwareWritesAllowed:false,inputReady:false,suspendSerial:generation});
+ await f.publish(held(2,2));
+ let successor=held(3,4);const delivered=[];
+ const first=f.life.onUiVisibilityChange((_value,source)=>{
+  if(source!=='power'||!successor)return;
+  const next=successor;successor=null;void f.publish(next);
+ });
+ const second=f.life.onUiVisibilityChange((value,source)=>{
+  if(source==='power')delivered.push([value.powerGeneration,value.visible]);
+ });
+ try{
+  await f.publish(ready(2,3,{suspendSerial:2}));
+  facts.holdWins=[...delivered];
+  assert.deepEqual(delivered,[[3,false]],'a later subscriber must not restart on the superseded Ready');
+  assert.equal(f.life.isUiVisible(),false);
+  await f.publish(ready(3,5,{suspendSerial:3}));
+  assert.deepEqual(delivered,[[3,false],[3,true]],'current Ready resumes presentation once');
+  successor=ready(4,7,{suspendSerial:4});
+  await f.publish(held(4,6));
+  facts.readyWins=delivered.slice(2);
+  assert.deepEqual(facts.readyWins,[[4,true]],'a superseded Suspend must not stop the current presentation');
+  assert.equal(f.life.isUiVisible(),true);
+ }finally{second();first();}
+});
 await test('presentation-ready-without-device-admission-remains-operable',async f=>{await f.publish(ready(2,2,{inputReady:false,hardwareWritesAllowed:false}));f.register('settings',100,{pauseWhenHidden:true,runImmediately:true});await flush();assert.equal(f.life.isUiVisible(),true);assert.equal(f.taskCalls.length,1);assert.equal(f.power.getSharedPowerLifecycle().hardwareWritesAllowed,false);});
+await test('new-scope-hint-holds-periodic-work-until-current-readback',async f=>{
+ const old=ready(2,2,{suspendSerial:3,inputReady:false,hardwareWritesAllowed:false});
+ const current={...old,publicationRevision:3,observedNotificationSequence:3,suspendSerial:4};
+ await f.publish(old);
+ let release,signal;const held=new Promise(resolve=>{release=resolve;});
+ try{
+  f.register('old-read',100,{runImmediately:true,releaseReadOnPowerChange:true},async s=>{
+   if(signal){f.taskCalls.push(['fresh-read',f.now]);return;}
+   signal=s;await held;if(!s.aborted)f.taskCalls.push(['old-publication']);
+  });
+  f.register('next',100,{runImmediately:true});await flush();
+  f.window.dispatchEvent({type:'ipc:power.resumed',detail:{generation:2,readbackScope:{suspendSerial:4,notificationSequence:3}}});
+  await flush();
+  assert.equal(signal?.aborted,true,'the old read must be released even if no device permission was cached');
+  assert.equal(f.life.isUiVisible(),true,'a pending readback does not close the presentation');
+  assert.equal(f.power.getSharedPowerLifecycle()?.suspendSerial,3,'a hint cannot synthesize a current Ready');
+  await f.advance(500);
+  assert.deepEqual(f.taskCalls,[],'no periodic work while the only snapshot belongs to the old scope');
+  await f.publish(current);
+  assert.deepEqual(f.taskCalls,[['next',500],['fresh-read',500]],'matching Ready resumes overdue tasks once without device permission');
+  release();await flush();
+  assert.equal(f.taskCalls.length,2,'the retired read cannot publish after recovery');
+ }finally{release();await flush();}
+});
+await test('lost-ready-publication-recovers-periodic-work-from-native-readback',async f=>{
+ const old=ready(2,2,{suspendSerial:3});
+ const current=ready(2,3,{suspendSerial:4});
+ await f.publish(old);
+ f.register('background',250,{pauseWhenHidden:false});
+ f.window.dispatchEvent({type:'ipc:power.resumed',detail:{generation:2,readbackScope:{suspendSerial:4,notificationSequence:3}}});
+ await flush();
+ assert.equal(f.power.getSharedPowerLifecycle()?.scopeReadbackPending,true);
+ assert.equal(f.power.getSharedPowerLifecycle()?.hardwareWritesAllowed,false);
+ await f.advance(999);
+ assert.deepEqual(f.taskCalls,[],'an older Ready read may not settle the newer scope');
+ f.native.state=current; // The final event is lost; the original retry must recover it.
+ await f.advance(1000);
+ assert.equal(f.power.getSharedPowerLifecycle()?.scopeReadbackPending,undefined);
+ assert.deepEqual(f.taskCalls,[['background',1000]],'a current read releases the original task once');
+ await f.advance(1250);
+ assert.deepEqual(f.taskCalls,[['background',1000],['background',1250]],'the normal scheduler cadence resumes');
+});
 await test('suspend-during-await-does-not-start-the-next-due-task',async f=>{let release;const held=new Promise(r=>{release=r;});f.register('held',100,{runImmediately:true},()=>{f.taskCalls.push(['held']);return held;});f.register('after',100,{runImmediately:true});await flush();await f.publish(ready(2,2,{phase:'suspended',hardwareWritesAllowed:false,inputReady:false}));release();await flush();assert.deepEqual(f.taskCalls.map(r=>r[0]),['held']);await f.publish(ready(2,3));assert.deepEqual(f.taskCalls.map(r=>r[0]),['held','after']);});
 await test('merged-suspend-releases-an-opted-in-read-but-keeps-a-transaction-serialized',async f=>{
  await f.publish(ready(2,2,{suspendSerial:1}));let releaseRead,releaseWrite;
@@ -41,7 +108,7 @@ await test('merged-suspend-releases-an-opted-in-read-but-keeps-a-transaction-ser
   f.register('read',100,{runImmediately:true,releaseReadOnPowerChange:true},async signal=>{f.taskCalls.push(['read']);await read;if(!signal?.aborted)f.taskCalls.push(['published']);});
   f.register('write',100,{runImmediately:true},async()=>{f.taskCalls.push(['write']);await write;f.taskCalls.push(['write-receipt']);});
   f.register('after',100,{runImmediately:true});await flush();
-  await f.publish(ready(2,3,{suspendSerial:1}));assert.deepEqual(f.taskCalls.map(r=>r[0]),['read']);
+  await f.publish(ready(2,3,{suspendSerial:1,observedNotificationSequence:2}));assert.deepEqual(f.taskCalls.map(r=>r[0]),['read']);
   await f.publish(ready(2,4,{suspendSerial:2}));assert.deepEqual(f.taskCalls.map(r=>r[0]),['read','write']);
   await f.publish(ready(2,5,{suspendSerial:3}));assert.deepEqual(f.taskCalls.map(r=>r[0]),['read','write']);
   releaseRead();await flush();assert.deepEqual(f.taskCalls.map(r=>r[0]),['read','write']);
@@ -59,6 +126,66 @@ await test('long-stall-runs-once-without-catch-up',async f=>{f.register('late',1
 await test('throw-and-rejection-do-not-starve-other-tasks',async f=>{f.register('throw',100,{},()=>{throw Error('expected');});f.register('reject',100,{},()=>Promise.reject(Error('expected')));f.register('good',100);await f.advance(1000);assert.equal(f.taskCalls.length,10);});
 await test('hide-and-final-unregister-do-not-cancel-an-already-started-transaction',async f=>{let release;const held=new Promise(r=>{release=r;});const stop=f.register('transaction',100,{runImmediately:true},async()=>{f.taskCalls.push(['start']);await held;f.taskCalls.push(['finish']);});await f.event('ipc:window.hidden');stop();release();await flush();assert.deepEqual(f.taskCalls.map(r=>r[0]),['start','finish']);assert.equal(f.scheduler.getScheduledTaskNames().length,0);});
 await test('same-name-replacement-during-await-keeps-new-instance',async f=>{let release;const held=new Promise(r=>{release=r;});const stop=f.register('same',100,{runImmediately:true},()=>{f.taskCalls.push(['old']);return held;});f.register('same',100,{runImmediately:true},()=>f.taskCalls.push(['new']));stop();release();await flush();assert.deepEqual(f.taskCalls.map(r=>r[0]),['old','new']);});
+await test('notification-only-ready-releases-an-opted-in-read-before-its-reply',async f=>{
+ const scope={suspendSerial:17};await f.publish(ready(1,2,scope));
+ let resolve,signal;const held=new Promise(r=>{resolve=r;});
+ f.register('read',100,{runImmediately:true,releaseReadOnPowerChange:true},async s=>{signal=s;await held;if(!s?.aborted)f.taskCalls.push(['old-publication']);});
+ f.register('next',100,{runImmediately:true});await flush();
+ assert.equal(signal?.aborted,false);assert.deepEqual(f.taskCalls,[]);
+ await f.publish(ready(1,3,{...scope,observedNotificationSequence:2}));
+ assert.equal(signal.aborted,false,'publication-only metadata must not retire the current read');
+ await f.publish(ready(1,4,{...scope,observedNotificationSequence:3}));
+ assert.equal(signal.aborted,true,'notification-only Ready must retire the old read');
+ assert.deepEqual(f.taskCalls,[['next',0]],'current work can run before the old read settles');
+ resolve();await flush();assert.deepEqual(f.taskCalls,[['next',0]],'retired read must not publish');
+});
+await test('ready-delivered-from-abort-wins-over-the-older-hold',async f=>{
+ const successor=ready(2,3,{suspendSerial:1,observedNotificationSequence:3});
+ let release,signal;const held=new Promise(resolve=>{release=resolve;});
+ try{
+  f.register('old-read',100,{runImmediately:true,releaseReadOnPowerChange:true},async s=>{
+   signal=s;s.addEventListener('abort',()=>{void f.publish(successor);},{once:true});
+   await held;if(!s.aborted)f.taskCalls.push(['old-publication']);
+  });
+  f.register('next',100,{runImmediately:true});await flush();
+  await f.publish(ready(2,2,{phase:'suspending',inputReady:false,hardwareWritesAllowed:false,suspendSerial:1,observedNotificationSequence:2}));
+  assert.equal(signal.aborted,true);
+  assert.equal(f.power.getSharedPowerLifecycle()?.phase,'ready');
+  assert.deepEqual(f.taskCalls,[['next',0]],'the successor Ready must release the pump without another broadcast');
+ }finally{release();await flush();}
+});
+await test('hold-delivered-from-abort-wins-over-the-older-ready',async f=>{
+ const suspend=ready(2,3,{phase:'suspending',inputReady:false,hardwareWritesAllowed:false,suspendSerial:2,observedNotificationSequence:3});
+ let release,signal;const held=new Promise(resolve=>{release=resolve;});
+ try{
+  f.register('old-read',100,{runImmediately:true,releaseReadOnPowerChange:true},async s=>{
+   signal=s;s.addEventListener('abort',()=>{void f.publish(suspend);},{once:true});
+   await held;if(!s.aborted)f.taskCalls.push(['old-publication']);
+  });
+  f.register('next',100,{runImmediately:true});await flush();
+  await f.publish(ready(1,2,{suspendSerial:1,observedNotificationSequence:2}));
+  assert.equal(signal.aborted,true);
+  assert.equal(f.power.getSharedPowerLifecycle()?.phase,'suspending');
+  assert.deepEqual(f.taskCalls,[],'the successor suspend must prevent another scheduled task');
+  await f.publish(ready(2,4,{suspendSerial:2,observedNotificationSequence:4}));
+  assert.deepEqual(f.taskCalls,[['next',0]],'the next valid Ready must resume the pump');
+ }finally{release();await flush();}
+});
+await test('unregister-and-replacement-return-opted-in-read-ownership',async f=>{
+ let resolve,signal;const held=new Promise(r=>{resolve=r;});
+ const opts={runImmediately:true,releaseReadOnPowerChange:true};
+ const stale=f.register('read',100,opts,async s=>{signal=s;await held;if(!s?.aborted)f.taskCalls.push(['stale']);});
+ let currentSignal;
+ const current=f.register('read',100,opts,async s=>{currentSignal=s;await held;if(!s?.aborted)f.taskCalls.push(['current']);});
+ stale();await flush();
+ assert.equal(signal?.aborted,true,'replacement retires only the old read');
+ assert.equal(currentSignal?.aborted,false,'stale disposer must leave the replacement in flight');
+ current();await flush();
+ assert.equal(currentSignal.aborted,true,'removing the last task must release the read without another power broadcast');
+ assert.equal(f.power.getSharedPowerLifecycleDiagnostics().subscriberCount,1,'scheduler power subscriber returned');
+ f.register('next',100,{runImmediately:true});await flush();assert.deepEqual(f.taskCalls,[['next',0]]);
+ resolve();await flush();assert.deepEqual(f.taskCalls,[['next',0]]);
+});
 const report={status:results.every(r=>r.pass)?'PASS':'FAIL',scope:'actual shared-source, UI lifecycle and scheduler; only IPC/DOM/logical time inert; no App or device execution',inputs,results,sourceDrift:inputs.filter(p=>sha(fs.readFileSync(p.path))!==p.sha256)};fs.writeFileSync(path.join(out,'REPORT.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({status:report.status,results,sourceDrift:report.sourceDrift}));process.exitCode=report.status==='PASS'&&!report.sourceDrift.length?0:1;
 
 }
@@ -74,7 +201,7 @@ if(!prepareOnly){const savedArgv=process.argv;try{process.argv=[process.execPath
 
 async function mediaIpcSource(args){
  assert(args.length===4||args.length===5);assert.equal(args[0],'--media-ipc-case');assert.equal(args[2],'--out');assert(path.isAbsolute(args[3]));
- const names=['policy-lost-return','policy-remote-failure','policy-retry-deadline','policy-denied-terminal','policy-read-confirms-same-intent','policy-latest-setting','manual-timeout','manual-reply-crosses-notification','stop-bridge-loss'],which=args[1];assert(which==='all'||names.includes(which),'Unknown actual media IPC case');const prepareOnly=args.length===5;assert(!prepareOnly||args[4]==='--prepare-only');const out=args[3];assert(!fs.existsSync(out));fs.mkdirSync(out,{recursive:true});
+ const names=['policy-lost-return','policy-remote-failure','policy-retry-deadline','policy-retry-revoked-by-sleep','policy-denied-terminal','policy-read-confirms-same-intent','policy-latest-setting','policy-confirmed-then-queued-notice','policy-confirmed-then-queued-sleep','manual-timeout','manual-reply-crosses-notification','stop-bridge-loss'],which=args[1];assert(which==='all'||names.includes(which),'Unknown actual media IPC case');const prepareOnly=args.length===5;assert(!prepareOnly||args[4]==='--prepare-only');const out=args[3];assert(!fs.existsSync(out));fs.mkdirSync(out,{recursive:true});
  const ts=req('typescript'),testPath=path.join(root,'tools/shared_game_media_downloads_selftest.ts'),test=fs.readFileSync(testPath,'utf8'),tree=ts.createSourceFile(testPath,test,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS),functions=tree.statements.filter(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='publicMediaIpcCase');assert.equal(functions.length,1);const body=functions[0].getText(tree);const loaded=[],sha=b=>crypto.createHash('sha256').update(b).digest('hex');
  const mocks={uiSettings:"export const getUiSetting=name=>name==='steamWallpaperDownloadCpuThreshold'?15:true;export const setUiSettings=async()=>{throw Error('settings write forbidden')};export const uiSettingsLoaded=()=>true;",wallpaperPowerPolicy:"export const wallpaperPowerBlocked=()=>false;export const wallpaperPowerReason=()=>'';export const subscribeWallpaperPowerChanged=()=>()=>{};"};
  const code="import{strict as assert}from'node:assert';import{MediaDownloads}from'./src/bridge/gameMediaDownloads';import{getSharedPowerLifecycleDiagnostics,onSharedPowerLifecycle}from'./src/bridge/powerLifecycleState';import{rejectAllPending}from'./src/bridge/ipc';\n"+body+"\nexport{MediaDownloads,getSharedPowerLifecycleDiagnostics,onSharedPowerLifecycle,rejectAllPending,publicMediaIpcCase};";

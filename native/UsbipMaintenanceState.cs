@@ -14,7 +14,9 @@ internal static class UsbipMaintenanceState
     internal static string PendingPath => Path.Combine(DirectoryPath, "pending.json");
     // Same provider/key/mutex as native/boot_mode_identity.h. Loader GUID/BootId
     // can repeat after a real restart. This is not an app/logon/Host identity.
-    internal const string BootSessionKey = @"SOFTWARE\YeManCC\Runtime\BootSessionV2";
+    private const string BootSessionParent = @"SOFTWARE\YeManCC\Runtime";
+    private const string BootSessionLeaf = "BootSessionV2";
+    internal const string BootSessionKey = BootSessionParent + @"\" + BootSessionLeaf;
     private const string BootSessionMutex = @"Global\YeManCC-BootSessionV2";
     internal const string BootSessionPrefix = "windows-volatile-v2|";
     private static string? cachedBootSession;
@@ -43,7 +45,7 @@ internal static class UsbipMaintenanceState
     }
     // Elevated setup only, inside its existing USB/IP gate. Host/status readers
     // never create the key or modify a maintenance record.
-    private static bool PrepareBootSessionIdentity()
+    internal static bool PrepareBootSessionIdentity()
     {
         if (CurrentBootSessionIdentity is not null) return true;
         using var mutex = new Mutex(false, BootSessionMutex);
@@ -52,7 +54,10 @@ internal static class UsbipMaintenanceState
             try { held = mutex.WaitOne(5000); } catch (AbandonedMutexException) { held = true; }
             if (!held) return false;
             using var machine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
-            using var key = machine.CreateSubKey(BootSessionKey, writable: true, RegistryOptions.Volatile);
+            // A volatile full-path create also makes missing ancestors volatile.
+            // Only the boot marker, not the parent of durable maintenance journals, may expire.
+            using var parent = machine.CreateSubKey(BootSessionParent, writable: true, RegistryOptions.None);
+            using var key = parent?.CreateSubKey(BootSessionLeaf, writable: true, RegistryOptions.Volatile);
             if (key is null) return false;
             // A malformed value is not overwritten and never proves a reboot.
             if (!key.GetValueNames().Contains("Session", StringComparer.OrdinalIgnoreCase))

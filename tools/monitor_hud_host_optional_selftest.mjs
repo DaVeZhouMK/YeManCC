@@ -8,7 +8,7 @@ const mocks={
  // isolates the persistent HUD data-demand and output-coordinator lifecycle.
  'src/bridge/monitorNoticeHost.ts':`export function startMonitorNoticeHost(){return {ready(){},update(){},stop(){}}}`,
  'src/bridge/monitorGameLogo.ts':"export const subscribeMonitorGameLogo=()=>()=>{};",
- 'src/bridge/ipc.ts':"export const isNativeRuntime=true;export const invoke=(command,args,options)=>globalThis.__hudHostTest.invoke(command,args,options);export function on(name,fn){const f=globalThis.__hudHostTest;const listeners=f.events.get(name)||new Set();f.events.set(name,listeners);listeners.add(fn);return ()=>listeners.delete(fn)}",
+ 'src/bridge/ipc.ts':"export class IpcRemoteError extends Error {} export const isNativeRuntime=true;export const invoke=(command,args,options)=>globalThis.__hudHostTest.invoke(command,args,options);export function on(name,fn){const f=globalThis.__hudHostTest;const listeners=f.events.get(name)||new Set();f.events.set(name,listeners);listeners.add(fn);return ()=>listeners.delete(fn)}",
  'src/bridge/settingsRepository.ts':"export function cachedBootStartupReceiptOwner(){return undefined}export async function loadSettings(){return structuredClone(globalThis.__hudHostTest.settings)}export async function updateSettings(edit){edit(globalThis.__hudHostTest.settings)}export async function readSettingsSection(name){const f=globalThis.__hudHostTest;f.settingsReads++;if(f.settingsReadFailures>0){--f.settingsReadFailures;throw Error('synthetic settings read failure')}const value=structuredClone(f.settings[name]||{});if(f.settingsReadGate){const wait=f.settingsReadGate;f.settingsReadGate=null;await wait}return value}export async function saveSettingsSection(name,patch){Object.assign(globalThis.__hudHostTest.settings[name],structuredClone(patch))}",
  'src/bridge/yeman.ts':"const f=()=>globalThis.__hudHostTest;export async function rtssRunning(){return f().rtss}export async function toggleRtss(show){if(!show)throw Error('RTSS must remain in background');++f().backendStarts;if(f().failRtssStart)throw Error('synthetic RTSS backend unavailable');f().rtss=show}export async function readOverlayLayout(){return f().layout}export async function setOverlayLayout(v){f().rtssLoads.push(v);if(v!=='off'&&f().failRtssLoad)throw Error('synthetic RTSS target load failure');f().layout=v==='off'?'Empty.ovl':({W:'YeManOBS-W-1.ovl',L:'YeManOBS-L-1.ovl',J:'YeManOBS-JJ-1.ovl'})[v];return {mode:f().rtss?'live':'offline'}}export async function readRtssZoom(){return 5}export async function detectCpuName(){return 'Fixture CPU'}",
  'src/bridge/monitorData.ts':"const f=()=>globalThis.__hudHostTest;export function acquireMonitorDemand(){f().demand++;let closed=false;return()=>{if(!closed){closed=true;f().demand--}}}export async function readMonitorSnapshot(){f().reads++;return f().snapshot}export function subscribeMonitorSnapshot(fn){fn(f().snapshot);return ()=>{}}export const subscribeMonitorHudSnapshot=subscribeMonitorSnapshot;export function subscribeMonitorTdpState(fn){fn(null);return ()=>{}}export function acceptPublishedMonitorSnapshot(){}export function isOwnedMonitorDisplaySnapshot(){return false}",
@@ -26,7 +26,8 @@ const pendingWakeClockNames=['power-wake-clock-pending-expired','power-wake-cloc
 const wakeClockNames=['power-wake-clock-lost','power-wake-clock-retained',...pendingWakeClockNames];
 const startupSelection=selectedStartup?.split(',');
 const bootReceiptNames=['boot-receipt-saved','boot-receipt-replaced','boot-monitor-replaced','boot-receipt-inflight-replaced'];
-const selectableStartupNames=[...startupNames,...powerScopeNames,...scopedVisibilityNames,...wakeClockNames,...bootReceiptNames];
+const settingsBoundaryNames=['settings-boundary-merged-off','settings-boundary-suspend-on','settings-boundary-notification'];
+const selectableStartupNames=[...startupNames,...powerScopeNames,...scopedVisibilityNames,...wakeClockNames,...bootReceiptNames,...settingsBoundaryNames];
 if(startupSelection&&(new Set(startupSelection).size!==startupSelection.length||startupSelection.some(name=>!selectableStartupNames.includes(name))))throw Error('Unknown HUD startup case');
 const compiledInputs={};
 const b=await build({metafile:true,stdin:{contents:"export {startMonitorHudHost} from './src/bridge/monitorHudHost.ts';export {normalizeMonitorOutput} from './src/bridge/monitorHudModel.ts';export {monitorOutputCoordinator,saveMonitorOutputPreferences} from './src/bridge/monitorOutput.ts';",resolveDir:root,loader:'ts'},bundle:true,platform:'node',format:'esm',write:false,plugins:[{name:'inert-host-io',setup(build){build.onLoad({filter:/\.ts$/},args=>{const key=path.relative(root,args.path).replaceAll('\\','/');const sourcePath=key==='src/bridge/desktopHudOwner.ts'&&process.env.YMCC_HUD_DESKTOP_SOURCE||key==='src/bridge/monitorOutput.ts'&&process.env.YMCC_HUD_OUTPUT_SOURCE||key==='src/bridge/monitorOutputCoordinator.ts'&&process.env.YMCC_HUD_COORDINATOR_SOURCE||key==='src/bridge/monitorHudHost.ts'&&process.env.YMCC_HUD_HOST_SOURCE||key==='src/bridge/monitorHudClock.ts'&&process.env.YMCC_HUD_CLOCK_SOURCE||args.path;const contents=mocks[key]??fs.readFileSync(sourcePath,'utf8');compiledInputs[args.path]={kind:mocks[key]?'synthetic-port':'production',sourcePath:mocks[key]?undefined:sourcePath,sha256:crypto.createHash('sha256').update(contents).digest('hex')};return {contents,loader:'ts',resolveDir:path.dirname(args.path)}})}}]});
@@ -305,7 +306,12 @@ try{
     assert.equal(powerScopeCurrents.length,applies,'publication-only observations do not reapply HUD');assert.equal(f.calls.length,calls);assert.equal(creates(),1);
    }else if(name==='read-retry'){
     f.settingsReadFailures=1;await start();assert.equal(f.settingsReads,1);assert.equal(f.native,null);
-    await advance(1000);assert.equal(f.settingsReads,2);assert(f.native);assert.equal(f.demand,1);assert.equal(timers.size,0);
+    const retryAt=host.inspect().recovery.retryAt;
+    f.power={...f.power,publicationRevision:2,observedNotificationSequence:2};f.emit('power.lifecycleChanged',f.power);await flush(48);
+    assert.equal(f.settingsReads,1,'same-boundary notification cannot bypass the settings retry deadline');
+    assert.equal(host.inspect().recovery.retryAt,retryAt);assert.equal(f.native,null);
+    await advance(999);assert.equal(f.settingsReads,1);
+    await advance(1);assert.equal(f.settingsReads,2);assert(f.native);assert.equal(f.demand,1);assert.equal(timers.size,0);
    }else if(name==='create-retry'){
     f.createFailures=1;await start();assert.equal(creates(),1);assert.equal(f.native,null);
     for(let i=0;i<1000;i++)f.emit('deckySidebar.updated',{steamKnown:true,steamRunning:false});await flush(48);
@@ -382,8 +388,46 @@ try{
     await start();assert(f.native);const count=f.calls.length,reads=f.reads;
     assert.equal(timers.size,0);await advance(60000);assert.equal(f.calls.length,count);assert.equal(f.reads,reads);assert.equal(creates(),1);assert.equal(f.demand,1);
    }else if(name==='read-exhaustion'){
+    f.power={...f.power,suspendSerial:7};
     f.settingsReadFailures=99;await start();await advance(1000);await advance(3000);assert.equal(f.settingsReads,3);assert.equal(f.native,null);assert.equal(timers.size,0);assert.equal(host.inspect().clock.users,0);
     const calls=f.calls.length;await advance(60000);assert.equal(f.calls.length,calls);assert.equal(f.settingsReads,3);
+    const prior={...f.power,publicationRevision:2,observedNotificationSequence:2};
+    f.settingsReadFailures=0;f.power=prior;f.emit('power.lifecycleChanged',prior);await flush(48);
+    assert.equal(f.settingsReads,3,'same-boundary notification cannot rearm an exhausted read');assert.equal(creates(),0);
+    f.power={...prior,phase:'suspending',hardwareWritesAllowed:false,suspendSerial:8,publicationRevision:3,observedNotificationSequence:3};
+    f.emit('power.lifecycleChanged',f.power);await flush(48);
+    f.emit('power.lifecycleChanged',{...prior,publicationRevision:4});await advance(60000);
+    assert.equal(f.settingsReads,3,'hold or late prior Ready cannot rearm the read');assert.equal(creates(),0);assert.equal(timers.size,0);
+    f.power={...prior,suspendSerial:8,publicationRevision:5,observedNotificationSequence:4};f.emit('power.lifecycleChanged',f.power);await flush(80);
+    assert.equal(f.settingsReads,4,'confirmed new sleep boundary must rearm exhausted startup settings');
+    assert.equal(creates(),1);assert(f.native);assert.equal(f.demand,1);assert.equal(timers.size,0);
+   }else if(settingsBoundaryNames.includes(name)){
+    const suspended=name==='settings-boundary-suspend-on',notification=name==='settings-boundary-notification';
+    f.power={...f.power,suspendSerial:7};
+    f.settings.rtss.monitorOutput.enabled=!suspended;
+    let release;f.settingsReadGate=new Promise(resolve=>{release=resolve});
+    host=m.startMonitorHudHost();const pending=host.ready();
+    try{
+     await flush(24);assert.equal(f.settingsReads,1);
+     if(suspended){
+      f.power={...f.power,suspendSerial:8,phase:'suspending',hardwareWritesAllowed:false,publicationRevision:2,observedNotificationSequence:2};
+      f.emit('power.lifecycleChanged',f.power);await flush(24);
+      assert.equal(creates(),0);
+     }
+     f.settings.rtss.monitorOutput.enabled=suspended;
+     f.power={...f.power,suspendSerial:notification?7:8,phase:'ready',hardwareWritesAllowed:true,publicationRevision:3,observedNotificationSequence:3};
+     f.emit('power.lifecycleChanged',f.power);await flush(48);
+     assert.equal(f.settingsReads,1,'repository work still owns its settlement');
+     assert.equal(creates(),0);
+    }finally{release();await pending;await flush(80);}
+    assert.equal(creates(),suspended?1:0,'only the current boundary preferences may create a HUD');
+    if(notification){
+     assert.equal(host.inspect().recovery.settingsAttempts,1,'notification-only advance cannot refund the retired attempt');
+     await advance(999);assert.equal(f.settingsReads,1,'notification-only advance must keep the normal backoff');
+     await advance(1);
+    }
+    assert.equal(f.settingsReads,2,'current Ready needs one fresh settings validation after settlement');
+    assert.equal(!!f.native,suspended);assert.equal(f.demand,suspended?1:0);assert.equal(timers.size,0);
    }else if(name==='stop-pending'){
     let release;f.settingsReadGate=new Promise(resolve=>{release=resolve});host=m.startMonitorHudHost();const pending=host.ready();await flush(12);host.stop();await flush(24);release();await pending;await flush(48);
     assert.equal(creates(),0);assert.equal(f.native,null);assert.equal(f.demand,0);assert.equal(timers.size,0);

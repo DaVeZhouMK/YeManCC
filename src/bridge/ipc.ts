@@ -30,6 +30,9 @@ export type IpcMessage = {
  * proves the request is no longer an unacknowledged native operation. */
 export class IpcRemoteError extends Error {}
 
+/** The local bridge could not post the message. Lost replies use other errors. */
+export class IpcPostError extends Error {}
+
 /** Only a local response timer can produce this; remote error text is not a timeout. */
 export class IpcTimeoutError extends Error {
   readonly code = 'IPC_TIMEOUT';
@@ -176,7 +179,7 @@ export function invoke<T = unknown>(
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     if (!hasWebView) {
-      reject(new Error('Not running in WebView2'));
+      reject(new IpcPostError('Not running in WebView2'));
       return;
     }
     if (options.signal?.aborted) { reject(new Error("IPC request retired")); return; }
@@ -205,7 +208,7 @@ export function invoke<T = unknown>(
       options.signal?.removeEventListener("abort", abort);
       if (timeout) clearTimeout(timeout);
       const m = err instanceof Error ? err.message : String(err);
-      reject(err instanceof Error ? err : new Error(m));
+      reject(new IpcPostError(m));
     }
   }).then(
     (res) => {

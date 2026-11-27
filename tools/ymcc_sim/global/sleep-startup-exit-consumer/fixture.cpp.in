@@ -39,7 +39,9 @@ namespace fspath{
  struct entry{fspath::path value;bool regular=true;bool is_regular_file()const{if(typeQueryErrors.count(value.wstring())){op("memory-file-type-error",{{"path",narrow(value.wstring())}});throw std::system_error(std::make_error_code(std::errc::permission_denied));}return regular;}fspath::path path()const{return value;}};
  struct directory_range{std::wstring directory;std::vector<entry> values;struct iterator{directory_range* owner;size_t index;entry& operator*()const{return owner->values[index];}bool operator!=(const iterator& other)const{return index!=other.index;}iterator& operator++(){++index;if(index==1&&iteratorIncrementErrors.count(owner->directory)){op("memory-directory-increment-error",{{"path",narrow(owner->directory)}});throw std::system_error(std::make_error_code(std::errc::io_error));}return *this;}};iterator begin(){return{this,0};}iterator end(){return{this,values.size()};}};
  bool exists(const std::wstring& p){if(existsErrors.count(p))throw std::system_error(std::make_error_code(std::errc::permission_denied));return files.count(p)||directories.count(p);}bool exists(const std::wstring& p,std::error_code& ec){if(existsErrors.count(p)){ec=std::make_error_code(std::errc::permission_denied);op("memory-exists-error",{{"path",narrow(p)},{"value",existsErrorValue}});return existsErrorValue;}ec.clear();return exists(p);}bool exists(const path& p){return exists(p.wstring());}
- void remove(const std::wstring& p){op("memory-remove",{{"path",narrow(p)}});files.erase(p);}void remove(const std::wstring& p,std::error_code& ec){ec.clear();remove(p);}void remove(const path& p){remove(p.wstring());}void remove(const path& p,std::error_code& ec){remove(p.wstring(),ec);}
+ bool remove(const std::wstring& p){op("memory-remove",{{"path",narrow(p)}});return files.erase(p)!=0;}
+ bool remove(const std::wstring& p,std::error_code& ec){ec.clear();return remove(p);}
+ void remove(const path& p){remove(p.wstring());}void remove(const path& p,std::error_code& ec){remove(p.wstring(),ec);}
  directory_range directory_iterator(const std::wstring& dir){if(iteratorErrors.count(dir))throw std::system_error(std::make_error_code(std::errc::permission_denied));std::vector<entry> out;for(const auto& item:files){auto p=item.first.find_last_of(L"\\/");if(p!=std::wstring::npos&&item.first.substr(0,p)==dir)out.push_back({path(item.first),!nonRegular.count(item.first)});}return{dir,std::move(out)};}
  directory_range directory_iterator(const std::wstring& dir,std::error_code& ec){if(iteratorErrors.count(dir)){ec=std::make_error_code(std::errc::permission_denied);op("memory-directory-iterator-error",{{"path",narrow(dir)}});return {};}ec.clear();return directory_iterator(dir);}
 }
@@ -61,6 +63,15 @@ template<class...T>void traceLog(const char*,T...){}
 void sgRecordFact(const char* name,const json& facts=json::object()){op(name,facts);}
 void focusSingleResumedGame(const std::vector<DWORD>&,ULONGLONG,const ymcc::sleeppower::SharedPowerV1&){++focusCalls;}
 namespace ymcc::sleepLegacyResume {
+struct File {
+    HANDLE value;
+    explicit File(HANDLE h) : value(h) {}
+    File(const File&) = delete;
+    File& operator=(const File&) = delete;
+    ~File() { if (value) CloseHandle(value); }
+    explicit operator bool() const { return value != 0; }
+    HANDLE get() const { return value; }
+};
 struct Paths {std::wstring dir;DWORD pid;};
 static Paths paths(const std::wstring& dir,DWORD pid){return {dir,pid};}
 enum class Result { None,Cleaned,Pending };
@@ -107,6 +118,14 @@ enum class PowerLifecycle { Ready,Resuming };
 static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
 static ULONGLONG currentPowerGeneration(){return memoryPower?memoryPower->generation:0;}
 static bool sgSleepRetryActive(){return false;}
+// Startup and exit do not own the strict S4 wake permit.
+static std::atomic<std::uint64_t> g_sharedPowerSuspendSerial{0};
+static struct {
+ std::uint64_t observedSleepBoundarySequence() const { std::abort(); }
+ bool pendingSuspend() const { std::abort(); }
+} g_sleepPowerDispatch;
+static void sgForgetAcceptedWakeMarker(const std::wstring&,DWORD,ULONGLONG,const std::string&){std::abort();}
+static bool sgConfirmStrictWakeLeaseResume(HANDLE,const SgSleepTarget&,const std::string&,const std::function<bool()>&){std::abort();}
 static int readMemoryPower(Power* output,std::uint32_t size)noexcept{if(!output||size!=sizeof(Power)||!memoryPower)return 0;*output=*memoryPower;return 1;}
 static int __cdecl readSharedSystemPower(Power* output,std::uint32_t size)noexcept{return readMemoryPower(output,size);}
 static bool captureSharedPowerLifecycle(Power& output)noexcept{return Shared::capturePower(&readMemoryPower,output);}

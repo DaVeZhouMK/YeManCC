@@ -31,7 +31,7 @@ dotnet publish .\FanLab\real-host\YeManFanHost.csproj `
 & .\YeManFanHost.exe --parent-process YeManCC --protocol-version 2
 ```
 
-只监听 `127.0.0.1`。可用 `GET /health`、`POST /api/handshake`、`GET /api/state` 检查；停止时按 OEM restore → release → close 顺序清理内存状态。Host 的 `SystemEvents.PowerModeChanged` 回调只排入后台串行队列并立即返回，绝不在系统电源事件上等待 HC/EC 或阻止睡眠；Suspend/Resume 实际处理在后台执行且可与 HTTP/parent-watchdog 恢复幂等竞合。
+只监听 `127.0.0.1`。可用 `GET /health`、`POST /api/handshake`、`GET /api/state` 检查；停止时按 OEM restore → release → close 顺序清理内存状态。生产 Host 消费唯一 Native 睡眠协调层传来的当轮电源状态和许可；会话关闭、重建与 HTTP 操作仍在原队列协调。`InvokePowerModeChangedForSelfTest` 仅供夹具注入，不是生产中的 Windows 睡眠监听入口。
 
 如果主程序关闭后仍显示硬件接管，不要强制杀 `YeManFanHost.exe`；保留当前会话和日志，先核对当前 Host 身份与恢复状态，不得改用旧 `PowerControl\fan-host` 实例。
 

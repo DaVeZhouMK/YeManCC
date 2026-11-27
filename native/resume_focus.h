@@ -18,7 +18,7 @@ struct ResumeFocusRequest {
 };
 enum class ResumeFocusGate { Ready, Deferred, Invalid, Superseded, StalePower, Exiting, Expired };
 // Only the confirmed thaw handoff may follow a later notice, and only while
-// the caller still holds the same observed sleep boundary before submission.
+// the caller still holds the same observed sleep boundary before the first probe.
 inline bool sameResumeFocusSleep(const sleeppower::SharedPowerV1& origin,
                                  const sleeppower::SharedPowerV1& now) noexcept {
     return sleeppower::powerObservationKnown(origin) && sleeppower::powerObservationKnown(now) &&

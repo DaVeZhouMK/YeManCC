@@ -1,5 +1,6 @@
 from pathlib import Path
 import argparse,hashlib,json,re,subprocess,sys
+from fan_keepalive_success_log_selftest import extract_disarm
 
 def extract(text,signature):
     start=text.index(signature);i=text.index('{',start)+1;depth=1
@@ -16,11 +17,11 @@ def main():
     if out.exists():raise RuntimeError('Output must be new')
     out.mkdir(parents=True);raw=source.read_bytes();text=raw.decode('utf-8-sig')
     signatures={'ArmExtract.inc':'static void fanLeaseKeepaliveArm(const std::string& leaseId, const char* source, ULONGLONG receiptEpoch = 0) {',
-      'DisarmExtract.inc':'static void fanLeaseKeepaliveDisarm(const char* reason, const std::string* expectedLease) {',
       'NoteExtract.inc':'static void fanHostNoteMsiModeWrite(unsigned long long generation) noexcept {',
       'ModeExtract.inc':'static void fanLeaseKeepaliveAddMsiMode(json& payload) {',
       'TickExtract.inc':'static void fanLeaseKeepaliveTick() {'}
     parts={name:extract(text,sig)for name,sig in signatures.items()}
+    parts['DisarmExtract.inc']=extract_disarm(text)
     rawArm=parts['ArmExtract.inc'];oldArmGuard='std::lock_guard<std::mutex> lock(g_fanLeaseKeepaliveMx);';newArmGuard='FixtureArmLock lock(g_fanLeaseKeepaliveMx);'
     assert rawArm.count(oldArmGuard)==2,'Arm owner/notification lock shape changed'
     parts['ArmExtract.inc']=rawArm.replace(oldArmGuard,newArmGuard,1)
@@ -67,14 +68,16 @@ def main():
         compiled=subprocess.run(['cmd.exe','/d','/c',str(out/'compile.cmd')],cwd=out,stdout=log,stderr=subprocess.STDOUT)
     if compiled.returncode:print((out/'compile.log').read_text(encoding='utf-8',errors='replace'));return compiled.returncode
     cases=['lease-clock-ownership','lease-clock-enable','lease-clock-preset','lease-clock-mixed','lease-clock-evidence','lease-clock-refused-boundaries','renderer-starvation','duplicate-for-deferred','native-backup','zero-edge','multiple-edges','authorization','lease-boundary','malformed','existing-field','stale-power','stale-epoch','off','sleep','large-body','routing','cold-generation','header-casing','stop-flags','metadata-failure','during-epoch','during-power','during-lease','during-off','canonical-body','fallback-bodies','canonical-invalid','canonical-build-failure','fallback-during-epoch','fallback-during-power','fallback-during-lease','fallback-during-off'];results=[]
+    cases.append('renderer-expiry-rearm')
     for case in cases:
         run=subprocess.run([str(out/'fixture.exe'),case],capture_output=True,text=True,encoding='utf-8');value=json.loads(run.stdout)
         if run.returncode not in(0,1)or'fixtureError'in value:raise RuntimeError(case+' fixture failure: '+run.stdout+run.stderr)
         results.append(value);(out/(case+'.json')).write_text(json.dumps(value,ensure_ascii=False,indent=2),encoding='utf-8')
-    for name,sig in signatures.items():assert extract(source.read_bytes().decode('utf-8-sig'),sig)==(rawArm if name=='ArmExtract.inc' else parts[name]),name+' changed during verification'
+    latest=source.read_bytes().decode('utf-8-sig')
+    for name,sig in signatures.items():assert extract(latest,sig)==(rawArm if name=='ArmExtract.inc' else parts[name]),name+' changed during verification'
+    assert extract_disarm(latest)==parts['DisarmExtract.inc'],'retirement changed during verification'
     assert (root/'native/fan_response_contract.h').read_bytes()==receiptHeader,'receipt header changed during verification'
     assert (root/'FanLab/real-host/Program.cs').read_bytes()==hostRaw,'Host TTL source changed during verification'
-    latest=source.read_bytes().decode('utf-8-sig')
     assert (extract(latest,optional)if optional in latest else '')==rawRendererMode,'renderer metadata helper changed during verification'
     assert (extract(latest,builderSignature)if builderSignature in latest else '')==rawBuilder,'canonical builder changed during verification'
     latestStart=latest.index('ipc_on("http.request",');latestSend=latest.index('        request.send(body);',latestStart)

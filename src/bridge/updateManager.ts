@@ -12,6 +12,7 @@ import {
   UPDATE_MANIFEST_URL,
 } from './yeman';
 import { on, invoke, IpcRemoteError } from './ipc';
+import { getSharedPowerLifecycle, isSharedPowerLifecycleAdmitted, onSharedPowerLifecycle } from './powerLifecycleState';
 import { APP_VERSION } from '@/version';
 
 export type UpdatePhase =
@@ -53,7 +54,7 @@ export const updateCacheState = reactive({ busy: false, message: '', error: '', 
 let maintenanceGeneration = 0;
 let retireDownload: (() => Promise<boolean>) | null = null;
 let initialized = false;
-let initialization: Promise<void> | null = null;
+let initialization: { task: Promise<void>; controller: AbortController } | null = null;
 let activeOperation = '';
 let downloadTask: Promise<boolean> | null = null;
 let installRequested = false;
@@ -112,12 +113,27 @@ export async function ensureUpdateManager(): Promise<void> {
     offProgress = on<UpdateProgressState>('update.progress', merge);
   }
   if (initialized) return;
-  if (initialization) return initialization;
+  if (initialization) return initialization.task;
+  let power = getSharedPowerLifecycle();
+  if (power && !isSharedPowerLifecycleAdmitted(power)) return;
   const generation = maintenanceGeneration;
+  const controller = new AbortController();
+  const currentPower = (state: ReturnType<typeof getSharedPowerLifecycle>) =>
+    !state ? power === null : isSharedPowerLifecycleAdmitted(state) && (!power || (
+      state.generation === power.generation && state.suspendSerial === power.suspendSerial &&
+      state.observedNotificationSequence === power.observedNotificationSequence));
+  const stopPower = onSharedPowerLifecycle(state => {
+    if (controller.signal.aborted) return;
+    if (currentPower(state)) { power ??= state; return; }
+    // Retire only the state read; submitted transfers keep their owner.
+    if (initialization?.controller === controller) initialization = null;
+    controller.abort();
+  }, { observeNotificationSequence: true, observeSuspendSerial: true });
   const task = (async () => {
     try {
-      const saved = await readNativeUpdateState();
-      if (generation !== maintenanceGeneration || updateCacheState.busy) return;
+      const saved = await readNativeUpdateState(controller.signal);
+      if (controller.signal.aborted || !currentPower(getSharedPowerLifecycle()) ||
+          generation !== maintenanceGeneration || updateCacheState.busy) return;
       restoreSavedUpdateInfo(saved);
       if (saved.downloadActive && saved.activeDownloadOperation === saved.operationId) {
         activeOperation = saved.operationId || '';
@@ -142,9 +158,12 @@ export async function ensureUpdateManager(): Promise<void> {
       /* Native state is optional in preview, but a failed load stays retryable. */
     }
   })();
-  initialization = task;
+  if (!controller.signal.aborted) initialization = { task, controller };
   try { await task; }
-  finally { if (initialization === task) initialization = null; }
+  finally {
+    stopPower();
+    if (initialization?.controller === controller) initialization = null;
+  }
 }
 
 export async function checkForUpdate(appVersion: string, background = false, admissionCurrent?: () => boolean): Promise<boolean> {
@@ -309,6 +328,9 @@ export function prepareUpdate(options: { background?: boolean; cacheOnly?: boole
         updateSnapshot.backgroundPaused=true;
         Object.assign(updateSnapshot,{phase:'interrupted',stage:'download',error:'',message:'后台下载已暂停，下载进度已保留'});return false;
       }
+      if (!options.background && String(error).includes('Update download paused for power transition')) {
+        Object.assign(updateSnapshot,{phase:'interrupted',stage:'download',error:'',message:'下载已暂停，进度已保留'});return false;
+      }
       updateSnapshot.phase = 'failed';
       updateSnapshot.error = '下载失败：' + (error instanceof Error ? error.message : String(error));
       updateSnapshot.message = updateSnapshot.error;
@@ -367,7 +389,10 @@ export async function restoreBackgroundTarget(next: UpdateInfo): Promise<void> {
 }
 /** Read-only manifest probing is allowed during a background transfer. It never
  * changes a user-owned install or bypasses the download/cache ownership lease. */
-export function probeBackgroundSuccessor(admissionCurrent?: () => boolean): Promise<void> {
+export function probeBackgroundSuccessor(
+  power: { generation: number; suspendSerial: number; observedNotificationSequence: number },
+  admissionCurrent?: () => boolean,
+): Promise<void> {
   if (successorProbe) return successorProbe;
   const generation = backgroundGeneration;
   const current = () => !updateCacheState.busy && !backgroundGamePaused && !installRequested &&
@@ -376,7 +401,7 @@ export function probeBackgroundSuccessor(admissionCurrent?: () => boolean): Prom
   const task = (async () => {
     const next = await checkUpdate(UPDATE_MANIFEST_URL, true);
     if (!current() || !updateInfo.value || !isSuccessor(next, updateInfo.value) || (pendingTarget && !isSuccessor(next, pendingTarget))) return;
-    const saved = await invoke<boolean>('app.updatePredownloadTarget', { version: next.version, sha256: next.sha256 }, { timeoutMs: 5000 });
+    const saved = await invoke<boolean>('app.updatePredownloadTarget', { version: next.version, sha256: next.sha256, power }, { timeoutMs: 5000 });
     // Saving the hint must precede cancellation: a crash in the handoff may not
     // bring an obsolete package back as a fresh ready notification.
     if (saved !== true || !current()) return;
@@ -388,17 +413,17 @@ export function probeBackgroundSuccessor(admissionCurrent?: () => boolean): Prom
 }
 
 /** Refresh an adopted native operation while its original observation is current. */
-export async function refreshAdoptedUpdate(admissionCurrent?: () => boolean): Promise<void> {
+export async function refreshAdoptedUpdate(admissionCurrent?: () => boolean, signal?: AbortSignal): Promise<void> {
   const generation = maintenanceGeneration, operation = activeOperation;
   const { operationId, phase, installerActive } = updateSnapshot;
   const current = () => generation === maintenanceGeneration && !updateCacheState.busy && !installRequested &&
     activeOperation === operation && updateSnapshot.operationId === operationId &&
-    updateSnapshot.phase === phase && updateSnapshot.installerActive === installerActive && (admissionCurrent?.() ?? true);
+    updateSnapshot.phase === phase && updateSnapshot.installerActive === installerActive && !signal?.aborted && (admissionCurrent?.() ?? true);
   if (!current()) return;
   // Reuse the service's bounded refresh opportunity, including while automatic
   // downloads are disabled or paused for a game. This never launches an install.
   if (installerActive === true) {
-    const saved = await readNativeUpdateState();
+    const saved = await readNativeUpdateState(signal);
     if (!current() || (saved.operationId && saved.operationId !== operationId)) return;
     activeOperation = saved.operationId || '';
     restoreSavedUpdateInfo(saved);
@@ -408,7 +433,7 @@ export async function refreshAdoptedUpdate(admissionCurrent?: () => boolean): Pr
     return;
   }
   if (downloadTask || !['downloading', 'validating'].includes(phase)) return;
-  const saved = await readNativeUpdateState();
+  const saved = await readNativeUpdateState(signal);
   if (!current() || downloadTask || saved.operationId !== operation) return;
   merge(saved);
   if (saved.downloadActive === false && saved.phase !== 'downloaded' && updateSnapshot.backgroundPaused) { updateSnapshot.phase='interrupted';updateSnapshot.stage='download'; }

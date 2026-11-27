@@ -126,7 +126,15 @@ real-renderer-negative-selftest.mjs仅在构建中将产品frame准入guard增�
 
 原生lease组件现明确绑定真实产品源码、驻留窗口/周期timer/COM引用资源类别和case-local结果文件，同时绑定公共生命周期门源文件。分类属于持续的 monitor.notice-host；组件PASS只反映该原生退出范围。父级需在合同中明确接入并完成原有全部退出、健康恢复与限制观测，缺失项继续INCOMPLETE。
 
+针对退出残留，用同一生产器 `native-lease-selftest.mjs --out <绝对、未创建的证据目录> --scope shutdown`。经原有界执行器单独运行，不进入默认 10 项或改变两个 mutation。它在主窗口 `WM_DESTROY` 调用点的源码绑定下，直接执行真实 Carrier 退出方法；检查析构前归还两个自有 HWND、timer、控制器和旧 lease，省略调用的对照必须仍看得到资源。该范围没有执行主窗口消息分发或真实 WebView2；守卫的工具后代清理须单列。
+
+要验证 Windows 消息触发到监控清理，用同一入口的 `--scope shutdown-dispatch`。一次原生构建、一次执行，覆盖正常与意外销毁，以及仅省略监控清理调用的对照。它把 `native/main.cpp` 的完整 `WM_DESTROY` 分支投影到私有根 HWND，由实际 `DestroyWindow` 交付消息；真实 Carrier、计时器和窗口保留，其他功能使用隔离替身。只有该分支变化才需重核替身边界及分支摘要，其他 `main.cpp` 改动不要求更新摘要。此显式场景不加入默认 10 项、模块 minimum 或发布；不是安装版整 App 或真实 WebView2 验收。
+
+同一原生入口另有定向 `--scope shutdown-intent`，只跑一项，不重复上述三个场景。原样编译生产主窗口的 WebView 消息回调，接到投影的 IPC 分发，在私有 HWND 所属线程调用原 `app.exit`。校验权限拒绝、坏请求和被拦截的消息不触发退出；未拦截的合法消息同步回包，保留请求 ID、先于销毁，退出码只投递一次。私有工作线程直接调用处理器仍作队列控制，但不触发第二次销毁。随后走原 `WM_CLOSE`、`WM_APP_EXIT`、`WM_APP_EXIT_READY`、`WM_DESTROY` 分支：驻留关闭只隐藏；无退出意图、清理未完成或本地所有者未归还均不能销毁；放行后监控通知窗口、定时器、控制器及旧租约在析构前退役。WebView 及消息参数、壁纸消息拦截器、处理器注册表、回包传输、清理工作线程和邻接模块为替身，真实 Win32 事件提供清理句柄状态。不验收真实 COM 传输、整 App、Vue 联动、退出总时长或实机；不进入默认、minimum 或发布流程。
+
 
 <!-- CURRENT-EXPLICIT-RUNTIME-20261113 -->
+
+真实 WebView 生产者 `real-webview-selftest.mjs` 也支持显式 `--scope shutdown-intent`。准备与执行均须指定相同的 `--out`、`--runtime`、`--runtime-version` 和 `--scope`；先用 `--prepare-only` 固定产物，再以针对该产物的独立审阅记录运行。它在同一私有桌面内使用真实根窗口、WebView2 和通知 Carrier，检查页面收到关联回复、只投递一次退出、未归还时保留所有者，以及允许退出后销毁窗口并自然退役。不执行真实清理 worker、Vue 或整 App；不加入默认九控制器组、minimum 或发布门。
 2026-11-13 当前入口后继：真实 WebView/Vue 沿原 prepare/run 显式绑定本机运行库与完整文件清单；历史155/916只描述旧证据。两个原真实 runtime 角色组合容量4096，普通/native仍3072，原场景/负例/时限和逐文件身份保持。当前软件Host23、native10及独立真实WebView19/负例8、Vue36/负例4分别有原件；不是同一global整父或实机通过。详见 `G:/YeManCC-Work/Testing/YMCC/Evidence/MonitorJointRenderer-20261023/RuntimeCurrent-20261113/SOURCE_READY.json` 和同目录报告；普通导出不因此增加默认夹具。
 <!-- /CURRENT-EXPLICIT-RUNTIME-20261113 -->

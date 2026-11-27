@@ -7,6 +7,8 @@ export interface HidHideSetupSnapshot {
   driverSetupResult?: number;
   driverSetupRedistDir?: string;
   driverSetupSession?: string;
+  hidHideUnsupportedVersion?: string;
+  hidHideMaintenanceExit?: number;
 }
 export interface HidHideManualInstallPrompt {
   directory: string;
@@ -21,7 +23,6 @@ export function hidHideManualInstallPrompt(state: HidHideSetupSnapshot): HidHide
     1: 'HidHide 安装结果检查未通过。请检查安装结果并按需自行安装。',
     2: '自动安装未获得管理员权限。请以管理员身份运行安装程序。',
     3: '其他控制器程序仍在运行，自动安装已跳过。请先关闭相关程序，再自行安装。',
-    4: '检测到已有驱动或残留，自动安装已跳过。请自行检查、安装或修复 HidHide。',
     5: '缺少 HidHide 安装器。请先用 YMCC 完整安装包恢复安装器，再自行安装。',
     6: 'HidHide 安装器校验未通过。请先用 YMCC 完整安装包恢复正确安装器，再自行安装。',
   };

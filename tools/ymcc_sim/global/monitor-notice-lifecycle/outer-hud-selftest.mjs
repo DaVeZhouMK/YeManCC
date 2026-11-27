@@ -21,14 +21,15 @@ const key=file=>path.resolve(file).toLowerCase();
 const same=(a,b)=>key(a)===key(b);
 const read=file=>JSON.parse(fs.readFileSync(file,'utf8'));
 const evidence=(dir,file,value)=>fs.writeFileSync(path.join(dir,file),JSON.stringify(value,null,2)+'\n',{flag:'wx',flush:true});
-const scenarioNames=['outer-hud-stop-owns-notice-retirement','outer-hud-stop-rejects-delayed-settings-admission'];
+const recoveryName='outer-hud-coalesced-ready-unblocks-failed-switch';
+const scenarioNames=['outer-hud-stop-owns-notice-retirement','outer-hud-stop-rejects-delayed-settings-admission',recoveryName];
 const appScenarioNames=['app-unmount-retires-visible-owned-notice','app-unmount-rejects-delayed-settings-admission'];
 const ENTRY=`export {startMonitorHudHost} from './src/bridge/monitorHudHost';
 export {setLogSink} from './src/bridge/ipc';
 export {SHORTCUT_FEEDBACK_EVENT} from './src/bridge/shortcutActionFeedback';
 export {getSharedPowerLifecycleDiagnostics} from './src/bridge/powerLifecycleState';
 export {normalizeSettings} from './src/bridge/settingsRepository';
-export {registerYmccHudOutputAdapter} from './src/bridge/monitorOutput';
+export {registerYmccHudOutputAdapter,monitorOutputCoordinator,onMonitorOutputApplied} from './src/bridge/monitorOutput';
 export {registerDeckyMirrorExtension} from './src/bridge/deckyMirrorExtensions';
 export {registerUpdateReadyPresenter,presentUpdateReady} from './src/bridge/updateReadyNotice';`;
 
@@ -116,7 +117,7 @@ async function buildOuterBundle(runDir,appUnmount){
   }};
 }
 
-function runCase(bundle,holdSettings,appUnmount=false,skipMonitorStop=false){
+function runCase(bundle,holdSettings,appUnmount=false,skipMonitorStop=false,scenario){
   const dir='M:\\ymcc-fixture-memory-settings';
   const file=dir+'\\yeman-settings.json';
   const rejectedCommands=[];
@@ -130,11 +131,13 @@ function runCase(bundle,holdSettings,appUnmount=false,skipMonitorStop=false){
       return host;
     },
     reply(cmd,args){
+      if(scenario?.ports.has(cmd))return scenario.ports.get(cmd)(args);
       switch(cmd){
         case 'sys.info':return {cpuName:'Synthetic CPU'};
         case 'settings.location':return {file,directory:dir,backup:file+'.bak'};
         case 'settings.read':assert.equal(args.path,file);return {stamp:'100',unchanged:false,content:settingsContent};
         case 'desktopHud.status':return {id:0,available:true};
+        case 'monitor.hudPulse.ack':return pulseOwner!==null&&args.nonce===pulseOwner;
         case 'monitor.hudPulse.set':
           assert.match(args.nonce,/^[a-zA-Z0-9-]{16,80}$/);
           assert.equal(typeof args.enabled,'boolean');
@@ -161,8 +164,10 @@ function ownedRetirement(post,ownedNotice){
 function verifyVueDispatch(view,before){
   const after=view.inspect();
   assert(view.mounted&&before.nodeCount===1&&before.calls.length===0&&!before.hostReferenceCleared,'PRIMARY_CALLBACK_NOT_DEFERRED_TO_UNMOUNT');
+  const readinessStop=after.calls.indexOf('stopResumeGameReadinessWatch');
   assert(after.nodeCount===0&&after.hostReferenceCleared&&after.backgroundPresentationDisposed&&!after.resumeLifecycleActive&&
     after.calls[0]==='stopUndervoltRuntime'&&after.calls.includes('radialHost')&&after.calls.includes('stopDeckySafetyNotifications')&&
+    readinessStop>=0&&after.calls.lastIndexOf('stopResumeGameReadinessWatch')===readinessStop&&readinessStop<after.calls.indexOf('resumeQueue')&&
     after.calls.at(-1)==='stopStartupPerformanceWatch'&&after.errors.length===0,'INCOMPLETE_PRIMARY_VUE_CALLBACK:'+JSON.stringify(after));
   return {before,after};
 }
@@ -268,6 +273,115 @@ async function exerciseMissingStop(bundle,runDir){
   return result;
 }
 
+async function exerciseCoalescedReady(bundle,runDir){
+  const checks=[];
+  const check=(name,value,detail=null)=>{checks.push({name,passed:Boolean(value),detail});assert(value,name);};
+  let owner=null,serial=100,staleReply=false,nativeVisible=true;
+  const ports=new Map([
+    ['desktopHud.status',()=>staleReply?{available:false,id:0,recoveryBlocked:true}:{available:true,id:owner?.id??0,nonce:owner?.nonce,
+      ready:!!owner,armed:!!owner,presentationAllowed:!!owner,visible:nativeVisible,layoutReady:!!owner,controllerVisible:nativeVisible}],
+    ['desktopHud.create',args=>{
+      assert.equal(owner,null);nativeVisible=true;owner={id:++serial,nonce:args.nonce};
+      memory.emit('desktopHud.ready',owner);return owner;
+    }],
+    ['desktopHud.frame',args=>{
+      assert.equal(args.hudId,owner?.id);assert.equal(args.nonce,owner?.nonce);
+      memory.emit('desktopHud.painted',{...owner,seq:args.frame.seq,visible:nativeVisible,armed:true,visibilityRevision:1});return true;
+    }],
+    ['desktopHud.close',args=>{
+      if(args.hudId!==owner?.id||args.nonce!==owner?.nonce)return false;
+      const closed=owner;owner=null;memory.emit('desktopHud.closed',closed);return true;
+    }],
+    ['monitor.snapshot',()=>null], ['monitor.start',()=>({ok:true})], ['monitor.stop',()=>({ok:true})],
+    ['proc.identities',()=>({known:true,processes:[]})], ['proc.running',()=>({RTSS:false})],
+    ['env.get',()=>null], ['rtss.findRegisteredInstall',()=>({known:true,directory:''})],
+  ]);
+  const {memory,rejectedCommands}=runCase(bundle,false,false,false,{ports});
+  const {api,clock,host}=memory;
+  const ready={phase:'ready',generation:1,known:true,inputReady:true,hardwareWritesAllowed:true,publicationRevision:2,observedNotificationSequence:1,notificationPending:false,suspendSerial:0};
+  let off=()=>{};
+  try{
+    memory.publishPowerSnapshot(ready);await host.ready();await clock.advance(0);
+    const prefs={...memory.preferences,output:'ymcc',enabled:true,ymccCarrier:'desktop',ymcc:{...memory.preferences.ymcc,visibility:'always'}};
+    let statusReads=0;
+    memory.policy.decide=r=>r.cmd==='desktopHud.status'&&++statusReads===3?'error':'success';
+    off=api.onMonitorOutputApplied((_prefs,result)=>{
+      if(result.ok)return;
+      memory.policy.decide=r=>r.cmd==='desktopHud.status'?'hold':'success';
+    });
+    const failed=await api.monitorOutputCoordinator.apply(prefs);
+    off();memory.policy.decide=undefined;await clock.advance(0);
+    check('explicit ON waits for the close proof and records the failure',!failed.ok&&failed.phase==='hide-ymcc'&&memory.count('desktopHud.create')===0,failed);
+    const oldReads=[...memory.operations.values()].filter(r=>r.cmd==='desktopHud.status');
+    check('old desktop status transport is still withheld before Ready',oldReads.length>0);
+    const boundary=memory.trace.length;
+    const wake={...ready,publicationRevision:3,suspendSerial:1};
+    memory.publishPowerSnapshot(wake);memory.publishPowerSnapshot({...wake,publicationRevision:4});
+    memory.publishPowerSnapshot({...ready,publicationRevision:5},{store:false});
+    for(let i=0;i<12;i++)await clock.advance(0);
+    check('same-generation Ready restores once before any old status reply or timeout',clock.now===Date.UTC(2026,9,22)&&!!owner&&host.inspect().desktop.owned?.prepared&&memory.count('desktopHud.create')===1,host.inspect());
+    const retired=memory.trace.slice(boundary).filter(r=>r.type==='ipc.complete'&&r.cmd==='desktopHud.status'&&r.error==='IPC request retired');
+    check('old status waits returned before their withheld native reply',retired.length===oldReads.length&&oldReads.every(r=>memory.operations.has(r.id))&&host.inspect().desktop.pendingCalls===0,host.inspect());
+    const restored=owner.nonce;
+    staleReply=true;await memory.lateReplies();await clock.advance(0);staleReply=false;
+    check('old unavailable reply cannot mark the new carrier blocked',host.inspect().desktop.nativeAvailable&&!host.inspect().desktop.recoveryBlocked,host.inspect());
+    const next={...wake,publicationRevision:6,suspendSerial:2};
+    memory.publishPowerSnapshot(next);await clock.advance(0);
+    check('late and repeated Ready observations preserve the confirmed owner',owner?.nonce===restored&&memory.count('desktopHud.create')===1,host.inspect());
+
+    async function pulse(delay=0){
+      await clock.advance(delay);const nonce=host.inspect().clock.nonce;assert(nonce);
+      memory.emit('monitor.hudPulse',{nonce,snapshot:null});
+      for(let i=0;i<12;i++)await clock.advance(0);
+    }
+    nativeVisible=false;await pulse(10000);
+    check('first pre-sleep mismatch uses only one of the two observations',host.inspect().desktop.visibilityHealth.failures===1&&memory.count('desktopHud.close')===0,host.inspect());
+    memory.policy.decide=r=>r.cmd==='desktopHud.status'?'hold':'success';await pulse(10000);
+    memory.policy.decide=undefined;
+    const held=[...memory.operations.values()].filter(r=>r.cmd==='desktopHud.status');
+    check('the periodic visibility read is held with a known prepared owner',held.length===1&&host.inspect().desktop.visibilityHealth.checking&&owner?.nonce===restored,host.inspect());
+    const afterVisibilityWake={...next,publicationRevision:7,suspendSerial:3};
+    memory.publishPowerSnapshot(afterVisibilityWake);memory.publishPowerSnapshot({...afterVisibilityWake,publicationRevision:8});
+    memory.publishPowerSnapshot({...next,publicationRevision:9},{store:false});await clock.advance(0);
+    const verifyBoundary=memory.trace.length;
+    await pulse();
+    check('the first wake pulse checks current visibility before the old reply',memory.count('desktopHud.status',verifyBoundary)===1&&memory.operations.has(held[0].id)&&host.inspect().desktop.visibilityHealth.failures===1&&owner?.nonce===restored,host.inspect());
+    await memory.lateReplies();await clock.advance(0);
+    check('the old matching hidden reply does not count or close the current window',owner?.nonce===restored&&host.inspect().desktop.visibilityHealth.failures===1&&memory.count('desktopHud.close')===0,host.inspect());
+    await pulse(10000);
+    const repair=memory.trace.find(r=>r.type==='native.request'&&r.cmd==='desktopHud.close');
+    check('two current mismatches repair only the recorded window and recover once',!!owner&&owner.nonce!==restored&&repair?.args.nonce===restored&&memory.count('desktopHud.close')===1&&memory.count('desktopHud.create')===2&&host.inspect().desktop.owned?.prepared,host.inspect());
+
+    const lost=owner;owner=null;
+    memory.policy.decide=r=>r.cmd==='desktopHud.status'?'error':'success';
+    memory.emit('desktopHud.closed',lost);
+    await clock.advance(0);await clock.advance(1000);await clock.advance(3000);
+    check('a failed carrier exhausts the bounded restore attempts',host.inspect().recovery.restoreAttempts===3&&host.inspect().recovery.retryAt===0&&memory.count('desktopHud.create')===2,host.inspect());
+    memory.policy.decide=undefined;
+    const sameBoundary={...afterVisibilityWake,publicationRevision:10,observedNotificationSequence:2};
+    memory.publishPowerSnapshot(sameBoundary);await clock.advance(0);
+    check('a later notification does not refund the same suspend boundary',host.inspect().recovery.restoreAttempts===3&&memory.count('desktopHud.create')===2,host.inspect());
+    const nextBoundary={...sameBoundary,publicationRevision:11,suspendSerial:4};
+    memory.publishPowerSnapshot(nextBoundary);
+    for(let i=0;i<12;i++)await clock.advance(0);
+    check('a newer committed suspend serial restores the exhausted carrier once',!!owner&&host.inspect().desktop.owned?.prepared&&memory.count('desktopHud.create')===3,host.inspect());
+    memory.publishPowerSnapshot({...nextBoundary,publicationRevision:12});
+    memory.publishPowerSnapshot({...sameBoundary,publicationRevision:13},{store:false});await clock.advance(0);
+    check('duplicate and old Ready do not open another carrier',memory.count('desktopHud.create')===3,host.inspect());
+    const disable=await api.monitorOutputCoordinator.apply({...prefs,enabled:false});
+    memory.publishPowerSnapshot({...nextBoundary,publicationRevision:14,suspendSerial:5});await clock.advance(0);
+    check('explicit OFF closes the owned window and Ready does not resurrect it',disable.ok&&disable.applied==='off'&&owner===null&&memory.count('desktopHud.create')===3,disable);
+  }catch(error){checks.push({name:'directed recovery completed',passed:false,detail:String(error.stack??error)});}
+  finally{
+    off();memory.policy.decide=undefined;memory.stop();await memory.lateReplies();await clock.advance(30000);
+    const resources=memory.outerResources();
+    checks.push({name:'window, host resources and native operations return at stop',passed:!owner&&resources.windows===0&&resources.timers===0&&resources.nativeOperations===0&&resources.host.clock.users===0&&resources.host.sampleUsers===0&&!resources.host.desktop.pendingCalls&&Object.values(resources.domSubscriptions).every(r=>!r.host.length),detail:resources});
+    checks.push({name:'no unhandled native command',passed:rejectedCommands.length===0,detail:rejectedCommands});
+    evidence(runDir,recoveryName+'.trace.json',memory.trace);
+  }
+  return {id:recoveryName,checks,passed:checks.every(row=>row.passed)};
+}
+
 async function worker(args){
   const context=readBudgetWorker(args[1],args[2],{repoRoot:REPO,coreRoot:CORE});
   const {appUnmount}=parseArgs(context.args);
@@ -279,6 +393,7 @@ async function worker(args){
       assert(context.remainingMs()>0,'RUN_BUDGET_EXHAUSTED');
       cases.push(await exercise(build.bundle,hold,context.runDir,appUnmount));
     }
+    if(!appUnmount)cases.push(await exerciseCoalescedReady(build.bundle,context.runDir));
     if(appUnmount&&cases.every(row=>row.passed))negativeControl=await exerciseMissingStop(build.bundle,context.runDir);
     provenance=build.verify();
   } catch(e) { error=String(e.stack??e); }

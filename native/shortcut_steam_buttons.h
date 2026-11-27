@@ -10,6 +10,8 @@ static bool nativeSteamShortcutEmit(ymcc::FrontendButton button,uint64_t sourceE
     const auto actionEpoch=sourceEpoch==kOemShortcutUnboundEpoch?g_oemShortcutEdgeEpoch.load(std::memory_order_acquire):sourceEpoch;
     const auto revision=GamepadSerialEvent::captureRevision();
     const auto coldDeadline=nativeSteamMenuColdDeadline(GetTickCount64());
+    const bool quick=button==ymcc::FrontendButton::SteamQuickAccess;
+    const auto origin=quick?nativeSteamQamOrigin():NativeSteamQamOrigin{};
     const auto qamTicket=ymcc::qamfollowup::snapshot();
     const auto allowed=[generation,actionEpoch,revision,wmiGeneration,keyboardWmiFallback,producerTokens] {
         return currentPowerGeneration()==generation && GamepadSerialEvent::currentRevision(revision) &&
@@ -19,14 +21,14 @@ static bool nativeSteamShortcutEmit(ymcc::FrontendButton button,uint64_t sourceE
             !g_exitRequested.load() && !g_shortcutRecordingActive.load() && !radialHasInputOwner() &&
             g_inputReady.load(std::memory_order_acquire) && sgVirtualWriterAllowedNow();
     };
-    const bool queued=nativeYmccShortcutSubmit([button,allowed,qamTicket,coldDeadline,actionEpoch,generation,revision] {
+    const bool queued=nativeYmccShortcutSubmit([button,allowed,qamTicket,coldDeadline,actionEpoch,generation,revision,quick,origin] {
         if(!allowed()) {
             nativeFrontendButtonReceipt(button,false,"input-power-gate");return;
         }
         // A new menu key supersedes an older touch recovery. Abandon only the
         // captured ticket; a later touch must keep its own recovery window.
         ymcc::qamfollowup::abandon(qamTicket);
-        auto result=nativeSteamMenuButton(button==ymcc::FrontendButton::SteamQuickAccess,allowed,json(),coldDeadline,actionEpoch);
+        auto result=nativeSteamMenuButton(quick,allowed,json(),coldDeadline,actionEpoch,quick?&origin:nullptr);
         try {result["menuActionOrigin"]={{"schema",1},{"channel","shortcut"},
             {"generation",std::to_string(actionEpoch)},{"inputRevision",std::to_string(revision)},
             {"powerGeneration",std::to_string(generation)},{"powerSource","native-before-action-queue"}};

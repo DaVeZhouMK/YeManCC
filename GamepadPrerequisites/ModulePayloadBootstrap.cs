@@ -163,27 +163,26 @@ internal static class ModulePayloadBootstrap
     }
     private static bool JournalFailure(Exception ex) => ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException or InvalidOperationException or KeyNotFoundException or OverflowException;
     private static bool HistoricalRoot(string root) => !Exists(Path.Combine(root, "PowerControl", ".ymcc-input-managed.json")) && !HasInterruptedStages(root);
-    internal static bool Current(string root)
+    private static bool PayloadCurrent(string root, JsonElement manifest)
     {
-        try {
-            if (!Exists(Path.Combine(root, "YeManCC", "module-package.json"))) return HistoricalRoot(root);
-            using var doc = ReadManifest(root);
-            ValidateStageRecords(root, doc.RootElement);
-            foreach (var entry in doc.RootElement.GetProperty("files").EnumerateArray()) {
-                string file = Path.Combine(root, "PowerControl", Text(entry, "path").Replace('/', Path.DirectorySeparatorChar));
-                RegularPath(file);
-                using var input = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read);
-                if (input.Length != Integer(entry, "bytes") || !Convert.ToHexString(SHA256.HashData(input)).Equals(Text(entry, "sha256"), StringComparison.OrdinalIgnoreCase)) return false;
-            }
-            return true;
-        } catch (Exception ex) when (JournalFailure(ex)) { return false; }
+        ValidateStageRecords(root, manifest);
+        foreach (var entry in manifest.GetProperty("files").EnumerateArray()) {
+            string file = Path.Combine(root, "PowerControl", Text(entry, "path").Replace('/', Path.DirectorySeparatorChar));
+            RegularPath(file);
+            using var input = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read);
+            if (input.Length != Integer(entry, "bytes") || !Convert.ToHexString(SHA256.HashData(input)).Equals(Text(entry, "sha256"), StringComparison.OrdinalIgnoreCase)) return false;
+        }
+        return true;
     }
     internal static bool ReceiptCurrent(string root)
     {
         try {
             if (!Exists(Path.Combine(root, "YeManCC", "module-package.json"))) return HistoricalRoot(root);
-            if (!Current(root)) return false;
             using var manifest = ReadManifest(root);
+            if (!PayloadCurrent(root, manifest.RootElement)) return false;
+            // Bind the receipt to the same inventory whose bytes passed verification.
+            using var latest = ReadManifest(root);
+            if (!ManifestIdentityEqual(manifest.RootElement, latest.RootElement)) return false;
             using var receipt = ReadJournal(Path.Combine(root, "PowerControl", ".ymcc-input-managed.json"));
             ValidateManifest(receipt.RootElement);
             return ManifestIdentityEqual(manifest.RootElement, receipt.RootElement);
@@ -244,7 +243,7 @@ internal static class ModulePayloadBootstrap
             }
         }
         // A confirmed full update also retires superseded HC directories.
-        if (string.IsNullOrEmpty(commitState) && Current(root) && ReceiptCurrent(root) && !HasInterruptedStages(root)) return;
+        if (string.IsNullOrEmpty(commitState) && ReceiptCurrent(root) && !HasInterruptedStages(root)) return;
         if (!ownerAlive()) throw new IOException("YMCC exited before module payload preparation");
         string script = Path.Combine(root, "PowerControl", "redist", "ymcc-input-payload-apply.ps1");
         using var manifest = ReadManifest(root);
@@ -283,7 +282,7 @@ internal static class ModulePayloadBootstrap
             diagnosticsCancellation.Cancel();
             throw new TimeoutException("Module file preparation exceeded budget; retry on next startup");
         }
-        if (process.ExitCode != 0 || !Current(root) || !ReceiptCurrent(root)) {
+        if (process.ExitCode != 0 || !ReceiptCurrent(root)) {
             // A descendant can retain a redirected pipe after the helper exits.
             // Diagnostics must never outlive the install wait budget indefinitely.
             string detail=FinishDiagnosticRead(errors);

@@ -761,14 +761,39 @@ static bool inputHostTargetReturnRuntimeSettledLocked(const std::string& runId,s
 // it cannot commit/erase a duty or require already-returned visibility.
 // AfterPhysicalRestore retains the original journal/path-free durable settlement.
 enum class InputHostRuntimeReturnStage { BeforePhysicalRestore, AfterPhysicalRestore };
-static bool inputHostTargetReturnRuntimeQuarantineProofLocked(const std::string& runId,std::uint64_t epoch,InputHostRuntimeReturnStage stage) {
+struct InputHostRuntimeReturnPower {
+    ymcc::sleeppower::SharedPowerV1 power;
+    bool closing=g_exitRequested.load(std::memory_order_acquire);
+
+    InputHostRuntimeReturnPower() {
+        if(!closing) {
+            captureSharedPowerLifecycle(power);
+            return;
+        }
+        // The public action reader closes on exit. Exact old-owner cleanup
+        // can still finish in the same Ready window, without admitting Start.
+        power.generation=currentPowerGeneration();
+        power.suspendSerial=g_sharedPowerSuspendSerial.load(std::memory_order_acquire);
+        power.observedNotificationSequence=g_sleepPowerDispatch.observedSequence();
+    }
+    bool current() const noexcept {
+        if(!closing)return sharedPowerLifecycleCurrent(power);
+        return power.generation && g_exitRequested.load(std::memory_order_acquire) &&
+            g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready &&
+            !g_sleepPowerDispatch.pendingSuspend() && currentPowerGeneration()==power.generation &&
+            g_sharedPowerSuspendSerial.load(std::memory_order_acquire)==power.suspendSerial &&
+            g_sleepPowerDispatch.observedSequence()==power.observedNotificationSequence;
+    }
+};
+static bool inputHostTargetReturnRuntimeQuarantineProofLocked(const std::string& runId,std::uint64_t epoch,
+        InputHostRuntimeReturnStage stage,const InputHostRuntimeReturnPower& power) {
     const bool physicalReturned=stage==InputHostRuntimeReturnStage::AfterPhysicalRestore;
     using namespace ymcc::inputHost::targetReturnRuntime;
     try {
         if(!g_inputHostMx.ownedByCurrentThread() || runId.empty() || !epoch ||
             !state.session || !state.session->ready())return false;
-        if(physicalReturned && inputHostTargetReturnRuntimeSettledLocked(runId,epoch))return true;
-        const auto power=currentPowerGeneration();
+        if(!power.current())return false;
+        if(physicalReturned && inputHostTargetReturnRuntimeSettledLocked(runId,epoch))return power.current();
         const auto intent=g_inputHostVirtualIntentRevision.load(std::memory_order_acquire);
         const auto hostInstance=g_inputHostHostInstanceId;
         const auto parent=inputHostTargetReturnCaptureOwner(GetCurrentProcess());
@@ -782,7 +807,7 @@ static bool inputHostTargetReturnRuntimeQuarantineProofLocked(const std::string&
                 inputHostPipeRetirementProvenLocked() && physicalWritersQuiescent() &&
                 // Writer retirement can synchronously read its durable journal.
                 // The last power/intent observations must follow that IO too.
-                currentPowerGeneration()==power && g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready &&
+                power.current() &&
                 !g_inputHostVirtualIntentWriters.load(std::memory_order_acquire) &&
                 g_inputHostVirtualIntentRevision.load(std::memory_order_acquire)==intent;
         };
@@ -856,15 +881,17 @@ static bool inputHostTargetReturnRuntimeQuarantineProofLocked(const std::string&
             // but that late completion cannot authorize clearing a newer owner.
             if(!current())return false;
         }
-        return inputHostTargetReturnRuntimeSettledLocked(runId,epoch);
+        return inputHostTargetReturnRuntimeSettledLocked(runId,epoch) && current();
     }catch(...){note("runtime-target-return-deferred","runtime-target-return-exception");return false;}
 }
 
-static bool inputHostTargetReturnBeforeRuntimeRestoreLocked(const std::string& runId,std::uint64_t epoch) {
-    return inputHostTargetReturnRuntimeQuarantineProofLocked(runId,epoch,InputHostRuntimeReturnStage::BeforePhysicalRestore);
+static bool inputHostTargetReturnBeforeRuntimeRestoreLocked(const std::string& runId,std::uint64_t epoch,
+        const InputHostRuntimeReturnPower& power=InputHostRuntimeReturnPower{}) {
+    return inputHostTargetReturnRuntimeQuarantineProofLocked(runId,epoch,InputHostRuntimeReturnStage::BeforePhysicalRestore,power);
 }
-static bool inputHostTargetReturnAfterRuntimeQuarantineLocked(const std::string& runId,std::uint64_t epoch) {
-    return inputHostTargetReturnRuntimeQuarantineProofLocked(runId,epoch,InputHostRuntimeReturnStage::AfterPhysicalRestore);
+static bool inputHostTargetReturnAfterRuntimeQuarantineLocked(const std::string& runId,std::uint64_t epoch,
+        const InputHostRuntimeReturnPower& power) {
+    return inputHostTargetReturnRuntimeQuarantineProofLocked(runId,epoch,InputHostRuntimeReturnStage::AfterPhysicalRestore,power);
 }
 
 // OFF return continuation only. This is a queue eligibility check, NOT endpoint

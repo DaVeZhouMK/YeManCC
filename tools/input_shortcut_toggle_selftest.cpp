@@ -49,6 +49,9 @@ static void resetRoute(const json& rules, const json& input = baseInput()) {
     g_frontendButtonPulse.clear();fixtureSendInputs.clear();fixtureSendCount=UINT_MAX;
     g_inputHostProcess=reinterpret_cast<HANDLE>(1);
     fixtureSteamAttempts=0;fixtureSteamThrows=false;fixtureSteamRequests.clear();fixtureSteamBeforeSend={};
+    fixtureSteamAfterSend={};fixtureSteamSession={L"fixture-steam",42,0,43};
+    fixtureDeckyEnabled=fixtureDeckyModeDemand=true;fixtureDeckyFenced=g_aiFanMockSession.isolated=false;
+    fixtureDeckyRefreshes=fixtureDeckyChecks=0;fixtureDeckyMenuDiagnostic=nullptr;
     fixtureSteamResult={{"ok",true},{"mutated",true},{"keyDelivered",true},{"runtimeAccepted",false},
         {"response","key-delivered-no-menu-state-change"},{"menuTarget",{{"source","steam-game-overlay"}}}};
     ymcc::qamfollowup::abandon(ymcc::qamfollowup::snapshot());
@@ -464,6 +467,103 @@ static void nativeOemUiMailboxCases() {
         check(g_shortcutActionMailbox.claim(id,GetTickCount64()).empty(),"UI failed request stays revoked across later guard copies "+boundary);
         check(g_shortcutActionMailbox.complete(id,outcome,GetTickCount64(),nativeShortcutUnixMs()).empty(),"cancelled UI request cannot fabricate a successful result "+boundary);
     }
+    std::string stalePower;
+    for (const bool notification:{true,false}) {
+        const std::string edge=notification?"notification-sequence":"suspend-serial";
+        const auto advance=[&]{if(notification)++fixtureNotificationSequence;else ++fixtureSuspendSerial;};
+        prepare(0,false,"disabled");g_curW=0;deliver(0,true);
+        check(fixtureJobs.size()==1,"UI actual dispatch holds one queued request before "+edge);
+        advance();flushJobs();
+        if(!fixtureShortcutActionRequests.empty())stalePower+=" queued/"+edge;
+        deliver(0,false);tick(0,fixtureTick+1);
+        const auto current=issue(0,false,"fresh-after/"+edge);const auto id=current["id"].get<std::string>();
+        ymcc::sleeppower::SharedPowerV1 uiOrigin;
+        check(captureSharedPowerLifecycle(uiOrigin)&&current.contains("powerScope")&&
+            current["powerScope"]==json::array({uiOrigin.generation,uiOrigin.suspendSerial,uiOrigin.observedNotificationSequence}),
+            "ordinary UI request carries its exact original public power scope "+edge);
+        ++fixturePublicationRevision;
+        check(g_shortcutActionMailbox.claim(id,GetTickCount64())==current,"same-scope publication preserves actual UI claim "+edge);
+        advance();
+        if(!g_shortcutActionMailbox.claim(id,GetTickCount64()).empty())stalePower+=" claim/"+edge;
+        if(!g_shortcutActionMailbox.complete(id,outcome,GetTickCount64(),nativeShortcutUnixMs()).empty())stalePower+=" result/"+edge;
+    }
+    check(stalePower.empty(),"UI new public power boundary must revoke old queued, issued and claimed work:"+stalePower);
+    prepare(0,false,"disabled");
+    const auto emitTdp=[] {
+        ymcc::sleeppower::SharedPowerV1 power;
+        captureSharedPowerLifecycle(power);
+        return nativeShortcutTdpEvent(1,power);
+    };
+    const auto tdp=emitTdp();
+    check(tdp.value("delta",0)==1&&tdp.contains("feedbackId"),"TDP adjustment has an actual Native ticket");
+    ymcc::sleeppower::SharedPowerV1 tdpOrigin;
+    check(captureSharedPowerLifecycle(tdpOrigin)&&tdp.contains("powerScope")&&
+        tdp["powerScope"]==json::array({tdpOrigin.generation,tdpOrigin.suspendSerial,tdpOrigin.observedNotificationSequence}),
+        "TDP event carries its exact original public power scope");
+    const auto tdpId=tdp["feedbackId"].get<std::string>();
+    ++fixturePublicationRevision;
+    check(!g_shortcutActionMailbox.claim(tdpId,GetTickCount64()).empty(),"same-scope publication preserves TDP claim");
+    ++fixtureSuspendSerial;
+    const auto staleTdp=g_shortcutActionMailbox.claim(tdpId,GetTickCount64());
+    const auto staleTdpResult=g_shortcutActionMailbox.complete(tdpId,outcome,GetTickCount64(),nativeShortcutUnixMs());
+    check(staleTdp.empty()&&staleTdpResult.empty(),"TDP old ticket and feedback revoked together on same-generation suspend");
+    g_powerLifecycle=PowerLifecycle::Suspended;
+    const auto suspendedTdp=emitTdp();
+    g_powerLifecycle=PowerLifecycle::Ready;
+    check(suspendedTdp.value("delta",1)==0&&!suspendedTdp.contains("feedbackId")&&!suspendedTdp.contains("powerScope"),
+        "TDP while suspended never emits an adjustment or scope");
+    const auto nextTdp=emitTdp();
+    check(nextTdp.value("delta",0)==1&&nextTdp.contains("feedbackId")&&
+        !g_shortcutActionMailbox.claim(nextTdp["feedbackId"].get<std::string>(),GetTickCount64()).empty(),"fresh TDP adjustment claims on current Ready");
+    std::string blockedAfterWake;
+    for(const bool notification:{true,false}) {
+        const std::string edge=notification?"notification-sequence":"suspend-serial";
+        prepare(0,false,"disabled");
+        const auto oldUi=issue(0,false,"mailbox-before/"+edge);
+        const auto oldUiId=oldUi["id"].get<std::string>();
+        check(g_shortcutActionMailbox.claim(oldUiId,GetTickCount64())==oldUi,"old UI request is claimed before sleep "+edge);
+        for(unsigned n=1;n<16;++n)check(emitTdp().contains("feedbackId"),"old scoped TDP ticket occupies slot "+std::to_string(n)+" "+edge);
+        ++fixturePublicationRevision;
+        check(emitTdp().value("delta",1)==0&&g_shortcutActionMailbox.size()==16,
+            "same-scope publication cannot evict existing live mailbox capacity "+edge);
+        if(notification)++fixtureNotificationSequence;else ++fixtureSuspendSerial;
+        if(notification){
+            deliver(0,false);tick(0,fixtureTick+1);deliver(0,true);flushJobs();
+            if(fixtureShortcutActionRequests.size()!=2)blockedAfterWake+=" UI/"+edge;
+        }else{
+            if(!emitTdp().contains("feedbackId"))blockedAfterWake+=" TDP/"+edge;
+        }
+        check(g_shortcutActionMailbox.complete(oldUiId,outcome,GetTickCount64(),nativeShortcutUnixMs()).empty(),
+            "old claimed result never posts after the mailbox power boundary "+edge);
+    }
+    check(blockedAfterWake.empty(),"new current press must not wait for revoked mailbox slots to expire:"+blockedAfterWake);
+    prepare(0,false,"disabled");
+    check(nativeYmccShortcutEmit("power.tdpAdjust",1)&&fixtureJobs.size()==1,"actual TDP route queued in prior public scope");
+    ++fixtureNotificationSequence;flushJobs();
+    check(fixtureDeltas.empty()&&g_shortcutActionMailbox.size()==0,"queued TDP cannot use a later public scope to issue or emit");
+    check(nativeYmccShortcutEmit("power.tdpAdjust",1)&&fixtureJobs.size()==1,"fresh TDP route queues after scope revocation");
+    ++fixturePublicationRevision;flushJobs();
+    check(fixtureDeltas==std::vector<int>{1}&&g_shortcutActionMailbox.size()==1,"current queued TDP issues once after publication refresh");
+#if defined(YMCC_NATIVE_TDP_ROUTES)
+    for(bool window:{false,true}) {
+        prepare(0,false,"disabled");
+        if(!window) {
+            fixtureInput["buttonMapping"]["rules"].erase("shortcutRules");
+            fixtureInput["revision"]=fixtureInput["revision"].get<long long>()+1;
+            GamepadSerialEvent::rulesPublished();
+            fixtureTick+=NATIVE_KEYBOARD_SHORTCUT_REFRESH_MS+1;
+            nativeKeyboardShortcutsRefresh(fixtureTick);
+            check(nativeShortcutLegacyDefaultAllowed("tdpShortcut",g_tdpShortcut),"first-run settings retain the original default TDP binding");
+        }
+        const auto press=[&]{if(window)fixtureWindowTdp(1);else nativeAdjustTdp(1);};
+        const std::string route=window?"window":"default";
+        press();check(fixtureJobs.size()==1,"actual "+route+" TDP route queues the press");
+        ++fixtureSuspendSerial;flushJobs();
+        check(fixtureDeltas.empty()&&g_shortcutActionMailbox.size()==0,"actual "+route+" TDP route retires the old press before signing");
+        press();flushJobs();
+        check(fixtureDeltas==std::vector<int>{1}&&g_shortcutActionMailbox.size()==1,"actual "+route+" TDP route resumes on a fresh press");
+    }
+#endif
     prepare(0,true,"disabled");const auto concurrent=issue(0,true,"shared-copy");const auto concurrentId=concurrent["id"].get<std::string>();
     g_inputReleaseRequired=true;
     auto first=std::async(std::launch::async,[&]{return g_shortcutActionMailbox.claim(concurrentId,GetTickCount64());});
@@ -476,6 +576,17 @@ static void nativeOemUiMailboxCases() {
     check(capacity.issue("monitor.toggle",{{"operation","toggle"}},1,1,1000,100000,[]{return true;}).empty(),"original mailbox capacity rejects seventeenth pending request");
     check(!capacity.issue("monitor.toggle",{{"operation","toggle"}},1,1,31000,130000,[]{return true;}).empty()&&capacity.size()==1,
         "original mailbox TTL reclaims expired entries without a new timer");
+    using PowerScope=ymcc::ShortcutActionMailbox::PowerScope;
+    const PowerScope currentScope{7,13,29};
+    const auto currentTicket=capacity.issueResultTicket("power.tdpAdjust",currentScope,1,31001,130001,[]{return true;});
+    check(currentTicket.contains("id")&&capacity.size()==1,"new scope replaces exhausted old scope without reusing its ids");
+    for (const auto delayed:{PowerScope{6,13,29},PowerScope{7,12,29},PowerScope{7,13,28}}) {
+        const auto old=capacity.issue("monitor.toggle",{{"operation","toggle"}},delayed,1,31002,130002,[]{return true;});
+        check(old.empty()&&capacity.size()==1,"late issuer cannot clear the current mailbox after crossing a public boundary");
+    }
+    const auto currentTicketId=currentTicket["id"].get<std::string>();
+    check(capacity.claim(currentTicketId,31003)==currentTicket&&!capacity.complete(currentTicketId,outcome,31004,130004).empty(),
+        "ticket in current public scope remains usable after late issuers");
 }
 #ifdef YMCC_SHORTCUT_TOKEN_INTERLEAVE
 static void sampledTokenWindowCases(){

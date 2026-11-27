@@ -59,7 +59,7 @@ export async function applyRadialPerformance(snapshot:ContinuousPerformanceSnaps
   if(JSON.stringify(fresh.identity)!==JSON.stringify(snapshot.identity)||JSON.stringify(freshFrame)!==JSON.stringify(frame))throw Error('供电、游戏或性能范围已变化，请重新呼出');
   if(!deps.admit())throw Error('性能操作已取消或过期');
   const updated=await deps.update(snapshot.identity,patch,deps.admit);
-  await deps.checkpoint();
+  // The scheduler owns the receipt once dispatched, even across a power edge.
   const refreshed=radialPerformanceFrame(updated,capability,deps.nextRevision());
   const proof=updated.tdpWriteReceipt;
   const confirmed=intent.key==='tdp'&&proof?.ok===true&&proof.proof==='write-ack'&&proof.requested===intent.value&&proof.accepted===intent.value;

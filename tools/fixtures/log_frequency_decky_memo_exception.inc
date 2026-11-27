@@ -163,7 +163,7 @@ int wmain(int argc,wchar_t** argv){try{
     if(argc!=2)return 2;const fspath::path root(argv[1]);if(fspath::exists(root))return 3;
     fspath::create_directories(root);DWORD handlesBefore=0,handlesAfter=0;GetProcessHandleCount(GetCurrentProcess(),&handlesBefore);
     const json queued={{"generation",1ull},{"ready",true},{"revision",11u}};
-    const json healthy={{"elapsedMs",0u},{"reason",""},{"launchMode","bigpicture"},{"modeKnown",true},{"modeRunning",true},{"modeIdentityConfirmed",true},
+    const json healthy={{"elapsedMs",0u},{"modeReadPath","budget-cache"},{"reason",""},{"launchMode","bigpicture"},{"modeKnown",true},{"modeRunning",true},{"modeIdentityConfirmed",true},
         {"deckyBackendKnown",true},{"deckyBackendConnected",true},{"deckyClientKnown",true},{"deckyClientConnected",true},{"deckyHooksKnown",true},{"deckyHooksInstalled",true},
         {"deckyClientCheckingKnown",true},{"deckyClientChecking",false},{"steamPid",37u},{"steamBirth","400"},{"proofStage","registry-account"}};
     const auto invoke=[&](bool mode){if(mode)deckySidebarDiagnostic("steam-mode-read",healthy,true);else deckySidebarDiagnostic("mirror-snapshot-queued",queued,false);};

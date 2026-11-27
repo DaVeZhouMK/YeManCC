@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([switch]$Elevated,[switch]$CurrentUserFixture,[string]$ValidationRoot='', [ValidateSet('Pipeline','Cancel','Lease','LuaFailure','SessionConfig','SessionLua','Startup','TargetChange','RendererRestart')][string]$TestMode='Pipeline', [ValidatePattern('^[a-zA-Z0-9 ._-]+\.exe$')][string]$FixtureExeName='MappedFixture.exe', [string]$GameTitle='CE test fixture', [ValidatePattern('^[0-9]*$')][string]$SteamAppId='', [string]$CaseFilter='', [string]$LuaRuntimePath='', [string]$SessionSourcePath='', [ValidateSet('Serial','DuplicateSession','HelperCrash','LegacyAdoption','UnconfirmedLaunch','UnconfirmedLive','UnconfirmedWithoutGate','LegacyUndispatched','PreCreateCrash','CancelWhileWaiting','TargetChangeWhileWaiting')][string]$OwnershipCase='Serial', [ValidateSet('Healthy','OwnerDirectory','OwnerMissing','MalformedCapability','FutureConfig')][string]$StartupCase='Healthy', [switch]$TargetChangeAfterResults,[switch]$ExternalCeDuringRecovery,[switch]$LegacyOwnerGone,[switch]$ReconcileRelease,[switch]$ReleaseAfterGameExit,[ValidateSet('None','FutureClosed')][string]$ReleaseReceiptFault='None',[switch]$ConcurrentRelease,[switch]$ForeignReleaseImage)
+param([switch]$Elevated,[switch]$CurrentUserFixture,[string]$ValidationRoot='', [ValidateSet('Pipeline','Cancel','Lease','LuaFailure','SessionConfig','SessionLua','Startup','TargetChange','RendererRestart')][string]$TestMode='Pipeline', [ValidatePattern('^[a-zA-Z0-9 ._-]+\.exe$')][string]$FixtureExeName='MappedFixture.exe', [string]$GameTitle='CE test fixture', [ValidatePattern('^[0-9]*$')][string]$SteamAppId='', [string]$CaseFilter='', [string]$LuaRuntimePath='', [string]$SessionSourcePath='', [ValidateSet('Serial','DuplicateSession','HelperCrash','LegacyAdoption','UnconfirmedLaunch','UnconfirmedLive','UnconfirmedWithoutGate','LegacyUndispatched','PreCreateCrash','CancelWhileWaiting','TargetChangeWhileWaiting')][string]$OwnershipCase='Serial', [ValidateSet('Healthy','OwnerDirectory','OwnerMissing','MalformedCapability','FutureConfig')][string]$StartupCase='Healthy', [switch]$TargetChangeAfterResults,[switch]$SameExeTargetChange,[switch]$HeartbeatContention,[switch]$ExternalCeDuringRecovery,[switch]$LegacyOwnerGone,[switch]$ReconcileRelease,[switch]$ReleaseAfterGameExit,[ValidateSet('None','FutureClosed')][string]$ReleaseReceiptFault='None',[switch]$ConcurrentRelease,[switch]$ForeignReleaseImage)
 if($ReconcileRelease -and ($TestMode -ne 'RendererRestart' -or $OwnershipCase -ne 'UnconfirmedLive')){throw 'ReconcileRelease extends only the exact live unknown CE boundary'}
 if($ReleaseAfterGameExit -and -not $ReconcileRelease){throw 'ReleaseAfterGameExit requires explicit release reconciliation'}
 if($ReleaseReceiptFault -ne 'None' -and -not $ReconcileRelease){throw 'ReleaseReceiptFault requires the explicit release boundary'}
@@ -8,6 +8,8 @@ if($ForeignReleaseImage -and (-not $ReconcileRelease -or $ConcurrentRelease -or 
 if($LegacyOwnerGone -and ($TestMode -ne 'RendererRestart' -or $OwnershipCase -ne 'UnconfirmedWithoutGate')){throw 'LegacyOwnerGone extends only the no-gate migration boundary'}
 if($ExternalCeDuringRecovery -and ($TestMode -ne 'RendererRestart' -or $OwnershipCase -notin @('LegacyUndispatched','UnconfirmedLaunch','UnconfirmedLive'))){throw 'ExternalCeDuringRecovery extends only the selected old-session recovery cases'}
 if($TargetChangeAfterResults -and $TestMode -ne 'TargetChange'){throw 'TargetChangeAfterResults applies only to the original TargetChange fixture'}
+if($SameExeTargetChange -and $TestMode -ne 'TargetChange'){throw 'SameExeTargetChange applies only to the original TargetChange fixture'}
+if($HeartbeatContention -and $TestMode -ne 'Pipeline'){throw 'HeartbeatContention applies only to the original Pipeline fixture'}
 if($StartupCase -ne 'Healthy' -and $TestMode -ne 'Startup'){throw 'StartupCase applies only to the existing Startup fixture'}
 if($OwnershipCase -ne 'Serial' -and $TestMode -ne 'RendererRestart'){throw 'OwnershipCase applies only to the existing RendererRestart fixture'}
 if(($CaseFilter -or $SessionSourcePath -or $LuaRuntimePath) -and $TestMode -notin @('SessionConfig','SessionLua')){throw 'Selection options are supported only by inert SessionConfig/SessionLua'}
@@ -99,6 +101,7 @@ local function newSession(longRoot)
  env.createFileStream=function(p,mode)
   p=safe(p);assert(mode==0x40 or mode==0xff00,'unsupported CE stream mode')
   if faults.readRefuse and mode==0x40 and p==statePath then return nil,'owned IO refusal' end
+  if faults.leaseReadRefuse and mode==0x40 and p==root..'\\ce-lease.txt' then error('owned lease sharing violation') end
   local h,err=nativeIO.open(p,mode==0x40 and 'rb'or 'wb');if not h then return nil,err end
   local stream={
    readString=function(n)totals.reads=totals.reads+1;return h:read(n)or ''end,
@@ -137,6 +140,18 @@ check('lua-file-actual-publish-and-write-readback-preserves-a-valid-idle-session
  local x=newSession();x.start();assert(x.timer()and x.closed()==0);local first=assert(x.get(x.statePath));assert(first:find('"schemaVersion":1',1,true)and first:find('"stage":"idle"',1,true))
  x.put(x.root..'\\ce-lease.txt',x.token..'\n1');x.tick(1000);assert(x.closed()==0)
  x.put(x.root..'\\stop','stop');x.tick(1100);local last=assert(x.get(x.statePath));assert(last~=first and last:find('"stage":"closed"',1,true));assert(x.closed()==1 and x.timer().destroyed)
+end)
+check('lua-file-lease-transient-sharing-recovers-without-renewing-on-errors',function()
+ local x=newSession();x.start();local p=x.root..'\\ce-lease.txt';x.put(p,x.token..'\n1');x.tick(1000)
+ x.faults.leaseReadRefuse=true;x.tick(1100);x.tick(7000);assert(x.closed()==0,'brief lease IO fault ended CE')
+ x.faults.leaseReadRefuse=false;x.put(p,x.token..'\n2');x.tick(7100);x.tick(9001);assert(x.closed()==0,'valid increasing heartbeat did not recover')
+ x.faults.leaseReadRefuse=true;x.tick(15100);assert(x.closed()==0);x.tick(15101);assert(x.closed()==1 and x.timer().destroyed,'lease IO errors renewed or disabled finite expiry')
+end)
+check('lua-file-lease-sharing-never-hides-stop-or-command-errors',function()
+ local x=newSession();x.start();x.put(x.root..'\\ce-lease.txt',x.token..'\n1');x.tick(1000);x.faults.leaseReadRefuse=true
+ x.put(x.root..'\\stop','stop');x.tick(1100);assert(x.closed()==1 and x.timer().destroyed,'lease sharing blocked explicit stop')
+ local y=newSession();y.start();y.put(y.root..'\\ce-lease.txt',y.token..'\n1');y.tick(1000);y.faults.leaseReadRefuse=true
+ y.put(y.root..'\\ce-command.txt','invalid-frame');y.tick(1100);assert(y.closed()==0);y.tick(1200);assert(y.closed()==1 and y.timer().destroyed,'command error was swallowed as lease IO')
 end)
 check('lua-file-lease-exact-token-sequence-and-replay-expire-without-memory-authority',function()
  for _,bad in ipairs({'wrong-token','prefix-token','repeat','decrease','trailing'})do
@@ -197,7 +212,7 @@ $assembly=[Reflection.Assembly]::LoadFrom($assemblyPath);$adapterType=$assembly.
 $script:scanAdapter=[Activator]::CreateInstance($adapterType,$true)
 $binding=[Reflection.BindingFlags]'Instance,Static,NonPublic,Public'
 function Call-SessionMethod([string]$Name,[object[]]$Arguments) {
-    if($Name -notin @('Read','Save','Atomic','Handoff','SaveHandoff','ValidateSessionConfig','ValidateLease','ValidateRequest','ValidateCeState','Refresh','Publish','ClaimRequest','FinishClaim','ResolveCE','ValidateCeRecord','Exclusive','SaveCeRecord','CloseState','HasSessionArgument','IsReleaseOnlyCommand','ExactReleasedReceipt')){throw 'Refusing non-file/process method'}
+    if($Name -notin @('Read','Save','Atomic','Handoff','SaveHandoff','ValidateSessionConfig','ValidateLease','ValidateRequest','ValidateCeState','Refresh','Publish','ClaimRequest','FinishClaim','ResolveCE','ValidateCeRecord','Exclusive','SaveCeRecord','CloseState','HasSessionArgument','IsReleaseOnlyCommand','ExactReleasedReceipt','Heartbeat')){throw 'Refusing non-file/process method'}
     $method=if($Name -eq 'ResolveCE'){$adapterType.GetMethod($Name,$binding,$null,[type[]]@([string],[string]),$null)}else{$adapterType.GetMethod($Name,$binding)};if(!$method){throw ('Missing actual boundary '+$Name)}
     $parameters=$method.GetParameters();$unwrapped=New-Object object[] $Arguments.Count
     for($i=0;$i -lt $Arguments.Count;$i++){$item=$Arguments[$i];if($item -is [Management.Automation.PSObject]){$item=$item.PSObject.BaseObject};$type=$parameters[$i].ParameterType;if($type -eq [string]){$unwrapped[$i]=[string]$item}elseif($type -eq [int]){$unwrapped[$i]=[int]$item}elseif($type -eq [bool]){$unwrapped[$i]=[bool]$item}else{$unwrapped[$i]=$item}}
@@ -405,6 +420,24 @@ Session-Case 'file-close-clears-results-without-inventing-CE-resume' {
     }
 }
 
+Session-Case 'file-heartbeat-sharing-recovers-and-permanent-lock-is-bounded' {
+    $heartbeatRoot=Join-Path $owned 'heartbeat-sharing';[IO.Directory]::CreateDirectory($heartbeatRoot)|Out-Null
+    Field root $heartbeatRoot;Field token $token
+    Call-SessionMethod Heartbeat @();$heartbeatPath=Join-Path $heartbeatRoot 'ce-lease.txt';$original=[IO.File]::ReadAllText($heartbeatPath)
+    $hold=[IO.File]::Open($heartbeatPath,'Open','ReadWrite','None')
+    try{
+        Call-SessionMethod Heartbeat @() # Exact Windows sharing fault; neither rename nor overwrite is permitted.
+        $watch=[Diagnostics.Stopwatch]::StartNew();while($watch.ElapsedMilliseconds -lt 2100){Start-Sleep -Milliseconds 50}
+        Reject-Session {Call-SessionMethod Heartbeat @()}
+        Assert-Session ($script:sessionRejection -like '*CE心跳文件持续被占用*') 'Persistent lease lock did not fail with bounded, actionable error'
+    }finally{$hold.Dispose()}
+    Assert-Session ([IO.File]::ReadAllText($heartbeatPath) -ceq $original) 'Sharing retry modified the held heartbeat'
+    Call-SessionMethod Heartbeat @();$recovered=[IO.File]::ReadAllText($heartbeatPath)
+    Assert-Session ($recovered.StartsWith($token+"`n") -and $recovered -cne $original) 'Heartbeat did not recover after lock release'
+    $badRoot=Join-Path $owned 'heartbeat-nonsharing';[IO.Directory]::CreateDirectory((Join-Path $badRoot 'ce-lease.txt'))|Out-Null;Field root $badRoot
+    Reject-Session {Call-SessionMethod Heartbeat @()}
+}
+
 Session-Case 'file-size-IO-lease-errors-are-not-missing-or-current' {
     [IO.File]::WriteAllBytes($path,(New-Object byte[] 16385));Reject-Session {Call-SessionMethod Read @($path,16384)}
     [IO.File]::Delete($path);Call-SessionMethod Save @($path,$valid);$hold=[IO.File]::Open($path,'Open','ReadWrite','None');try{Reject-Session {Call-SessionMethod Read @($path,16384)}}finally{$hold.Dispose()}
@@ -453,7 +486,7 @@ function SettingsSnapshot {
  return ,$rows.ToArray()
 }
 $run=Join-Path $out ('fixture-'+[guid]::NewGuid().ToString('N').Substring(0,8));$pc=Join-Path $run 'PowerControl';$session=Join-Path $run ([guid]::NewGuid().ToString('N'));foreach($dir in @((Join-Path $pc 'MemoryScan'),(Join-Path $session 'requests'),(Join-Path $session 'responses'))){[IO.Directory]::CreateDirectory($dir)|Out-Null}
-$ceId=0;$report=@{ok=$false;mode=$TestMode;gameTitle=$GameTitle;steamAppId=$SteamAppId;realGameMemoryWrites=0;scope='Production CE plus adapter against owned 1MiB mapped fixture only';checks=@()};$fixture=$null;$helper=$null;$map=$null;$view=$null;$secondSession=$null;$secondHelper=$null;$firstCeProcess=$null;$secondCeProcess=$null;$externalCe=$null;$externalStop=$null
+$ceId=0;$report=@{ok=$false;mode=$TestMode;gameTitle=$GameTitle;steamAppId=$SteamAppId;realGameMemoryWrites=0;scope='Production CE plus adapter against owned 1MiB mapped fixture only';checks=@()};$fixture=$null;$helper=$null;$map=$null;$view=$null;$secondSession=$null;$secondHelper=$null;$firstCeProcess=$null;$secondCeProcess=$null;$externalCe=$null;$externalStop=$null;$sameExeFixture=$null;$sameExeStop=$null
 try{
  $fixtureFile=Join-Path $run ('steamapps/common/'+$(if($SteamAppId){$SteamAppId}else{'fixture'})+'/bin/'+$FixtureExeName);[IO.Directory]::CreateDirectory((Split-Path $fixtureFile))|Out-Null;& "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /optimize+ /target:winexe /platform:x64 /r:System.Web.Extensions.dll ('/out:'+$fixtureFile) (Join-Path $PSScriptRoot 'game_value_scan_fixture.cs');if($LASTEXITCODE){throw 'Fixture compile failed'}
  $dataFile=Join-Path $run 'fixture-memory.bin';$stream=[IO.File]::Create($dataFile);$stream.SetLength(1048576);$stream.Dispose();$sharedStream=[IO.FileStream]::new($dataFile,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::ReadWrite);$map=[IO.MemoryMappedFiles.MemoryMappedFile]::CreateFromFile($sharedStream,[NullString]::Value,1048576,[IO.MemoryMappedFiles.MemoryMappedFileAccess]::ReadWrite,$null,[IO.HandleInheritability]::None,$true);$view=$map.CreateViewAccessor();$view.Write(0,[int]731001);$view.Write(4,[int]731001)
@@ -461,7 +494,8 @@ try{
  $until=[DateTime]::UtcNow.AddSeconds(5);while(-not [IO.File]::Exists($ready)-and[DateTime]::UtcNow-lt$until){Start-Sleep -Milliseconds 50};if(-not[IO.File]::Exists($ready)){throw 'Fixture not ready'}
  $token=[guid]::NewGuid().ToString('N')+[guid]::NewGuid().ToString('N');$owner=Get-Process -Id $PID
  Json (Join-Path $session 'config.json') @{token=$token;pid=$fixture.Id;processCreated=[string]$fixture.StartTime.ToUniversalTime().ToFileTimeUtc();path=$fixtureFile;ownerPid=$PID;ownerPath=$owner.Path;ownerCreated=[string]$owner.StartTime.ToUniversalTime().ToFileTimeUtc()}
- function Pulse {Json (Join-Path $session 'lease.json') @{token=$token;at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()};Json (Join-Path $pc 'game-target.json') @{valid=$true;generation=1;lastSeen=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();pid=$fixture.Id;processCreated=[string]$fixture.StartTime.ToUniversalTime().ToFileTimeUtc();path=$fixtureFile;title=$GameTitle;name=$GameTitle;steamAppId=$SteamAppId}}
+ $script:targetOverride=$null
+  function Pulse {Json (Join-Path $session 'lease.json') @{token=$token;at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()};$snapshot=if($script:targetOverride){$copy=$script:targetOverride.Clone();$copy.lastSeen=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();$copy}else{@{valid=$true;generation=1;lastSeen=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();pid=$fixture.Id;processCreated=[string]$fixture.StartTime.ToUniversalTime().ToFileTimeUtc();path=$fixtureFile;title=$GameTitle;name=$GameTitle;steamAppId=$SteamAppId}};Json (Join-Path $pc 'game-target.json') $snapshot}
  function WaitFile([string]$path,[int]$seconds=25){$until=[DateTime]::UtcNow.AddSeconds($seconds);while(-not[IO.File]::Exists($path)-and[DateTime]::UtcNow-lt$until){Pulse;if($helper-and$helper.HasExited){throw ('Adapter exited: '+(Read (Join-Path $session 'status.json')).message)};Start-Sleep -Milliseconds 100};if(-not[IO.File]::Exists($path)){throw ('Missing '+$path)}}
  & (Join-Path $PSScriptRoot 'build-game-value-scan-host.ps1') -OutputDirectory (Join-Path $out 'helper') | Out-Null
  foreach($name in @('MemoryScanHost.exe','CeScanEngine.lua')){Copy-Item -LiteralPath (Join-Path $out ('helper/'+$name)) -Destination (Join-Path $pc ('MemoryScan/'+$name))}
@@ -671,6 +705,18 @@ try{
   }
  }
  function Request([string]$action,[string]$value,[string]$expectError=''){Pulse;$id=[guid]::NewGuid().ToString('N');Json (Join-Path $session ('requests/'+$id+'.json')) @{token=$token;id=$id;action=$action;value=$value;revision=$script:revision};$response=Join-Path $session ('responses/'+$id+'.json');WaitFile $response;$result=Read $response;$script:revision=$result.state.revision;if($expectError){if($result.ok -or $result.error -notlike ('*'+$expectError+'*')){throw ('Expected '+$expectError+', got '+$result.error)}}elseif(-not$result.ok){throw ('CE '+$action+': '+$result.error)};return $result}
+ if($HeartbeatContention){
+  $leasePath=Join-Path $session 'ce-lease.txt';$report.heartbeatContentionBlocks=0
+  for($block=0;$block -lt 3;$block++){
+   $hold=$null;$deadline=[DateTime]::UtcNow.AddSeconds(2)
+   while($null -eq $hold){Pulse;try{$hold=[IO.File]::Open($leasePath,'Open','ReadWrite','None')}catch [IO.IOException]{if([DateTime]::UtcNow -ge $deadline){throw};Start-Sleep -Milliseconds 10}}
+   try{for($tick=0;$tick -lt 8;$tick++){Pulse;Start-Sleep -Milliseconds 100}}finally{$hold.Dispose()}
+   for($tick=0;$tick -lt 5;$tick++){Pulse;Start-Sleep -Milliseconds 100}
+   if($helper.HasExited -or (Read (Join-Path $session 'status.json')).stage -eq 'closed'){throw 'Brief real heartbeat contention ended the CE session'}
+   $report.heartbeatContentionBlocks++
+  }
+  $report.checks+=@('Three actual Windows exclusive heartbeat locks recover through the original CE timer and adapter loop without session restart')
+ }
  if($TestMode -eq 'Cancel'){
   [IO.File]::WriteAllText((Join-Path $session 'cancel'),'cancel');$cancelled=Request first '731001' '取消';if($cancelled.state.count -ne 0){throw 'Cancelled scan published results'}
   if([IO.File]::Exists((Join-Path $session 'cancel'))){throw 'Cancellation marker leaked to later scans'};$report.checks+=@('Pending cancellation is consumed exactly once without dispatching a scan')
@@ -686,10 +732,25 @@ try{
   $deadline=[DateTime]::UtcNow.AddSeconds(8);while(-not $helper.HasExited -and [DateTime]::UtcNow -lt $deadline){Pulse;Start-Sleep -Milliseconds 100}
   if(-not $helper.HasExited){throw 'Lua failure left adapter alive'};$report.checks+=@('Lua error closes owned CE and adapter without an active-loop leak')
  }elseif($TestMode -eq 'TargetChange'){
-  Json (Join-Path $pc 'game-target.json') @{valid=$true;generation=2;lastSeen=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();pid=$PID;processCreated=[string]$owner.StartTime.ToUniversalTime().ToFileTimeUtc();path=$owner.Path}
-  if(-not $helper.WaitForExit(12000)){throw 'Changed shared target left the old CE adapter alive'}
+  if($SameExeTargetChange){
+   $sameExeReady=Join-Path $run 'same-exe-ready.txt';$sameExeStop=Join-Path $run 'same-exe-stop'
+   $sameExeData=Join-Path $run 'same-exe-memory.bin';$secondData=[byte[]]::new(1048576);[BitConverter]::GetBytes([int]1234567).CopyTo($secondData,0);[BitConverter]::GetBytes([int]1234567).CopyTo($secondData,4);[IO.File]::WriteAllBytes($sameExeData,$secondData)
+   $sameExeFixture=Start-Process -FilePath $fixtureFile -ArgumentList @(('"'+$sameExeData+'"'),('"'+$sameExeReady+'"'),('"'+$sameExeStop+'"')) -WindowStyle Hidden -PassThru
+   $until=[DateTime]::UtcNow.AddSeconds(5);while(-not[IO.File]::Exists($sameExeReady)-and[DateTime]::UtcNow-lt$until){Pulse;Start-Sleep -Milliseconds 50};if(-not[IO.File]::Exists($sameExeReady)){throw 'Second same-exe fixture did not start'}
+   if($sameExeFixture.Id -eq $fixture.Id -or $sameExeFixture.Path -cne $fixture.Path){throw 'Same-exe fixture did not have distinct PID and identical executable path'}
+   $report.sameExeTargetChange=$true;$report.originalTargetPid=$fixture.Id;$report.replacementTargetPid=$sameExeFixture.Id;$report.targetExecutable=$fixtureFile
+   $script:targetOverride=@{valid=$true;generation=2;lastSeen=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();pid=$sameExeFixture.Id;processCreated=[string]$sameExeFixture.StartTime.ToUniversalTime().ToFileTimeUtc();path=$fixtureFile};Pulse
+  }else{$script:targetOverride=@{valid=$true;generation=2;lastSeen=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();pid=$PID;processCreated=[string]$owner.StartTime.ToUniversalTime().ToFileTimeUtc();path=$owner.Path};Pulse}
+  for($tick=0;$tick -lt 5;$tick++){Pulse;Start-Sleep -Milliseconds 100};if($helper.HasExited){throw 'Foreground recognition change cancelled the pinned PID'}
+   if($TargetChangeAfterResults){$view.Write(0,[int]731003);$view.Write(4,[int]731003);$pinned=Request next '731003'}else{$pinned=Request first '731001'}
+   if($pinned.state.pid -ne $fixture.Id -or $pinned.state.processCreated -cne [string]$fixture.StartTime.ToUniversalTime().ToFileTimeUtc() -or $pinned.state.path -cne $fixtureFile){throw 'Search rebound to the foreground or same-exe replacement PID'}
+   $pinnedWrite=Request writeAll '999999';if($view.ReadInt32(0)-ne999999-or$view.ReadInt32(4)-ne999999){throw 'Pinned original fields were not written'}
+   if($SameExeTargetChange){$bytes=[byte[]]::new(8);$checkStream=[IO.FileStream]::new($sameExeData,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete));try{if($checkStream.Read($bytes,0,8)-ne8){throw 'Replacement fixture read incomplete'}}finally{$checkStream.Dispose()};if([BitConverter]::ToInt32($bytes,0)-ne1234567-or[BitConverter]::ToInt32($bytes,4)-ne1234567){throw 'Replacement same-exe process memory was modified'}}
+   $report.pinnedPidPreserved=$true;$report.foregroundDidNotCancel=$true;$report.replacementMemoryUntouched=[bool]$SameExeTargetChange;$report.pinnedState=$pinnedWrite.state
+   [IO.File]::WriteAllText((Join-Path $run 'fixture-stop'),'stop');if(-not $fixture.WaitForExit(5000)){throw 'Pinned target did not exit'}
+   if(-not $helper.WaitForExit(12000)){throw 'Original pinned PID exit left CE alive'}
   $closedStatus=Read (Join-Path $session 'status.json');if($closedStatus.stage -cne 'closed' -or $closedStatus.count -ne 0 -or $closedStatus.rows.Count -ne 0 -or $closedStatus.lastWriteCount -ne 0 -or $closedStatus.searchValue -cne '' -or $closedStatus.lastWriteValue -cne ''){throw 'Target change closed the helper but retained previous results or write authority'}
-  $report.closedResultsCleared=$true;$report.targetChangeAfterResults=[bool]$TargetChangeAfterResults;$report.checks+=@('A different shared target closes the exact old owned CE and clears all previous result/write fields without automatic replacement')
+  $report.closedResultsCleared=$true;$report.targetChangeAfterResults=[bool]$TargetChangeAfterResults;$report.checks+=@('Foreground target changes preserve the original pinned PID and scan results; only actual original PID exit closes CE and clears result/write authority')
  }elseif($TestMode -eq 'Lease'){
   if(-not $helper.WaitForExit(22000)){throw 'Expired frontend lease left adapter alive'};$report.checks+=@('Loss of YMCC heartbeat closes owned CE without touching other processes')
  }else{
@@ -713,6 +774,6 @@ try{
  $otherAfter=@($after|Where-Object {-not ($_.path -eq 'Software\Cheat Engine' -and $_.name -eq 'First Time User')})
  $report.settingsPreserved=(($otherBefore|ConvertTo-Json -Depth 16 -Compress)-ceq($otherAfter|ConvertTo-Json -Depth 16 -Compress));if(-not$report.settingsPreserved){throw 'CE preferences changed beyond the authorized first-run DWORD; inspect exact before/after values'};$report.checks+=@('CE preferences remain byte-for-byte equivalent; only the first-run DWORD can initialize');$report.ok=$true
 }catch{$report.error=$_.Exception.Message;$report.stack=$_.ScriptStackTrace}
-finally{if($externalCe){[IO.File]::WriteAllText($externalStop,'stop');$report.externalCeExitedAtCleanup=$externalCe.WaitForExit(5000);$externalCe.Dispose()};if([IO.Directory]::Exists($session)){[IO.File]::WriteAllText((Join-Path $session 'stop'),'stop')};if($secondSession-and[IO.Directory]::Exists($secondSession)){[IO.File]::WriteAllText((Join-Path $secondSession 'stop'),'stop')};if($helper){$report.adapterExited=$helper.WaitForExit(12000)};if($secondHelper){$report.secondAdapterExited=$secondHelper.WaitForExit(12000)};if($firstCeProcess){$report.firstCeExitedAtCleanup=$firstCeProcess.WaitForExit(1000);$firstCeProcess.Dispose()};if($secondCeProcess){$report.secondCeExitedAtCleanup=$secondCeProcess.WaitForExit(1000);$secondCeProcess.Dispose()};if($fixture){[IO.File]::WriteAllText((Join-Path $run 'fixture-stop'),'stop');$report.fixtureExited=$fixture.WaitForExit(5000)};if($view){$view.Dispose()};if($map){$map.Dispose()};$report.run=$run;$report.at=[DateTimeOffset]::Now.ToString('o');Json (Join-Path $out ('ce-fixture-'+$TestMode.ToLowerInvariant()+'-result.json')) $report
+finally{if($sameExeFixture){[IO.File]::WriteAllText($sameExeStop,'stop');$report.sameExeFixtureExited=$sameExeFixture.WaitForExit(5000);$sameExeFixture.Dispose()};if($externalCe){[IO.File]::WriteAllText($externalStop,'stop');$report.externalCeExitedAtCleanup=$externalCe.WaitForExit(5000);$externalCe.Dispose()};if([IO.Directory]::Exists($session)){[IO.File]::WriteAllText((Join-Path $session 'stop'),'stop')};if($secondSession-and[IO.Directory]::Exists($secondSession)){[IO.File]::WriteAllText((Join-Path $secondSession 'stop'),'stop')};if($helper){$report.adapterExited=$helper.WaitForExit(12000)};if($secondHelper){$report.secondAdapterExited=$secondHelper.WaitForExit(12000)};if($firstCeProcess){$report.firstCeExitedAtCleanup=$firstCeProcess.WaitForExit(1000);$firstCeProcess.Dispose()};if($secondCeProcess){$report.secondCeExitedAtCleanup=$secondCeProcess.WaitForExit(1000);$secondCeProcess.Dispose()};if($fixture){[IO.File]::WriteAllText((Join-Path $run 'fixture-stop'),'stop');$report.fixtureExited=$fixture.WaitForExit(5000)};if($view){$view.Dispose()};if($map){$map.Dispose()};$report.run=$run;$report.at=[DateTimeOffset]::Now.ToString('o');Json (Join-Path $out ('ce-fixture-'+$TestMode.ToLowerInvariant()+'-result.json')) $report
  if(-not $report.ok){Write-Error $report.error -ErrorAction Continue;exit 1}
  $report|ConvertTo-Json -Depth 3}

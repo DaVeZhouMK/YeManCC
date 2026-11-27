@@ -12,6 +12,10 @@
         for(const auto* command: {"lossless.detect","lossless.getState"}){
             beginRead();std::atomic<bool> first{true};ymcc::losslessUiaFixture::callHook=[&](const char* stage){if(std::string(stage)=="name"&&first.exchange(false)){std::lock_guard<std::mutex> lock(powerMutex);++nativePowerFact.publicationRevision;}};
             const auto r=callRead(command);expect(readableRead(command,r),"diagnostic-publication-keeps-current-read-valid");expectReadResources();
+            if(std::string(command)=="lossless.detect")expect(r.value("powerGeneration",0ULL)==nativePowerFact.generation&&
+                r.value("powerNotificationSequence",0ULL)==nativePowerFact.observedNotificationSequence&&
+                r.contains("powerSuspendSerial")&&r.value("powerSuspendSerial",0ULL)==nativePowerFact.suspendSerial,
+                "detect-positive-reply-carries-original-shared-power-scope");
             bool rejected=false;try{readEntries.at(command)(json{{"unexpected",true}});}catch(const std::runtime_error&){rejected=true;}
             expect(rejected,"read-preserves-original-invalid-schema-rejection");
             for(unsigned stateIndex=0;stateIndex!=4;++stateIndex){reset();beginRead();{std::lock_guard<std::mutex> lock(powerMutex);if(stateIndex==0)known=false;else if(stateIndex==1)nativePowerFact.phase=1;else if(stateIndex==2)nativePowerFact.flags=1;else g_exitRequested=true;}

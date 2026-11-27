@@ -12,7 +12,7 @@ const performanceModels=evaluate(fs.readFileSync('src/bridge/performanceControls
 const settingsModel=directed?null:evaluate(req('esbuild').buildSync({entryPoints:['src/bridge/settingsRepository.ts'],bundle:true,write:false,platform:'node',format:'cjs',external:['vue']}).outputFiles[0].text);
 let prefs={rtss:{future:'KEEP'},tdp:{fpsLimit:75,tdpMax:27,future:'TDP'},performanceSchedule:{}},generation=1,mode='ac',game=null,initialized=true,phase='ready',actual=75,failWrite=false,failReload=false,reliablePower=true,deviceTemplate='portable',readHook=null,storeHook=null;
 let custom={entries:{},rtss:{}},schedule={configured:true,enabled:true,active:{ac:'balanced',dc:'balanced'},profiles:{ac:{balanced:{cpuPreset:'turbo',tdpMax:25,fpsTarget:30}},dc:{balanced:{cpuPreset:'balanced',tdpMax:12,fpsTarget:120}}}};
-let targetAdmission=true,powerReadHook=null;
+let targetAdmission=true,powerReadHook=null,writePreparationHook=null;
 const readinessListeners=new Set(),appliedListeners=new Set();
 const detectionPort={isGameStatusCurrent:()=>targetAdmission,isCurrentGameTarget:captured=>targetAdmission && captured===game,
  subscribeGameTargetReadiness:cb=>{readinessListeners.add(cb);return()=>readinessListeners.delete(cb);}};
@@ -22,14 +22,20 @@ const repository={getSettingsGeneration:()=>generation,assertSettingsGeneration:
 repository.updateSettings=async mutate=>{const next=structuredClone(prefs);await mutate(next);prefs=next;trace.writes.push({key:'rtss',patch:structuredClone(next.rtss)});};
 const target={getPolicyGame:()=>game,isPolicyGameInitialized:()=>initialized,gamePolicyKey:g=>g?g.path.split(/[\/]/).at(-1).toLowerCase():'',subscribePolicyGameStatus(cb){gameListeners.add(cb);cb(game);return()=>gameListeners.delete(cb)}};
 const float={isContinuousFloat:()=>false,getFloatInfo:()=>({...optimizer}),setFloatRtssLinked:()=>{},async setFloatTarget(fps){optimizer.target=fps;trace.targets.push(fps)}};
-const yeman={async detectPerformanceTemplate(){return deviceTemplate},async detectPowerModeReliable(){trace.powerReads++;if(powerReadHook)await powerReadHook(trace.powerReads);return reliablePower?mode:null},async detectPowerMode(){trace.powerReads++;return mode},async readRtssLimit(){trace.rtssReads++;if(readHook){const hook=readHook;readHook=null;await hook()}return actual},async setRtssLimit(fps,current){if(current&&!current())return;if(failWrite)throw Error('simulated-RTSS-write-failure');actual=fps;trace.rtss.push(fps);if(failReload)throw Error('simulated-live-reload-failure')}};
-let powerFact=null;
+const yeman={async detectPerformanceTemplate(){return deviceTemplate},async detectPowerModeReliable(){trace.powerReads++;if(powerReadHook)await powerReadHook(trace.powerReads);return reliablePower?mode:null},async detectPowerMode(){trace.powerReads++;return mode},async readRtssLimit(){trace.rtssReads++;if(readHook){const hook=readHook;readHook=null;await hook()}return actual},async setRtssLimit(fps,current,retired){if(writePreparationHook){const hook=writePreparationHook;writePreparationHook=null;const read=hook();await (retired?Promise.race([read,retired]):read);}if(current&&!current())return;if(failWrite)throw Error('simulated-RTSS-write-failure');actual=fps;trace.rtss.push(fps);if(failReload)throw Error('simulated-live-reload-failure')}};
+let powerFact=null,residentNow=100000;
 const powerSnapshot=()=>({phase,hardwareWritesAllowed:phase==='ready',generation:1,...powerFact});
 const api={powerLifecycle:{async get(){trace.phaseReads++;return powerSnapshot()}}};
 const powerEvents=new Map();
+const powerTimers=new Map();
 const powerModule=evaluate(fs.readFileSync('src/bridge/powerLifecycleState.ts','utf8'),{'./ipc':{}},{queueMicrotask,setTimeout,clearTimeout});
-const sharedPower=powerModule.createSharedPowerLifecycleSource({read:async()=>powerSnapshot(),listen(name,callback){powerEvents.set(name,callback);return()=>powerEvents.delete(name);}});
-const perf={isPerformanceScheduleBusy:()=>false,async loadGameCustomConfig(){return structuredClone(custom)},async loadPerformanceSchedule(){return structuredClone(schedule)},resolveGameCustomProfiles:entry=>({ac:entry.acMode?schedule.profiles.ac[entry.acMode]:entry.ac,dc:entry.dcMode?schedule.profiles.dc[entry.dcMode]:entry.dc}),onGameCustomConfigChanged(cb){customListeners.add(cb);return()=>customListeners.delete(cb)},onPerformanceScheduleChanged(cb){scheduleListeners.add(cb);return()=>scheduleListeners.delete(cb)},async restorePerformanceScheduleIfConfigured(){trace.performance.push(game?.pid||null);return 'auto'}};
+const sharedPower=powerModule.createSharedPowerLifecycleSource({read:async()=>powerSnapshot(),listen(name,callback){powerEvents.set(name,callback);return()=>powerEvents.delete(name);},
+ ...(sharedPowerOnly?{clock:{setTimeout(fn,delay){const key={};powerTimers.set(key,{fn,delay});return key;},clearTimeout:key=>powerTimers.delete(key)}}:{})});
+const perf={isPerformanceScheduleBusy:()=>false,async loadGameCustomConfig(){return structuredClone(custom)},async loadPerformanceSchedule(){return structuredClone(schedule)},resolveGameCustomProfiles:entry=>({ac:entry.acMode?schedule.profiles.ac[entry.acMode]:entry.ac,dc:entry.dcMode?schedule.profiles.dc[entry.dcMode]:entry.dc}),onGameCustomConfigChanged(cb){customListeners.add(cb);return()=>customListeners.delete(cb)},onPerformanceScheduleChanged(cb){scheduleListeners.add(cb);return()=>scheduleListeners.delete(cb)},async restorePerformanceScheduleIfConfigured(_side,options){trace.performance.push(game?.pid||null);return options?.withReceipt?{ownership:'auto',scope:game?'dedicated':'global',applied:true}:'auto'},reconcilePerformanceScheduleTdp:async()=>true};
+if(!directed){
+ const {continuousControlsFromSchedule,continuousControlsForEntry}=createPerformanceMemoryFixture().schedule;
+ Object.assign(perf,{continuousControlsFromSchedule,continuousControlsForEntry});
+}
 const limits=evaluate(fs.readFileSync('src/bridge/frameRateLimits.ts','utf8'),{'./gamedetect':detectionPort,'./settingsRepository':repository,'./yeman':yeman,'./gamePolicyTarget':target,'./frameRateModel':model,'./performanceSchedule':perf,'./autofloat':float,'./api':api,'./powerSource':{powerSourceMode:source},'./powerLifecycleState':{...sharedPower,isSharedPowerLifecycleAdmitted:powerModule.isSharedPowerLifecycleAdmitted}});
 perf.onContinuousPerformanceApplied=cb=>{appliedListeners.add(cb);return()=>appliedListeners.delete(cb);};
 const runtime=directed?null:evaluate(fs.readFileSync('src/bridge/gamePolicyRuntime.ts','utf8'),{'./performanceControls':performanceModels,'./gamedetect':detectionPort,'./powerSource':{powerSourceMode:source,powerSourceBatteryPresent:vue.ref(true)},'./yeman':yeman,'./frameRateLimits':limits,'./autofloat':float,'./gamePolicyTarget':target,'./performanceSchedule':perf,'@/scheduler':{registerScheduledTask(name,ms,run){tasks.set(name,{ms,run});return()=>tasks.delete(name)}},'./api':api,'./quickActionLock':{isQuickActionBusy:()=>false},'./gameCorePolicy':{detectGameCorePolicy:async()=>({heterogeneous:false,smtAvailable:false}),applyGameCorePolicy:async()=>({ok:true,applied:true}),clearGameCorePolicy:async()=>{trace.cores.push('clear');return true}},
@@ -37,8 +43,12 @@ const runtime=directed?null:evaluate(fs.readFileSync('src/bridge/gamePolicyRunti
  './powerResume':evaluate(fs.readFileSync('src/bridge/powerResume.ts','utf8')),
  './monitorData':{subscribeMonitorSnapshot:()=>()=>{}},
  './monitorSnapshotSignals':evaluate(fs.readFileSync('src/bridge/monitorSnapshotSignals.ts','utf8'),{'./monitorFrameTime':evaluate(fs.readFileSync('src/bridge/monitorFrameTime.ts','utf8')),'./monitorCoreTiles':evaluate(fs.readFileSync('src/bridge/monitorCoreTiles.ts','utf8'))}),
-});
+},{AbortController,Date:class extends Date{static now(){return residentNow;}}});
 async function flush(){for(let i=0;i<120;i++){await Promise.resolve();await vue.nextTick();}}
+async function settleResident(){
+ await flush();
+ for(const advance of [0,3000,7000]){residentNow+=advance;await tasks.get('game-policy-runtime-retry')?.run();await flush();}
+}
 async function check(name,run){await run();cases.push(name)}
 function resetTrace(){for(const key of ['writes','rtss','targets','performance','cores'])trace[key]=[]}
 function rates(ac,dc){return model.frameRatePair({},ac,dc)}
@@ -47,7 +57,7 @@ function record(ac,dc){return model.dedicatedFrameRateRecord(rates(ac,dc))}
 if(sharedPowerOnly){
  const results=[];
  const publish=patch=>{powerFact={...powerFact,...patch};powerEvents.get('power.lifecycleChanged')?.(powerSnapshot());};
- for(const kind of ['suspend-during-rtss-read','same-generation-sequence-at-final-power-read','queued-before-suspend','held-old-rtss-read','same-scope-publication','pending-ready-refused','merged-suspend-held-power-read','merged-suspend-held-settings-read']){
+ for(const kind of ['suspend-during-rtss-read','same-generation-sequence-at-final-power-read','queued-before-suspend','held-old-rtss-read','same-scope-publication','pending-ready-refused','merged-suspend-held-power-read','merged-suspend-held-settings-read','merged-suspend-held-write-preparation','native-readback-ready-first','native-readback-suspend-first']){
   const merged=kind.startsWith('merged-suspend-');
   powerFact={phase:'ready',known:true,generation:80,hardwareWritesAllowed:true,inputReady:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:7,suspendSerial:12};
   game=null;prefs={rtss:{frameRates:rates(30,30)}};mode='ac';source.value='ac';initialized=true;actual=kind==='same-generation-sequence-at-final-power-read'?30:80;
@@ -56,6 +66,29 @@ if(sharedPowerOnly){
   let release,enter,task,queued,successor,observed;
   const reached=new Promise(resolve=>{enter=resolve}),held=new Promise(resolve=>{release=resolve});
   try{
+   if(kind.startsWith('native-readback-')){
+    const prior=powerSnapshot(),suspended=kind==='native-readback-suspend-first';
+    powerFact={...prior,suspendSerial:13,publicationRevision:2,observedNotificationSequence:8,
+     ...(suspended?{phase:'suspended',hardwareWritesAllowed:false,inputReady:false}:{})};
+    assert.equal(await limits.applyIndependentFrameRates(),false,'old request must not adopt the new snapshot');
+    assert.deepEqual(trace.rtss,[]);assert.deepEqual(trace.targets,[]);
+    assert.equal(sharedPower.getSharedPowerLifecycle().suspendSerial,13,'undelivered Native readback must advance the public scope');
+    if(suspended){
+     assert.equal(sharedPower.getSharedPowerLifecycle().hardwareWritesAllowed,false);
+     assert.equal(await limits.applyIndependentFrameRates(),false,'unconfirmed Ready cannot write');
+     assert.equal(powerTimers.size,1,'same public source owns the missing Ready retry');
+     powerFact={...powerFact,phase:'ready',hardwareWritesAllowed:true,inputReady:true,publicationRevision:3,observedNotificationSequence:9};
+     const [key,timer]=powerTimers.entries().next().value;powerTimers.delete(key);timer.fn();await flush();
+     assert.equal(powerTimers.size,0);
+    }
+    powerEvents.get('power.lifecycleChanged')?.(prior);await flush();
+    assert.equal(sharedPower.getSharedPowerLifecycle().suspendSerial,13,'delayed old publication cannot regress the source');
+    assert.equal(await limits.applyIndependentFrameRates(),true);
+    assert.deepEqual(trace.rtss,[30]);assert.deepEqual(trace.targets,[30]);
+    assert.equal(sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,1);
+    results.push({kind,status:'PASS',observed:{retiredWrites:0,successorWrites:[...trace.rtss]}});
+    continue;
+   }
    if(kind==='pending-ready-refused'){
     publish({notificationPending:true,publicationRevision:2});
     task=limits.applyIndependentFrameRates();
@@ -63,6 +96,7 @@ if(sharedPowerOnly){
     if(kind==='same-generation-sequence-at-final-power-read')powerReadHook=async n=>{if(n===3){enter();await held;}};
     else if(kind==='merged-suspend-held-power-read')powerReadHook=async n=>{if(n===1){enter();await held;}};
     else if(kind==='merged-suspend-held-settings-read')storeHook=()=>{enter();return held;};
+    else if(kind==='merged-suspend-held-write-preparation')writePreparationHook=()=>{enter();return held;};
     else readHook=()=>{enter();return held;};
     task=limits.applyIndependentFrameRates();
     let timeout;
@@ -108,7 +142,7 @@ if(sharedPowerOnly){
    assert.equal(sharedPower.getSharedPowerLifecycleDiagnostics().subscriberCount,1);
    results.push({kind,status:'PASS',observed});
   }catch(error){results.push({kind,status:'FAIL',observed,error:{message:error.message,stack:error.stack}});}
-   finally{release();await Promise.allSettled([task,queued,successor]);readHook=powerReadHook=storeHook=null;releaseObserver();powerFact=null;}
+   finally{release();await Promise.allSettled([task,queued,successor]);readHook=powerReadHook=storeHook=writePreparationHook=null;releaseObserver();powerFact=null;assert.equal(powerTimers.size,0,'scope teardown releases the shared readback clock');}
  }
  const result={option:'--shared-power-only',passed:results.filter(x=>x.status==='PASS').length,failed:results.filter(x=>x.status==='FAIL').length,cases:results,sourceBindings:['src/bridge/frameRateLimits.ts','src/bridge/powerLifecycleState.ts','tools/independent_frame_rates_selftest.mjs'].map(file=>({file,sha256:createHash('sha256').update(fs.readFileSync(file)).digest('hex')}))};
  fs.writeFileSync(path.join(out,'service-results.json'),JSON.stringify(result,null,2)+'\n',{flag:'wx'});console.log(JSON.stringify({option:result.option,passed:result.passed,failed:result.failed}));
@@ -181,20 +215,56 @@ await check('Power changes during RTSS read cancel stale side before file write'
 await check('Game PID reuse/switch during queued read cannot replay old dedicated cap',async()=>{game=A;mode='ac';source.value='ac';actual=10;resetTrace();readHook=async()=>{game=B};assert.equal(await limits.applyIndependentFrameRates(),false);assert.deepEqual(trace.rtss,[]);await limits.applyIndependentFrameRates();assert.equal(actual,96)});
 await check('Save failure keeps both prior independent modes and other feature fields',async()=>{const before=JSON.stringify(prefs);const previous=repository.updateSettings;repository.updateSettings=async()=>{throw Error('write-failed')};try{await assert.rejects(limits.saveGlobalFrameRate('ac',200));assert.equal(JSON.stringify(prefs),before)}finally{repository.updateSettings=previous}});
 await check('Queued old-generation save cannot contaminate a reset/new settings directory',async()=>{const before=JSON.stringify(prefs);const request=limits.saveGlobalFrameRate('ac',220);generation++;await assert.rejects(request);assert.equal(JSON.stringify(prefs),before)});
-custom.entries['a.exe'].acMode='balanced';custom.entries['a.exe'].dcMode='balanced';game=A;mode='ac';source.value='ac';actual=85;phase='ready';runtime.startGamePolicyRuntime();await flush();
-await check('Existing resident policy removes idle retry and retains one original task only while readiness is unknown',async()=>{
- await flush();assert.equal(tasks.size,0);targetAdmission=false;for(const callback of readinessListeners)callback(false);await flush();
- assert.equal(tasks.size,1);assert.equal(tasks.get('game-policy-runtime-retry').ms,2000);
+custom.entries['a.exe'].acMode='balanced';custom.entries['a.exe'].dcMode='balanced';game=A;mode='ac';source.value='ac';actual=85;phase='ready';
+powerFact={known:true,inputReady:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:1,suspendSerial:1};runtime.startGamePolicyRuntime();await settleResident();
+await check('Resident waits for game readiness without probing hardware or keeping an idle timer',async()=>{
+ await flush();assert.equal(tasks.size,0);resetTrace();const frameReads=trace.rtssReads;targetAdmission=false;for(const callback of readinessListeners)callback(false);await flush();
+ assert.equal(tasks.size,0);assert.deepEqual(trace.rtss,[]);assert.deepEqual(trace.performance,[]);assert.deepEqual(trace.cores,[]);
+ assert.equal(trace.rtssReads,frameReads);
  targetAdmission=true;for(const callback of readinessListeners)callback(true);await flush();assert.equal(tasks.size,0);
 });
 await check('Global legacy combo edits cannot replay an independent dedicated owner or unchanged FPS',async()=>{resetTrace();schedule.profiles.ac.balanced.tdpMax=28;schedule.profiles.ac.balanced.fpsTarget=300;for(const cb of scheduleListeners)cb(schedule);await flush();assert.equal(trace.performance.length,0);assert.deepEqual(trace.rtss,[]);assert.equal(actual,85)});
 await check('Frame-only dedicated edit never replays CPU/TDP/core policies',async()=>{resetTrace();custom.rtss['a.exe'].acFps=100;for(const cb of customListeners)cb(custom);await flush();assert.equal(actual,100);assert.deepEqual(trace.performance,[]);assert.deepEqual(trace.cores,[])});
 await check('AC/DC native notification swaps cap once without a background power poll',async()=>{resetTrace();mode='dc';source.value='dc';await flush();assert.equal(actual,45);assert.deepEqual(trace.rtss,[45]);assert.deepEqual(trace.performance,[101])});
 await check('Dedicated exit restores global DC cap even when global performance is manual',async()=>{schedule.enabled=false;game=null;for(const cb of gameListeners)cb(game);await flush();assert.equal(actual,40)});
-await check('Idle resident owner has no retry task and does not query power, native gate or RTSS after successful application',async()=>{const before={phase:trace.phaseReads,power:trace.powerReads,rtss:trace.rtssReads};assert.equal(tasks.size,0);for(let i=0;i<100;i++)await flush();assert.deepEqual({phase:trace.phaseReads,power:trace.powerReads,rtss:trace.rtssReads},before)});
+await check('Idle resident owner has no retry task and does not query power, native gate or RTSS after successful application',async()=>{await settleResident();const before={phase:trace.phaseReads,power:trace.powerReads,rtss:trace.rtssReads};assert.equal(tasks.size,0);for(let i=0;i<100;i++)await flush();assert.deepEqual({phase:trace.phaseReads,power:trace.powerReads,rtss:trace.rtssReads},before)});
+const publishResidentPower=async patch=>{powerFact={...powerFact,...patch};powerEvents.get('power.lifecycleChanged')?.(powerSnapshot());await flush();};
+await check('Resident restores lost FPS after a new physical sleep and ignores a late older Ready',async()=>{
+ assert.equal(actual,40);assert.equal(tasks.size,0);resetTrace();
+ await publishResidentPower({publicationRevision:2,observedNotificationSequence:2});
+ assert.deepEqual(trace.rtss,[]);assert.equal(tasks.size,0);
+ // Windows can deliver only the committed snapshot for the new sleep serial.
+ actual=0;await publishResidentPower({publicationRevision:3,observedNotificationSequence:3,suspendSerial:2});
+ assert.deepEqual(trace.rtss,[40],'An already acknowledged preference needs one fresh hardware reconciliation after a new sleep');assert.equal(actual,40);
+ assert.deepEqual(trace.performance,[]);assert.deepEqual(trace.cores,[]);
+ powerEvents.get('power.lifecycleChanged')?.({...powerSnapshot(),publicationRevision:4,observedNotificationSequence:2,suspendSerial:1});
+ await settleResident();assert.deepEqual(trace.rtss,[40]);assert.equal(tasks.size,0);
+});
+await check('Resident waits through suspend and late game readiness, then reads the new FPS once',async()=>{
+ resetTrace();actual=0;targetAdmission=false;
+ await publishResidentPower({phase:'suspended',notificationPending:true,hardwareWritesAllowed:false,publicationRevision:5,observedNotificationSequence:4,suspendSerial:3});
+ assert.deepEqual(trace.rtss,[]);assert.equal(tasks.size,0);
+ await publishResidentPower({phase:'ready',notificationPending:false,hardwareWritesAllowed:true,publicationRevision:6,observedNotificationSequence:5});
+ assert.deepEqual(trace.rtss,[]);
+ targetAdmission=true;for(const callback of readinessListeners)callback(true);await settleResident();
+ assert.deepEqual(trace.rtss,[40]);assert.equal(actual,40);assert.equal(tasks.size,0);
+ resetTrace();const frameReads=trace.rtssReads;
+ await publishResidentPower({publicationRevision:7,observedNotificationSequence:6,suspendSerial:4});await settleResident();
+ assert.equal(trace.rtssReads,frameReads+1,'new physical sleep revalidates an already healthy cap');assert.deepEqual(trace.rtss,[]);assert.equal(tasks.size,0);
+});
+await check('Resident restores the cap when its Native read sees the new sleep scope before any event',async()=>{
+ resetTrace();actual=0;
+ powerFact={...powerFact,publicationRevision:8,observedNotificationSequence:7,suspendSerial:5};
+ await limits.saveGlobalFrameRate('dc',42);
+ await flush();
+ assert.equal(sharedPower.getSharedPowerLifecycle().suspendSerial,5);
+ assert.deepEqual(trace.rtss,[42]);assert.equal(actual,42);
+ await settleResident();assert.deepEqual(trace.rtss,[42]);assert.equal(tasks.size,0);
+ await limits.saveGlobalFrameRate('dc',40);await settleResident();
+});
 await check('Stopping resident owner removes power/frame subscriptions and the original retry task',async()=>{runtime.stopGamePolicyRuntime();assert.equal(tasks.size,0);assert.equal(readinessListeners.size,0);assert.equal(appliedListeners.size,0);resetTrace();mode='ac';source.value='ac';for(const cb of customListeners)cb(custom);await flush();assert.deepEqual(trace.rtss,[])});
-await check('Restarting the resident owner rechecks RTSS rather than reusing a stopped-session receipt',async()=>{mode='dc';source.value='dc';actual=299;resetTrace();runtime.startGamePolicyRuntime();await flush();assert.equal(actual,40);assert.deepEqual(trace.rtss,[40]);runtime.stopGamePolicyRuntime();assert.equal(tasks.size,0)});
-await check('Resident continuous owner ignores edits to inactive DC bank and applies active AC/new power bank',async()=>{schedule.controls={version:1,ac:{tdp:55},dc:{tdp:30}};schedule.enabled=true;game=null;mode='ac';source.value='ac';runtime.startGamePolicyRuntime();await flush();resetTrace();schedule.controls.dc.tdp=29;for(const cb of scheduleListeners)cb(schedule);await flush();assert.deepEqual(trace.performance,[]);schedule.controls.ac.tdp=54;for(const cb of scheduleListeners)cb(schedule);await flush();assert.equal(trace.performance.length,1);resetTrace();mode='dc';source.value='dc';await flush();assert.equal(trace.performance.length,1);runtime.stopGamePolicyRuntime();delete schedule.controls});
+await check('Restarting the resident owner rechecks RTSS rather than reusing a stopped-session receipt',async()=>{mode='dc';source.value='dc';actual=299;resetTrace();runtime.startGamePolicyRuntime();await settleResident();assert.equal(actual,40);assert.deepEqual(trace.rtss,[40]);runtime.stopGamePolicyRuntime();assert.equal(tasks.size,0)});
+await check('Resident continuous owner ignores edits to inactive DC bank and applies active AC/new power bank',async()=>{schedule.controls={version:1,ac:performanceModels.defaultContinuousBank('ac'),dc:performanceModels.defaultContinuousBank('dc')};schedule.enabled=true;game=null;mode='ac';source.value='ac';runtime.startGamePolicyRuntime();await settleResident();resetTrace();schedule.controls.dc.tdp=29;for(const cb of scheduleListeners)cb(schedule);await flush();assert.deepEqual(trace.performance,[]);schedule.controls.ac.tdp=54;for(const cb of scheduleListeners)cb(schedule);await flush();assert.equal(trace.performance.length,1);resetTrace();mode='dc';source.value='dc';await flush();assert.equal(trace.performance.length,1);runtime.stopGamePolicyRuntime();delete schedule.controls});
 await check('Legacy FPS normalization materializes remembered45FPS once and never reinterprets it as a fresh template',async()=>{const before=prefs;deviceTemplate='desktop';prefs=settingsModel.normalizeSettings({tdp:{fpsLimit:45}});generation++;assert.equal((await limits.ensureGlobalFrameRates()).ac.fps,45);assert.equal(prefs.rtss.templateDefaults,false);assert.equal((await limits.loadGlobalFrameRates()).ac.fps,45);prefs=before;deviceTemplate='portable';generation++});
 await check('Battery templates resolve desktop200/portable120 with DC60; explicit saved120 is preserved',async()=>{const before=prefs;deviceTemplate='desktop';prefs=settingsModel.normalizeSettings({});generation++;resetTrace();let pair=await limits.loadGlobalFrameRates();assert.equal(pair.ac.fps,200);assert.equal(pair.dc.fps,60);assert.equal(trace.writes.length,0);prefs=settingsModel.normalizeSettings({rtss:{frameRates:rates(120,60)}});generation++;pair=await limits.loadGlobalFrameRates();assert.equal(pair.ac.fps,120);assert.equal(prefs.rtss.templateDefaults,false);deviceTemplate='portable';prefs=settingsModel.normalizeSettings({});generation++;assert.equal((await limits.loadGlobalFrameRates()).ac.fps,120);prefs=before;generation++});
 const editor=fs.readFileSync('src/views/PerformanceScheduleView.vue','utf8'),pair=fs.readFileSync('src/components/FrameRatePair.vue','utf8'),widget=fs.readFileSync('src/components/RtssFrameLimit.vue','utf8'),app=fs.readFileSync('src/App.vue','utf8'),perfText=fs.readFileSync('src/bridge/performanceSchedule.ts','utf8');

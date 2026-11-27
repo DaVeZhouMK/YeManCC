@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -17,6 +18,8 @@
 #include <vector>
 #include "json.hpp"
 #include "virtual_start_protection.h"
+#include "controller_persona.h"
+#include "msi_host_liveness_admission.h"
 using json=nlohmann::json;
 class InputHostMutex {
     std::mutex value_;std::atomic<DWORD> owner_{0};
@@ -40,7 +43,8 @@ static std::string configuredPersona="disabled",g_inputHostRunId;
 static HANDLE g_inputHostProcess=nullptr,g_inputHostPrimaryThread=nullptr,g_inputHostServerPipe=nullptr;
 static bool g_inputHostHello=false,g_inputHostPrepared=false,g_inputHostPrepareMayHaveReachedHost=false;
 static bool g_inputHostNeutralized=false,g_inputHostActive=false;
-static bool g_inputHostStartBlocked=false,g_inputHostTransportFault=false,g_inputHostFaultHoldsStart=false;
+static bool g_inputHostStartBlocked=false,g_inputHostTransportFault=false;
+static std::atomic<bool> g_inputHostFaultHoldsStart{false};
 static bool g_inputReady=true,sharedKnown=true,pipeReturned=true,historyReturned=true,currentProofPending=false;
 static bool profileKnown=true,publicCurrent=true;
 static unsigned powerChecks=0;static std::function<void()> afterFirstPowerCheck;
@@ -88,13 +92,45 @@ static void appendNativeLifecycleLog(const char* event,const json& row){auto r=r
 @@ARM@@
 @@RETIRE@@
 @@MAYQUEUE@@
-static bool originalBusWakeGate(){
-    const bool publicationWanted=g_realStickTest.enabled&&g_realStickTest.virtualTargetEnabled;
-    const bool hostRunning=g_inputHostProcess!=nullptr;
-    @@BUS_RETIRE@@
-    const bool personaTransition=false;
-    const bool nativeWriterWaitMayQueue=publicationWanted&&!hostRunning&&inputHostMayQueueGpdNativeWriterWait();
-    return @@BUS_GATE@@;
+static std::uint64_t g_inputHostSwitchRecoveryStartDeadline=0,g_inputHostSwitchRecoveryStartRequestId=0,g_inputHostSwitchRecoveryStartPower=0;
+static void inputHostRecordSwitchTimeout(const ymcc::VirtualStartProtection::View&){}
+#include "virtual_controller_queued_start_runtime.h"
+namespace ymcc {struct VirtualOutputAdmissionStatus {struct Context {std::uint64_t epoch,power,work;};};}
+static std::atomic<std::uint64_t> g_inputHostEpochMirror{0},g_inputHostPresentationWorkGeneration{0};
+static std::atomic<unsigned long long> g_msiHostLivenessDeferredTicks{0};
+static constexpr bool kMsiHostLivenessUnknownFixBuild=true;
+@@BUS_LIVENESS_GATE@@
+static bool busSourceAdmitted=true,g_hidHideStartDeferredLogged=false;
+static ULONGLONG g_hidHideLastStartAttemptTick=0,g_hidHideStartDeferredSinceTick=0;
+static unsigned busQueueCalls=0,busDiscoveryDirty=0,busThrottled=0;
+static std::vector<std::string> busQueue;
+static int inputHostProcessLivenessTry(){return g_inputHostProcess?1:0;}
+static bool inputHostPersonaTransitionPending(){return false;}
+static std::string inputHostAttemptPersonaSnapshot(){return {};}
+static const char* inputHostPersona(){return configuredPersona.c_str();}
+static void xinputSlotsEnsurePreTargetBoundaryDiscovery(){}
+static void inputHostCoordinatorLateSourceVisibilityTick(bool,bool){}
+static bool inputHostAdmitSelectedPhysicalSource(){return busSourceAdmitted;}
+static bool inputHostCanCreateTargetWithoutPhysicalSource(){return false;}
+static bool inputHostTargetReturnMayQueueMsiColdStart(){return false;}
+static unsigned inputHostPresentationRequest(){return 0;}
+static void inputHostPresentationDeferred(unsigned,const ymcc::VirtualOutputAdmissionStatus::Context&,bool){}
+static void inputHostSwitchAuditThrottled(const char*,ULONGLONG,ULONGLONG){++busThrottled;}
+static void xinputSlotsMarkDiscoveryDirty(){++busDiscoveryDirty;}
+static bool inputHostQueueLifecycleWork(const char* reason){
+    ++busQueueCalls;
+    const std::string original(reason);
+    @@BUS_QUEUE_BIND@@
+    if(requested.empty())return false;
+    busQueue.push_back(requested);g_inputHostLifecycleWorkRequested=true;return true;
+}
+static bool originalBusQueues(){
+    const auto prior=busQueue.size();
+    // The BUS throttle uses the same controlled monotonic clock as the ticket.
+    #define GetTickCount64 inputHostStartProtectionNow
+    @@BUS_ADMISSION@@
+    #undef GetTickCount64
+    return busQueue.size()>prior;
 }
 static void reset(){
     g_virtualStartProtection.~VirtualStartProtection();new(&g_virtualStartProtection)ymcc::VirtualStartProtection;
@@ -113,7 +149,30 @@ static void reset(){
       &g_inputHostTupleHealPending,&g_msiNativeForegroundCyclePending,&g_physicalReleaseWindowDutyActive,
       &g_postHideCycleOwned,&g_coldReturnCycleOwned,&g_msiNativeForegroundPowerHold})p->store(false);
     lifecycleLogs.clear();powerChecks=0;afterFirstPowerCheck={};
+    busSourceAdmitted=true;g_hidHideStartDeferredLogged=false;
+    g_hidHideLastStartAttemptTick=g_hidHideStartDeferredSinceTick=0;
+    busQueueCalls=busDiscoveryDirty=busThrottled=0;busQueue.clear();
 }
+
+// Link the original downstream Start gate and outcome to a typed player ticket.
+// The stop/readback result is an input here; only record calls beyond the gate.
+static std::atomic<std::uint64_t> g_powerGeneration{4},g_inputHostSwitchVerificationPending{0};
+static struct {std::uint64_t requestId=0;} g_inputHostSwitchRecovery;
+static unsigned quarantineDiagnostics=0,recoveryOffers=0,nextStartStageCalls=0;
+static std::string switchAudit,startProtectionAction,startProtectionOrigin;
+static bool inputHostRogOffExecutionDefersSuccess(std::uint64_t,const char*){return false;}
+static void inputHostStartProtectionLog(const char* action,const char* origin){startProtectionAction=action;startProtectionOrigin=origin;}
+static void inputHostSwitchRecoveryOfferLocked(std::uint64_t,std::uint64_t,DWORD){++recoveryOffers;}
+static bool inputHostSwitchExecutionAwaitingLocked(std::uint64_t){return false;}
+static void msiQuarantineDiagnosticReceipt(){++quarantineDiagnostics;}
+static void inputHostSwitchAuditRejected(const char* reason){switchAudit=reason;}
+@@START_PROTECTION_FINISH@@
+static bool runStartQuarantineExcerpt(std::uint64_t requestTicket){
+@@START_OUTCOME@@
+@@START_QUARANTINE@@
+    ++nextStartStageCalls;return true;
+}
+
 static std::uint64_t onAfterOffWake(){
     // OFF suspend uses the actual production arm. The retired wake's lack of
     // pending work is a declared input; no wake execution/retirement is emulated.
@@ -126,11 +185,11 @@ int main(int argc,char**argv){
     auto check=[&](const std::string& name,bool ok){results.push_back({{"name",name},{"passed",ok}});if(!ok)failures.push_back(name);};
     reset();const auto request=onAfterOffWake();const auto before=g_virtualStartProtection.view(clockNow);
     check("gpd-off-suspend-arms-existing-hold",g_wakeHoldPhysicalUnhide&&request!=0);
-    const bool gate=originalBusWakeGate();
+    const bool gate=originalBusQueues();
     check("gpd-idle-wake-first-on-reaches-original-bus-gate",gate&&!g_wakeHoldPhysicalUnhide);
     const auto after=g_virtualStartProtection.view(clockNow);
     check("original-request-period-persona-and-fallback-retained",after.requestId==request&&after.persona==before.persona&&after.remainingMs==before.remainingMs&&after.phase=="pending"&&after.fallbackAttempts==before.fallbackAttempts);
-    const auto logCount=lifecycleLogs.size();(void)originalBusWakeGate();
+    const auto logCount=lifecycleLogs.size();(void)originalBusQueues();
     check("retirement-is-once-with-no-target-or-device-effect",lifecycleLogs.size()==logCount&&!g_inputHostProcess&&g_inputHostEpoch==0&&g_realStickTest.virtualTargetEnabled&&configuredPersona=="steamdeck");
     std::vector<std::pair<std::string,std::function<void()>>> refused={
       {"unresolved-machine",[]{g_machineIdentity.resolved=false;}},{"unknown-gpd-profile",[]{profileKnown=false;}},
@@ -178,9 +237,13 @@ int main(int argc,char**argv){
     for(const auto family:{Family::Msi,Family::OneX,Family::Aya,Family::Unknown}){reset();(void)onAfterOffWake();g_machineIdentity.family=family;check("other-family-unchanged-"+std::to_string(static_cast<int>(family)),!inputHostRetireUnownedRogWakeHoldForStart()&&g_wakeHoldPhysicalUnhide);}
     reset();(void)onAfterOffWake();g_machineIdentity.family=Family::Rog;sharedKnown=false;
     check("original-rog-admission-unchanged",inputHostRetireUnownedRogWakeHoldForStart()&&!g_wakeHoldPhysicalUnhide);
-    reset();(void)onAfterOffWake();g_msiNativeForegroundCyclePending=true;auto& owner=g_msiNativeForegroundLease;
-    owner.active=true;owner.cycleProcess=reinterpret_cast<HANDLE>(1);
-    check("live-native-writer-keeps-hold-and-existing-queue-authority",originalBusWakeGate()&&g_wakeHoldPhysicalUnhide&&lifecycleLogs.empty());
+    auto& owner=g_msiNativeForegroundLease;
+    const auto liveWriter=[&]{
+        reset();(void)onAfterOffWake();g_msiNativeForegroundCyclePending=true;
+        owner.active=true;owner.cycleProcess=reinterpret_cast<HANDLE>(1);
+    };
+    liveWriter();
+    check("live-native-writer-keeps-hold-and-existing-queue-authority",originalBusQueues()&&g_wakeHoldPhysicalUnhide&&busQueueCalls==1&&lifecycleLogs.size()==1);
     const auto settledHandoff=[&]{
         reset();const auto ticket=onAfterOffWake();
         owner.active=true;owner.virtualHandoffHeld=true;owner.virtualHandoffRequest=ticket;
@@ -188,11 +251,19 @@ int main(int argc,char**argv){
         return ticket;
     };
     const auto heldTicket=settledHandoff();
+    const auto deadline=clockNow+g_virtualStartProtection.view(clockNow).remainingMs;
+    const bool queued=originalBusQueues();
+    ymcc::inputHost::queuedPlayerStart::Work work;
+    const bool bound=queued&&ymcc::inputHost::queuedPlayerStart::decode(busQueue.front(),work)&&work.bound;
+    const auto queuedWire=queued?busQueue.front():std::string{};
+    const bool duplicate=originalBusQueues();
     check("settled-native-handoff-queues-original-first-on-without-clearing-hold",
-        originalBusWakeGate()&&g_wakeHoldPhysicalUnhide&&owner.active&&owner.virtualHandoffHeld&&
+        bound&&!duplicate&&busQueueCalls==1&&busQueue.size()==1&&busDiscoveryDirty==1&&!busThrottled&&
+        work.request==heldTicket&&work.deadline==deadline&&work.power==powerNow&&work.persona==configuredPersona&&work.reason=="initial-target-admission"&&
+        g_wakeHoldPhysicalUnhide&&owner.active&&owner.virtualHandoffHeld&&
         !g_inputHostProcess&&!g_inputHostEpoch&&owner.retiredNativeWriterAttempt=="original-writer"&&
-        owner.deferredVirtualWork.empty()&&lifecycleLogs.empty()&&
-        g_virtualStartProtection.view(clockNow).requestId==heldTicket);
+        owner.deferredVirtualWork.empty()&&lifecycleLogs.size()==1&&lifecycleLogs[0].value("nativeWriterWaitMayQueue",false)&&
+        lifecycleLogs[0].value("wakeHoldPreserved",false)&&g_virtualStartProtection.view(clockNow).requestId==heldTicket);
     const std::vector<std::pair<std::string,std::function<void()>>> settledRefusals{
         {"not-held",[&]{owner.virtualHandoffHeld=false;}},{"other-request",[&]{++owner.virtualHandoffRequest;}},
         {"other-suspend",[&]{++owner.suspendSerial;}},{"expired",[]{clockNow+=30000;}},
@@ -204,13 +275,61 @@ int main(int argc,char**argv){
         {"stale-power",[]{publicCurrent=false;}},{"unknown-power",[]{sharedKnown=false;}}
     };
     for(const auto& [name,alter]:settledRefusals){(void)settledHandoff();alter();
-        check("settled-native-handoff-refuses-"+name,!originalBusWakeGate()&&g_wakeHoldPhysicalUnhide);}
+        check("settled-native-handoff-refuses-"+name,!originalBusQueues()&&!busQueueCalls&&g_wakeHoldPhysicalUnhide);}
+    liveWriter();busSourceAdmitted=false;
+    check("current-handoff-does-not-bypass-physical-source-admission",
+        !originalBusQueues()&&busQueue.empty()&&!busQueueCalls&&!busDiscoveryDirty&&g_wakeHoldPhysicalUnhide&&g_hidHideStartDeferredLogged);
+    liveWriter();g_inputHostLifecycleWorkInFlight=true;
+    check("current-handoff-does-not-bypass-serial-owner",
+        !originalBusQueues()&&busQueue.empty()&&!busQueueCalls&&g_wakeHoldPhysicalUnhide);
+    liveWriter();g_hidHideLastStartAttemptTick=clockNow;
+    check("current-handoff-does-not-bypass-bus-attempt-throttle",
+        !originalBusQueues()&&busQueue.empty()&&!busQueueCalls&&g_wakeHoldPhysicalUnhide&&
+        busThrottled==1);
     for(bool native:{false,true}){
         reset();(void)onAfterOffWake();std::atomic<bool> locked=false,release=false;
         std::thread holder([&]{if(native)g_msiNativeForegroundMx.lock();else g_inputHostMx.lock();locked=true;while(!release)Sleep(1);if(native)g_msiNativeForegroundMx.unlock();else g_inputHostMx.unlock();});
         while(!locked)Sleep(1);const bool retired=inputHostRetireUnownedRogWakeHoldForStart();release=true;holder.join();
         check(native?"native-lock-contention-keeps-hold":"host-lock-contention-keeps-hold",!retired&&g_wakeHoldPhysicalUnhide);
     }
-    std::ofstream(argv[1])<<json({{"passed",failures.empty()},{"checks",results.size()},{"failures",failures},{"results",results},{"scope","actual admission functions and original BUS wake predicate; controlled IO facts; not whole Start or hardware"}}).dump(2);
+    reset();configuredPersona="elite";g_realStickTest.virtualTargetEnabled=true;g_powerGeneration=powerNow;
+    const auto elite=g_virtualStartProtection.admit(configuredPersona,clockNow);
+    const auto beforeQuarantine=g_virtualStartProtection.view(clockNow);
+    const auto eliteWire=ymcc::inputHost::queuedPlayerStart::bind("initial-target-admission");
+    ymcc::inputHost::queuedPlayerStart::Work eliteWork;
+    const bool eliteBound=ymcc::inputHost::queuedPlayerStart::decode(eliteWire,eliteWork)&&eliteWork.bound;
+    check("win5-elite-enablement-binds-original-ticket-and-deadline",elite.accepted&&eliteBound&&eliteWork.request==elite.requestId&&
+        eliteWork.persona=="elite"&&eliteWork.power==powerNow&&eliteWork.deadline==clockNow+30000);
+    g_inputHostReleaseQuarantined=true;g_inputHostStartBlocked=true;historyReturned=false;
+    const auto startRan=runStartQuarantineExcerpt(eliteWork.request);
+    const auto candidate=g_virtualStartProtection.view(clockNow);
+    check("win5-elite-unreturned-old-target-refuses-before-next-start-stage",!startRan&&!nextStartStageCalls&&
+        g_inputHostReleaseQuarantined&&g_inputHostStartBlocked&&!historyReturned&&switchAudit=="release-quarantine"&&quarantineDiagnostics==1&&
+        lifecycleLogs.size()==1&&lifecycleLogs[0].value("event","")=="input-host-start-blocked"&&lifecycleLogs[0].value("reason","")=="release-quarantine");
+    check("win5-elite-start-refusal-emits-same-ticket-failure-candidate",candidate.locked&&candidate.requestId==elite.requestId&&
+        candidate.phase=="verifying"&&candidate.candidateOutcome=="failure"&&candidate.verificationRemainingMs==10000&&
+        candidate.remainingMs==beforeQuarantine.remainingMs&&candidate.fallbackAttempts==0&&g_inputHostSwitchVerificationPending==elite.requestId&&
+        startProtectionAction=="verification-pending"&&startProtectionOrigin=="start-terminal-failure"&&!recoveryOffers);
+    clockNow+=9999;
+    const auto rejectedEarly=g_virtualStartProtection.finishVerification(elite.requestId,"failure",clockNow);
+    const auto rejectedNewOn=g_virtualStartProtection.admit("elite",clockNow);
+    check("win5-elite-candidate-neither-finalizes-early-nor-renews-admission",!rejectedEarly&&!rejectedNewOn.accepted&&
+        g_virtualStartProtection.view(clockNow).remainingMs==20001&&g_virtualStartProtection.view(clockNow).verificationRemainingMs==1);
+    ++clockNow;
+    const bool wrongFinal=g_virtualStartProtection.finishVerification(elite.requestId+1,"success",clockNow);
+    const bool final=g_virtualStartProtection.finishVerification(elite.requestId,"failure",clockNow);
+    const bool repeatedFinal=g_virtualStartProtection.finishVerification(elite.requestId,"failure",clockNow);
+    const auto terminal=g_virtualStartProtection.view(clockNow);
+    check("win5-elite-protection-finalizes-once-but-cannot-return-old-target",!wrongFinal&&final&&!repeatedFinal&&
+        terminal.requestId==elite.requestId&&terminal.phase=="failure"&&!terminal.locked&&g_inputHostReleaseQuarantined&&!nextStartStageCalls);
+    // Represent confirmed return as an input; this leaf does not perform the return or create a Host.
+    g_inputHostReleaseQuarantined=false;g_inputHostStartBlocked=false;historyReturned=true;
+    const auto fresh=g_virtualStartProtection.admit("elite",clockNow);
+    const bool proceeded=runStartQuarantineExcerpt(fresh.requestId);
+    check("win5-elite-confirmed-return-allows-one-next-stage-not-ready",fresh.accepted&&fresh.requestId!=elite.requestId&&proceeded&&
+        nextStartStageCalls==1&&g_virtualStartProtection.view(clockNow).phase=="pending"&&quarantineDiagnostics==1&&!g_inputHostProcess);
+    std::ofstream(argv[1])<<json({{"passed",failures.empty()},{"checks",results.size()},{"failures",failures},{"results",results},
+      {"busDispatch",{{"wire",queuedWire},{"request",work.request},{"deadline",work.deadline},{"power",work.power},{"persona",work.persona},{"reason",work.reason}}},
+      {"scope","actual BUS admission through ticket binding and the source-exact Start quarantine and candidate excerpts; no queued worker, full Start, real return or device IO"}}).dump(2);
     std::cout<<"checks="<<results.size()<<" failures="<<failures.size()<<"\n";return failures.empty()?0:1;
 }

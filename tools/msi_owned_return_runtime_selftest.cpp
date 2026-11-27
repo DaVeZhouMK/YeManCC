@@ -67,10 +67,20 @@ static bool g_hostLockBlocked = false;
 // STUB-BEGIN Host/power/board context and instrumented lifecycle lock boundary
 class InputHostMutex {
     std::mutex mutex_;
+#ifdef YMCC_MSI_RUNTIME_HANDOFF_CASES
+    bool held_=false; // All handoff cases run on the sole fixture thread.
+#endif
 public:
+#ifdef YMCC_MSI_RUNTIME_HANDOFF_CASES
+    void lock() { mutex_.lock();held_=true; }
+    bool try_lock() { ++g_count.hostTryLocks;if(g_hostLockBlocked || !mutex_.try_lock())return false;held_=true;return true; }
+    void unlock() { held_=false;mutex_.unlock(); }
+    bool ownedByCurrentThread()const {return held_;}
+#else
     void lock() { mutex_.lock(); }
     bool try_lock() { ++g_count.hostTryLocks; return !g_hostLockBlocked && mutex_.try_lock(); }
     void unlock() { mutex_.unlock(); }
+#endif
 };
 static InputHostMutex g_inputHostMx;
 static std::mutex g_msiPersonaPumpMx;
@@ -80,6 +90,9 @@ static std::string g_board = "msi", g_persona = "disabled";
 static bool g_hardwareGate = true, g_powerReady = true, g_exitFence = false;
 static bool g_targetAbsent = true;
 static unsigned long long g_power = 9;
+static std::atomic<std::uint64_t> g_sharedPowerSuspendSerial{0};
+static std::uint64_t g_powerPublication=0;
+static bool g_powerNotificationPending=false;
 static HANDLE g_inputHostProcess = 0;
 static bool g_inputHostPrepared = false, g_inputHostReleaseQuarantined = false;
 static bool g_inputHostActive = false;
@@ -135,6 +148,7 @@ static bool msiCrashRecoveryAfterModeDischarge(const std::function<bool()>& proo
     if (proofCurrent && !proofCurrent()) return false;
     ++g_count.durableDischarges;
     g_msiCrashRecord.modeReturnPending = false;
+    g_msiCrashRecord.modeAttemptOwner.clear();
     return true;
 }
 // STUB-END
@@ -254,7 +268,12 @@ static struct {bool required()const{return false;}} g_msiSteamDeckReleaseDebt;
 static struct {bool retirementRequired()const{return false;}} g_psEndpointOwnership;
 static bool inputHostTargetReturnHistorySettledLocked(){return true;}
 static HANDLE g_inputHostPrimaryThread=0,g_inputHostServerPipe=0;
+#ifdef YMCC_MSI_RUNTIME_HANDOFF_CASES
+static bool g_runtimePipeReturned=true;
+static bool inputHostPipeRetirementProvenLocked(){return g_runtimePipeReturned;}
+#else
 static bool inputHostPipeRetirementProvenLocked(){return true;}
+#endif
 static bool inputHostTargetReturnCurrentProofPendingLocked(){return false;}
 // STUB-END
 // Read-only public transport ports for this legacy inert business fixture.
@@ -273,16 +292,43 @@ class Scope final {public:bool current()const noexcept{return true;}bool power()
 #define YMCC_LEGACY_RETURN_OBSERVATION_CAPTURE
 static bool captureSharedPowerLifecycle(ymcc::sleeppower::SharedPowerV1& output)noexcept{
     output={};output.generation=currentPowerGeneration();output.flags=ymcc::sleeppower::kKnown;
+    output.suspendSerial=g_sharedPowerSuspendSerial.load();output.publicationRevision=g_powerPublication;
+    if(g_powerNotificationPending)output.flags|=ymcc::sleeppower::kNotificationPending;
     if(hardwareWriteAllowed())output.flags|=ymcc::sleeppower::kHardwareAllowed;
     return ymcc::sleeppower::powerAdmitted(output);
 }
 static bool sharedPowerLifecycleCurrent(const ymcc::sleeppower::SharedPowerV1& value)noexcept{
-    return ymcc::sleeppower::powerAdmitted(value)&&value.generation==currentPowerGeneration()&&hardwareWriteAllowed();
+    ymcc::sleeppower::SharedPowerV1 current;
+    return captureSharedPowerLifecycle(current)&&ymcc::sleeppower::samePowerRevocation(value,current);
 }
 #endif
 #include "../native/msi_owned_return_runtime.h"
 // Byte-for-byte actual gate, readback contract, restore and finish consumers.
 #include "production_restore_helpers.h"
+
+#ifdef YMCC_MSI_RUNTIME_HANDOFF_CASES
+// STUB-BEGIN Original post-final owner, old pipe and independent target return ports
+static bool g_msiCrashLoaded=true,g_runtimeHeld=false,g_runtimeTargetReturned=true;
+static unsigned g_runtimeProofPublishes=0,g_runtimeTargetChecks=0;
+static auto g_inputHostEpoch=19ULL;
+static std::string g_inputHostRunId="old-run";
+namespace ymcc::inputHost::runtimeRecovery {
+static struct {unsigned long long serial=37,power=9;bool pending=true,spent=false,stopInvoked=true;} state;
+static bool oldTuple(){return g_inputHostEpoch==19 && g_inputHostRunId=="old-run";}
+enum class PowerScope { Original, CurrentReturn };
+static const char* stale(bool,PowerScope scope){return g_exitFence || !g_realStickTest.virtualTargetEnabled ||
+    (scope==PowerScope::Original && g_power!=state.power) || !g_powerReady?"retired":nullptr;}
+static bool held(ULONGLONG){return g_runtimeHeld;}
+static void note(const char*,const char*){++g_runtimeProofPublishes;}
+}
+static bool psRetiredReturnProvenLocked(){throw std::runtime_error("no independent PS debt in this case");}
+static bool msiSteamDeckRecheckOwnedRemovalDebt(){throw std::runtime_error("no independent SD debt in this case");}
+static bool inputHostTargetReturnBeforeRuntimeRestoreLocked(const std::string& run,unsigned long long epoch){
+    ++g_runtimeTargetChecks;return run=="old-run" && epoch==19 && g_runtimeTargetReturned;
+}
+// STUB-END
+#include "../native/virtual_runtime_msi_return_runtime.h"
+#endif
 
 static constexpr const char* kOwnedRoot = "USB\\VID_0DB0&PID_1902\\7&OWNED&0&3";
 static constexpr const char* kReturnedRoot = "USB\\VID_0DB0&PID_1901\\7&OWNED&0&3";
@@ -322,6 +368,7 @@ static void reset() {
     g_inputHostPrepared = g_inputHostReleaseQuarantined = g_inputHostActive = false;
     g_msiNativeForegroundCyclePending = false; g_msiNativeForegroundPowerHold = false; g_foregroundIsolationBorrowBusy = false;
     g_power = 9; g_msiFeedbackModeGeneration = 4; g_xinputTopologyEpoch = 8; g_xinputSlotIdentityEpoch = 3;
+    g_sharedPowerSuspendSerial=0;g_powerPublication=0;g_powerNotificationPending=false;
     g_msiDinputRouteDinputArmed = false; g_msiDinputReturnOwed = true; g_msiDinputReturnDebtEpisode = 41;
     g_msiOwnedReturnRecovery = Recovery{}; g_msiOwnedReturnExpected = {};
     g_msiOwnedReturnTerminalReceipt={};
@@ -330,6 +377,7 @@ static void reset() {
     g_msiOwnedReturnPending = false; g_msiOwnedReturnWorking = false; g_msiOwnedReturnFailed = false;
     g_msiOwnedReturnMatchedEpisode = 0; g_msiOwnedReturnMatchedPower = 0; g_msiOwnedReturnMatchedTopology = 0;
     g_msiOwnedReturnSourceEvent = 0;
+    g_msiOwnedReturnSeenSuspendSerial=0;
     g_msiDinputReturnDebtPendingLogTick = 0; g_externalPriorityVirtualSuspended = false; g_externalPrioritySourceMask = 0;
     g_msiCrashStoreInvalid = false; g_msiCrashRecord = {};
     g_msiCrashRecord.boardKey = msiCrashBoardKey();
@@ -365,6 +413,7 @@ static void sample(unsigned long long sequence, ULONGLONG completed, const std::
     g_inputCaptureGamepadSnapshot.readStartedTick = completed > 5 ? completed - 5 : 0;
     g_inputCaptureGamepadSnapshot.readCompletedTick = completed;
     g_inputCaptureGamepadSnapshot.readContextStable = true;
+    (void)captureSharedPowerLifecycle(g_inputCaptureGamepadSnapshot.sharedPower);
 }
 static void physical(unsigned slot = 0, const std::string& root = kReturnedRoot,
                      const std::vector<std::string>& locations = kLocations,
@@ -847,6 +896,56 @@ static void windowsAndDormancy(Checks& c) {
         sample(103, 1032000); maintain(1032000); c.settled();
         c.require(g_count.writes == 1, "late valid physical signal settles without another retry");
     });
+    c.run("dormant/same-generation-suspend-resumes-existing-duty", [&] {
+        initial(); for (unsigned i=0;i<19;++i) maintain(10000+i*1000);
+        physical();sample(700,29000);maintain(29000);
+        c.require(g_msiOwnedReturnFailed && g_msiOwnedReturnRecovery.observations()==20 &&
+            g_count.writes==1 && g_msiOwnedReturnRecovery.retryUsed(), "old scope exhausted after its first matching read and single write");
+        c.owed();
+        const auto before=counterJson();
+        ++g_powerPublication;maintain(29200);
+        g_powerNotificationPending=true;maintain(29400);
+        ++g_sharedPowerSuspendSerial;g_powerReady=false;maintain(29600);
+        g_powerReady=true;maintain(29800);
+        c.require(counterJson()==before && g_msiOwnedReturnRecovery.observations()==20,
+            "publication alone, an unclassified notification and a closed gate grant no probe");
+        g_powerNotificationPending=false;maintain(30000);
+        c.require(g_msiOwnedReturnWorking && g_msiOwnedReturnRecovery.observations()==1,
+            "Ready with only a new suspend serial reopens one bounded observation window");
+        c.require(g_count.rootQueries==before.at("parentRootQueries"), "pre-suspend cached read performs no root query");
+        c.owed();
+        sample(701,31000);maintain(31000);c.owed("old scope cannot count toward the new proof");
+        sample(701,32000);maintain(32000);c.owed("repeated identity cannot supply a second read");
+        sample(702,33000);maintain(33000);c.settled();
+        c.require(g_count.writes==1 && g_msiOwnedReturnRecovery.retryUsed(), "the original write budget stays consumed");
+    });
+    c.run("OFF/same-generation-suspend-requalifies-exhausted-proof", [&] {
+        g_inputHostReleaseQuarantined=true;
+        initial();maintain(12000);physical();sample(710,13000);maintain(13000);sample(711,14000);maintain(14000);c.settled();
+        c.require(msiOwnedReturnOffEndpointAbsent(), "the original OFF handoff is qualified");
+        ++g_inputHostVirtualIntentRevision;g_inputCaptureGamepadSnapshot.live=false;
+        for(unsigned i=0;i<19;++i) maintain(15000+i*1000);
+        sample(712,34000);maintain(34000);
+        c.require(g_msiOwnedReturnOffRequalification.observations==20 && !msiOwnedReturnOffEndpointAbsent(),
+            "retired OFF proof exhausted its requalification window with one matching read");
+        ++g_powerPublication;maintain(34200);
+        c.require(g_msiOwnedReturnOffRequalification.observations==20, "publication alone cannot refund the OFF budget");
+        ++g_sharedPowerSuspendSerial;g_powerReady=false;maintain(34400);
+        g_powerReady=true;g_powerNotificationPending=true;maintain(34600);
+        c.require(g_msiOwnedReturnOffRequalification.observations==20, "the OFF window stays closed until admitted");
+        const auto rootQueries=g_count.rootQueries;
+        g_powerNotificationPending=false;maintain(35000);
+        c.require(g_msiOwnedReturnOffRequalification.observations==1 && g_count.rootQueries==rootQueries &&
+            !msiOwnedReturnOffEndpointAbsent(), "new suspend reopens OFF observation without accepting the retired sample");
+        sample(713,36000);maintain(36000);
+        c.require(!msiOwnedReturnOffEndpointAbsent(), "one current OFF sample plus retired evidence is insufficient");
+        sample(713,37000);maintain(37000);
+        c.require(!msiOwnedReturnOffEndpointAbsent(), "replayed OFF read identity does not qualify");
+        sample(714,38000);maintain(38000);
+        c.require(msiOwnedReturnOffEndpointAbsent(), "two fresh reads requalify the real OFF handoff");
+        c.require(g_count.writes==1 && g_count.durableDischarges==1 && !g_msiDinputReturnOwed,
+            "OFF proof recovery does not write Mode1 again or reopen discharged debt");
+    });
     c.run("dormant/late-source-event-reopens-observation", [&] {
         initial(); for (unsigned i = 0; i < 20; ++i) maintain(10000 + i * 1000);
         c.require(g_msiOwnedReturnPending && !g_msiOwnedReturnWorking && g_msiOwnedReturnFailed,
@@ -1070,9 +1169,131 @@ static void offTerminalHandoff(Checks& c) {
     });
 }
 
+#ifdef YMCC_MSI_RUNTIME_HANDOFF_CASES
+static void runtimeHandoff(Checks& c) {
+    using ymcc::inputHost::runtimeMsiReturn::proof;
+    const auto capture=[] {
+        ymcc::inputHost::runtimeRecovery::state={};
+        g_inputHostReleaseQuarantined=true;g_realStickTest.virtualTargetEnabled=true;g_persona="emulated-x360";
+        g_runtimeProofPublishes=g_runtimeTargetChecks=0;
+        g_runtimeHeld=false;g_runtimePipeReturned=true;g_runtimeTargetReturned=true;
+        inputHostRuntimeMsiReturnCaptureLocked();
+    };
+    const auto prepare=[](ULONGLONG now) {g_tick=now;return inputHostRuntimeMsiReturnPrepareLocked();};
+    c.run("runtime-handoff/reject-cross-suspend-pair-and-cached-proof",[&] {
+        std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+        capture();c.require(inputHostRuntimeMsiReturnRequiredLocked(),"old quarantine retains the exact MSI return duty");
+        physical();sample(100,10000);
+        c.require(inputHostRuntimeMsiReturnProbeDueLocked() && !prepare(10000),"old first window alone cannot settle");
+        ++g_sharedPowerSuspendSerial;
+        sample(101,11000);
+        c.require(!prepare(11000) && g_count.durableDischarges==0 && g_runtimeTargetChecks==0,
+            "one new read cannot pair with a pre-suspend read or start target return");
+        sample(102,12000);
+        c.require(prepare(12000) && inputHostRuntimeMsiReturnProofCurrentLocked(),"two current reads qualify same old incident");
+        c.require(g_count.durableDischarges==1 && !g_msiDinputReturnOwed && g_runtimeProofPublishes==1,
+            "a single durable settlement publishes the proof");
+        ++g_powerPublication;
+        c.require(inputHostRuntimeMsiReturnProofCurrentLocked(),"publication alone preserves proof");
+        ++g_sharedPowerSuspendSerial;sample(103,13000);g_tick=13000;
+        c.require(!inputHostRuntimeMsiReturnProofCurrentLocked() && !prepare(13000),
+            "a fresh current cache cannot authorize a proof retained from the previous suspend");
+        sample(103,14000);c.require(!prepare(14000),"same read identity cannot complete requalification");
+        sample(104,15000);c.require(prepare(15000),"two current samples requalify without another durable write");
+        c.require(g_count.durableDischarges==1 && g_count.writes==0,"the runtime handoff never reissues Mode1");
+    });
+    c.run("runtime-handoff/exhausted-window-reopens-only-on-admitted-suspend",[&] {
+        std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+        capture();
+        for(unsigned i=0;i<19;++i)(void)prepare(10000+i*1000);
+        physical();sample(200,29000);(void)prepare(29000);
+        c.require(proof.checks==20 && !g_runtimeProofPublishes,"twenty attempts exhaust the old window");
+        ++g_powerPublication;g_tick=29500;
+        c.require(!inputHostRuntimeMsiReturnProbeDueLocked() && !prepare(29500) && proof.checks==20,
+            "publication cannot rearm the bounded window");
+        ++g_sharedPowerSuspendSerial;g_powerReady=false;
+        c.require(!inputHostRuntimeMsiReturnProbeDueLocked() && !prepare(29700) && proof.checks==20,
+            "unavailable power does not grant a probe");
+        g_powerReady=true;g_powerNotificationPending=true;
+        c.require(!inputHostRuntimeMsiReturnProbeDueLocked() && !prepare(29800) && proof.checks==20,
+            "unclassified notification cannot rearm probing");
+        g_powerNotificationPending=false;
+        c.require(!inputHostRuntimeMsiReturnProbeDueLocked() && !prepare(29999) && proof.checks==20,
+            "new boundary does not bypass the existing per-second limit");
+        g_tick=30000;const auto queries=g_count.rootQueries;
+        c.require(inputHostRuntimeMsiReturnProbeDueLocked() && !prepare(30000) && proof.checks==1,
+            "Ready schedules exactly one probe on the existing incident");
+        c.require(g_count.rootQueries==queries && !g_runtimeProofPublishes,"still-young pre-suspend cache cannot query or qualify");
+        sample(201,31000);c.require(!prepare(31000),"first new sample is insufficient");
+        sample(202,32000);c.require(prepare(32000) && g_count.durableDischarges==1 && !g_count.writes,
+            "same original duty finishes after two new reads without a mode command");
+    });
+    c.run("runtime-handoff/power-retired-stop-retains-exact-return-only",[&] {
+        std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+        namespace runtime=ymcc::inputHost::runtimeRecovery;
+        capture();physical();sample(250,10000);(void)prepare(10000);
+        ++g_power;++g_sharedPowerSuspendSerial;g_powerReady=false;
+        runtime::state.pending=false;runtime::state.spent=true;
+        c.require(!inputHostRuntimeMsiReturnProbeDueLocked() && !prepare(11000) && !g_count.durableDischarges,
+            "retired stop cannot continue reading while public power is unavailable");
+        g_powerReady=true;g_powerNotificationPending=true;
+        c.require(!inputHostRuntimeMsiReturnProbeDueLocked() && !prepare(11000) && !g_count.durableDischarges,
+            "unclassified notification still blocks the old device return");
+        g_powerNotificationPending=false;physical();sample(251,11000);
+        c.require(inputHostRuntimeMsiReturnRequiredLocked() && inputHostRuntimeMsiReturnProbeDueLocked(),
+            "current Ready can observe the exact stopped Host's existing duty after restart authority retires");
+        c.require(!prepare(11000) && !g_count.durableDischarges && !g_runtimeTargetChecks,
+            "a new-generation sample cannot complete the old pair");
+        sample(252,12000);g_runtimeTargetReturned=false;
+        c.require(!prepare(12000) && g_runtimeTargetChecks==1 && !g_count.durableDischarges,
+            "a dead pipe and current samples do not replace independent target absence");
+        g_runtimeTargetReturned=true;sample(253,13000);
+        c.require(prepare(13000) && inputHostRuntimeMsiReturnProofCurrentLocked() && g_count.durableDischarges==1,
+            "fresh proof settles the original debt once in the new generation");
+        c.require(!runtime::state.pending && runtime::state.spent && runtime::state.power!=g_power && !g_count.writes,
+            "return grants neither the old restart authority nor a mode write");
+        g_inputHostEpoch=20;
+        c.require(!inputHostRuntimeMsiReturnRequiredLocked() && !inputHostRuntimeMsiReturnProofCurrentLocked(),
+            "the old return proof cannot apply to a successor Host");
+        g_inputHostEpoch=19;g_realStickTest.virtualTargetEnabled=false;
+        c.require(!inputHostRuntimeMsiReturnProofCurrentLocked(),"changing effective intent revokes the old live proof");
+        g_realStickTest.virtualTargetEnabled=true;g_exitFence=true;
+        c.require(!inputHostRuntimeMsiReturnProofCurrentLocked(),"exit still vetoes publication of the live proof");
+    });
+    c.run("runtime-handoff/retirement-during-query-and-real-record-shape",[&] {
+        std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+        g_msiCrashRecord.modeAttemptOwner=std::to_string(g_msiCrashRecord.ownerPid)+":"+g_msiCrashRecord.ownerCreationTime;
+        capture();physical();sample(300,10000);(void)prepare(10000);
+        g_signalHook=[] {++g_sharedPowerSuspendSerial;};
+        sample(301,11000);c.require(!prepare(11000) && g_count.durableDischarges==0,"late suspend during lookup retains debt");
+        g_runtimePipeReturned=false;sample(302,12000);
+        c.require(!prepare(12000) && !g_runtimeTargetChecks,"pending pipe retirement still blocks proof");
+        g_runtimePipeReturned=true;sample(303,13000);c.require(!prepare(13000),"first post-resume qualified read");
+        g_runtimeTargetReturned=false;sample(304,14000);
+        c.require(!prepare(14000) && !g_count.durableDischarges,"separate target return still gates durable settlement");
+        g_runtimeTargetReturned=true;sample(305,15000);
+        c.require(prepare(15000) && g_msiCrashRecord.modeAttemptOwner.empty() && g_count.durableDischarges==1,
+            "settled record without attempt owner still proves the same durable owner");
+        ++g_sharedPowerSuspendSerial;sample(306,16000);c.require(!prepare(16000),"settled record needs one more current sample");
+        sample(307,17000);c.require(prepare(17000) && g_count.durableDischarges==1 && g_count.writes==0,
+            "requalification preserves the durable settlement and issues no mode command");
+    });
+}
+int main(int argc,char** argv) {
+#else
 int main() {
+#endif
     Checks c;
+#ifdef YMCC_MSI_RUNTIME_HANDOFF_CASES
+    if(argc!=1) {
+        if(argc!=2 || std::strcmp(argv[1],"post-final-runtime-handoff")!=0)return 2;
+        runtimeHandoff(c);
+    } else {
+#endif
     classify(c); trackingAndReturn(c); invalidSignals(c); contextAndOwnership(c); foregroundIsolation(c); commandBoundaries(c); windowsAndDormancy(c); failedMode2ReturnDuty(c); commandReadyBoundary(c);refreshedActualOutcome(c);offTerminalHandoff(c);
+#ifdef YMCC_MSI_RUNTIME_HANDOFF_CASES
+    }
+#endif
     const json report = {{"passed", c.failures.empty()}, {"tests", c.cases.size()}, {"assertions", c.assertions},
         {"failures", c.failures}, {"noInputHost", true}, {"noSdkDeviceIo", true}, {"hardwareFakesOnly", true},
         {"realRuntimeFunctions", {"msiOwnedReturnRecordInitial", "msiOwnedReturnMaintenance", "msiOwnedReturnReadSignal",

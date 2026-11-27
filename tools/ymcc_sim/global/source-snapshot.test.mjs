@@ -6,7 +6,7 @@ import os from 'node:os';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {createSourceSnapshot,createCapturedSourceSnapshot,compareSourceSnapshot,verifyCapturedSourceSnapshot,SNAPSHOT_METADATA,SNAPSHOT_MANIFEST,SNAPSHOT_POLICY} from './source-snapshot.mjs';
+import {createSourceSnapshot,createCapturedSourceSnapshot,compareSourceSnapshot,verifyCapturedSourceSnapshot,verifyCapturedSourceSnapshotParallel,SNAPSHOT_METADATA,SNAPSHOT_MANIFEST,SNAPSHOT_POLICY} from './source-snapshot.mjs';
 import {parseSnapshotArguments,SOURCE_SNAPSHOT_HELP} from './create-source-snapshot.mjs';
 
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -21,6 +21,60 @@ function fixture(t){
 }
 function captured(f){const r=f.create();assert.equal(r.status,'PASS',JSON.stringify(r.failure));assert.equal(r.isCurrent,true);return r;}
 const paths=value=>value.files.map(row=>row.path);
+const provenanceOptions=(f,r)=>({manifestFile:r.manifestFile,repoRoot:f.repo,expectedManifestSha256:hash(fs.readFileSync(r.manifestFile))});
+const proofContent=({verifiedAt,...proof})=>proof;
+test('guarded capture readback has the same exact identity as the default capture',t=>{
+ const f=fixture(t);f.write('deps/samples/raw.bin',Buffer.from([255,0,13,10]));f.write('node_modules/pkg/excluded.mjs','never read');
+ const original=createCapturedSourceSnapshot({repoRoot:f.repo,outDir:f.out});
+ const guarded=createCapturedSourceSnapshot({repoRoot:f.repo,outDir:path.join(f.parent,'Guarded'),guardedReadback:true});
+ for(const value of [original,guarded]){
+  assert.equal(value.status,'PASS',JSON.stringify(value.failure));
+  assert.equal(compareSourceSnapshot(provenanceOptions(f,value)).status,'CURRENT');
+  const proof=verifyCapturedSourceSnapshot(provenanceOptions(f,value));assert(proof.snapshotIntegrityVerified&&proof.isCurrent);
+ }
+ for(const key of ['files','directories','excluded','main','copyVerifiedFiles','sourceDiff','snapshotDiff'])assert.deepEqual(guarded[key],original[key],key);
+});
+for(const [phase,member] of [['copy-complete','snapshotDiff'],['before-source-after','sourceDiff']])test('guarded capture readback rejects changed bytes at '+phase,t=>{
+ const f=fixture(t);
+ const value=createCapturedSourceSnapshot({repoRoot:f.repo,outDir:f.out,guardedReadback:true,onProgress(e){
+  if(e.phase===phase)fs.appendFileSync(path.join(member==='snapshotDiff'?f.out:f.repo,'native/main.cpp'),'// drift\n');
+ }});
+ assert.equal(value.status,'FAIL');assert.equal(value.failure.code,'SNAPSHOT_SOURCE_OR_COPY_DRIFT');assert.equal(value[member].equal,false);
+ assert.equal(value[member==='snapshotDiff'?'sourceDiff':'snapshotDiff'].equal,true);assert.equal(value.isCurrent,false);
+});
+test('guarded capture readback rejects a late junction before traversal',t=>{
+ const f=fixture(t),outside=path.join(f.base,'outside');fs.mkdirSync(outside);
+ fs.writeFileSync(path.join(outside,'sentinel.txt'),'original');
+ const value=createCapturedSourceSnapshot({repoRoot:f.repo,outDir:f.out,guardedReadback:true,onProgress(e){
+  if(e.phase==='before-source-after')fs.symlinkSync(outside,path.join(f.repo,'redirect'),process.platform==='win32'?'junction':'dir');
+ }});
+ assert.equal(value.status,'FAIL');assert.match(value.failure.code,/SNAPSHOT_REPARSE/);assert.equal(value.isCurrent,false);
+ assert.deepEqual(fs.readdirSync(outside),['sentinel.txt']);assert.equal(fs.readFileSync(path.join(outside,'sentinel.txt'),'utf8'),'original');
+});
+test('parallel provenance matches serial current and stale source proofs without granting approval',async t=>{
+ const f=fixture(t),r=captured(f),options=provenanceOptions(f,r);
+ const now=await verifyCapturedSourceSnapshotParallel(options);
+ assert.deepEqual(proofContent(now),proofContent(verifyCapturedSourceSnapshot(options)));
+ assert.equal(now.isCurrent,true);assert.equal(now.sourceApprovalGranted,false);
+ f.write('native/main.cpp','edited main');f.write('deps/new.h','new dependency');fs.rmdirSync(path.join(f.repo,'empty'));
+ const stale=await verifyCapturedSourceSnapshotParallel(options);
+ assert.deepEqual(proofContent(stale),proofContent(verifyCapturedSourceSnapshot(options)));
+ assert.equal(stale.isCurrent,false);assert.deepEqual(stale.sourceDiff.changed.map(row=>row.path),['native/main.cpp']);
+ assert.deepEqual(stale.sourceDiff.added,['deps/new.h']);assert.deepEqual(stale.sourceDiff.removedDirectories,['empty']);
+ assert.equal(hash(fs.readFileSync(r.manifestFile)),options.expectedManifestSha256);
+});
+test('parallel provenance keeps snapshot tampering a hard error and primary redirection non-current',async t=>{
+ const f=fixture(t),r=captured(f),options=provenanceOptions(f,r),outside=path.join(f.base,'outside');
+ fs.mkdirSync(outside);fs.symlinkSync(outside,path.join(f.repo,'foreign'),'junction');
+ const redirected=await verifyCapturedSourceSnapshotParallel(options);
+ assert.deepEqual(proofContent(redirected),proofContent(verifyCapturedSourceSnapshot(options)));
+ assert.equal(redirected.isCurrent,false);assert.equal(redirected.currentComparisonFailure.code,'SNAPSHOT_REPARSE_PATH');
+ fs.writeFileSync(path.join(f.out,'src/view.txt'),'tampered capture');
+ await assert.rejects(verifyCapturedSourceSnapshotParallel(options),{code:'SNAPSHOT_CAPTURED_VERSION_CHANGED'});
+ assert.throws(()=>verifyCapturedSourceSnapshot(options),{code:'SNAPSHOT_CAPTURED_VERSION_CHANGED'});
+ await assert.rejects(verifyCapturedSourceSnapshotParallel({...options,expectedManifestSha256:'0'.repeat(64)}),{code:'SNAPSHOT_EXPECTED_MANIFEST_SHA_REQUIRED'});
+ assert.equal(hash(fs.readFileSync(r.manifestFile)),options.expectedManifestSha256);
+});
 test('snapshot freezes exact uncommitted raw bytes and preserves the shared historical workspace',t=>{
  const f=fixture(t),bytes=Buffer.from([0,255,13,10,0,7,128]);f.write('deps/runtime/bin/raw.dll',bytes);f.write('src/未提交 文件.txt','working bytes differ from VCS');const value=captured(f);
  assert.equal(value.sourceWorkspaceRoot,value.snapshotWorkspaceRoot);assert.equal(value.sourceWorkspaceRoot,path.resolve(f.repo,'../../..'));assert.equal(value.copyVerifiedFiles,value.files.length);assert(fs.readFileSync(path.join(f.out,'deps/runtime/bin/raw.dll')).equals(bytes));assert.equal(value.main.before.sha256,hash(fs.readFileSync(path.join(f.repo,'native/main.cpp'))));assert.deepEqual(value.main.before,value.main.snapshot);assert.deepEqual(value.main.before,value.main.sourceAfter);assert.equal(f.compare().status,'CURRENT');assert.equal(value.executionPerformed,false);assert.equal(value.requiresFinalCurrentComparison,true);assert.equal(value.snapshotPassApprovesChangedSource,false);
@@ -398,4 +452,33 @@ test('core owner layout: capture rejects reparse owner ancestors before writing'
 test('core owner layout: capture rejects reparse destination roots before writing',t=>{
  const f=coreOwnerFixture(t),real=path.join(f.base,'owned-root-target');fs.mkdirSync(real);fs.symlinkSync(real,f.coreOut,'junction');
  assert.throws(()=>createCapturedSourceSnapshot({repoRoot:f.repo,outDir:f.coreOut}),/REPARSE/);assert.deepEqual(fs.readdirSync(real),[]);
+});
+test('snapshot comparison and provenance parse the same descriptor bytes they identify',t=>{
+ const f=fixture(t),r=captured(f),options=provenanceOptions(f,r);
+ const metadata=new Map([r.manifestFile,...[r.sourceBefore,r.sourceAfter,r.snapshotAfter].map(row=>path.join(f.out,row.path))]
+  .map(file=>[path.resolve(file),0]));
+ const originalOpen=fs.openSync,originalRead=fs.readFileSync;
+ t.mock.method(fs,'openSync',function(file,...args){
+  if(metadata.has(file))metadata.set(file,metadata.get(file)+1);
+  return originalOpen.call(this,file,...args);
+ });
+ t.mock.method(fs,'readFileSync',function(file,...args){
+  assert(!metadata.has(file),'must not reopen a metadata path for parsing');
+  return originalRead.call(this,file,...args);
+ });
+ const compared=f.compare();assert(compared.isCurrent);assert.equal(compared.manifestSha256,options.expectedManifestSha256);
+ assert.deepEqual([...metadata.values()],[1,1,1,1]);
+ const verified=verifyCapturedSourceSnapshot(options);assert(verified.isCurrent&&verified.snapshotIntegrityVerified);
+ assert.equal(verified.manifestSha256,options.expectedManifestSha256);
+ assert.deepEqual([...metadata.values()],[3,2,2,2]); // Opening read plus closing manifest check.
+});
+test('snapshot provenance refuses a changed manifest even after admitting its parsed bytes',t=>{
+ const f=fixture(t),r=captured(f),options=provenanceOptions(f,r);
+ const readdir=fs.readdirSync;let changed=false;
+ t.mock.method(fs,'readdirSync',function(dir,...args){
+  if(dir===f.repo&&!changed){changed=true;fs.appendFileSync(r.manifestFile,' ');}
+  return readdir.call(this,dir,...args);
+ });
+ assert.throws(()=>verifyCapturedSourceSnapshot(options),/SNAPSHOT_MANIFEST_CHANGED_DURING_VERIFICATION/);
+ assert(changed);assert.notEqual(hash(fs.readFileSync(r.manifestFile)),options.expectedManifestSha256);
 });

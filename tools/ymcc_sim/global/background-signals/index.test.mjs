@@ -84,7 +84,7 @@ backgroundTest('actual original/derived native tests and all formal consumer fee
  const passed=await runBackgroundRegressions({repoRoot,evidenceDir});
  assert.equal(passed.status,'PASS',JSON.stringify(passed.failure));
  const worker=JSON.parse(await fs.readFile(path.join(evidenceDir,'worker-result.json'),'utf8'));
- assert.equal(passed.checks.length,20);assert.equal(passed.originalDynamic.status,'PASS');assert.equal(passed.originalNative.checks,12);assert.deepEqual(validateBackgroundReceipt(worker),{status:'PASS',issues:[]});assert.equal(passed.sourceVerification.status,'PASS');assert.ok(passed.actualCompiledInputs.some(item=>item.path==='src/bridge/sharedGameMedia.ts'));assert.ok(passed.nativeSourceInputs.some(item=>item.path==='native/main.cpp'));
+ assert.equal(passed.checks.length,21);assert.equal(passed.originalDynamic.status,'PASS');assert.equal(passed.originalNative.checks,12);assert.deepEqual(validateBackgroundReceipt(worker),{status:'PASS',issues:[]});assert.equal(passed.sourceVerification.status,'PASS');assert.ok(passed.actualCompiledInputs.some(item=>item.path==='src/bridge/sharedGameMedia.ts'));assert.ok(passed.nativeSourceInputs.some(item=>item.path==='native/main.cpp'));
  // Keep the original mutations against the real receipt when the real producer runs.
  for(const [,check] of receiptControls)check(worker);
 });

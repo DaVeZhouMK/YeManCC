@@ -3,7 +3,7 @@ namespace YeManFanBackend.Capabilities;
 public static partial class HcBatteryCapabilityCatalog
 {
     public const string RuleDocumentSha256 = "11c0709b6b5c5100fc2b3e9430f8bfaf9867d64919ae691567775e6de291994e";
-    public const string CatalogSha256 = "41161d6f9ff2002688d01e1804043474cf57e3c0fa549fb100436d8e3184f54c";
+    public const string CatalogSha256 = "4a6bc0c3f52702a5cdd92f96f7f7301caae0d6609e52b7bc15dada447c73f18a";
     internal static readonly BatteryCapabilityDescriptor[] GeneratedRules = {
         new("battery.rule.asus-ally-acpi.ROGAlly", "hc.device.ROGAlly", "ROGAlly", "frozen-HC-identity", "asus-ally-acpi", "boardProduct", new[] { "ASUSTEK COMPUTER INC." }, new[] { "RC71L" }, null, true),
         new("battery.rule.asus-ally-acpi.ROGAllyX", "hc.device.ROGAllyX", "ROGAllyX", "frozen-HC-identity", "asus-ally-acpi", "boardProduct", new[] { "ASUSTEK COMPUTER INC." }, new[] { "RC72LA" }, null, true),

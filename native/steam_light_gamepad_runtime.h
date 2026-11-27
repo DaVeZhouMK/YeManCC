@@ -16,6 +16,7 @@ struct SteamLightGamepadIntent {
     ULONGLONG deadline = 0;
     long long expiresAt = 0;
     bool enabled = false;
+    mutable std::atomic<ULONGLONG> renewAfter{0};
     std::shared_ptr<const FocusLightIsolationTicket> proof;
     std::shared_ptr<SteamLightGamepadLeaseState> lease;
 };
@@ -27,6 +28,7 @@ static unsigned long long g_steamLightGamepadSerial = 0;
 static ULONGLONG g_steamLightGamepadNextRenewal = 0;
 static constexpr ULONGLONG kSteamLightGamepadLeaseMs = 3000;
 static constexpr ULONGLONG kSteamLightGamepadRenewalMs = 750;
+static constexpr ULONGLONG kSteamLightGamepadRenewalReserveMs = 2 * kSteamLightGamepadRenewalMs;
 
 static void steamLightGamepadRequireFallback(const std::shared_ptr<SteamLightGamepadLeaseState>& lease, const char* reason) {
     if (!lease || g_steamLightGamepadLeaseState.load(std::memory_order_acquire) != lease) return;
@@ -102,11 +104,13 @@ static void steamLightGamepadQueue() {
         static DWORD boundAccount = 0;
         static bool lastEnabled = false;
         static bool lastReleasing = false;
+        static int lastPendingRelease = 0;
         static std::string lastReason;
         try {
             if (owner.empty()) owner = ymcc::deckymirror::randomHex(16);
             if (intent && steamLightGamepadIntentCurrent(intent)) {
                 json result = {{"ok", true}, {"enabled", false}, {"reason", "no-steam-lease"}};
+                bool steamRequestReturned = false;
                 const auto session = g_steamSettingsObserver.sessionSnapshot();
                 if (intent->enabled) {
                     const json candidate = {{"pid", session.pid}, {"created", std::to_string(session.created)}, {"root", W2U(session.root)}};
@@ -122,6 +126,7 @@ static void steamLightGamepadQueue() {
                         {"enabled", intent->enabled}, {"expiresAt", intent->expiresAt}, {"lightSessionProcess", binding}
                     }, [intent, session] { return steamLightGamepadIntentCurrent(intent) &&
                         (!intent->enabled || g_steamSettingsObserver.sessionSnapshot() == session); });
+                    steamRequestReturned = true;
                 }
                 const bool releasing = result.value("ok", false) && result.value("releasing", false);
                 if (!intent->enabled && result.value("ok", false) && !result.value("enabled", true) && !releasing &&
@@ -137,16 +142,39 @@ static void steamLightGamepadQueue() {
                     if (enabled && !steamLightGamepadFallbackRequired() && result.value("serial", 0ULL) == intent->serial && remaining > 0 &&
                         remaining <= static_cast<int>(kSteamLightGamepadLeaseMs) &&
                         result.value("scope", std::string()) == "steam-gamepad-navigation") {
-                        intent->lease->acknowledgedDeadline.store(
-                            (std::min)(intent->deadline, GetTickCount64() + static_cast<ULONGLONG>(remaining)), std::memory_order_release);
+                        const auto acknowledgedDeadline = (std::min)(intent->deadline,
+                            GetTickCount64() + static_cast<ULONGLONG>(remaining));
+                        intent->lease->acknowledgedDeadline.store(acknowledgedDeadline, std::memory_order_release);
+                        // Preserve time for a renewal and retry inside the original lease.
+                        // An unconfirmed intent continues to use the existing retry cadence.
+                        if (acknowledgedDeadline > kSteamLightGamepadRenewalReserveMs)
+                            intent->renewAfter.store(acknowledgedDeadline - kSteamLightGamepadRenewalReserveMs,
+                                std::memory_order_release);
                     } else steamLightGamepadRequireFallback(intent->lease, "steam-lease-not-established");
                     enabled = enabled && !intent->lease->fallback.load(std::memory_order_acquire);
                 }
                 const auto reason = result.value("reason", enabled ? std::string("navigation-suppressed") : std::string("navigation-released"));
-                if (enabled != lastEnabled || releasing != lastReleasing || reason != lastReason) {
+                int pendingRelease = 0;
+                if (!intent->enabled && releasing && current && !result.value("enabled", true)) {
+                    const auto count = result.find("pendingReleaseCount"), serial = result.find("serial"), scope = result.find("scope");
+                    if (count != result.end() && count->is_number_integer() &&
+                        serial != result.end() && serial->is_number_integer() && *serial == intent->serial &&
+                        scope != result.end() && scope->is_string() && *scope == "steam-gamepad-navigation") {
+                        const auto reported = count->get<long long>();
+                        if (reported > 0 && reported <= (std::numeric_limits<int>::max)())
+                            pendingRelease = static_cast<int>(reported);
+                    }
+                }
+                // The release tail can only drain blocked keys. Retry serials and
+                // clocks can still advance without providing any new evidence.
+                const bool releaseProgress = pendingRelease > 0 &&
+                    (lastPendingRelease == 0 || pendingRelease < lastPendingRelease);
+                if (enabled != lastEnabled || releasing != lastReleasing || reason != lastReason || releaseProgress) {
                     appendNativeLifecycleLog("summon-light-gamepad", {
                         {"session", intent->session}, {"serial", intent->serial}, {"requested", intent->enabled},
+                        {"intentLightTicketSerial", intent->proof ? intent->proof->logSerial : 0},
                         {"enabled", enabled}, {"reason", reason}, {"scope", "steam-gamepad-navigation"},
+                        {"steamRequestReturned", steamRequestReturned},
                         {"acknowledged", result.value("ok", false)}, {"current", steamLightGamepadIntentCurrent(intent)},
                         {"releasing", releasing}, {"pendingReleaseCount", result.value("pendingReleaseCount", 0)},
                         {"result", result.value("ok", false) ? "acknowledged" : "unconfirmed"},
@@ -154,12 +182,14 @@ static void steamLightGamepadQueue() {
                         {"leaseMs", kSteamLightGamepadLeaseMs}, {"renewalMs", kSteamLightGamepadRenewalMs}
                     });
                     lastEnabled = enabled; lastReleasing = releasing; lastReason = reason;
+                    lastPendingRelease = pendingRelease;
                 }
             }
         } catch (...) {
             if (intent && intent->enabled && steamLightGamepadIntentCurrent(intent))
                 steamLightGamepadRequireFallback(intent->lease, "steam-lease-worker-failed");
             appendNativeLifecycleLog("summon-light-gamepad", {{"enabled", false}, {"reason", "lease-worker-failed"},
+                {"intentLightTicketSerial", intent && intent->proof ? intent->proof->logSerial : 0},
                 {"scope", "steam-gamepad-navigation"}, {"deviceVisibilityChanged", false}});
         }
         responsibility->retire();
@@ -217,7 +247,9 @@ static void steamLightGamepadUiChanged() {
         previous->serial != g_steamLightGamepadSettledSerial.load(std::memory_order_acquire);
     if (previous && previous->session == g_focusSessionSequence && previous->enabled == enabled && previous->proof == proof &&
         ((!enabled && !releasePending) || now < g_steamLightGamepadNextRenewal ||
-         (enabled && previous->lease == lease && now < previous->deadline && g_steamLightGamepadQueued.load(std::memory_order_acquire)))) return;
+         (enabled && previous->lease == lease && now < previous->deadline &&
+          (now < previous->renewAfter.load(std::memory_order_acquire) ||
+           g_steamLightGamepadQueued.load(std::memory_order_acquire))))) return;
     auto intent = std::make_shared<SteamLightGamepadIntent>();
     intent->serial = ++g_steamLightGamepadSerial;
     intent->session = g_focusSessionSequence;

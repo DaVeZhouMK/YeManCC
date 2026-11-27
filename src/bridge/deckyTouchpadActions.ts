@@ -35,7 +35,7 @@ export function touchpadMirrorSource(persona:string,virtualEnabled:boolean,state
     enabled:state.enabled,summonEnabled:state.summonEnabled,specialEnabled:state.specialEnabled,rearEnabled:state.rearEnabled,
     ok:state.ok,available:state.available,deck:state.steamDeckAvailable,ps5:state.ps5Available});
 }
-export function createTouchpadMirrorActions(deps:{allowed:()=>boolean;read:()=>Promise<TouchpadMirrorRead>;power:()=>Promise<PowerLifecycleState>;
+export function createTouchpadMirrorActions(deps:{allowed:()=>boolean;read:()=>Promise<TouchpadMirrorRead>;power:(context:RelayMutationContext)=>Promise<PowerLifecycleState>;
   set:(patch:Partial<ScreenTouchpadConfig>,persona:ReturnType<typeof screenTouchpadProfile>)=>Promise<ScreenTouchpadState>}) {
  return {async execute(args:Record<string,unknown>,context:RelayMutationContext){
   if(Object.keys(args).length!==2 || typeof args.field!=='string' || !['layout','singleMode','leftMode','rightMode','summonPosition','specialMask','rearMask','standaloneSpecialMode'].includes(args.field) || typeof args.value!=='string')throw Error('TOUCHPAD_MIRROR_INVALID_REQUEST');
@@ -43,7 +43,7 @@ export function createTouchpadMirrorActions(deps:{allowed:()=>boolean;read:()=>P
   const source=context.controlAdmission?.touchpads;if(typeof source!=='string')throw Error('TOUCHPAD_MIRROR_SOURCE_REQUIRED');
   // Shared global overlay settings are not dedicated-profile/process quick actions.
   // The mirror relay serializes its own requests; do not take YMCC's cross-view lock.
-  const power=async()=>{checkpoint();const state=await deps.power();checkpoint();if(state.phase!=='ready'||!state.hardwareWritesAllowed||state.generation!==context.generation)throw Error('TOUCHPAD_MIRROR_POWER_NOT_READY');};
+  const power=async()=>{checkpoint();const state=await deps.power(context);checkpoint();if(state.phase!=='ready'||!state.hardwareWritesAllowed||state.generation!==context.generation)throw Error('TOUCHPAD_MIRROR_POWER_NOT_READY');};
   await power();const read=await deps.read();checkpoint();if(read.source!==source)throw Error('TOUCHPAD_MIRROR_SOURCE_CHANGED');
   const field=read.fields[args.field],choice=field?.choices.find(o=>o.data===args.value);
   if(!field?.supported||!choice||choice.disabled)throw Error('TOUCHPAD_MIRROR_UNSUPPORTED');

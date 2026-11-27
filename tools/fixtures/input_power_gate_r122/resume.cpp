@@ -15,6 +15,7 @@
 #include "sleep_power_dispatch.h"
 #include "sleep_power_observation.h"
 #include "sleep_wake_admission.h"
+#include "recovery_resume_commit.h"
 using json=nlohmann::json;
 @@POWER_ENUM@@
 @@MESSAGES@@
@@ -24,12 +25,13 @@ static std::atomic<unsigned long long> fixturePowerGeneration{100};
 static unsigned long long sharedPowerGeneration=0;
 static unsigned long long currentPowerGeneration(){return sharedPowerGeneration?sharedPowerGeneration:fixturePowerGeneration.load();}
 static ymcc::sleeppower::Dispatch g_sleepPowerDispatch;
+static ymcc::sleeppower::RecoveryResumeCommit g_recoveryResumeCommit;
 static unsigned long long serial=1;
 static bool sharedPowerKnown=true;
 
 static std::atomic<uint64_t> g_sharedPowerPublicationRevision{1},g_sharedPowerSuspendSerial{1};
-static bool sharedPowerAllowed=true;
-static bool hardwareWriteAllowed(){if(!sharedPowerKnown)g_sharedPowerSuspendSerial.fetch_add(1);return sharedPowerAllowed&&!g_exitRequested.load()&&!g_sleepPowerDispatch.pendingSuspend()&&g_powerLifecycle.load()==PowerLifecycle::Ready;}
+static bool sharedPowerAllowed=true,unstablePublicationOnly=false;
+static bool hardwareWriteAllowed(){if(!sharedPowerKnown)(unstablePublicationOnly?g_sharedPowerPublicationRevision:g_sharedPowerSuspendSerial).fetch_add(1);return sharedPowerAllowed&&!g_exitRequested.load()&&!g_sleepPowerDispatch.pendingSuspend()&&g_powerLifecycle.load()==PowerLifecycle::Ready;}
 static unsigned rawReadCount=0,rawFailAt=0;static bool rawFailDenied=false,unknownAfterSend=false,failNextRaw=false;
 @@RAW_READER@@
 static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* out,uint32_t bytes) noexcept {const bool fail=(++rawReadCount==rawFailAt)||failNextRaw;failNextRaw=false;const bool wasKnown=sharedPowerKnown,wasAllowed=sharedPowerAllowed;if(fail){if(rawFailDenied)sharedPowerAllowed=false;else sharedPowerKnown=false;}const auto result=fixtureProductionReadSharedSystemPower(out,bytes);sharedPowerKnown=wasKnown;sharedPowerAllowed=wasAllowed;return result;}
@@ -135,19 +137,24 @@ static void rogEnsureXboxFaceEnabled(const char*){
 static bool failRepairTimer=false;
 static UINT_PTR fixtureSetTimer(HWND,UINT_PTR id,UINT,TIMERPROC){if(id==kSleepPowerRedeliveryTimer){++repairArms;if(failRepairTimer)return 0;}else{++focusArms;boundary("focus-arm",false);}return 1;}
 static BOOL fixtureKillTimer(HWND,UINT_PTR id){if(id==WAKE_FOCUS_NUDGE_TIMER_ID)boundary("focus-cancel",false);return TRUE;}
+static LRESULT diagnosticOriginalCommit(WPARAM w,LPARAM l);
 static LRESULT fixtureSendMessage(HWND,UINT message,WPARAM w,LPARAM l){
  if(message==WM_POWER_INPUT_RECOVER){const auto result=recoverMessage(w);if(unknownAfterSend){unknownAfterSend=false;failNextRaw=true;rawFailDenied=false;}return result;}
  if(message==kSleepPowerForwardMessage){const auto receipt=g_sleepPowerDispatch.forwarded(static_cast<unsigned long long>(l),static_cast<ULONG>(w),++serial);g_sleepPowerDispatch.complete(receipt,++serial);return 0;}
- if(message==kSharedPowerStateMessage){projectSharedPowerLifecycle(g_hwnd);return 0;}if(message==WM_POWER_RESUME_COMMIT)return 0;
+ if(message==kSharedPowerStateMessage){projectSharedPowerLifecycle(g_hwnd);return 0;}
+ if(message==WM_POWER_RESUME_COMMIT)return diagnosticOriginalCommit(w,l);
  throw std::runtime_error("unexpected original repair message");
 }
 #define SetTimer fixtureSetTimer
 #define KillTimer fixtureKillTimer
 #define SendMessageW fixtureSendMessage
+static BOOL fixturePostRawReceipt(HWND,UINT,WPARAM,LPARAM);
+#define PostMessageW fixturePostRawReceipt
 [[maybe_unused]] static void sleepPowerArmRedelivery(HWND);
 static void inputCaptureSensorThreadRetryPowerWake(HWND){} // Sensor owner is exercised by the original sensor-power-only selector.
 static void inputCaptureSensorThreadRecoverReturned(HWND){} // Actual STA recovery executes in sleep.gyro-power power-wake.
 @@DELIVERY@@
+#undef PostMessageW
 
 
 static unsigned projectionMsiCalls=0,projectionOtherCalls=0;
@@ -174,6 +181,19 @@ enum class FanReadyDelivery { Idle, Settled, Deferred };
 static FanReadyDelivery fanHostScheduleEmergencyResume(uint64_t){++projectionOtherCalls;return FanReadyDelivery::Settled;}
 static bool fanHostPhysicalWakeCurrent(){return false;}
 static FanReadyDelivery fanHostPublishPhysicalWake(uint64_t,bool){return FanReadyDelivery::Idle;}
+// No cold startup offer belongs to the Input delivery scenarios.
+static bool fanStartupWakeCurrent(const ymcc::sleeppower::SharedPowerV1&,uint64_t,ULONGLONG){return false;}
+static bool fanManualActivityRevision(uint64_t&){return false;}
+static struct {
+ bool startupClaimCurrent(uint64_t,ULONGLONG,ULONGLONG,uint64_t,uint64_t) const{return false;}
+ bool needsClose(uint64_t) const{return false;}
+ bool publishStartup(uint64_t,ULONGLONG,ULONGLONG,uint64_t,uint64_t) const{return false;}
+ bool needsPhysicalDelivery(uint64_t,ULONGLONG) const{return false;}
+} g_fanPhysicalWake;
+static bool fanActivityIntentPresent(){return false;}
+static void fanHostQueueSuspend(const char*,uint64_t){throw std::runtime_error("unexpected Fan startup Close in Input fixture");}
+static void fanHostScheduleFanResume(uint64_t,bool){throw std::runtime_error("unexpected Fan startup resume in Input fixture");}
+static void publishSharedFanWake(uint64_t){throw std::runtime_error("unexpected Fan startup publication in Input fixture");}
 static void steamAppearancePublicReady(uint64_t){++projectionOtherCalls;}
 static bool nativeAyaLightingPublicReady(const ymcc::sleeppower::SharedPowerV1&){return true;}
 static bool projectPowerSourceRecovery(HWND,const ymcc::sleeppower::SharedPowerV1&){return true;}
@@ -196,10 +216,15 @@ static void sgNotifyParkedWakeGameRecovery(){}
 
 struct DiagnosticQueuedMessage {UINT message;WPARAM w;LPARAM l;};
 static std::vector<DiagnosticQueuedMessage> diagnosticMessages;
+static BOOL fixturePostRawReceipt(HWND window,UINT message,WPARAM w,LPARAM l){
+ if(window!=g_hwnd||message!=kSleepPowerForwardMessage||!l)throw std::runtime_error("unexpected raw receipt fallback");
+ diagnosticMessages.push_back({message,w,l});return TRUE;
+}
 static unsigned diagnosticSuccessfulPosts=0;
 static void stopPowerResumeWatchdog(){}
 static bool steamAppearanceResumeCommitted(unsigned long long){return true;}
-static void ipc_emit(const char*,const json&){}
+[[maybe_unused]] static void ipc_emit(const char*,const json&){}
+[[maybe_unused]] static bool ipc_emit_shared_power_fact(const json&,bool){return true;}
 static BOOL diagnosticPostMessage(HWND,UINT message,WPARAM w,LPARAM l){
  if(message!=WM_POWER_INPUT_RECOVER&&message!=kSharedPowerStateMessage)throw std::runtime_error("unexpected post outside original input/projection fanout");
  diagnosticMessages.push_back({message,w,l});++diagnosticSuccessfulPosts;return TRUE;
@@ -217,6 +242,7 @@ static void diagnosticConsumeQueued(){
  if(diagnosticMessages.empty())throw std::runtime_error("no posted message to consume");
  const auto message=diagnosticMessages.front();diagnosticMessages.erase(diagnosticMessages.begin());
  if(message.message==kSharedPowerStateMessage){diagnosticProjectionWindow(g_hwnd,message.w);return;}
+ if(message.message==kSleepPowerForwardMessage){fixtureSendMessage(g_hwnd,message.message,message.w,message.l);return;}
  if(message.message!=WM_POWER_INPUT_RECOVER||message.l!=0)throw std::runtime_error("queued input identity changed");
  recoverMessage(message.w);
 }
@@ -247,6 +273,7 @@ static void clearPending(){@@CLEAR_ROG_PENDING@@}
 static bool hasPending(){@@HAS_ROG_PENDING@@}
 static void reset(){
  @@RESET_PUBLIC_PROJECTION@@
+ g_recoveryResumeCommit.record({});
  observeReady=false;settle();fixturePowerGeneration+=10;g_exitRequested=false;g_powerLifecycle=PowerLifecycle::Ready;g_inputReady.silent(true);
  keepWriter=false;interruptAt.clear();edge.clear();changed=false;calls.clear();allCalls.clear();publications=repairArms=focusArms=binds=0;rawResult=true;waitEntered=false;rogAttempts=0;
  sharedPowerKnown=true;sharedPowerGeneration=0;sharedPowerAllowed=true;rawReadCount=rawFailAt=0;rawFailDenied=unknownAfterSend=failNextRaw=false;diagnosticMessages.clear();diagnosticSuccessfulPosts=0;failRepairTimer=false;projectionMsiCalls=projectionOtherCalls=0;projectionThrow=false;projectionUnknownAtMsi=false;g_sharedPowerProjectionPending=false;keepDiagnostics.clear();stepFailures.clear();
@@ -365,11 +392,33 @@ int main(int argc,char** argv){
  for(const std::string outcome:{"false","throw"})run("keep-registration-"+outcome,[&]{
   keepWriter=true;rawResult=outcome!="false";
   if(outcome=="throw"){interruptAt="raw";edge="throw";}
-  recoverMessage(static_cast<WPARAM>(fixturePowerGeneration.load()));completeOnce(true,false);
+  recoverMessage(static_cast<WPARAM>(fixturePowerGeneration.load()));
+  if(g_sleepPowerRedeliveryArmed)repairTimer();
+  completeOnce(true,false);
   require(g_inputReady&&!g_inputHostPowerAdmissionRevoked,"keep registration failure preserves original XInput fail-open admission");
   require(stepFailures.size()==(outcome=="throw"?1u:0u),"only a thrown registration records the original step failure");
   for(unsigned i=0;i<20;i++)recoverMessage(static_cast<WPARAM>(fixturePowerGeneration.load()));
   completeOnce(true,false);
+  require(count("raw-retry")== (outcome=="false"?1u:0u) && !g_sleepPowerRedeliveryArmed && !g_powerInputRecoverRedelivery,
+    "only explicit rejection spends one retry; neither persistent rejection nor an uncertain throw locks recovery");
+ });
+ run("keep-registration-retry-after-pending-query",[]{
+  keepWriter=true;rawResult=false;g_inputHostPowerAdmissionRevoked=false;
+  const auto generation=static_cast<WPARAM>(fixturePowerGeneration.load());
+  recoverMessage(generation);
+  require(count("raw")==1&&count("raw-retry")==0&&g_sleepPowerRedeliveryArmed&&g_powerInputRecoverRedelivery==generation,
+    "retained writer must park a retry for explicitly rejected physical registration");
+  require(g_inputReady&&!g_inputHostPowerAdmissionRevoked,"parking does not revoke the retained writer");
+  rawResult=true;
+  for(unsigned i=0;i<4;++i)recoverMessage(generation);
+  require(count("raw-retry")==0&&repairArms==1,"duplicate Ready cannot spend or renew the deferred retry");
+  const auto pending=g_sleepPowerDispatch.window(PBT_APMQUERYSUSPEND,++serial);repairTimer();
+  require(pending&&g_sleepPowerDispatch.pendingSuspend()&&count("raw-retry")==0&&g_powerInputRecoverRedelivery==generation,
+    "the pending query holds the original retry without orphaning it");
+  g_sleepPowerDispatch.complete(pending,++serial);settle();sleepPowerRedeliverCommitted(g_hwnd);
+  completeOnce(true);
+  require(count("raw-retry")==1&&count("rearm")==0&&count("rescan")==0&&g_powerInputRecoverRedelivery==0&&!g_sleepPowerRedeliveryArmed,
+    "the original Ready recovers the raw subscription once without rebuilding the retained Host");
  });
  for(const std::string initial:{"generation","phase","exit","unknown-shared","stale-shared"})run("keep-initial-"+initial,[&]{
   keepWriter=true;const auto captured=fixturePowerGeneration.load();
@@ -397,6 +446,28 @@ int main(int argc,char** argv){
   require(calls.empty(),"temporary UNKNOWN performs no input or Host operation");
   sharedPowerKnown=true;diagnosticPumpOnlyScheduled();
   require(count("raw")==1&&calls==std::vector<std::string>{"raw","stats"},"first successful post survives temporary UNKNOWN without a new commit");
+ });
+ run("full-recommit-same-generation-after-release",[]{
+  const auto generation=fixturePowerGeneration.load();
+  const auto commit=[&]{diagnosticOriginalCommit(0,static_cast<LPARAM>(generation));diagnosticPumpOnlyScheduled();};
+  g_recoveryResumeCommit.record({generation,g_sharedPowerSuspendSerial.load(),1});
+  commit();completeOnce(false);
+  ++g_sharedPowerPublicationRevision;commit();
+  require(diagnosticSuccessfulPosts==1&&count("rearm")==1,"projection refresh and duplicate commit cannot replenish Host recovery");
+  ++g_sharedPowerSuspendSerial;commit();
+  require(diagnosticSuccessfulPosts==1&&count("rearm")==1,"serial change without a new native Ready commit cannot reissue Host work");
+  g_powerLifecycle=PowerLifecycle::Suspended;g_inputReady.silent(false);g_inputHostPowerAdmissionRevoked=true;
+  const auto pending=g_sleepPowerDispatch.window(PBT_APMQUERYSUSPEND,++serial);
+  const auto recommitSerial=++g_sharedPowerSuspendSerial;
+  g_powerLifecycle=PowerLifecycle::Ready;
+  g_recoveryResumeCommit.record({generation,recommitSerial,2});
+  commit();
+  require(!g_inputReady&&diagnosticSuccessfulPosts==1&&count("rearm")==1,"pending notification holds successor Host admission");
+  g_sleepPowerDispatch.complete(pending,++serial);settle();sleepPowerRedeliverCommitted(g_hwnd);diagnosticPumpOnlyScheduled();
+  require(g_inputReady&&diagnosticSuccessfulPosts==2&&count("rearm")==2&&count("rescan")==2,"same-generation Ready recommit restores admission and dispatches the new Host scope");
+  require(count("raw")==1&&count("raw-retry")==0&&count("rog")==1&&binds==1&&count("face")==1&&count("reset")==1&&count("read")==1,"successor Host scope does not repeat completed registration, OEM or native state work");
+  for(unsigned i=0;i<4;++i)commit();
+  require(diagnosticSuccessfulPosts==2&&count("rearm")==2&&count("rescan")==2&&!g_powerResumeCommitRedelivery&&!g_powerInputRecoverRedelivery,"successor debt settles once without leaking or reissuing Host work");
  });
  run("unknown-delivery-armed-timer",[]{
   keepWriter=true;diagnosticMessages.clear();diagnosticSuccessfulPosts=0;
@@ -450,6 +521,33 @@ int main(int argc,char** argv){
  run("unknown-delivery-newer-debt-preserved",[]{g_powerInputRecoverRedelivery=fixturePowerGeneration.load()+1;sleepPowerRedeliverCommitted(g_hwnd);require(g_powerInputRecoverRedelivery==fixturePowerGeneration.load()+1&&calls.empty(),"current sender never clears or consumes newer debt");sharedPowerKnown=false;recoverMessage(static_cast<WPARAM>(fixturePowerGeneration.load()));require(g_powerInputRecoverRedelivery==fixturePowerGeneration.load()+1&&!g_sleepPowerRedeliveryArmed,"old unknown input cannot overwrite newer debt or arm old retry");});
  run("unknown-delivery-timer-failure",[]{keepWriter=true;diagnosticMessages.clear();diagnosticOriginalCommit(0,static_cast<LPARAM>(fixturePowerGeneration.load()));failRepairTimer=true;sharedPowerKnown=false;diagnosticConsumeQueued();require(!g_sleepPowerRedeliveryArmed&&g_powerInputRecoverRedelivery==fixturePowerGeneration&&calls.empty(),"failed timer retains notification and grants no action");failRepairTimer=false;sharedPowerKnown=true;productionPublishSharedPowerLifecycle("fixture-native-ready-after-timer-failure");diagnosticPumpOnlyScheduled();completeOnce(true);});
  run("unknown-delivery-duplicates-dont-renew-budget",[]{keepWriter=true;sharedPowerKnown=false;recoverMessage(static_cast<WPARAM>(fixturePowerGeneration.load()));for(unsigned i=0;i<30;++i)recoverMessage(static_cast<WPARAM>(fixturePowerGeneration.load()));while(g_sleepPowerRedeliveryArmed.load())repairTimer();const auto used=repairArms;for(unsigned i=0;i<30;++i)recoverMessage(static_cast<WPARAM>(fixturePowerGeneration.load()));require(used<=3&&repairArms==used&&!g_sleepPowerRedeliveryArmed&&calls.empty(),"duplicate current notifications cannot renew exhausted UNKNOWN retry budget");});
+ run("unknown-delivery-budget-renews-only-after-current-recommit",[]{
+  const auto generation=fixturePowerGeneration.load(),oldSuspend=static_cast<unsigned long long>(g_sharedPowerSuspendSerial.load());
+  g_recoveryResumeCommit.record({generation,oldSuspend,1});
+  diagnosticOriginalCommit(0,static_cast<LPARAM>(generation));
+  unstablePublicationOnly=true;sharedPowerKnown=false;diagnosticPumpOnlyScheduled();
+  require(repairArms==3&&!g_sleepPowerRedeliveryArmed&&calls.empty()&&g_powerInputRecoverRedelivery==generation,
+      "first committed scope exhausts three timers while preserving input delivery without action");
+  sleepPowerRedeliverCommitted(g_hwnd,generation,oldSuspend);
+  require(repairArms==3&&!g_sleepPowerRedeliveryArmed,"duplicate scope and publication movement cannot refill its budget");
+  const auto pending=g_sleepPowerDispatch.window(PBT_APMQUERYSUSPEND,++serial);
+  const auto nextSuspend=++g_sharedPowerSuspendSerial;
+  sleepPowerRedeliverCommitted(g_hwnd);
+  require(repairArms==3&&!g_sleepPowerRedeliveryArmed&&calls.empty(),"new pending suspend cannot refill or consume duty");
+  g_sleepPowerDispatch.complete(pending,++serial);settle();
+  sleepPowerRedeliverCommitted(g_hwnd);
+  require(repairArms==3&&!g_sleepPowerRedeliveryArmed&&calls.empty(),"a new serial without a matching Ready commit has no new budget");
+  g_recoveryResumeCommit.record({generation,nextSuspend,2});
+  sleepPowerRedeliverCommitted(g_hwnd,generation,oldSuspend);
+  require(repairArms==3&&!g_sleepPowerRedeliveryArmed&&calls.empty(),"old scoped delivery cannot spend the next scope budget while readback is unknown");
+  sleepPowerRedeliverCommitted(g_hwnd,generation,nextSuspend);
+  require(repairArms==4&&g_sleepPowerRedeliveryArmed&&calls.empty(),"same generation with a newly committed suspend serial earns bounded delivery retry");
+  sharedPowerKnown=true;unstablePublicationOnly=false;diagnosticPumpOnlyScheduled();
+  require(count("raw")==1&&count("rearm")==1&&count("rescan")==1&&g_inputReady&&
+      !g_powerInputRecoverRedelivery&&!g_sleepPowerRedeliveryArmed,"scheduled retry alone delivers the successor once without another publication");
+  sleepPowerRedeliverCommitted(g_hwnd,generation,nextSuspend);
+  require(count("raw")==1&&count("rearm")==1&&repairArms==4,"settled work is not repeated by another current wake");
+ });
 
  for(const unsigned at:{2u,3u})for(const bool denied:{false,true})run(std::string("unknown-delivery-sender-read-")+std::to_string(at)+(denied?"-denied":"-unknown"),[&]{
   keepWriter=true;diagnosticOriginalCommit(0,static_cast<LPARAM>(fixturePowerGeneration.load()));g_sleepPowerDispatch.callback(PBT_APMQUERYSUSPEND,++serial,[](const auto&){return false;});diagnosticConsumeQueued();settle();rawReadCount=0;rawFailAt=at;rawFailDenied=denied;repairTimer();

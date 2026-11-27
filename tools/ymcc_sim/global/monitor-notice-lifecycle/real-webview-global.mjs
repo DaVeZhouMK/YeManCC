@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
-import {run,sha,unique,LIMIT,REAL_MONITOR_RUNTIME_LIMIT} from '../../../fixtures/radial_private/scope.mjs';
+import {run,sha,unique,LIMIT,REAL_MONITOR_RUNTIME_LIMIT,freshReviewedOutput} from '../../../fixtures/radial_private/scope.mjs';
 import {MODULE,REAL_WEBVIEW_ID,ORIGINAL_ENTRIES,FIXED_NODE,WEBVIEW_INPUTS,WEBVIEW_COMPONENT} from './real-webview-adapter.mjs';
 import {validateBrowserOwnership} from './real-browser-ownership.mjs';
 
@@ -136,17 +136,18 @@ function reviewedPrepared(options){
  return {root,file,prepared,runtime,reviewFile,reviewPin};
 }
 export async function runRealWebViewComponent(options){
- need(key(process.execPath)===key(FIXED_NODE),'PINNED_NODE_REQUIRED');const root=freshRoot(options.evidenceDir),sources=repoPins();let attempted=false;
+ need(key(process.execPath)===key(FIXED_NODE),'PINNED_NODE_REQUIRED');const root=freshReviewedOutput(options.evidenceDir,[REPO,options.preparedRoot??process.env.YMCC_MONITOR_WEBVIEW_PREPARED_ROOT,process.env.YMCC_RADIAL_EXECUTION_REVIEW]),sources=repoPins();let attempted=false;
  const base={schemaVersion:1,id:REAL_WEBVIEW_ID,lifecycleComponent:WEBVIEW_COMPONENT,sourceHashes:sources,fullPersistentAcceptance:false,fullPersistentRecoveryAcceptance:false,fullProductAcceptance:false,normalYmccStarted:false,operatingSystemSleep:false};
  try{
-  const input=reviewedPrepared(options),{prepared,runtime}=input,p=prepared.builds[0].preparedOut,r=prepared.builds[1].preparedOut;
-  attempted=true;await original(root,'p-execute',ORIGINAL_ENTRIES[0],['--out',p,'--runtime',runtime.runtimeRoot,'--runtime-version',runtime.runtimeVersion]);
+  const input=reviewedPrepared(options),{prepared,runtime}=input;
+  const [preparedP,preparedR]=prepared.builds.map(build=>build.preparedOut),p=path.join(root,'p'),r=path.join(root,'r');
+  attempted=true;await original(root,'p-execute',ORIGINAL_ENTRIES[0],['--out',preparedP,'--execution-out',p,'--runtime',runtime.runtimeRoot,'--runtime-version',runtime.runtimeVersion]);
   const positiveState=read(path.join(p,'REAL-WEBVIEW-EXECUTE-PROCESS.json'));need(positiveState.status==='ACTUAL_REAL_WEBVIEW_NINE_CONTROLLERS_RETIRED_LATE_CALLBACKS_AND_NATURAL_BROWSER_EXIT_VERIFIED','ORIGINAL_POSITIVE_EXECUTION_NOT_ACCEPTED');
   const positive=validateRealWebViewResult(read(path.join(p,'real-webview-result.json')),read(path.join(p,'real-webview-private-launch.json')),{runtimeVersion:runtime.runtimeVersion,runtimeRoot:runtime.runtimeRoot});
-  await original(root,'r-execute',ORIGINAL_ENTRIES[1],['--out',r,'--positive-root',p]);
+  await original(root,'r-execute',ORIGINAL_ENTRIES[1],['--out',preparedR,'--execution-out',r,'--positive-root',preparedP]);
   const negativeState=read(path.join(r,'REAL-WEBVIEW-NEGATIVE-EXECUTE.json'));need(negativeState.status==='EXACT_STRONG_STATE_CAPTURE_NEGATIVE_FAILS_AT_REAL_LATE_COMPLETION_OWNER_RELEASE','ORIGINAL_NEGATIVE_EXECUTION_NOT_ACCEPTED');assert.equal(negativeState.execution.code,2);assert.equal(negativeState.execution.signal,null);assert.equal(negativeState.execution.killed,false);
   const negative=validateRealWebViewResult(read(path.join(r,'real-webview-result.json')),read(path.join(r,'real-webview-private-launch.json')),{negative:true,runtimeVersion:runtime.runtimeVersion,runtimeRoot:runtime.runtimeRoot});
-  verifyRepo(prepared.sourceHashes);verifyRuntime(runtime);need(sha(input.reviewFile)===input.reviewPin,'PARENT_REVIEW_CHANGED_DURING_EXECUTION');for(const build of prepared.builds)verifyOriginalPrepared(read(build.prepareRecord),build.preparedOut);
+  verifyRepo(prepared.sourceHashes);verifyRuntime(runtime);need(sha(input.reviewFile)===input.reviewPin,'PARENT_REVIEW_CHANGED_DURING_EXECUTION');for(const build of prepared.builds){need(sha(build.prepareRecord)===build.prepareRecordSha256,'PREPARED_RECORD_CHANGED_DURING_EXECUTION');verifyOriginalPrepared(read(build.prepareRecord),build.preparedOut);}
   const evidence=[];for(const [label,dir,processFile]of [['p',p,'REAL-WEBVIEW-EXECUTE-PROCESS.json'],['r',r,'REAL-WEBVIEW-NEGATIVE-EXECUTE.json']])for(const name of ['real-webview-result.json','real-webview-private-launch.json','run.log',processFile]){const target=path.join(root,label+'-'+name);fs.copyFileSync(path.join(dir,name),target,fs.constants.COPYFILE_EXCL);need(sha(target)===sha(path.join(dir,name)),'RAW_RECEIPT_COPY_CHANGED');evidence.push(pin(target));}
   const result={...base,status:'PASS',positive,negative,originalNegativeRawStatusPreserved:'FAIL',nativeLaunchAttempted:attempted,preparedManifest:pin(input.file),parentReview:{path:input.reviewFile,sha256:input.reviewPin},originalEvidence:evidence,runtimeIdentity:{root:runtime.runtimeRoot,version:runtime.runtimeVersion,fileCount:runtime.runtimeFiles.length},parentFeatureAcceptance:'INCOMPLETE_REQUIRES_SEPARATE_FULL_EXIT_AND_RECOVERY_EVIDENCE'};save(path.join(root,'result.json'),result);return result;
  }catch(error){const result={...base,status:error.blocked?'BLOCKED':'FAIL',error:String(error.stack??error),nativeLaunchAttempted:attempted,independentParentReviewRequired:true};save(path.join(root,'result.json'),result);error.componentResult=result;throw error;}

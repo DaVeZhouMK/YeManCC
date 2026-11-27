@@ -1,5 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
+
+// The extracted XInput scan is used by BUS-only fixture call sites.
+export function bindLifecycleBusDiscovery(source){
+ const reads=source.match(/\bpublishUi\b/g)??[];
+ if(!reads.length)return {text:source,receipt:null};
+ if(reads.length!==1||!/^    const bool win5GuideDemand = publishUi && win5MenuBoard\(\) &&\r?$/m.test(source))
+  throw Error('WIN5_XINPUT_PUBLICATION_SCOPE_CHANGED');
+ const text='static_assert(probeSrc == kGpReadBus);\nconstexpr bool publishUi = false;\n'+source;
+ const sha=value=>createHash('sha256').update(value).digest('hex');
+ return {text,receipt:{beforeSha256:sha(source),afterSha256:sha(text),publishUi:false,probeSource:'kGpReadBus'}};
+}
 
 // Select only observed compiler inputs. Snapshot copies remain archived separately.
 // A missing/unknown source or generated include fails closed; nothing is inferred

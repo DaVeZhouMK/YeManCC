@@ -20,14 +20,15 @@ const fn=component.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text=
 assert(fn,'production openTaskView missing');
 const body=fn.getText(component);
 function extractLifecycle(tree){
-  const stateNames=new Set(['disposed','menuStateEpoch','taskViewSessionEpoch','controlStateEpoch','losslessReadEpoch']);
+  const stateNames=new Set(['disposed','menuStateEpoch','menuStateRefreshPending','taskViewSessionEpoch','controlStateRead','resumePreflight','losslessReadEpoch']);
   const state=tree.statements.filter(ts.isVariableStatement).flatMap(n=>[...n.declarationList.declarations])
     .filter(d=>stateNames.has(d.name.getText(tree))).map(d=>'let '+d.getText(tree)+';').join('\n');
   const calls=tree.statements.filter(ts.isExpressionStatement).map(n=>n.expression).filter(ts.isCallExpression);
   const openWatch=calls.find(n=>n.expression.getText(tree)==='watch'&&ts.isArrowFunction(n.arguments[0])&&n.arguments[0].body.getText(tree)==='props.open');
   const unmount=calls.find(n=>n.expression.getText(tree)==='onBeforeUnmount');
-  assert(openWatch&&unmount,'production menu lifecycle missing');
-  return [state,openWatch.getText(tree)+';',unmount.getText(tree)+';'].join('\n');
+  const retire=tree.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='retireControlStateRead');
+  assert(openWatch&&unmount&&retire,'production menu lifecycle missing');
+  return [state,retire.getText(tree),openWatch.getText(tree)+';',unmount.getText(tree)+';'].join('\n');
 }
 const lifecycleBody=extractLifecycle(component);
 const engine=parse('engine.ts',sources['src/gamepad/engine.ts']);
@@ -71,7 +72,7 @@ function makeScenario({taskError=null,minimizeError=null,waitTask=false,waitMini
     touchEvents.set(event,evidence);return context.run(event);}},readTaskViewSystemTouchEvidence:event=>event?touchEvents.get(event):undefined,props:{open:true,game:{pid:1}},Date:{now:()=>123456789},document,HTMLElement:FixtureElement,
     watch:(_get,callback)=>{context.menuOpenChanged=callback;},onBeforeUnmount:callback=>{context.unmountFixture=callback;},
     refreshMenuState:async()=>{},trainerMenuOpen:{value:false},closeLosslessMenu:()=>{},
-    stopLosslessState:null,stopLosslessObservation:null,trainerCancelRequested:{value:false},stopTrainerState:null,stopPolicyGame:null,
+    stopLosslessState:null,stopLosslessObservation:null,trainerCancelRequested:{value:false},stopTrainerState:null,stopPolicyGame:null,stopTargetReadiness:null,
     onGamepadBack:()=>{},resizeOptiDialog:()=>{},QUICKAPP_SUSPENDED_EVENT:'fixture:suspended',onSuspendedStateSync:()=>{},
     onWakeGameRecovery:()=>{},onTargetLost:()=>{},refreshGame:()=>{},fsrResolve:null,closeDialog:()=>{},
     window:{dispatchEvent:()=>true,removeEventListener:()=>{}},exports:{},Event:class {constructor(type){this.type=type;}},CustomEvent:class {constructor(type,options){this.type=type;this.detail=options?.detail;}},

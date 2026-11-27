@@ -182,6 +182,12 @@ static void receiptDelayed(bool query,ULONGLONG delay){
  check(timeoutTimerDue==expected&&g_sgSleepTimeoutObservation.waiting&&!requestCount,"late public receipt delayed240s or granted action");
  timeoutSourceEvents={timeoutXml(506,1,original.fileTime100ns)};
  at(expected);sgSleepTimeoutTick();drainTimeoutSource();sgSleepTimeoutTick();
+ if(delay>=270000){
+  check(generation==gen&&!requestCount&&!sgSleepRetryActive()&&!g_sgSleepTimeoutWindow.active()&&
+        !timeoutTimerDue&&!g_sgAutomaticSleepBudget.requests(),"past-deadline source must retire without sending or charging");
+  passed(std::string("public-receipt-")+(query?"query":"suspend")+"-expired"+std::to_string(delay));
+  return;
+ }
  check(generation==gen&&sgSleepRetryActive()&&g_sgTask.retryKind==SgRetryKind::SleepTimeout,"original elapsed deadline did not reach same Native retry");
  dispatch();check(requestCount==1&&g_sgAutomaticSleepBudget.requests()==1,"original source must dispatch and charge exactly once");
  sgSleepTimeoutTick();sgDispatchSameModeRetry();check(requestCount==1,"queued duplicate replayed original request");
@@ -352,15 +358,15 @@ static void receiptSettledRetiredOriginal(){
 
 // SleepTimeout consumes the existing public classification; no fresh grace,
 // user proof, power generation, game task or action budget is created here.
-static ULONGLONG consumerOverdueResume443(){
+static ULONGLONG consumerOverdueResume(ULONGLONG elapsed=245000){
  receiptFresh();const auto original=receiptAdmit(false,0);
- at(original.tick+443000);originalEntry(original.fileTime100ns);
+ at(original.tick+elapsed);originalEntry(original.fileTime100ns);
  resumeAutomatic();resumeInteractive();drainActualWake();handle506(1,original.fileTime100ns);
- check(sgResumeClassificationHeld(generation)&&classificationTimerDue&&g_sgSleepTimeoutWindow.waiting,"field443 setup lost original public classification or overdue timeout");
+ check(sgResumeClassificationHeld(generation)&&classificationTimerDue&&g_sgSleepTimeoutWindow.waiting,"setup lost original public classification or overdue timeout");
  return original.fileTime100ns;
 }
 static void consumerDelayedManual443(){
- const auto original=consumerOverdueResume443(),resumeTick=nowTick;
+ const auto original=consumerOverdueResume(443000),resumeTick=nowTick;
  const auto classificationDeadline=classificationTimerDue;
  sgSleepTimeoutTick();at(resumeTick+700);sgDispatchSameModeRetry();
  check(!requestCount,"overdue timeout erased existing classification and slept before delayed human507");
@@ -372,7 +378,7 @@ static void consumerDelayedManual443(){
  passed("consumer443s-timeout-waits-original-classification-delayed-manual507");
 }
 static void consumerClassificationExpiry(bool duplicates){
- const auto original=consumerOverdueResume443(),resumeTick=nowTick,deadline=classificationTimerDue;
+ const auto original=consumerOverdueResume(),resumeTick=nowTick,deadline=classificationTimerDue;
  const auto elapsed=sgNowFileTime()-original;sgSleepTimeoutTick();
  if(duplicates){
   for(unsigned i=0;i<10;++i){at(resumeTick+10+i);resumeAutomatic();resumeInteractive();sgSleepTimeoutTick();}
@@ -389,7 +395,7 @@ static void consumerClassificationExpiry(bool duplicates){
 }
 static void consumerClassificationVeto(){
  for(const auto kind:{"manual","success","off","exit","generation","new-pbt"}){
-  consumerOverdueResume443();sgSleepTimeoutTick();const auto due=classificationTimerDue;
+  consumerOverdueResume();sgSleepTimeoutTick();const auto due=classificationTimerDue;
   if(std::string(kind)=="manual")g_sgLastPowerButtonWakeEventFileTime=nowFile;
   else if(std::string(kind)=="success")sgSleepTimeoutRecordSystemSuccess(nowFile);
   else if(std::string(kind)=="off")g_sgRetrySleepTimeout=false;
@@ -413,7 +419,7 @@ static void consumerNoClassification(){
  passed("consumer-no-resume-classification-keeps-original240s-send");
 }
 static void consumerRemainingBudget(){
- consumerOverdueResume443();check(g_sgAutomaticSleepBudget.consume()&&g_sgAutomaticSleepBudget.consume(),"prior request slots missing");
+ consumerOverdueResume();check(g_sgAutomaticSleepBudget.consume()&&g_sgAutomaticSleepBudget.consume(),"prior request slots missing");
  const auto due=classificationTimerDue;sgSleepTimeoutTick();at(due);sgResumeClassificationTick();drainActualWake();
  at(timeoutTimerDue);sgSleepTimeoutTick();requestAccepted=false;dispatch();drainActualWake();
  check(requestCount==1&&g_sgAutomaticSleepBudget.requests()==3&&!sgSleepRetryActive(),"classification continuation refunded or exceeded existing cumulative budget");
@@ -424,7 +430,7 @@ static void consumerRemainingBudget(){
 
 static void consumerResumeAfterScheduled(bool manual){
  receiptFresh();const auto original=receiptAdmit(false,0);
- at(original.tick+443000);originalEntry(original.fileTime100ns);handle506(1,original.fileTime100ns);
+ at(original.tick+245000);originalEntry(original.fileTime100ns);handle506(1,original.fileTime100ns);
  sgSleepTimeoutTick();const auto originalDue=timerDue;check(sgSleepRetryActive()&&originalDue&&!requestCount,"late resume setup did not schedule unissued timeout");
  at(nowTick+100);const auto resumeTick=nowTick;resumeAutomatic();resumeInteractive();drainActualWake();
  check(sgResumeClassificationHeld(generation)&&classificationTimerDue,"first resume after scheduled timeout lost original classification grace");
@@ -445,10 +451,10 @@ static void consumerResumeAfterScheduled(bool manual){
 
 static void consumerReturnTimerFailure(bool scheduled){
  if(scheduled){
-  receiptFresh();const auto original=receiptAdmit(false,0);at(original.tick+443000);originalEntry(original.fileTime100ns);handle506(1,original.fileTime100ns);
+  receiptFresh();const auto original=receiptAdmit(false,0);at(original.tick+245000);originalEntry(original.fileTime100ns);handle506(1,original.fileTime100ns);
   sgSleepTimeoutTick();const auto due=timerDue;at(nowTick+100);resumeAutomatic();resumeInteractive();drainActualWake();at(due);sgDispatchSameModeRetry();
   check(sgSleepRetryActive()&&!timerDue&&sgResumeClassificationHeld(generation),"timer-failure setup did not hold scheduled original");
- }else{consumerOverdueResume443();sgSleepTimeoutTick();}
+ }else{consumerOverdueResume();sgSleepTimeoutTick();}
  const auto classifyDue=classificationTimerDue;timeoutConsumerFailTimer=scheduled?SG_RETRY_TIMER_ID:SG_SLEEP_TIMEOUT_TIMER_ID;
  at(classifyDue);sgResumeClassificationTick();drainActualWake();
  check(!timeoutConsumerFailTimer&&!requestCount&&!sgSleepRetryActive()&&!timerDue&&!timeoutTimerDue&&!g_sgSleepTimeoutWindow.active(),"failed continuation timer stranded active retry or granted action");

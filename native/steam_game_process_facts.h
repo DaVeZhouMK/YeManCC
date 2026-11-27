@@ -98,7 +98,8 @@ enum class RegistrationFact {
     Exact,
     ShortIdBoundToHeldGame,
     ReportedAliasBoundToHeldGame,
-    CanonicalFullIdReportedShortBoundToHeldGame
+    CanonicalFullIdReportedShortBoundToHeldGame,
+    CanonicalFullIdReportedBaseBoundToHeldGame
 };
 inline RegistrationFact registrationFact(const Arguments& args, DWORD gamePid,
     DWORD steamPid, const TrackerIdentity& tracker,
@@ -106,16 +107,19 @@ inline RegistrationFact registrationFact(const Arguments& args, DWORD gamePid,
     if (!gamePid || !steamPid || gamePid == steamPid ||
         !exactGameId(tracker.appid, tracker.fullGameId) ||
         args.gamePid != gamePid || args.steamPid != steamPid) return RegistrationFact::Unknown;
-    // A canonical Type2 command-line full ID may be reported by the UI as the
-    // tracker's complete short ID. Keep this fact distinct from Exact/Short/
-    // ReportedAlias; the common guard above already binds both held PIDs.
+    // A Type2 host can carry the original full ID while its browser uses the
+    // shortcut AppID or a base app registration. Neither UI ID is the card's
+    // identity. Only the exact host full ID and both held PIDs link these roles.
     if (reported && reported->appid &&
         (tracker.fullGameId >> 32) == tracker.appid &&
         (tracker.fullGameId & 0xffffffffULL) == 0x02000000ULL &&
-        args.gameId == tracker.fullGameId && reported->gameId == tracker.appid &&
-        (reported->appid == tracker.appid ||
-            reported->appid == (tracker.appid & 0xffffffU)))
-        return RegistrationFact::CanonicalFullIdReportedShortBoundToHeldGame;
+        args.gameId == tracker.fullGameId) {
+        if (reported->gameId == tracker.appid &&
+            (reported->appid == tracker.appid || reported->appid == (tracker.appid & 0xffffffU)))
+            return RegistrationFact::CanonicalFullIdReportedShortBoundToHeldGame;
+        if (reported->appid <= 0xffffffU && reported->gameId == reported->appid)
+            return RegistrationFact::CanonicalFullIdReportedBaseBoundToHeldGame;
+    }
     if (reported && (!reported->appid || !reported->gameId ||
         args.gameId != reported->gameId)) return RegistrationFact::Unknown;
     if (argumentsMatch(args, gamePid, steamPid, tracker.appid, tracker.fullGameId)) {
@@ -208,6 +212,51 @@ inline std::optional<std::wstring> commandLine(HANDLE h) {
         value->length > 65534 || buffer < start || buffer > end || value->length > end - buffer) return {};
     const std::wstring out(value->buffer, value->length / sizeof(wchar_t));
     return out.find(L'\0') == std::wstring::npos ? std::optional<std::wstring>(out) : std::nullopt;
+}
+
+inline bool absoluteVbsPath(const std::wstring& path) noexcept {
+    if (path.size() < 8 || path.find(L'\0') != std::wstring::npos) return false;
+    const auto drive = path[0];
+    return ((drive >= L'A' && drive <= L'Z') || (drive >= L'a' && drive <= L'z')) &&
+        path[1] == L':' && (path[2] == L'\\' || path[2] == L'/') &&
+        _wcsicmp(path.c_str() + path.size() - 4, L".vbs") == 0;
+}
+
+inline bool windowsScriptHostImage(const std::wstring& image) {
+    wchar_t directory[MAX_PATH];
+    const auto matches = [&](UINT size) {
+        if (!size || size >= MAX_PATH) return false;
+        const std::wstring prefix(directory, size);
+        return samePath(image, prefix + L"\\wscript.exe") || samePath(image, prefix + L"\\cscript.exe");
+    };
+    return matches(GetSystemDirectoryW(directory, MAX_PATH)) ||
+        matches(GetSystemWow64DirectoryW(directory, MAX_PATH));
+}
+
+inline std::wstring scriptHostVbsOperand(HANDLE host, const std::wstring& hostImage, DWORD steamPid) {
+    if (!steamPid || !windowsScriptHostImage(hostImage) ||
+        !alive(host) || parent(host) != steamPid) return {};
+    const auto command = commandLine(host);
+    if (!command || command->empty()) return {};
+    int count = 0;
+    const auto args = CommandLineToArgvW(command->c_str(), &count);
+    if (!args) return {};
+    const auto freeArguments = [](LPWSTR* value) noexcept { LocalFree(value); };
+    const std::unique_ptr<LPWSTR, decltype(freeArguments)> ownedArguments(args, freeArguments);
+    // Check the script operand, not a matching path passed as a script argument.
+    int i = 1;
+    for (; i < count; ++i) {
+        const auto arg = args[i];
+        if (_wcsicmp(arg, L"//B") && _wcsicmp(arg, L"//I") && _wcsicmp(arg, L"//NoLogo")) break;
+    }
+    if (i == count) return {};
+    std::wstring operand(args[i]);
+    return absoluteVbsPath(operand) && alive(host) ? operand : std::wstring{};
+}
+
+inline bool scriptHostRunsVbs(HANDLE host, const std::wstring& hostImage,
+    const std::wstring& scriptPath, DWORD steamPid) {
+    return absoluteVbsPath(scriptPath) && samePath(scriptHostVbsOperand(host, hostImage, steamPid), scriptPath);
 }
 }
 
@@ -399,7 +448,7 @@ class ProcessOwner final {
     // Only the existing source owner can combine its actual fresh observation
     // with held process facts. Caller-constructed source DTOs cannot mint this.
     ProcessGroupCapture acquireGroup(const std::shared_ptr<ProcessLease>&,
-        const ProcessGroupSeed&) const;
+        const ProcessGroupSeed&, DWORD nativePrimaryPid) const;
 public:
     ProcessOwner(const ProcessOwner&) = delete;
     ProcessOwner& operator=(const ProcessOwner&) = delete;

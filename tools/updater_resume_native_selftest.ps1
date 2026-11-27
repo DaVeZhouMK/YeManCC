@@ -1,9 +1,9 @@
 ﻿[CmdletBinding()]
-param([string]$OutputRoot='',[string]$ProductSourceRoot='',[switch]$ConfigStormOnly,[switch]$ManifestSerializationOnly,
+param([string]$OutputRoot='',[string]$ProductSourceRoot='',[switch]$ConfigStormOnly,[switch]$ManifestSerializationOnly,[switch]$ManifestLoopbackOnly,[switch]$WeakNetworkOnly,
  [ValidatePattern('^[A-Za-z0-9 -]*$')][string]$ConfigStormCase='')
 $ErrorActionPreference='Stop'
 if($ConfigStormCase -and !$ConfigStormOnly){throw 'An exact config case requires ConfigStormOnly'}
-if($ConfigStormOnly -and $ManifestSerializationOnly){throw 'Select only one directed mode'}
+if(@($ConfigStormOnly,$ManifestSerializationOnly,$ManifestLoopbackOnly,$WeakNetworkOnly).Where({$_}).Count -gt 1){throw 'Select only one directed mode'}
 
 # Windows PowerShell launched by pnpm/pwsh must resolve its own built-in modules first.
 $ownModules = Join-Path $PSHOME 'Modules'
@@ -19,7 +19,7 @@ if (!$run.StartsWith($base+'\',[StringComparison]::OrdinalIgnoreCase)) {throw 'U
 $probe=$base
 while($probe -and $probe.Length -gt 3){if(Test-Path -LiteralPath $probe){if((Get-Item -LiteralPath $probe -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'REPARSE_TEST_ROOT'}};$probe=Split-Path -Parent $probe}
 New-Item -ItemType Directory -Path $run -Force|Out-Null
-$identityNames=@('native/main.cpp','native/update_config_state.h','native/update_download_resume.h','native/update_download_control.h','native/update_cache_maintenance.h','native/update_install_recovery.h','native/version.h','native/shared_game_media_capacity.h','deps/json/json.hpp')
+$identityNames=@('native/main.cpp','native/update_config_state.h','native/update_download_resume.h','native/update_download_control.h','native/update_cache_maintenance.h','native/update_install_recovery.h','native/version.h','native/shared_game_media_capacity.h','native/sleep_power_state.h','native/sleep_power_revocation.h','native/http_request_deadline.h','deps/json/json.hpp')
 $sourceBefore=[ordered]@{}
 foreach($name in $identityNames){$candidate=Join-Path $project $name;if(Test-Path -LiteralPath $candidate -PathType Leaf){$sourceBefore[$name]=(Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash}}
 $sourceBefore['harness']=(Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash
@@ -65,6 +65,15 @@ $fixture=$fixture.Replace('//__PRODUCTION_ATOMIC_WRITER__',$atomicWriter.Replace
 
 
 $fixture=$fixture.Replace('//__PRODUCTION_PREDOWNLOAD_REGISTRATION__',(Slice '    ipc_on("app.updatePredownloadActivity"' '    ipc_on("app.version"'))
+$fixture=$fixture.Replace('//__PRODUCTION_MANIFEST_TRANSPORT__',(Slice 'static json httpGet(' 'static std::string downloadWinHttpError('))
+if($ManifestLoopbackOnly) {
+    $fixture=$fixture.Replace('//__PRODUCTION_MANIFEST_SETUP__',(Slice 'static void setHttpTimeouts(' 'static std::string trim_ascii('))
+    $fixture=$fixture.Replace('//__PRODUCTION_MANIFEST_CRACK_URL__',(Slice 'static bool crackHttpUrl(' 'static bool fanHttpNeedsPower('))
+}
+foreach($stamp in @(@('app.checkUpdate','MANIFEST'),@('app.downloadUpdate','DOWNLOAD'))){
+    $line=[regex]::Match($main,'(?m)^        if \(cmd == "'+[regex]::Escape($stamp[0])+'"\) (captureUpdate\w+Admission\(args\);)\r?$')
+    if($line.Success){$fixture=$fixture.Replace('//__PRODUCTION_'+$stamp[1]+'_STAMP__',$line.Groups[1].Value)}
+}
 $fixture=$fixture.Replace('//__PRODUCTION_MANIFEST_REGISTRATION__',(Slice '    ipc_on("app.checkUpdate"' '    ipc_on("app.updateState"'))
 $fixture=$fixture.Replace('//__PRODUCTION_CACHE_REGISTRATION__',(Slice '    ipc_on("app.retireUpdateDownload"' '    ipc_on("app.downloadUpdate"'))
 $source=Join-Path $run 'updater-resume-selftest.cpp'
@@ -86,9 +95,9 @@ if errorlevel 1 exit /b 1
 where cl.exe >nul 2>nul
 if errorlevel 1 call "$vcvars" >nul
 if errorlevel 1 exit /b 1
-cl /nologo /std:c++20 /utf-8 /EHsc /W4 /MT /I"$project\deps\json" /I"$project\native" "$source" /Fo"$run\updater-resume-selftest.obj" /Fe"$run\updater-resume-selftest.exe" /link advapi32.lib user32.lib
+cl /nologo /std:c++20 /utf-8 /EHsc /W4 /MT $(if($ManifestLoopbackOnly){'/DYMCC_MANIFEST_LOOPBACK'}) /I"$project\deps\json" /I"$project\native" "$source" /Fo"$run\updater-resume-selftest.obj" /Fe"$run\updater-resume-selftest.exe" /link advapi32.lib user32.lib $(if($ManifestLoopbackOnly){'winhttp.lib ws2_32.lib'})
 if errorlevel 1 exit /b 1
-"$run\updater-resume-selftest.exe" "$run\fixtures" $(if($ConfigStormOnly){'--config-storm'}elseif($ManifestSerializationOnly){'--manifest-serialization'}else{''}) $(if($ConfigStormCase){'"'+$ConfigStormCase+'"'}else{''})
+"$run\updater-resume-selftest.exe" "$run\fixtures" $(if($ConfigStormOnly){'--config-storm'}elseif($ManifestSerializationOnly){'--manifest-serialization'}elseif($ManifestLoopbackOnly){'--manifest-loopback'}elseif($WeakNetworkOnly){'--weak-network'}else{''}) $(if($ConfigStormCase){'"'+$ConfigStormCase+'"'}else{''})
 "@ | Set-Content -LiteralPath $bat -Encoding ascii
 & $bat *> (Join-Path $run 'compile-and-test.log')
 $code=$LASTEXITCODE
@@ -104,6 +113,9 @@ foreach($name in $sourceBefore.Keys){if($sourceAfter[$name] -ne $sourceBefore[$n
 $record['sourceInputsBefore']=$sourceBefore;$record['sourceInputsAfter']=$sourceAfter;$record['sourceDrift']=$sourceDrift;$record['configurationOnly']=[bool]$ConfigStormOnly
 $record['selectedConfigCase']=$ConfigStormCase
 $record['manifestSerializationOnly']=[bool]$ManifestSerializationOnly
+$record['manifestLoopbackOnly']=[bool]$ManifestLoopbackOnly
+$record['weakNetworkOnly']=[bool]$WeakNetworkOnly
+if($ManifestLoopbackOnly){$record['scope']='Actual WinHTTP, test-local 127.0.0.1 only with direct proxy policy and inert product power input; no hardware or installer'}
 if($toolchainLine){$record['toolchainPath']=$toolchain;$record['toolchainSha256']=(Get-FileHash -LiteralPath $toolchain -Algorithm SHA256).Hash}
 if($sourceDrift.Count){$record['status']='SOURCE_DRIFT';if(!$code){$code=1}}
 

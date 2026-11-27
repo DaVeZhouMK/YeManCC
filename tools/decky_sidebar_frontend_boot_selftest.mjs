@@ -34,6 +34,27 @@ export async function frontendBootTests(root,out,onlyCase=null,excludeCase=null)
  await run(queueCase,async()=>{
   const official=fixture();official.inject();official.loader.pluginReloadQueue.push({name:'ymcc-sidebar'});
   await official.advance(60000);assert.equal(official.calls.length,0);assert.equal(official.timers.size,0);
+  for(const edge of ['queue-before-read','row-before-read','lock-before-read','transient-lock-before-read','ready-marker-before-read']){
+   const f=fixture({expectedVersion:'v3.3.1',version:'v3.3.1'});f.inject();f.fireNext();
+   const outcomes=[];f.host.console={info:line=>{const entry=JSON.parse(line.slice('[YMCC:DeckyHealth] '.length));if(entry.stage==='frontend-fallback-probe')outcomes.push(entry.outcome);}};
+   if(edge==='queue-before-read')f.loader.pluginReloadQueue.push({name:'ymcc-sidebar'});
+   if(edge==='row-before-read')f.loader.plugins.push({name:'ymcc-sidebar'});
+   if(edge.endsWith('lock-before-read'))f.loader.reloadLock=true;
+   if(edge==='transient-lock-before-read')queueMicrotask(()=>{f.loader.reloadLock=false;});
+   if(edge==='ready-marker-before-read')f.host.__YMCC_DECKY_FRONTEND__={active:true,buildId:f.value.frontendBuildId};
+   await flush();
+   const first={reads:f.reads(),imports:f.calls.length};
+   assert.deepEqual(first,{reads:0,imports:0},edge+' must not send an unnecessary official backend request');
+   f.loader.reloadLock=false;
+   await f.advance(60000);
+   const recovered=edge.endsWith('lock-before-read');
+   assert.equal(f.reads(),recovered?1:0,edge);
+   assert.equal(f.calls.length,recovered?1:0,edge);
+   assert.equal(f.state().phase,edge==='queue-before-read'||edge==='row-before-read'?'official-load-in-progress':'current',edge);
+   assert.equal(f.timers.size,0,edge);
+   assert.deepEqual(outcomes,recovered?['official-slot-busy','reading-enabled-plugin']:[edge==='ready-marker-before-read'?'frontend-already-ready':'official-owns-plugin'],edge);
+   officialLockFacts.push({edge,first,reads:f.reads(),imports:f.calls.length,phase:f.state().phase,timers:f.timers.size,outcomes});
+  }
   for(const edge of ['released-before-retry','locked-after-list','queued-before-retry','ready-before-retry','off-before-retry','pagehide-before-retry','lock-stays-busy']){
    const f=fixture();let complete;
    if(edge==='locked-after-list'){
@@ -74,8 +95,21 @@ export async function frontendBootTests(root,out,onlyCase=null,excludeCase=null)
   // Counterfactual: the original probe can run if the same document stays live.
   await f.advance(2459);assert.equal(f.reads(),1);assert.equal(f.calls.length,1);assert.equal(f.state().phase,'current');
   const expected={schema:1,stage:'frontend-fallback-import-submitted',probe:1};
+  const readProbe={schema:1,stage:'frontend-fallback-probe',probe:1,outcome:'reading-enabled-plugin'};
   win5Window.fallbackImportRecords=records;
-  assert.deepEqual(records,[expected],'One submitted fallback import must have one distinct diagnostic');
+  assert.deepEqual(records.filter(row=>row.stage==='frontend-fallback-import-submitted'),[expected],'One submitted fallback import must have one distinct diagnostic');
+  // 2026-11-27 local v3.3.1: Boot logged before the still-absent plugin;
+  // ready hooks alone do not establish that the official load is idle.
+  const local=fixture({expectedVersion:'v3.3.1',version:'v3.3.1'}),localRecords=[];
+  local.host.console={info:line=>localRecords.push(JSON.parse(line.slice(prefix.length)))};
+  local.inject();await local.advance(11999);
+  assert.deepEqual([local.state().probes,local.reads(),local.calls.length],[0,0,0]);
+  await local.advance(1);
+  assert.deepEqual([local.state().probes,local.reads(),local.calls.length],[1,1,1]);
+  assert.equal(local.state().phase,'current');assert.equal(local.timers.size,0);
+  assert.equal(local.loader.plugins.filter(p=>p.name==='ymcc-sidebar').length,1);
+  assert.deepEqual(localRecords,[readProbe,expected]);
+  win5Window.localV331={beforeProbeMs:11999,probeAtMs:12000,localRecords};
   const official=fixture();const notSubmitted=[];official.host.console={info:line=>notSubmitted.push(line)};
   official.inject();official.loader.plugins.push({name:'ymcc-sidebar'});official.ready();await official.advance(60000);
   const revoked=fixture();revoked.host.console=official.host.console;revoked.inject();revoked.cancel();await revoked.advance(60000);
@@ -83,7 +117,7 @@ export async function frontendBootTests(root,out,onlyCase=null,excludeCase=null)
   const queued=fixture({queued:true});const queuedRecords=[];queued.host.console={info:line=>{queuedRecords.push(JSON.parse(line.slice(prefix.length)));throw Error('diagnostic sink unavailable');}};
   queued.inject();await queued.advance(12000);assert.equal(queued.calls.length,1);assert.equal(queued.state().phase,'waiting-receipt');
   await queued.advance(30000);assert.equal(queued.calls.length,1);assert.equal(queued.state().phase,'failed');assert.equal(queued.timers.size,0);
-  assert.deepEqual(queuedRecords,[expected]);win5Window.noFallbackRecords=notSubmitted.length;win5Window.queuedRecords=queuedRecords;
+  assert.deepEqual(queuedRecords,[readProbe,expected]);win5Window.noFallbackRecords=notSubmitted.length;win5Window.queuedRecords=queuedRecords;
  });
  await run(ownerCase,async()=>{
   const rows=[{name:'ymcc-sidebar',version:'0.0.1',load_type:1,disabled:false}];

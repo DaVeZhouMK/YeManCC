@@ -277,6 +277,60 @@ export async function trainerRecoveryTests(out,{caseFilter=null}={}){
    }finally{stop();f.fx.powerReadHook=null;for(const reply of publicReplies.splice(0))reply({...f.fx.power});await flush();assert.equal(f.fx.timers.size,0);assert.equal(f.fx.sharedTimers.size,0);assert([...f.fx.events.values()].every(s=>s.size===0));f.fx.dispose();}
   }
  });
+ await check('lifecycle: direct trainer read cannot bypass the current shared power hold',async()=>{
+  for(const reason of ['pending','unknown']){
+   const f=await createTrainerRecoveryFixture({separatePowerClock:true});
+   const ready={phase:'ready',generation:7,known:true,hardwareWritesAllowed:true,notificationPending:false,observedNotificationSequence:12,suspendSerial:3,publicationRevision:1};
+   f.fx.power={...ready};let projected={...ready};f.fx.powerReadHook=async()=>projected;
+   const stop=f.lifecycle.subscribeTrainerLifecycle(()=>{});
+   const publish=async state=>{projected=state;for(const listener of [...f.fx.events.get('ipc:power.lifecycleChanged')])listener({detail:state});await flush();};
+   try{
+    await flush();
+    await publish({...ready,publicationRevision:2,known:reason!=='unknown',notificationPending:reason==='pending',hardwareWritesAllowed:false});
+    assert(!f.sharedPower.isSharedPowerLifecycleAdmitted(f.sharedPower.getSharedPowerLifecycle()),'public observer retains the hold');
+    await assert.rejects(f.lifecycle.assertTrainerPowerReady(f.lifecycle.getTrainerLifecycleEpoch()),/电源|取消/,reason+': same-scope direct Ready has no admission');
+    const successor={...ready,publicationRevision:3};f.fx.power=successor;await publish(successor);
+    assert.equal(await f.lifecycle.assertTrainerPowerReady(f.lifecycle.getTrainerLifecycleEpoch()),7,'direct check continues after the actual public Ready');
+    f.fx.power={...successor,generation:8};
+    await assert.rejects(f.lifecycle.assertTrainerPowerReady(f.lifecycle.getTrainerLifecycleEpoch()),/电源|取消/,'direct read cannot invent a new public generation');
+    noSideEffects(f);
+   }finally{stop();await flush();assert.equal(f.fx.sharedTimers.size,0);f.fx.dispose();}
+  }
+ });
+ await check('lifecycle: a superseded power read releases queued preparation',async()=>{
+  const f=await createTrainerRecoveryFixture({separatePowerClock:true}),g=game();
+  const initial={...f.fx.power,known:true,notificationPending:false,generation:7,suspendSerial:3,observedNotificationSequence:10,publicationRevision:20};
+  f.fx.power=initial;
+  const publish=async state=>{f.fx.power=state;for(const listener of [...f.fx.events.get('ipc:power.lifecycleChanged')])listener({detail:state});await flush();};
+  const stop=f.lifecycle.subscribeTrainerLifecycle(()=>{});
+  let release,old,next;
+  try{
+   await publish(initial);
+   assert(f.sharedPower.isSharedPowerLifecycleAdmitted(f.sharedPower.getSharedPowerLifecycle()));
+   f.fx.put(f.fx.powerDir+'\\YeManTrainerPrepare.ps1','inert worker');
+   f.fx.workerHook=async(_program,args)=>{
+    const output=args[args.indexOf('-ResultPath')+1];
+    f.fx.put(output,JSON.stringify(f.fx.requestReceipt(args,{ok:false,gameName:g.title,state:'unavailable'})));
+    return {ok:true};
+   };
+   let held=true,retired=false,successor=false;
+   f.fx.powerHook=()=>{if(held){held=false;return new Promise(resolve=>release=resolve);}};
+   old=f.trainer.prepareGameTrainer(g.title,{processPath:g.path,processTarget:g});
+   void old.then(()=>{},error=>{retired=error.name==='GameTrainerCancelledError';});
+   await flush();assert.equal(typeof release,'function');noSideEffects(f);
+   await publish({...initial,publicationRevision:21});
+   assert.equal(f.trainer.prepareGameTrainer(g.title,{processPath:g.path,processTarget:g}),old,'metadata alone must not retire a live request');
+   // A coalesced Ready can replace the scope without changing generation.
+   await publish({...initial,publicationRevision:22,suspendSerial:4,observedNotificationSequence:11});
+   next=f.trainer.prepareGameTrainer(g.title,{processPath:g.path,processTarget:g});
+   void next.then(value=>{successor=value.state==='unavailable';},()=>{});
+   await flush();
+   const beforeOldReply={retired,successor,workers:f.fx.workers.length};
+   release();await Promise.allSettled([old,next]);
+   assert.deepEqual(beforeOldReply,{retired:true,successor:true,workers:1},'a read from a retired scope must not hold the preparation queue');
+   assert.equal(f.fx.workers.length,1,'late read cannot submit a second worker');
+  }finally{release?.();await Promise.allSettled([old,next]);stop();f.fx.dispose();}
+ });
  await check('lifecycle: recovery timer retires on power or page loss without an automatic replay',async()=>{
   for(const event of ['ipc:power.pending','ipc:power.resuming','ipc:webview.recovering','pagehide']){
    const f=await createTrainerRecoveryFixture({separatePowerClock:true});f.fx.game=game();const publicReplies=[],stop=f.recovery.startGameTrainerRecovery();try{
@@ -354,6 +408,41 @@ export async function trainerRecoveryTests(out,{caseFilter=null}={}){
    assert.equal(f.fx.reads.filter(r=>r.p===f.fx.indexPath).length,1,'duplicate current Ready cannot repeat the cache check');
    assert.equal(f.fx.timers.size,0);noSideEffects(f);
   }finally{stop();assert.equal(f.fx.sharedTimers.size,0);f.fx.dispose();}
+ });
+ await check('wake replaces a retired same-instance cache read before the old reply',async()=>{
+  for(const mode of ['late-success','late-fault','suspend-again','target-cleared']){
+   const f=await createTrainerRecoveryFixture({separatePowerClock:true}),g=game();
+   const initial={known:true,phase:'ready',generation:1,publicationRevision:1,observedNotificationSequence:1,suspendSerial:1,hardwareWritesAllowed:true,notificationPending:false};
+   f.fx.game=g;f.fx.power=initial;f.fx.seedIndex();
+   const reads=[];
+   f.fx.readHook=p=>p!==f.fx.indexPath||(mode==='late-success'&&reads.length>0)?undefined:new Promise((resolve,reject)=>reads.push({resolve,reject}));
+   const observe=async state=>{f.fx.power=state;for(const listener of [...f.fx.events.get('ipc:power.lifecycleChanged')])listener({type:'ipc:power.lifecycleChanged',detail:state});await flush();};
+   const stop=f.recovery.startGameTrainerRecovery();
+   try{
+    await flush();assert.equal(indexReads(f),1);assert.equal(reads.length,1);
+    const suspended={...initial,phase:'suspending',publicationRevision:2,observedNotificationSequence:2,suspendSerial:2,hardwareWritesAllowed:false};
+    await observe(suspended);assert.equal(ready(f),null);assert.equal(indexReads(f),1,'a hold cannot start a new cache read');
+    const current={...initial,publicationRevision:3,observedNotificationSequence:3,suspendSerial:2};
+    await observe(current);
+    assert.equal(indexReads(f),2,mode+': current Ready joined the retired same-instance read');
+    if(mode==='late-success'){
+     const restored=ready(f);assert(restored,'the new read must finish without the old reply or a retry tick');
+     reads[0].resolve();await flush();assert.deepEqual(ready(f),restored);assert.equal(f.fx.hashes.length,2);
+    }else{
+     reads[0].reject(Error('late retired cache read failure'));await flush();assert.equal(ready(f),null);
+     if(mode==='late-fault'){
+      const faults=[],joined=f.trainer.restoreReadyGameTrainer(g.title,g.path,{...options(g),onCacheFault:fault=>faults.push(fault)});
+      await flush();assert.equal(indexReads(f),2,'retirement must not delete the replacement read or duplicate a healthy read');
+      reads[1].resolve();assert(await joined);await flush();assert(ready(f));assert.deepEqual(faults,[]);assert.equal(f.fx.hashes.length,2);
+     }else{
+      if(mode==='suspend-again')await observe({...suspended,publicationRevision:4,observedNotificationSequence:4,suspendSerial:3});
+      else f.fx.select(null);
+      reads[1].resolve();await flush();assert.equal(ready(f,g),null,'new suspension or target loss must revoke the replacement');assert.equal(f.fx.hashes.length,0);
+     }
+    }
+    assert.equal(indexReads(f),2);assert.equal(f.fx.timers.size,0);noSideEffects(f);
+   }finally{stop();for(const read of reads)read.resolve();await flush();assert.equal(f.fx.timers.size,0);assert.equal(f.fx.sharedTimers.size,0);f.fx.dispose();}
+  }
  });
  await check('owner shutdown removes subscriptions and timers and forbids a late hydration',async()=>{
   const f=await createTrainerRecoveryFixture();f.fx.game=game();f.fx.seedIndex();let release;f.fx.hashHook=()=>new Promise(resolve=>release=resolve);const stop=f.recovery.startGameTrainerRecovery();await flush();stop();stop();release(receipt().sha256);await flush();assert.equal(ready(f),null);assert.equal(f.fx.listeners.size,0);assert.equal(f.fx.timers.size,0);assert([...f.fx.events.values()].every(s=>s.size===0));noSideEffects(f);
@@ -645,7 +734,9 @@ export async function trainerRecoveryTests(out,{caseFilter=null}={}){
   const{f,g,at,respond,launch}=await launchFixture();let finish;
   try{
    f.fx.workerHook=async(_p,args)=>{await new Promise(resolve=>finish=()=>{respond(args,{ok:true,notice:'late receipt'});resolve();});return{ok:true};};
-   const pending=launch(),rejected=assert.rejects(pending,/取消|电源/);await flush();assert(finish);const resultPath=at(f.fx.workers[0],'-ResultPath');
+   const pending=launch(),rejected=assert.rejects(pending,/取消|电源/);
+   for(let attempt=0;attempt<4&&!finish;attempt++)await flush();
+   assert(finish,'uncertain launch must first reach the held worker dispatch');const resultPath=at(f.fx.workers[0],'-ResultPath');
    f.fx.power={...f.fx.power,generation:2,phase:'suspending'};f.fx.emit('ipc:power.suspending',2);await flush();assert.equal(f.fx.files.get(f.fx.norm(resultPath+'.cancel')),'cancel');finish();await rejected;
    f.fx.power.phase='ready';f.fx.emit('ipc:power.resumed',2);await f.fx.advance(90000);assert.equal(f.fx.workers.length,1);assert.equal(f.fx.files.get(f.fx.norm(resultPath+'.cancel')),'cancel');
   }finally{f.fx.dispose();}
@@ -741,6 +832,34 @@ export async function trainerRecoveryTests(out,{caseFilter=null}={}){
    for(const cb of [...f.fx.events.get('ipc:power.lifecycleChanged')||[]])cb({type:'ipc:power.lifecycleChanged',detail:{...f.fx.power}});
    await flush();await f.fx.advance(2500);assert.equal(f.fx.workers.length,1);assert(ready(f));assert.equal(f.fx.launches.length,0);
   }finally{stop();assert.equal(f.fx.timers.size,0);assert([...f.fx.events.values()].every(s=>s.size===0));f.fx.dispose();}
+ });
+ await check('lifecycle: unavailable automatic preferences can resume on confirmed Ready',async()=>{
+  for(const mode of ['first-read-rejected','old-read-rejects-after-ready','preference-disabled','owner-stopped']){
+   const f=await createTrainerRecoveryFixture({separatePowerClock:true});f.fx.autoEnabled=mode!=='preference-disabled';
+   let reads=0,rejectOld,finish=()=>{};
+   f.fx.trainerPreferencesHook=async()=>{
+    if(++reads!==1)return;
+    if(mode==='old-read-rejects-after-ready')await new Promise((_resolve,reject)=>{rejectOld=reject;});
+    throw Error('fixture interrupted preferences read');
+   };
+   const stop=f.auto.startGameTrainerAutoPrepare();finish=stop;
+   try{
+    await flush();assert.equal(reads,1,mode);assert.equal(f.fx.timers.size,0,mode);
+    const publish=async snapshot=>{f.fx.power=snapshot;for(const listener of [...f.fx.events.get('ipc:power.lifecycleChanged')||[]])listener({detail:snapshot});await flush();};
+    await publish({...f.fx.power,phase:'suspending',known:true,generation:2,suspendSerial:2,observedNotificationSequence:2,hardwareWritesAllowed:false,notificationPending:false,publicationRevision:2});
+    assert.equal(f.sharedPower.isSharedPowerLifecycleAdmitted(f.sharedPower.getSharedPowerLifecycle()),false,mode+': public scope is closed');
+    await f.fx.advance(30000);assert.equal(reads,1,mode);assert.equal(f.fx.timers.size,0,mode);noSideEffects(f);
+    if(mode==='owner-stopped'){stop();finish=()=>{};}
+    const admitted={...f.fx.power,phase:'ready',hardwareWritesAllowed:true,observedNotificationSequence:3,publicationRevision:3};
+    await publish(admitted);
+    if(mode!=='owner-stopped')assert.equal(f.sharedPower.isSharedPowerLifecycleAdmitted(f.sharedPower.getSharedPowerLifecycle()),true,mode+': public scope is confirmed');
+    if(rejectOld){assert.equal(reads,1,'do not duplicate an in-flight read');rejectOld(Error('late failure'));rejectOld=null;await flush();}
+    await publish(admitted);
+    assert.equal(reads,mode==='owner-stopped'?1:2,mode+': confirmed Ready must restore the preference read once');
+    assert.equal(f.fx.timers.size,mode==='preference-disabled'||mode==='owner-stopped'?0:1,mode+': only a loaded ON preference may arm the existing timer');
+    noSideEffects(f);
+   }finally{finish();rejectOld?.(Error('fixture disposed'));await flush();assert.equal(f.fx.timers.size,0);f.fx.dispose();}
+  }
  });
  await check('lifecycle: closing the automatic owner cannot rearm from a late catalog completion',async()=>{
   const f=await createTrainerRecoveryFixture({separatePowerClock:true});f.fx.game=game();f.fx.seedIndex();f.fx.autoEnabled=true;let finish;

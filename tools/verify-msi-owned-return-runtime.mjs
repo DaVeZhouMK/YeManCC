@@ -18,15 +18,17 @@ const args = process.argv.slice(2);
 let output = 'G:/YeManCC-Work/Build/Validation/MSI-Field143454-R108-20261016/return-runtime';
 let selectedProfiles = ['Release', 'Checked'];
 let profileSelected = false;
+let runtimeHandoff = false;
 for (let i = 0; i < args.length; ++i) {
   if (args[i] === '--out' && args[i + 1]) output = args[++i];
+  else if (args[i] === '--runtime-handoff' && !runtimeHandoff) runtimeHandoff = true;
   else if (args[i] === '--profile' && !profileSelected && ['Release', 'Checked'].includes(args[i + 1])) {
     selectedProfiles = [args[++i]]; profileSelected = true;
   }
   else if (args.length === 1 && !args[i].startsWith('--')) output = args[i];
-  else throw new Error('usage: node tools/verify-msi-owned-return-runtime.mjs [--out directory] [--profile Release|Checked]');
+  else throw new Error('usage: node tools/verify-msi-owned-return-runtime.mjs [--out directory] [--profile Release|Checked] [--runtime-handoff]');
 }
-const prepared=prepareOwnedReturnSources({repo,output,selectedProfiles});
+const prepared=prepareOwnedReturnSources({repo,output,selectedProfiles,runtimeHandoff});
 output=prepared.output;
 const {run,snapshot,sha,save,sources,frozen,receipt}=prepared;
 function command(label, exe, argv, cwd = run, timeout = 60000) {
@@ -50,6 +52,7 @@ for (const profile of selectedProfiles) {
   const opts = ['/nologo', '/std:c++20', '/utf-8', '/EHsc', '/W4', '/WX', '/permissive-', '/sdl', '/Zc:__cplusplus',
     profile === 'Release' ? '/O2' : '/Od', profile === 'Release' ? '/MT' : '/MTd',
     ...(profile === 'Release' ? ['/DNDEBUG'] : ['/RTC1', '/Zi', '/D_DEBUG']),
+    ...(runtimeHandoff ? ['/DYMCC_MSI_RUNTIME_HANDOFF_CASES'] : []),
     '/external:I' + quote(path.join(snapshot, 'deps/json')), '/external:W0',
     quote(path.join(snapshot, 'tools/msi_owned_return_runtime_selftest.cpp')),
     '/Fo' + quote(path.join(dir, 'selftest.obj')), '/Fe' + quote(exe), '/Fd' + quote(path.join(dir, 'selftest.pdb')),
@@ -63,10 +66,16 @@ for (const profile of selectedProfiles) {
     console.error(build.stdout, build.stderr);
     break; // A failed prerequisite must not start the next profile.
   }
-  const execute = command(profile + '-execute', exe, [], dir);
+  const execute = command(profile + '-execute', exe, runtimeHandoff ? ['post-final-runtime-handoff'] : [], dir);
   let report;
   try { report = JSON.parse(execute.stdout); }
   catch { report = { passed: false, parseError: true, stdout: execute.stdout }; }
+  if(runtimeHandoff && JSON.stringify(report.cases?.map(row=>row.name))!==JSON.stringify([
+    'runtime-handoff/reject-cross-suspend-pair-and-cached-proof',
+    'runtime-handoff/exhausted-window-reopens-only-on-admitted-suspend',
+    'runtime-handoff/power-retired-stop-retains-exact-return-only',
+    'runtime-handoff/retirement-during-query-and-real-record-shape',
+  ])) throw new Error('RUNTIME_HANDOFF_SELECTION_MISMATCH');
   save(profile + '-results.json', report);
   result.profiles[profile] = { buildPassed: true, passed: execute.status === 0 && report.passed === true,
     tests: report.tests, assertions: report.assertions, failures: report.failures, exeSha256: sha(fs.readFileSync(exe)) };
@@ -76,6 +85,7 @@ for (const profile of selectedProfiles) {
 }
 result.sourceChangedDuringRun = sources.filter(name => sha(fs.readFileSync(path.join(repo, name))) !== sha(frozen.get(name)));
 result.selectedProfiles = selectedProfiles;
+if(runtimeHandoff)result.selection='post-final-runtime-handoff';
 result.passed = Object.keys(result.profiles).length === selectedProfiles.length && selectedProfiles.every(name => result.profiles[name]?.passed) && result.sourceChangedDuringRun.length === 0;
 save('RESULT.json', result);
 fs.writeFileSync(path.join(output, 'LATEST.json'), JSON.stringify(result, null, 2) + '\n');

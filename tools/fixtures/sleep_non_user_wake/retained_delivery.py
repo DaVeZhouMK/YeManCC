@@ -37,10 +37,22 @@ def bind_pause(c,returned):
     parked=re.findall(r'^static std::atomic<bool> g_sgWakeRecoveryParked\{false\};$',header,re.M);assert len(parked)<=1
     batch+='\n'+'\n'.join(parked)
     old='struct { ULONGLONG generation=0;std::vector<RecoveryEntry> entries; } g_sgWakeRecovery;';assert p.count(old)==1;p=p.replace(old,batch)
+    if 'sgConfirmStrictWakeLeaseResume(' in header:
+        entry_end='uint64_t canceledBoundarySequence=0;};'
+        assert p.count(entry_end)==1
+        original_wake='ULONGLONG confirmationOriginalWakeFileTime=0;' if 'confirmationOriginalWakeFileTime' in header else ''
+        p=p.replace(entry_end,'uint64_t canceledBoundarySequence=0;bool strictConfirmation=false;uint64_t confirmationSleepSequence=0,confirmationSuspendSerial=0;\n'
+                    +original_wake+
+                    ' RecoveryEntry(std::wstring d,DWORD p,ULONGLONG c,ULONGLONG g,std::string t,bool end):dir(std::move(d)),pid(p),created(c),sleepOwnerGeneration(g),markerText(std::move(t)),done(end){}\n'
+                    ' RecoveryEntry(std::wstring d,DWORD p,ULONGLONG c,std::string t):RecoveryEntry(std::move(d),p,c,0,std::move(t),false){}\n'
+                    ' RecoveryEntry()=default;};')
     helper='\n'.join(function(n,returned,'native/sleep_returned_pause_native.inc') for n in ['sgOrdinaryPauseCurrent','sgReturnedPauseCurrent'])+'\n'+helpers
-    cancel_helpers=['sgCanceledSleepRecoveryEntryCurrent','sgQueueCanceledSleepLeaseRecoveryUnlocked']
+    queue=function('sgQueueCanceledSleepLeaseRecoveryUnlocked',header,'native/wake_game_recovery.h')
+    cancel_helpers=['sgCanceledSleepRecoveryEntryCurrent']
     if 'sgCanceledSleepRecoveryBoundaryCurrent' in header:cancel_helpers.insert(0,'sgCanceledSleepRecoveryBoundaryCurrent')
-    helper+='\n'+function('sgNotifyWork')+'\n'+'\n'.join(function(n,header,'native/wake_game_recovery.h') for n in cancel_helpers)+'\n'
+    if 'sgWakeGameRecoveryHasWork(' in queue:
+        cancel_helpers.insert(0,'sgWakeGameRecoveryHasWork')
+    helper+='\n'+function('sgNotifyWork')+'\n'+'\n'.join(function(n,header,'native/wake_game_recovery.h') for n in cancel_helpers)+'\n'+queue+'\n'
     return p,helper
 
 def bind_abort(c,p,returned,text):

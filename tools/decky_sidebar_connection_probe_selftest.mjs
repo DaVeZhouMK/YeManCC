@@ -10,6 +10,29 @@ const runId='a'.repeat(32),replies=[],tests=[];let reads=0,writes=0;
 const relay=new ReadOnlyMirrorRelay({read:async()=>({generation:1,ready:true,game:null,provenance:{kind:'ymcc-native',pid:123},fan:{supported:false,enabled:false,preset:'balanced',choices:[]}}),observe:()=>()=>{},reply:async(connection,message)=>{replies.push(message);return true;},execute:async()=>{writes++;throw Error('No writes in connection test');}});
 const read=relay.deps.read;relay.deps.read=()=>{reads++;return read();};
 async function check(name,fn){await fn();tests.push(name);}
+function checkRecoveryExhaustion(){
+ return check('global recovery exhaustion uses the existing manual status without granting repair',()=>{
+  const ui=load(fs.readFileSync(path.join(root,'src/bridge/deckySidebar.ts'),'utf8'),{'./ipc':{invoke:async()=>{},on:()=>()=>{}}});
+  const state={enabled:true,steamKnown:true,steamRunning:true,pid:0,revision:1,phase:'frontend-attached',reason:'retained-frontend-connected'};
+  assert.equal(ui.deckyConnectionSummary(state).label,'正在接续服务');
+  const terminal={...state,recovery:{phase:'manual-required',attempted:true,reason:'global-recovery-exhausted'}};
+  assert.equal(ui.deckyConnectionSummary(terminal).label,'需要手动修复');
+  assert.equal(ui.deckySidebarCanRepair(terminal),ui.deckySidebarCanRepair(state));
+  assert.equal(ui.deckySidebarCanRepair({...terminal,phase:'starting'}),false);
+  assert.equal(ui.deckyConnectionSummary({...terminal,enabled:false}).label,'已关闭');
+  const backend={...terminal,recovery:{...terminal.recovery,reason:'official-backend-unavailable'}};
+  assert.equal(ui.deckyConnectionSummary(backend).detail,'Decky 后台未能恢复');
+  assert.equal(ui.deckyConnectionSummary(backend).tone,'warning');
+  assert.equal(ui.deckySidebarCanRepair(backend),ui.deckySidebarCanRepair(state));
+  assert.equal(ui.deckyConnectionSummary({...backend,enabled:false}).label,'已关闭');
+ });
+}
+if(process.argv.includes('--exhaustion-only')){
+ relay.dispose();
+ await checkRecoveryExhaustion();
+ fs.writeFileSync(path.join(validation,'CONNECTION-EXHAUSTION-SELFTEST.json'),JSON.stringify({passed:tests.length,tests,scope:'Selected UI projection only; not the full connection probe',realHardware:false},null,2));
+ console.log('Connection exhaustion projection PASS '+tests.length);
+}else{
 const request=extra=>relay.request({connection:'1',runId,request:{command:'snapshot',runId,clientId:'probe-client',...extra}});
 await check('ordinary snapshot may reuse a cache, fresh probe forces a native read and correlated reply',async()=>{await request({});const first=replies.at(-1).snapshot.revision;assert.equal(reads,1);await request({});assert.equal(reads,1);await request({probeId:'probe:probe-client:1'});assert.equal(reads,2);assert.equal(replies.at(-1).probeId,'probe:probe-client:1');assert.ok(replies.at(-1).snapshot.revision>first);assert.equal(replies.at(-1).snapshot.provenance.pid,123);assert.equal(writes,0);});
 await check('a second test has a distinct correlation and does not acknowledge an older request',async()=>{await request({probeId:'probe:probe-client:2'});assert.equal(reads,3);assert.equal(replies.at(-1).probeId,'probe:probe-client:2');assert.equal(writes,0);});
@@ -72,4 +95,6 @@ await check('proven elevated desktop refusal keeps its specific UI reason ahead 
  for(const phase of ['recovering','manual-required']){const state={enabled:true,steamKnown:true,steamRunning:true,pid:0,revision:1,phase:'failed',reason:'launch-failed',launchStage:'shell-token-elevated',error:5,recovery:{phase,attempted:true}};
   const summary=ui.deckyConnectionSummary(state);assert.equal(summary.label,'启动权限不满足');assert.match(summary.detail,/Windows 桌面也在以管理员权限运行/);assert.equal(summary.tone,'warning');assert.equal(ui.deckySidebarCanRepair(state),false);}
 });
+await checkRecoveryExhaustion();
 fs.writeFileSync(path.join(validation,'CONNECTION-PROBE-SELFTEST.json'),JSON.stringify({passed:tests.length,tests,realHardware:false,productionRelay:true},null,2));console.log('Connection probe PASS '+tests.length);
+}

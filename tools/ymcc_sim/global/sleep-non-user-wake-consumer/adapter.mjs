@@ -7,7 +7,7 @@ export const CASE_ID='sleep.non-user-wake-consumer';
 // Match exact optional language-input selection to the owned compiler process.
 export const COMPILER_DIAGNOSTIC_ENVIRONMENT=Object.freeze({VSLANG:'1033'});
 export const REPO=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../..');
-export const moduleSources=()=>['adapter.mjs','run.mjs','worker.mjs','sitecustomize.py','compiler-leaf.mjs','joined-build-reference.mjs','boundary-probe.cpp','spec.json','toolchain-inputs.json','runner.test.mjs','README.md'].map(x=>MODULE+'/'+x);
+export const moduleSources=()=>['adapter.mjs','run.mjs','worker.mjs','sitecustomize.py','compiler-leaf.mjs','joined-build-reference.mjs','boundary-probe.cpp','spec.json','toolchain-inputs.json','runner.test.mjs','README.md','sender-current-continuity.json'].map(x=>MODULE+'/'+x);
 export function toolchainSpec(repo=REPO){
  const own=JSON.parse(fs.readFileSync(path.join(repo,MODULE,'toolchain-inputs.json'),'utf8'));
  let sharedBytes=fs.readFileSync(path.join(repo,own.sharedManifest));
@@ -57,7 +57,7 @@ export function getSleepNonUserWakeConsumerAdapters(repo=REPO){return [{id:CASE_
 export function getJoinedSenderChoices(repo=REPO){
  const source=fs.readFileSync(path.join(repo,'tools/fixtures/sleep_non_user_wake/resume_sender_join.inc'),'utf8');
  const choices=[...source.matchAll(/^\s*run\("([a-z0-9-]+)",/gm)].map(match=>match[1]);
- if(choices.length!==126||new Set(choices).size!==choices.length)throw Error('NONUSER_JOINED_CASE_CATALOG_CHANGED');
+ if(choices.length!==133||new Set(choices).size!==choices.length)throw Error('NONUSER_JOINED_CASE_CATALOG_CHANGED');
  return choices;
 }
 export function getJoinedSenderSelection(repo=REPO,value=null){

@@ -2,15 +2,25 @@
 import fs from 'node:fs';import path from 'node:path';import vm from 'node:vm';import assert from 'node:assert/strict';import crypto from 'node:crypto';import {createRequire} from 'node:module';
 import {root,task} from './fixtures/decky_task_paths.mjs';
 const require=createRequire(path.join(root,'package.json')),{transformSync}=require('esbuild');
-const runtimePower=process.argv.includes('--runtime-power'),configStorm=process.argv.includes('--config-storm'),steamInstallations=process.argv.includes('--steam-installations');assert([runtimePower,configStorm,steamInstallations].filter(Boolean).length<=1,'combined Lossless selections');
+const runtimePower=process.argv.includes('--runtime-power'),configStorm=process.argv.includes('--config-storm'),steamInstallations=process.argv.includes('--steam-installations'),actionPower=process.argv.includes('--action-power');assert([runtimePower,configStorm,steamInstallations,actionPower].filter(Boolean).length<=1,'combined Lossless selections');
+if(actionPower)assert.deepEqual(process.argv.slice(2),['--action-power']);
 assert.ok(configStorm||!process.env.YMCC_LOSSLESS_CONFIG_SOURCE,'Fixed config source requires --config-storm');
 const sourcePath=path.resolve(process.env.YMCC_LOSSLESS_CONFIG_SOURCE||path.join(root,'src/bridge/quickapp.ts'));
 const source=fs.readFileSync(sourcePath,'utf8');
 const configFixtures=[];let configRunning=false;const configReceipts=[];
 const configPin=p=>({path:path.resolve(p),sha256:crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex')});
-const configInputs=configStorm?[sourcePath,...['src/bridge/losslessProfiles.ts','src/bridge/losslessRuntimeState.ts','src/bridge/api.ts','src/bridge/ipc.ts','tools/lossless_scaling_selftest.mjs','tools/fixtures/decky_task_paths.mjs','package.json'].map(p=>path.join(root,p)),require.resolve('esbuild'),require.resolve('@esbuild/win32-x64/esbuild.exe'),process.execPath].map(configPin):[];
+const configInputs=configStorm?[sourcePath,...['src/bridge/losslessProfiles.ts','src/bridge/losslessRuntimeState.ts','src/bridge/powerLifecycleState.ts','src/bridge/api.ts','src/bridge/ipc.ts','tools/lossless_scaling_selftest.mjs','tools/fixtures/decky_task_paths.mjs','package.json'].map(p=>path.join(root,p)),require.resolve('esbuild'),createRequire(require.resolve('esbuild')).resolve('@esbuild/win32-x64/esbuild.exe'),process.execPath].map(configPin):[];
 
-function load(text,modules={},globals={}){const module={exports:{}};vm.runInNewContext(transformSync(text,{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,structuredClone,console,Uint8Array,TextEncoder,btoa:value=>Buffer.from(value,'binary').toString('base64'),require:name=>{if(name==='./losslessProgramState')return load(fs.readFileSync(path.join(root,'src/bridge/losslessProgramState.ts'),'utf8'));if(!(name in modules))throw Error('Unexpected import '+name);return modules[name];},...globals});return module.exports;}
+function load(text,modules={},globals={}){const module={exports:{}};vm.runInNewContext(transformSync(text,{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,structuredClone,console,AbortController,Uint8Array,TextEncoder,btoa:value=>Buffer.from(value,'binary').toString('base64'),require:name=>{if(name==='./losslessProgramState')return load(fs.readFileSync(path.join(root,'src/bridge/losslessProgramState.ts'),'utf8'));if(!(name in modules))throw Error('Unexpected import '+name);return modules[name];},...globals});return module.exports;}
+function runtimeFixture(initial={},detect=async()=>({known:true,running:false}),exactDetectWire=false){
+ let snapshot={phase:'ready',generation:71,known:true,inputReady:true,hardwareWritesAllowed:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:1,...initial},seq=0,held=false,resolveWatch,rejectWatch,gameListener=null;
+ const timers=new Map(),events=new Map(),watches=[],reads=[];const on=(name,fn)=>{if(!events.has(name))events.set(name,new Set());events.get(name).add(fn);return()=>{events.get(name).delete(fn);if(!events.get(name).size)events.delete(name);};};
+ const globals={window:{},queueMicrotask,setTimeout:(fn,ms)=>{timers.set(++seq,{fn,ms});return seq;},clearTimeout:id=>timers.delete(id)};
+ const power=load(fs.readFileSync(path.join(root,'src/bridge/powerLifecycleState.ts'),'utf8'),{'./ipc':{on,invoke:async(command,args,options)=>{assert.equal(command,'power.lifecycle');assert.equal(options.timeoutMs,3000);reads.push(command);return {...snapshot};}}},globals);
+ const detectWire=async()=>{const observed=snapshot,result=await detect();return exactDetectWire?result:{powerGeneration:observed.generation,powerNotificationSequence:observed.observedNotificationSequence,powerSuspendSerial:observed.suspendSerial??0,...result};};
+ const runtime=load(fs.readFileSync(path.join(root,'src/bridge/losslessRuntimeState.ts'),'utf8'),{'./api':{losslessRuntime:{detect:detectWire,watch:(active,detailed)=>{watches.push({active,detailed});if(held){held=false;return new Promise((resolve,reject)=>{resolveWatch=resolve;rejectWatch=reject;});}return Promise.resolve(true);}}},'./ipc':{on},'./powerLifecycleState':power,'./gamePolicyTarget':{subscribePolicyGameStatus:fn=>{gameListener=fn;fn(null);return()=>{gameListener=null;};}}},globals);
+ return {runtime,power,watches,timers,events,reads,holdNext:()=>held=true,release:()=>{resolveWatch?.(true);resolveWatch=null;},reject:()=>{rejectWatch?.(Error('owned earlier watch rejection'));rejectWatch=null;},game:value=>gameListener?.(value),publish:(patch={},raw=false)=>{assert.ok(events.has('power.lifecycleChanged'),'actual Native event subscription must be bound');snapshot={...snapshot,...patch,...(raw?{}:{publicationRevision:snapshot.publicationRevision+1,observedNotificationSequence:snapshot.observedNotificationSequence+1})};for(const fn of [...events.get('power.lifecycleChanged')??[]])fn({...snapshot});},inspect:()=>power.getSharedPowerLifecycleDiagnostics()};
+}
 if(steamInstallations){
  assert.deepEqual(process.argv.slice(2),['--steam-installations'],'exact Steam installation selection required');
  const {steamInstallationCases}=await import('./fixtures/lossless_steam_installations.mjs');
@@ -18,15 +28,56 @@ if(steamInstallations){
  fs.writeFileSync(path.join(task,'validation/LOSSLESS-STEAM-INSTALLATIONS.json'),JSON.stringify(record,null,2)+'\n',{flag:'wx'});require('esbuild').stop();console.log(JSON.stringify(record));process.exitCode=record.pass?0:1;
 }else if(runtimePower){
 const reports=[];let assertions=0;const verify=(value,message)=>{assertions++;assert.ok(value,message);},flush=async()=>{for(let i=0;i<60;i++)await Promise.resolve();};
-function runtimeFixture(initial={},detect=async()=>({known:true,running:false})){
- let snapshot={phase:'ready',generation:71,known:true,inputReady:true,hardwareWritesAllowed:true,notificationPending:false,publicationRevision:1,observedNotificationSequence:1,...initial},seq=0,held=false,resolveWatch,rejectWatch,gameListener=null;
- const timers=new Map(),events=new Map(),watches=[],reads=[];const on=(name,fn)=>{if(!events.has(name))events.set(name,new Set());events.get(name).add(fn);return()=>{events.get(name).delete(fn);if(!events.get(name).size)events.delete(name);};};
- const globals={window:{},queueMicrotask,setTimeout:(fn,ms)=>{timers.set(++seq,{fn,ms});return seq;},clearTimeout:id=>timers.delete(id)};
- const power=load(fs.readFileSync(path.join(root,'src/bridge/powerLifecycleState.ts'),'utf8'),{'./ipc':{on,invoke:async(command,args,options)=>{assert.equal(command,'power.lifecycle');assert.equal(options.timeoutMs,3000);reads.push(command);return {...snapshot};}}},globals);
- const runtime=load(fs.readFileSync(path.join(root,'src/bridge/losslessRuntimeState.ts'),'utf8'),{'./api':{losslessRuntime:{detect,watch:(active,detailed)=>{watches.push({active,detailed});if(held){held=false;return new Promise((resolve,reject)=>{resolveWatch=resolve;rejectWatch=reject;});}return Promise.resolve(true);}}},'./ipc':{on},'./powerLifecycleState':power,'./gamePolicyTarget':{subscribePolicyGameStatus:fn=>{gameListener=fn;fn(null);return()=>{gameListener=null;};}}},globals);
- return {runtime,power,watches,timers,events,reads,holdNext:()=>held=true,release:()=>{resolveWatch?.(true);resolveWatch=null;},reject:()=>{rejectWatch?.(Error('owned earlier watch rejection'));rejectWatch=null;},game:value=>gameListener?.(value),publish:(patch={},raw=false)=>{assert.ok(events.has('power.lifecycleChanged'),'actual Native event subscription must be bound');snapshot={...snapshot,...patch,...(raw?{}:{publicationRevision:snapshot.publicationRevision+1,observedNotificationSequence:snapshot.observedNotificationSequence+1})};for(const fn of [...events.get('power.lifecycleChanged')??[]])fn({...snapshot});},inspect:()=>power.getSharedPowerLifecycleDiagnostics()};
-}
 const definitions=[];const scenario=(name,fn)=>definitions.push({name,fn});
+ for(const kind of ['cached','in-flight'])scenario(`scoped-hint-fences-${kind}-observation-until-matching-fact`,async()=>{
+   let calls=0,release;
+   const held=new Promise(resolve=>{release=resolve;});
+   const f=runtimeFixture({suspendSerial:8},async()=>{
+    const pid=++calls;if(kind==='in-flight'&&pid===1)await held;
+    return {known:true,running:true,pid};
+   });
+   let reentrant,old,oldValue;
+   const offEarlier=f.power.onSharedPowerLifecycle(state=>{
+    if(state.scopeReadbackPending&&!reentrant)reentrant=f.runtime.readLosslessRuntime();
+   });
+   const stop=f.runtime.startLosslessRuntimeOwner();
+   try{
+    await flush();
+    old=f.runtime.readLosslessRuntime().then(value=>{oldValue=value;return value;});
+    await flush();
+    verify(calls===1&&(kind==='cached'?oldValue?.pid===1:oldValue===undefined),'original observation was not prepared');
+    for(const receive of f.events.get('power.resumed'))receive({generation:72,readbackScope:{suspendSerial:9,notificationSequence:2}});
+    verify(f.power.getSharedPowerLifecycle()?.scopeReadbackPending===true&&!!reentrant,'new scope did not fence the old Ready');
+    verify((await reentrant).known===false,'earlier shared subscriber read the revoked observation');
+    const denied=await f.runtime.readLosslessRuntime();
+    verify(denied.known===false&&calls===1,'a direct read issued a detect while the shared scope was unconfirmed');
+    if(kind==='in-flight')verify(oldValue?.reason==='observation-invalidated','old caller still waited for revoked detection');
+    f.publish({generation:72,suspendSerial:9});await flush();
+    const current=await f.runtime.readLosslessRuntime();
+    verify(current.pid===2&&calls===2,'matching Ready did not admit exactly one fresh detection before old reply');
+    release();await old;await flush();
+    verify((await f.runtime.readLosslessRuntime()).pid===2,'late old detect replaced the current observation');
+   }finally{release();await old;offEarlier();stop();await flush();}
+   verify(f.timers.size===0&&f.events.size===0,'scoped read retained source resources');
+ });
+scenario('direct-detect-cannot-adopt-a-scope-before-public-ready',async()=>{
+ const receipt=(pid,sequence,serial)=>({known:true,running:true,pid,powerGeneration:71,powerNotificationSequence:sequence,powerSuspendSerial:serial});
+ const denied={known:false,running:false,readable:false,reason:'power-not-ready'};
+ const answers=[receipt(202,2,9),receipt(101,1,8),denied,{known:true,running:true,pid:101},receipt(202,2,9)];let detects=0;
+ const f=runtimeFixture({suspendSerial:8},async()=>{detects++;return answers.shift();},true);
+ const stop=f.runtime.startLosslessRuntimeOwner();
+ try{
+  await flush();
+  verify((await f.runtime.readLosslessRuntime()).known===false,'direct detect adopted a newer Native scope before public Ready');
+  f.publish({suspendSerial:9});await flush();
+  verify((await f.runtime.readLosslessRuntime()).known===false,'direct detect adopted an older Native scope after public Ready');
+  verify((await f.runtime.readLosslessRuntime()).known===false,'Native power denial must stay unavailable');
+  verify((await f.runtime.readLosslessRuntime()).known===false,'unscoped Native confirmation must stay unavailable');
+  verify((await f.runtime.readLosslessRuntime()).pid===202&&detects===5,'a rejected receipt became a permanent cached result');
+  verify((await f.runtime.readLosslessRuntime()).pid===202&&detects===5,'valid current receipt was not cached');
+ }finally{stop();await flush();}
+ verify(f.events.size===0&&f.timers.size===0,'direct detect scope check retained resources');
+});
 scenario('merged-suspend-releases-old-detect-without-replaying-watch',async()=>{
  let release,calls=0;const held=new Promise(resolve=>{release=resolve;});
  const f=runtimeFixture({suspendSerial:8},async()=>{const pid=++calls;if(pid===1)await held;return {known:true,running:false,pid};});
@@ -39,6 +90,21 @@ scenario('merged-suspend-releases-old-detect-without-replaying-watch',async()=>{
  release();await old;await joined;verify((await f.runtime.readLosslessRuntime()).pid===2,'late old detect overwrote the current observation');
  }finally{release();await Promise.allSettled([old,next,joined]);off();stop();await flush();}
  verify(f.timers.size===0&&f.events.size===0,'merged suspend retained source resources');
+});
+scenario('merged-ready-retries-an-old-watch-only-after-late-rejection',async()=>{
+ const f=runtimeFixture({suspendSerial:8});const stop=f.runtime.startLosslessRuntimeOwner();let off=()=>{};
+ try{
+  await flush();f.holdNext();off=f.runtime.retainLosslessObservation();await flush();
+  const before=f.watches.length;
+  verify(before===2&&f.watches.at(-1).detailed,'original watch did not reach the held IPC');
+  f.publish({suspendSerial:9});await flush();
+  verify(f.watches.length===before,'same interest must wait for the in-flight receipt');
+  f.reject();await flush();
+  verify(f.watches.length===before+1&&f.watches.at(-1).active&&f.watches.at(-1).detailed,'merged Ready left the failed watch inactive');
+  f.publish({publicationRevision:3},true);await flush();
+  verify(f.watches.length===before+1,'a diagnostic publication replayed an acknowledged watch');
+ }finally{f.release();off();stop();await flush();}
+ verify(f.watches.at(-1).active===false&&f.timers.size===0&&f.events.size===0,'stop failed to return the recovered watch and subscriptions');
 });
 scenario('pending-and-closed-native-facts-retire-detailed-observation',async()=>{
  const f=runtimeFixture();const stop=f.runtime.startLosslessRuntimeOwner();let off=()=>{};try{await flush();off=f.runtime.retainLosslessObservation();await flush();verify(f.watches.at(-1).active&&f.watches.at(-1).detailed,'admitted detailed observation failed to start');f.publish({notificationPending:true});await flush();verify(f.watches.at(-1).active===false,'same-generation pending retained active Lossless observation');f.publish({notificationPending:false,hardwareWritesAllowed:false});await flush();verify(f.watches.at(-1).active===false,'closed native write gate reenabled Lossless observation');f.publish({hardwareWritesAllowed:true,inputReady:false});await flush();verify(f.watches.at(-1).active&&f.watches.at(-1).detailed,'current same-generation Native Ready did not restore detailed observation');const count=f.watches.length;f.publish({inputReady:true});f.publish({inputReady:true});await flush();verify(f.watches.length===count,'input or diagnostic metadata repeated Lossless interest');}finally{off();stop();f.release();await flush();}verify(f.timers.size===0&&f.events.size===0,'stopped Lossless owner retained source timers or subscriptions');
@@ -73,6 +139,85 @@ scenario('runtime-receipt-follows-current-public-scope-after-coalesced-wake',asy
   verify((await f.runtime.readLosslessRuntime()).pid===303,'retired scope bypassed the new cache with a later timestamp');
  }finally{off();stop();await flush();}
  verify(f.timers.size===0&&f.events.size===0&&f.watches.at(-1).active===false,'scoped observer retained resources after stop');
+});
+scenario('same-scope-runtime-receipt-waits-for-public-ready',async()=>{
+ for(const outcome of ['ready','ready-during-fanout','new-sleep','stop']){
+  const receipt=(pid,observedAt)=>({known:true,running:true,readable:true,pid,processCreated:'90',path:'observed.exe',button:'',status:'',reason:'',configRevision:0,observedAt,powerGeneration:71,powerNotificationSequence:2,powerSuspendSerial:8});
+  let detects=0,updates=0;
+  const f=runtimeFixture({suspendSerial:8},async()=>{detects++;return {known:false,running:false,pid:0};});
+  const deliver=value=>{for(const fn of [...f.events.get('lossless.runtime')??[]])fn(value);};
+  const offEarlier=outcome==='ready-during-fanout'?f.power.onSharedPowerLifecycle(state=>{
+   if(state.phase==='ready'&&state.observedNotificationSequence===2)deliver(receipt(404,400));
+  }):()=>{};
+  const stop=f.runtime.startLosslessRuntimeOwner(),off=f.runtime.retainLosslessObservation(),offUpdate=f.runtime.subscribeLosslessRuntime(()=>updates++);
+  try{
+   await flush();
+   f.publish({phase:'resuming',hardwareWritesAllowed:false});await flush();
+   verify(f.power.getSharedPowerLifecycle().observedNotificationSequence===2&&f.watches.at(-1).active===false,'fixture did not observe the held Native scope');
+   deliver(receipt(303,300));deliver(receipt(202,200));await flush();
+   verify(updates===0&&detects===0,'a held receipt consumed data or started a detect before public Ready');
+   if(outcome==='stop')stop();
+   else if(outcome==='new-sleep'){
+    f.publish({phase:'suspended',suspendSerial:9});
+    f.publish({phase:'ready',hardwareWritesAllowed:true});
+   }else f.publish({phase:'ready',hardwareWritesAllowed:true,publicationRevision:3},true);
+   await flush();
+   if(outcome==='ready'||outcome==='ready-during-fanout'){
+    verify(updates===1,'current Ready lost the held Native observation');
+    verify((await f.runtime.readLosslessRuntime()).pid===(outcome==='ready'?303:404)&&detects===0,'Ready must adopt only the newest receipt without a replacement detect');
+    f.publish({publicationRevision:4},true);await flush();
+    verify(updates===1,'duplicate publication replayed the held receipt');
+   }else verify(updates===0&&detects===0,'stopped or superseded Native observation was replayed');
+  }finally{offEarlier();offUpdate();off();stop();await flush();}
+  verify(f.events.size===0&&f.timers.size===0&&f.watches.at(-1).active===false,'receipt test retained observation resources');
+ }
+});
+scenario('lost-watch-reply-recovers-once-without-another-power-notice',async()=>{
+ for(const kind of ['recover','exhausted','resleep','released','close-lost']){
+  const initial={phase:'suspended',hardwareWritesAllowed:false,suspendSerial:8};
+  const f=runtimeFixture(initial),stop=f.runtime.startLosslessRuntimeOwner(),off=f.runtime.retainLosslessObservation();
+  const fire=async()=>{
+   const retry=[...f.timers].find(([,timer])=>timer.ms===500);
+   verify(retry,'the unconfirmed watch must own a bounded retry');
+   f.timers.delete(retry[0]);retry[1].fn();await flush();
+  };
+  try{
+   await flush();
+   if(kind!=='close-lost')f.holdNext();
+   f.publish({phase:'ready',hardwareWritesAllowed:true});await flush();
+   verify(f.watches.at(-1).active&&f.watches.at(-1).detailed,'public Ready did not start the requested observation');
+   if(kind==='close-lost'){
+    f.holdNext();stop();await flush();
+    verify(f.watches.at(-1).active===false,'last release did not start native observation cleanup');
+   }
+   const before=f.watches.length;
+   f.reject();await flush();
+   verify([...f.timers.values()].filter(timer=>timer.ms===500).length===1,'a lost reply left the watch without recovery');
+   if(kind==='resleep'||kind==='released'){
+    const stale=[...f.timers.values()].find(timer=>timer.ms===500);
+    if(kind==='resleep')f.publish({phase:'suspended',hardwareWritesAllowed:false,suspendSerial:9});else stop();
+    await flush();
+    verify(![...f.timers.values()].some(timer=>timer.ms===500),'revoked watch retained the old retry');
+    stale.fn();await flush();
+    verify(f.watches.length===before+1&&!f.watches.at(-1).active,'a revoked retry reopened observation');
+    if(kind==='resleep'){
+     f.publish({phase:'ready',hardwareWritesAllowed:true});await flush();
+     verify(f.watches.length===before+2&&f.watches.at(-1).active,'new Ready did not recover the original interest');
+    }
+   }else{
+    if(kind==='exhausted')f.holdNext();
+    await fire();
+    verify(f.watches.length===before+1&&f.watches.at(-1).active===(kind!=='close-lost'),'recovery did not repeat the current desired watch exactly once');
+    if(kind==='exhausted'){
+     f.reject();await flush();
+     verify(f.timers.size===0&&f.watches.length===before+1,'a failed retry kept polling');
+     f.publish({suspendSerial:9});await flush();
+     verify(f.watches.length===before+2&&f.watches.at(-1).active,'a newer scope could not recover an exhausted watch');
+    }
+   }
+  }finally{off();stop();await flush();}
+  verify(f.timers.size===0&&f.events.size===0&&f.watches.at(-1).active===false,'watch owner retained resources after cleanup');
+ }
 });
 const selected=[];for(let i=2;i<process.argv.length;i++){if(process.argv[i]==='--runtime-power')continue;assert.equal(process.argv[i],'--case','unknown Lossless runtime selection');const value=process.argv[++i];assert(value&&definitions.some(x=>x.name===value)&&!selected.includes(value),'invalid or duplicate Lossless runtime case');selected.push(value);}
 for(const {name,fn}of definitions){if(selected.length&&!selected.includes(name))continue;try{await fn();reports.push({name,pass:true});}catch(error){reports.push({name,pass:false,error:String(error.message??error)});break;}}
@@ -120,12 +265,18 @@ function fixture(options={}){
     catch(error){event.ok=false;event.error=String(error);throw error;}
    }};
  }
- runtime=load(fs.readFileSync(path.join(root,'src/bridge/losslessRuntimeState.ts'),'utf8'),{'./api':api,'./ipc':{on:()=>()=>{}},'./gamePolicyTarget':{subscribePolicyGameStatus:()=>()=>{}}});
- const owner=load(source+'\nexport const unsafeImportForRegression=ensureLsProfileUnlocked;',{'./api':api,'./losslessProfiles':profiles,'./losslessRuntimeState':runtime,'./gamedetect':{},'./optiscalerClientSync':{}});
- const created={owner,files,events,hooks,io,running:()=>running,observe:(t,b)=>{title=t;button=b;runtime.invalidateLosslessRuntime();},runtime};if(configStorm)configFixtures.push(created);return created;
+ const authority=runtimeFixture({suspendSerial:1});
+ authority.power.onSharedPowerLifecycle(()=>{});
+ authority.publish({},true);
+ if(options.readText){const read=api.fs.readTextFile;api.fs.readTextFile=async(p,...rest)=>options.readText(p,await read(p,...rest));}
+ if(options.beforeWrite){const write=api.fs.writeTextFileAtomic;api.fs.writeTextFileAtomic=async(p,text)=>{await options.beforeWrite(p);return write(p,text);};}
+ runtime=load(fs.readFileSync(path.join(root,'src/bridge/losslessRuntimeState.ts'),'utf8'),{'./api':api,'./ipc':{on:()=>()=>{}},'./powerLifecycleState':authority.power,'./gamePolicyTarget':{subscribePolicyGameStatus:()=>()=>{}}});
+ const owner=load(source+'\nexport const unsafeImportForRegression=ensureLsProfileUnlocked;',{'./api':api,'./losslessProfiles':profiles,'./losslessRuntimeState':runtime,'./powerLifecycleState':authority.power,'./gamedetect':{},'./optiscalerClientSync':{}});
+ const created={owner,files,events,hooks,io,authority,running:()=>running,observe:(t,b)=>{title=t;button=b;runtime.invalidateLosslessRuntime();},runtime};if(configStorm)configFixtures.push(created);return created;
 }
 const results=[];async function check(name,action){
- if(configStorm&&!configRunning)return;
+ if((configStorm&&!configRunning)||(actionPower&&!name.startsWith('action power:')))return;
+ if(actionPower){try{await action();results.push({name,pass:true});console.log('PASS '+name);}catch(error){results.push({name,pass:false,error:String(error)});console.log('FAIL '+name+' : '+error);}return;}
  if(!configStorm){await action();results.push(name);console.log('PASS '+name);return;}
  const start=configFixtures.length;let error='';try{await action();}catch(failure){error=String(failure);}
  const fixtures=configFixtures.slice(start).map(f=>({events:f.events,io:f.io,files:[...f.files].filter(([p])=>p!==exe).map(([p,text])=>({path:p,bytes:Buffer.byteLength(text),sha256:crypto.createHash('sha256').update(text).digest('hex')})),running:f.running()}));
@@ -135,7 +286,10 @@ function realTransport(){
  const timers=new Map(),posted=[];let nextTimer=1,listener;
  const module={exports:{}};const window={chrome:{webview:{postMessage:packet=>posted.push(packet),addEventListener:(_,fn)=>{listener=fn;}}},dispatchEvent(){},addEventListener(){},removeEventListener(){}};
  vm.runInNewContext(transformSync(fs.readFileSync(path.join(root,'src/bridge/ipc.ts'),'utf8'),{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,window,console,queueMicrotask,setTimeout:(fn,ms)=>{const id=nextTimer++;timers.set(id,{fn,ms});return id;},clearTimeout:id=>timers.delete(id)});
- const ipc=module.exports,api=load(fs.readFileSync(path.join(root,'src/bridge/api.ts'),'utf8'),{'./ipc':ipc});
+ const bridge=(name,imports)=>load(fs.readFileSync(path.join(root,'src/bridge',name+'.ts'),'utf8'),imports);
+ const settings=bridge('settingsBaseline',{'../../PowerControl/settings-baseline.json':JSON.parse(fs.readFileSync(path.join(root,'PowerControl/settings-baseline.json'),'utf8'))});
+ const boot=bridge('bootModeGlobalPreferences',{'./inputConfigHash':bridge('inputConfigHash'),'./settingsBaseline':settings});
+ const ipc=module.exports,api=bridge('api',{'./ipc':ipc,'./steamInstallationFacts':bridge('steamInstallationFacts'),'./bootModeGlobalPreferences':boot});
  return {ipc,api,timers,posted,fire:ms=>{for(const [id,t]of [...timers])if(t.ms<=ms){timers.delete(id);t.fn();}},reply:value=>listener({data:{id:posted.at(-1).id,...value}})};
 }
 const realRequest={exe,pid:71,processCreated:'123',gamePath:'D:/Games/a.exe',profileTitle:'A',refreshWindow:true,resetOnFailure:false,retryAttempt:0};
@@ -334,6 +488,66 @@ await check('shared cache rejects late reads and older event receipts without in
  state.accept(fresh);state.accept({...fresh,pid:71,observedAt:100});release({...fresh,running:false,observedAt:50});
  assert.equal((await old).pid,81);assert.equal((await peer).pid,81);assert.equal(calls,1);
 });
+const flushActions=async()=>{for(let i=0;i<160;i++)await Promise.resolve();};
+const actionTarget='D:\\Games\\a.exe';
+const actionCalls=f=>f.events.filter(event=>event==='native-ensure-scaling').length;
+const observeAction=task=>{const observed={done:false,ok:false,error:''};void task.then(()=>{observed.done=true;observed.ok=true;},error=>{observed.done=true;observed.error=String(error);});return observed;};
+await check('action power: a merged wake retires an old read before a new click',async()=>{
+ let release,reads=0;
+ const f=fixture({readText:(_path,value)=>++reads===1?new Promise(resolve=>release=()=>resolve(value)):value});
+ const on=()=>f.owner.setLosslessScalingEnabled(actionTarget,true);
+ const old=on(),before=observeAction(old);await flushActions();assert.equal(typeof release,'function');assert.equal(actionCalls(f),0);
+ f.authority.publish({suspendSerial:2});
+ assert.equal(f.authority.power.getSharedPowerLifecycle().suspendSerial,2);
+ const next=on(),after=observeAction(next);await flushActions();
+ const checkpoint={distinct:next!==old,oldSettled:before.done&&!before.ok,completed:after.done&&after.ok,controls:actionCalls(f)};
+ release();await Promise.allSettled([old,next]);
+ assert.deepEqual(checkpoint,{distinct:true,oldSettled:true,completed:true,controls:1});
+ assert.equal(actionCalls(f),1,'late read must not submit another control');
+});
+await check('action power: publication revisions within a scope still share one click',async()=>{
+ let release,reads=0;
+ const f=fixture({readText:(_path,value)=>++reads===1?new Promise(resolve=>release=()=>resolve(value)):value});
+ const on=()=>f.owner.setLosslessScalingEnabled(actionTarget,true);
+ const old=on();await flushActions();assert.equal(typeof release,'function');
+ f.authority.publish({publicationRevision:2},true);
+ assert.equal(f.authority.power.getSharedPowerLifecycle().publicationRevision,2);
+ const next=on();release();await Promise.all([old,next]);assert.equal(next,old);assert.equal(actionCalls(f),1);
+});
+await check('action power: submitted control retains ownership through its real reply',async()=>{
+ const f=fixture();let release;f.hooks.activationGate=new Promise(resolve=>release=resolve);
+ const on=()=>f.owner.setLosslessScalingEnabled(actionTarget,true);
+ const old=on(),before=observeAction(old);await flushActions();assert.equal(actionCalls(f),1);
+ f.authority.publish({suspendSerial:2});
+ const next=on();await flushActions();
+ const checkpoint={distinct:next!==old,oldSettled:before.done,controls:actionCalls(f)};
+ release();const [first,second]=await Promise.allSettled([old,next]);
+ assert.deepEqual(checkpoint,{distinct:true,oldSettled:false,controls:1});
+ assert.equal(first.status,'rejected');assert.equal(second.status,'fulfilled');assert.equal(actionCalls(f),2);
+});
+await check('action power: a committed settings write is not released early or followed by another old write',async()=>{
+ let release;
+ const f=fixture({beforeWrite:p=>p.endsWith('.ymccbak')&&!release?new Promise(resolve=>release=resolve):undefined});
+ const old=f.owner.setLosslessScalingEnabled(actionTarget,false),before=observeAction(old);
+ await flushActions();assert.equal(typeof release,'function');
+ f.authority.publish({suspendSerial:2});
+ const next=f.owner.setLosslessScalingEnabled(actionTarget,true),after=observeAction(next);await flushActions();
+ const checkpoint={oldSettled:before.done,nextSettled:after.done,controls:actionCalls(f)};
+ release();const [first,second]=await Promise.allSettled([old,next]);
+ assert.deepEqual(checkpoint,{oldSettled:false,nextSettled:false,controls:0});
+ assert.equal(first.status,'rejected');assert.equal(second.status,'fulfilled');assert.equal(actionCalls(f),1);
+ assert.deepEqual(f.events.filter(e=>e.startsWith('write:')),['write:'+file+'.ymccbak']);
+});
+await check('action power: a late read after closing LS cannot restart the old process',async()=>{
+ let release;
+ const f=fixture({running:true,readText:(_path,value)=>f.events.includes('normal-close')&&!release?new Promise(resolve=>release=()=>resolve(value)):value});
+ const old=f.owner.setLosslessScalingEnabled('D:\\Games\\missing.exe',true),before=observeAction(old);
+ await flushActions();assert.equal(typeof release,'function');assert.equal(f.running(),false);
+ f.authority.publish({suspendSerial:2});await flushActions();
+ const retired=before.done&&!before.ok;release();await Promise.allSettled([old]);
+ assert.equal(retired,true);assert.equal(f.running(),false);
+ assert.ok(!f.events.some(e=>e.startsWith('launch:')||e.startsWith('write:')));
+});
 await check('newer OFF revokes pending ON and late activation never reopens or deletes custom parameters',async()=>{
  const f=fixture();let release;f.hooks.activationGate=new Promise(resolve=>release=resolve);
  const on=f.owner.setLosslessScalingEnabled('D:\\Games\\a.exe',true);const rejection=assert.rejects(on,/较新/);
@@ -342,17 +556,16 @@ await check('newer OFF revokes pending ON and late activation never reopens or d
  assert.equal((await off).confirmed,true);assert.equal(f.running(),false);const p=profiles.matchLsProfile(profiles.parseLsProfiles(f.files.get(file)),'D:\\Games\\a.exe');assert.equal(p.enabled,false);assert.match(p.block,/<FrameGeneration>LSFG3<\/FrameGeneration>/);assert.equal(f.events.filter(e=>e==='native-ensure-scaling').length,1);
 });
 await check('YMCC owns observation interest once for both consumers, suspends and disposes without retry timers',async()=>{
- const watches=[],handlers=new Map();let gameChanged;
- const runtime=load(fs.readFileSync(path.join(root,'src/bridge/losslessRuntimeState.ts'),'utf8'),{'./api':{losslessRuntime:{detect:async()=>({known:true,running:false}),watch:async(active,detailed)=>{watches.push({active,detailed});return true;}}},'./ipc':{on:(event,cb)=>{handlers.set(event,cb);return()=>handlers.delete(event);}},'./gamePolicyTarget':{subscribePolicyGameStatus:cb=>{gameChanged=cb;cb(null);return()=>{gameChanged=null;};}}});
+ const f=runtimeFixture({suspendSerial:1}),{runtime,watches}=f;
  const flush=async()=>{for(let i=0;i<40;i++)await Promise.resolve();};
  const stopA=runtime.startLosslessRuntimeOwner(),stopB=runtime.startLosslessRuntimeOwner();await flush();assert.deepEqual(watches.at(-1),{active:false,detailed:false});
- gameChanged({path:'game.exe'});await flush();assert.deepEqual(watches.at(-1),{active:true,detailed:false});
+ f.game({path:'game.exe'});await flush();assert.deepEqual(watches.at(-1),{active:true,detailed:false});
  const y=runtime.retainLosslessObservation(),decky=runtime.retainLosslessObservation();await flush();assert.deepEqual(watches.at(-1),{active:true,detailed:true});
  y();await flush();assert.deepEqual(watches.at(-1),{active:true,detailed:true});
- handlers.get('power.suspending')();await flush();assert.deepEqual(watches.at(-1),{active:false,detailed:false});
- handlers.get('power.resumed')();await flush();assert.deepEqual(watches.at(-1),{active:true,detailed:true});
+ f.publish({phase:'suspended',suspendSerial:2,hardwareWritesAllowed:false});await flush();assert.deepEqual(watches.at(-1),{active:false,detailed:false});
+ f.publish({phase:'ready',hardwareWritesAllowed:true});await flush();assert.deepEqual(watches.at(-1),{active:true,detailed:true});
  decky();await flush();assert.deepEqual(watches.at(-1),{active:true,detailed:false});
- stopA();stopA();assert.ok(gameChanged);stopB();await flush();assert.equal(gameChanged,null);assert.equal(handlers.size,0);assert.deepEqual(watches.at(-1),{active:false,detailed:false});
+ stopA();stopA();assert.ok(f.events.has('power.lifecycleChanged'));stopB();await flush();assert.equal(f.events.size,0);assert.equal(f.timers.size,0);assert.deepEqual(watches.at(-1),{active:false,detailed:false});
 });
 await check('ON needing profile changes cannot close another active or unreadable external session',async()=>{
  for(const unreadable of [false,true]){
@@ -461,7 +674,7 @@ await check('missing window-refresh receipt cannot confirm the explicit request'
 });
 const actualPath=path.join(process.env.LOCALAPPDATA,'Lossless Scaling/Settings.xml'),hash=v=>crypto.createHash('sha256').update(v).digest('hex');
 let realListReadOnly={available:false};
-if(!configStorm&&fs.existsSync(actualPath)){
+if(!configStorm&&!actionPower&&fs.existsSync(actualPath)){
  const bytes=fs.readFileSync(actualPath),actual=profiles.parseLsProfiles(bytes.toString('utf8')),realGames=actual.filter(p=>p.path);
  if(process.argv.includes('--require-two-real-exes')){assert.equal(realGames.length,2);for(const key of ['cyberpunk2077.exe','warno.exe'])assert.ok(realGames.some(p=>profiles.lsExeKey(p.path)===key));}
  assert.equal(hash(fs.readFileSync(actualPath)),hash(bytes));realListReadOnly={available:true,path:actualPath,sha256:hash(bytes),profileCount:actual.length};
@@ -473,5 +686,9 @@ if(configStorm){
  const after=configInputs.map(p=>configPin(p.path));const changedInputs=after.filter((p,i)=>p.sha256!==configInputs[i].sha256);const failures=configReceipts.filter(r=>!r.pass).length;
  const selected={pass:failures===0&&changedInputs.length===0,selection:'original lossless owner --config-storm',cases:configReceipts.length,failures,receipts:configReceipts,source:configPin(sourcePath),inputsBefore:configInputs,inputsAfter:after,changedInputs,exactOriginalOwnerExecuted:true,realListReadOnly:{available:false,probeAttempted:false},actualProductYmccExecuted:false,actualLSControlActions:0,realSettingsWrites:0,realGameLaunches:0,scope:'inert memory fs/app/process/focus; current config transaction only'};
  fs.writeFileSync(path.join(task,'validation/LOSSLESS-CONFIG-RESULT.json'),JSON.stringify(selected,null,2));console.log(JSON.stringify({pass:selected.pass,cases:selected.cases,failures,changedInputs}));process.exitCode=selected.pass?0:1;
+}else if(actionPower){
+ const failures=results.filter(r=>!r.pass).length;
+ const selected={...report,pass:results.length>0&&!failures,stage:'Lossless action public power scope',failures,sourceHashes:{...report.sourceHashes,...Object.fromEntries(['src/bridge/powerLifecycleState.ts','src/bridge/losslessRuntimeState.ts'].map(name=>[name,hash(fs.readFileSync(path.join(root,name)))]))}};
+ fs.writeFileSync(path.join(task,'validation/LOSSLESS-ACTION-POWER-RESULT.json'),JSON.stringify(selected,null,2));process.exitCode=selected.pass?0:1;
 }else{fs.writeFileSync(path.join(task,'validation/MAINLINE20-LOSSLESS-OWNER.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));}
 }

@@ -2,6 +2,7 @@
 // Higher recovery tier: one close and one open, each observed in the SAME
 // Steam/account. Runs inside the existing cancellable private native child.
 #include "decky_sidebar_session.h"
+#include "steam_ui_epoch.h"
 namespace ymcc::deckyrepair::bigpicture {
 using Json=nlohmann::json;
 inline constexpr char alreadyHealthy[]="decky-bigpicture-already-healthy";
@@ -13,6 +14,21 @@ inline bool readyBeforeClose(const Json& mode){
         if(it==mode.end()||!it->is_boolean()||!it->get<bool>())return false;
     }
     return true;
+}
+inline void attachReopenReadback(Json& receipt,const Json& before,const Json& after) noexcept {
+    // Changing mode can keep the same JS document. Log only the relationship.
+    try{
+        const auto a=before.find("modeEpoch"),b=after.find("modeEpoch");
+        if(a!=before.end()&&b!=after.end()&&a->is_string()&&b->is_string()){
+            const auto old=steamui::parseModeEpoch(a->get_ref<const std::string&>());
+            const auto next=steamui::parseModeEpoch(b->get_ref<const std::string&>());
+            if(old.valid&&next.valid)receipt["reopenDocument"]=old.document==next.document?"retained":"changed";
+        }
+        const auto backend=after.find("deckyBackendState"),loaded=after.find("deckyFrontendLoaded");
+        if(backend!=after.end()&&backend->is_string()&&deckyfrontend::backendState(backend->get_ref<const std::string&>()))
+            receipt["reopenBackendState"]=*backend;
+        if(loaded!=after.end()&&loaded->is_boolean())receipt["reopenFrontendLoaded"]=*loaded;
+    }catch(...){} // Observability must not change the mode receipt.
 }
 template<class Current,class Read,class Send,class Now,class Wait>
 Json run(const steamsession::Session& session,Current current,Read read,Send send,Now now,Wait wait){
@@ -38,14 +54,17 @@ Json run(const steamsession::Session& session,Current current,Read read,Send sen
         if(observedMode(initial)!="bigpicture")return fail("decky-bigpicture-state-changed");
         if(readyBeforeClose(initial))return fail(alreadyHealthy);
         const auto started=now();
-        const auto await=[&](const char* expected,unsigned long long deadline){
+        const auto await=[&](const char* expected,unsigned long long deadline,Json* accepted=nullptr){
             while(current()&&now()<deadline){
                 lastMode="unknown";
-                const auto mode=read();
+                auto mode=read();
                 if(!current()||now()>=deadline)return false;
                 const auto observed=deckysession::positiveAccount(mode.value("observedAccount",Json()));
                 if(observed&&observed!=session.account)return false;
-                if(same(mode)&&observedMode(mode)==expected)return true;
+                if(same(mode)&&observedMode(mode)==expected){
+                    if(accepted)*accepted=std::move(mode);
+                    return true;
+                }
                 wait();
             }
             return false;
@@ -60,9 +79,12 @@ Json run(const steamsession::Session& session,Current current,Read read,Send sen
         stage="open-submit";
         if(!send("bigpicture"))return fail("decky-bigpicture-open-unconfirmed");
         stage="open-readback";
-        if(!await("bigpicture",started+24000))return fail("decky-bigpicture-open-unconfirmed");
-        return {{"ok",true},{"mutated",true},{"reason","decky-bigpicture-reopened"},
+        Json reopened;
+        if(!await("bigpicture",started+24000,&reopened))return fail("decky-bigpicture-open-unconfirmed");
+        Json receipt={{"ok",true},{"mutated",true},{"reason","decky-bigpicture-reopened"},
             {"launchStage","complete"},{"launchMode",lastMode}}; // Mode receipt only.
+        attachReopenReadback(receipt,initial,reopened);
+        return receipt;
     }catch(...){return fail("decky-bigpicture-result-unconfirmed");}
 }
 }

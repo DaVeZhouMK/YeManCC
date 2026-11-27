@@ -55,13 +55,13 @@ int wmain(int argc,wchar_t** argv) {
         std::atomic<double> cpu{0};
         std::atomic<unsigned> acChecks{0};
         Limits limits;limits.startup=0;limits.monitor=200;
-        struct Attempt {std::string id;int code;std::string stage;DWORD error;uint64_t tick;bool retry;};
+        struct Attempt {std::string id;int code;std::string stage;DWORD error;uint64_t tick;bool retry;std::string veto;};
         std::array<Attempt,4> attempts{};
         std::atomic<size_t> attemptCount{0};
         Controller controller(root,child,[](const Json&){},limits,ResourcePorts{[&]{++acChecks;return 1;},[&](uint64_t){return std::optional<double>{cpu.load()};},[]{return false;},
-            [&](const std::string& id,int code,const char* stage,DWORD error,uint64_t,bool retry){
+            [&](const std::string& id,int code,const char* stage,DWORD error,uint64_t,bool retry,const char* veto,unsigned,bool){
                 const auto index=attemptCount.load(std::memory_order_relaxed);
-                if(index<attempts.size())attempts[index]={id,code,stage,error,GetTickCount64(),retry};
+                if(index<attempts.size())attempts[index]={id,code,stage,error,GetTickCount64(),retry,veto?veto:""};
                 attemptCount.store(index+1,std::memory_order_release);
             }});
         controller.background({{"enabled",false},{"pauseReason",""},{"cpuThreshold",15}});
@@ -208,8 +208,10 @@ int wmain(int argc,wchar_t** argv) {
             // Hold the same idle grant throughout; only the supervisor's CPU
             // observation can cause the first cancellation.
             const auto loadAt=GetTickCount64();cpu.store(91.0);
-            expect(waitFor(4500,[&]{return activeStage().empty();}),"CPU veto retires the running child's staging file");
+            expect(waitFor(4500,[&]{return attemptCount.load()==1&&activeStage().empty();}),"CPU veto retires the running child's staging file");
             const auto cpuCancelMs=GetTickCount64()-loadAt;
+            expect(attempts[0].code==17&&attempts[0].stage=="admission-withdrawn"&&attempts[0].veto=="cpu-busy"&&attempts[0].retry,
+                "CPU veto is attributed on the existing retryable attempt receipt");
             expect(selected().empty()&&originalCurrent(),"CPU veto publishes nothing");
             expect(!waitFor(22000,[&]{return !activeStage().empty();}),"CPU veto inhibits retry even after its backoff expires");
             const auto calmAt=GetTickCount64();cpu.store(0.0);
@@ -220,7 +222,7 @@ int wmain(int argc,wchar_t** argv) {
             expect(waitFor(4500,[&]{return controller.finishForExit()&&activeStage().empty()&&SourceJob::reap()==0;}),"exit retires the active converter and its staging file");
             expect(selected().empty()&&originalCurrent(),"exit publishes nothing and preserves the original");
             std::cout<<Json({{"ok",true},{"cpuCancelMs",cpuCancelMs},{"retryMs",retryMs},
-                {"shutdownMs",GetTickCount64()-stopAt},{"protocolProcess",true}}).dump()<<'\n';
+                {"shutdownMs",GetTickCount64()-stopAt},{"protocolProcess",true},{"cpuVeto",attempts[0].veto}}).dump()<<'\n';
             return 0;
         }
         const auto withdraw=GetTickCount64();setIdle(false);

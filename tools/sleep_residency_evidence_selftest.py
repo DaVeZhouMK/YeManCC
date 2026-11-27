@@ -27,7 +27,9 @@ def capture_507_binding(source):
     prepare='    json residency;\n    if (leaving) {'
     prepare_end='    // Observation failures must not prevent the original wake from reaching the window.'
     emit='    if (leaving && residency.is_object()) observe("residency-journal", [&] {'
-    emit_end='    observe("trace", [&] { traceLog("kernel power event id=%d reason=%s targetState=%d", eventId,'
+    emit_end='    if(leaving&&originalTimeValid)observe("long-screen-off-journal",[&]{'
+    if emit_end not in source:
+        emit_end='    observe("trace", [&] { traceLog("kernel power event id=%d reason=%s targetState=%d", eventId,'
     assert all(source.count(anchor)==1 for anchor in [prepare,prepare_end,emit,emit_end]),'native507capture boundary changed'
     first,last=source.index(prepare,callback),source.index(prepare_end,callback)
     emission,finish=source.index(emit,callback),source.index(emit_end,callback)
@@ -70,7 +72,7 @@ for path in [project,out]:
 cpp=project/'tools/sleep_residency_evidence_selftest.cpp'
 # Export-only helper and actual adapter are compiled in both scopes, same execution.
 export_inputs=[project/'native/sleep_export_diagnostics.h',project/'native/sleep_export_diagnostics_native.inc',project/'tools/fixtures/sleep_residency/sleep_export_harness.inc']
-export_inputs += [project/name for name in ['native/log_ai_index.h', 'native/log_export_evidence.h', 'native/buffered_domain_log.h', 'native/log_jsonl_boundary.h', 'tools/input_pipe_test_allocation_fault.h']]
+export_inputs += [project/name for name in ['native/log_ai_index.h', 'native/screen_touchpad_log_scope.h', 'native/log_export_evidence.h', 'native/buffered_domain_log.h', 'native/log_jsonl_boundary.h', 'tools/input_pipe_test_allocation_fault.h']]
 export_inputs += [project/'native'/name for name in (
     'gamepad_backend_cost_json.h','gamepad_backend_cost.h','ui_gamepad_cycle_log.h','input_idle_scope.h',
     'input_signal_activity_log_scope.h','input_edge_log_scope.h','input_source_readback_log_scope.h',
@@ -80,6 +82,7 @@ export_inputs += [project/'native'/name for name in (
 activity_inputs=[project/'native/sleep_activity_evidence.h',project/'native/sleep_activity_evidence_native.inc',project/'native/sleep_notification_evidence.h',project/'tools/fixtures/sleep_residency/sleep_activity_native_harness.inc']
 timeout_inputs=[project/'native/sleep_timeout_policy.h',project/'native/sleep_timeout_native.inc',project/'native/sleep_kernel_cycle.h',project/'native/sleep_kernel_cycle_native.inc',project/'tools/fixtures/sleep_residency/sleep_timeout_native_harness.inc',project/'native/sleep_power_state.h',project/'native/sleep_power_observation.h',project/'native/sleep_power_dispatch.h']
 late_inputs=[project/'tools/fixtures/sleep_residency/latewake_cases.inc',project/'tools/fixtures/sleep_non_user_wake/amd_rog_late_spontaneous_ac.json',project/'native/sleep_abnormal_resleep.h',project/'native/sleep_cancel_ready.h']
+resume_classification_source=project/'native/sleep_resume_classification_native.inc'
 copy_paths=[project/'native'/name for name in ['sleep_abnormal_resleep.h','sleep_abnormal_resleep_native.inc','sleep_abnormal_etw_native.inc','sleep_request_fallback.h','sleep_retry_budget.h']]
 copy_paths += [project/'tools/fixtures/sleep_residency'/name for name in ['abnormal_native_harness.inc','cases.json']]
 if args.component_scope=='all':
@@ -95,6 +98,7 @@ if late_enabled:copy_paths+=late_inputs
 copy_paths += [cpp,project/'deps/json/json.hpp',*export_inputs]
 header=project/'native/sleep_residency_evidence.h'
 source_paths=[header,project/'native/main.cpp',Path(__file__).resolve(),project/'tools/fixtures/hc_reviewed_calibration/toolchain.mjs',*copy_paths,*activity_inputs,*timeout_inputs,*late_inputs]
+if late_enabled:source_paths.append(resume_classification_source)
 source_hashes={f:hashlib.sha256(f.read_bytes()).hexdigest() for f in source_paths}
 late_payload=project/'tools/fixtures/sleep_non_user_wake/amd_rog_late_spontaneous_ac.json'
 late_provenance=None
@@ -198,11 +202,18 @@ def timeout_slices(filename,names,kind,artifacts=None):
                 else:
                     begin=source.index('    if(leaving&&reason1) {',cb)
                     end=source.index('\n    }',begin)+6
-                    assert end<source.index('sgRecordFact(',cb)<source.index('PostMessageW(',cb),'manual callback highwater must precede log and UI'
+                    callback=source[cb:source.index('\n}\n',cb)+3]
+                    delivery=cb+(callback.index('sgPostKernelWake(') if 'sgPostKernelWake(' in callback else callback.index('PostMessageW('))
+                    assert end<source.index('sgRecordFact(',cb)<delivery,'manual callback highwater must precede log and UI'
         elif kind=='late-declaration':
             matches=list(re.finditer(r'^static [^\n]*\b'+re.escape(name)+r'\b[^;]*;',source,re.M))
             assert len(matches)==1,'late declaration missing or nonunique: '+name
             begin,end=matches[0].span()
+        elif kind=='late-s4-state':
+            start='static std::mutex g_sgFailedS4Mutex;'
+            finish='static SgFailedS4Delivery::Wake g_sgOriginalHibernateIngress;'
+            assert source.count(start)==source.count(finish)==1,'late-wake S4 ingress declarations changed'
+            begin=source.index(start);end=source.index(finish,begin)+len(finish)
         elif kind=='s4-callback':
             callback_begin=source.index('static DWORD WINAPI sgKernelPowerEventCallback(')
             callback_end=source.index('\n}\n',callback_begin)+3
@@ -214,7 +225,8 @@ def timeout_slices(filename,names,kind,artifacts=None):
                 anchor='    if((hibernateWake || (leaving&&reason==20))&&eventFileTime)\n        sgSleepTimeoutRecordSystemSuccess(eventFileTime);'
                 assert callback.count(anchor)==1,'S4 original-time success callback hook missing or nonunique'
                 local_begin=callback.index(anchor);local_end=local_begin+len(anchor)
-                assert callback.index('const ULONGLONG eventFileTime =')<local_begin<callback.index('sgRecordFact(')<callback.index('PostMessageW('),'S4 success must precede log/UI using original event time'
+                delivery=callback.index('sgPostKernelWake(') if 'sgPostKernelWake(' in callback else callback.index('PostMessageW(')
+                assert callback.index('const ULONGLONG eventFileTime =')<local_begin<callback.index('sgRecordFact(')<delivery,'S4 success must precede log/UI using original event time'
             begin=callback_begin+local_begin;end=callback_begin+local_end
         elif name in ['SgSleepMode','SgRetryKind']:
             matches=list(re.finditer(r'^enum class '+name+r'\b[^\n]+',source,re.M))
@@ -244,6 +256,22 @@ timeout_slices('production_timeout_s4_hook.inc',['hibernateWake','original107-su
 timeout_binding={'entryObservationScope':'No entry observation episode in this companion; Present/Held/Join false, RememberExit inert, Interrupt hard refusal; actual observation/handoff predicates are selected only by joined non-user consumer','sourcePath':'native/main.cpp','sourceSha256':source_hashes[project/'native/main.cpp'],'normalization':'utf8-sig-universal-newlines','artifacts':timeout_artifacts}
 late_artifacts=[]
 timeout_slices('production_late_wake_types.inc',['SG_USER_STANDBY_DEVICE_DELAY_MS','SG_INTERNAL_SLEEP_506_WINDOW_MS','SG_INTERNAL_SLEEP_506_CLOCK_SKEW_MS','g_sgFactMonitorEnabled'],'late-declaration',late_artifacts)
+if late_enabled:
+    resume_source=resume_classification_source.read_text('utf-8-sig')
+    start='struct SgResumeClassificationState {'
+    finish='static SgResumeClassificationState g_sgResumeClassification;'
+    assert resume_source.count(start)==resume_source.count(finish)==1,'public resume classification declaration changed'
+    begin=resume_source.index(start);end=resume_source.index(finish,begin)+len(finish)
+    payload=(resume_source[begin:end]+'\n').encode('utf-8')
+    generated='production_late_wake_resume_state.inc'
+    (out/generated).write_bytes(payload)
+    late_artifacts.append({'path':generated,'sha256':hashlib.sha256(payload).hexdigest(),
+        'sourcePath':resume_classification_source.relative_to(project).as_posix(),
+        'sourceSha256':source_hashes[resume_classification_source],'suffix':'\n',
+        'slices':[{'name':'SgResumeClassificationState','begin':len(resume_source[:begin].encode()),
+                   'end':len(resume_source[:end].encode()),'sha256':hashlib.sha256(payload[:-1]).hexdigest()}]})
+timeout_slices('production_late_wake_s4_state.inc',['SgFailedS4Delivery-and-original-ingress'],'late-s4-state',late_artifacts)
+timeout_slices('production_late_wake_s4_veto.inc',['sgKernelEventSupersededByS4'],'function',late_artifacts)
 timeout_slices('production_late_wake_bindings.inc',['sgInternalSleepRequestMatches506','sgSleepTriggerOrigin','sgRefreshSleepTriggerOrigin','sgNonUserWakeGuardEnabled','sgExternalDeviceWakeIntentAge','sgClearUnexpectedWake','sgArmNonUserWakeGuard','sgEvaluateExternalDeviceWake','sgObserveNonUserWake','sgNoteExternalDeviceNodeChange','sgNoteExternalDeviceAcDcChange','sgNoteExternalDeviceKernel507Reason5','sgNoteExternalDeviceKernel507Reason7','sgEntryFailureWindowEligible','sgS0EntryFailureEligible','sgRenewCancellationReady'],'function',late_artifacts)
 timeout_slices('production_late_wake_message.inc',['WM_SG_S0_WAKE-complete-body'],'late-message',late_artifacts)
 timeout_slices('production_late_wake_manual_callback.inc',['manual507-time-qualification','manual507-callback-before-log-UI'],'late-manual',late_artifacts)

@@ -11,36 +11,37 @@ namespace YeMan.Setup {
   public const string InstallRoot = @"C:\SOFT\YeMan";
   public string Root = InstallRoot;
   public string Mode = "install";
-  public string ExpectedInstalledVersion;
   // Legacy program-download and reset requests are explicitly rejected.
   public bool Online;
   public bool ResetSettings;
   public bool DesktopShortcut = true;
   public bool DefenderExclusions = true;
+  public bool DownloadWebView;
   public static void Validate(Plan plan) {
    if(plan==null)throw new IOException("缺少安装计划");
    if(plan.Online)throw new IOException("YMCC 仅使用包内版本，不支持在线更新");
    if((plan.Mode!="install"&&plan.Mode!="first")||plan.ResetSettings)throw new IOException("此安装器支持本地安装或更新，不支持重新设置");
-   if(!string.IsNullOrEmpty(plan.ExpectedInstalledVersion)&&plan.ExpectedInstalledVersion!="unknown")Config.StrictVersion(plan.ExpectedInstalledVersion);
    if(!string.Equals(SafeFiles.Full(plan.Root),InstallRoot,StringComparison.OrdinalIgnoreCase))throw new IOException("此版本固定安装到 C:\\SOFT\\YeMan，暂不支持更换位置");
    plan.Root=InstallRoot;
   }
  }
  public sealed class Receipt {
   public string OperationId; public string Phase; public string Root; public string Version;
-  public string PreviousVersion;
   public string CoreVersion; public string StartedUtc; public string FinishedUtc; public string Error;
   public string ErrorType,ErrorDetails;public int? ErrorHResult;
   public bool RebootRequired; public string Backup; public string SystemActions = "NOT_RUN";
   public List<string> Events = new List<string>();
+  public List<string> Warnings = new List<string>();
   public DefenderRecord Defender = new DefenderRecord();
   public HidHideRecord HidHide = new HidHideRecord();
   public bool DesktopShortcutRequested,DesktopShortcutVerified;
   public string DesktopShortcutPath;
+  public bool StartMenuShortcutVerified;
+  public string StartMenuShortcutPath;
   public List<string> RemovedHidHideDesktopShortcuts = new List<string>();
  }
  public sealed class InstallAssessment {
-  public string InstalledVersion; public string PackageVersion; public string Action; public string Label; public string Error; public bool Allowed;
+  public string PackageVersion; public string Action; public string Label; public string Error; public bool Allowed;
  }
  public static class Json {
   public static string Write(object o) { return new JavaScriptSerializer { MaxJsonLength = 16000000 }.Serialize(o); }

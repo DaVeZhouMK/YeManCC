@@ -5,6 +5,46 @@ static ymcc::sleeptimeout::Window g_sgSleepTimeoutWindow;
 static ULONGLONG sgSleepTimeoutSuccessfulExitTime() {
     return g_sgKernelSystemWake.load(std::memory_order_acquire);
 }
+// Only the public final 507 handler can bind this age proof. It neither
+// changes the live intent/lease nor makes a PBT receipt into a wake fact.
+struct SgContinuedWake {
+    ULONGLONG generation=0,sequence=0,entry=0,exit=0,origin=0;
+    int reason=-1;
+};
+static SgContinuedWake g_sgContinuedWake;
+static ULONGLONG sgContinuedWakeOrigin(const SgContinuedWake& wake) {
+    const auto boundary=g_sleepPowerDispatch.latestSleepBoundary();
+    if(!wake.entry||!wake.sequence||boundary.sequence!=wake.sequence||boundary.type!=PBT_APMSUSPEND ||
+       g_sleepPowerDispatch.pendingSuspend()||g_sgTask.generation!=wake.generation||g_sgTask.mode!=SgSleepMode::S3||
+       !g_sgRepairEligible||g_sgLastPowerButtonSleepIntentFileTime.load(std::memory_order_acquire)!=boundary.fileTime100ns||
+       !boundary.fileTime100ns||g_sgClosedSleepIntentFileTime.load(std::memory_order_acquire)>=boundary.fileTime100ns)
+        return 0;
+    const auto entry=g_sgKernelCycles.continuedUserEntry(wake.generation,boundary.fileTime100ns,wake.entry,
+        wake.exit,wake.reason,SG_S0_ENTRY_FAILURE_WINDOW_MS);
+    if(!entry.at||g_sgLatestUserSleepEntryFileTime.load(std::memory_order_acquire)!=entry.at ||
+       sgUserWakeCancelsSleepIntent(entry.at,g_sgLastPowerButtonWakeEventFileTime.load(std::memory_order_acquire))||
+       sgSleepTimeoutSuccessfulExitTime()>=entry.at ||
+       g_sgLatestSleepEntryFileTime.load(std::memory_order_acquire)!=wake.entry||
+       g_sgLastKernel507EventFileTime.load(std::memory_order_acquire)!=wake.exit||
+       wake.sequence!=g_sleepPowerDispatch.observedSleepBoundarySequence()||wake.generation!=currentPowerGeneration())return 0;
+    return entry.at;
+}
+static void sgBindContinuedWake(int reason,ULONGLONG at) {
+    const auto generation=currentPowerGeneration();
+    if(g_sgContinuedWake.generation==generation||!at||at>sgNowFileTime())return;
+    SgContinuedWake wake{generation,g_sleepPowerDispatch.observedSleepBoundarySequence(),
+        g_sgLatestSleepEntryFileTime.load(std::memory_order_acquire),at,0,reason};
+    wake.origin=sgContinuedWakeOrigin(wake);
+    if(wake.origin)g_sgContinuedWake=wake;
+}
+static bool sgContinuedWakeAge(ULONGLONG& age) {
+    age=0;
+    const auto& wake=g_sgContinuedWake;
+    if(!wake.origin||wake.generation!=currentPowerGeneration())return true;
+    if(sgContinuedWakeOrigin(wake)!=wake.origin)return false;
+    age=(wake.exit-wake.origin)/10000ULL;
+    return true;
+}
 // UI-owned observation only. PBT is never a physical-button action permit.
 // The existing timer and pool are used once; there is no standby poller.
 struct SgSleepTimeoutOriginalJob {
@@ -33,9 +73,14 @@ struct SgSleepTimeoutReentry {
 };
 static SgSleepTimeoutReentry g_sgSleepTimeoutReentry;
 static ULONGLONG g_sgSleepTimeoutAdoptedEntry=0;
+static ULONGLONG g_sgSleepTimeoutOriginalNativeBoundary=0,g_sgSleepTimeoutEvidenceEndTick=0;
+static ULONGLONG g_sgSleepTimeoutEvidenceEntry=0;
+static ULONGLONG g_sgSleepTimeoutPendingExitTick=0;
+static ULONGLONG g_sgSleepTimeoutPendingSuccessorExit=0;
 // Original Native callback cache; window retirement cannot erase source facts.
 static void sgResetKernelPowerIntervalObservations() noexcept {
     g_sgKernelCycles.reset();
+    g_sgContinuedWake={};
 }
 static void sgSleepTimeoutClearReentry() noexcept {
     g_sgSleepTimeoutAdoptedEntry=0;
@@ -43,8 +88,9 @@ static void sgSleepTimeoutClearReentry() noexcept {
 
 }
 static void sgSleepTimeoutRecordKernel(int id,int reason,ULONGLONG at,ULONGLONG generation,
-                                       bool continuing=false,bool sessionEnded=false) noexcept {
-    if(at&&at<=sgNowFileTime())g_sgKernelCycles.record(id,{at,generation,reason,0,continuing,sessionEnded});
+                                       bool continuing=false,bool sessionEnded=false,
+                                       ymcc::sleeppower::KernelCycleIdentity identity={}) noexcept {
+    g_sgKernelCycles.record(id,{at<=sgNowFileTime()?at:0,generation,reason,0,continuing,sessionEnded,0,identity});
 }
 static void sgSleepTimeoutStageReentry(ULONGLONG generation,const ymcc::sleeppower::Dispatch::Receipt& receipt) {
     const auto origin=g_sgSleepTimeoutWindow.origin,from=g_sgSleepTimeoutGeneration;
@@ -71,8 +117,8 @@ static bool sgSleepTimeoutReentryPending() {
         !sgSleepTimeoutSuccessAfter(link.origin)&&g_guardEnabled&&g_sgRetrySleepTimeout&&
         !g_exitRequested.load(std::memory_order_acquire);
 }
-static bool sgKernelPowerWakePredatesLatestEntry(int reason,ULONGLONG at,ULONGLONG* laterEntry) {
-    if(!at||reason==1||reason==20)return false;
+static bool sgKernelPowerWakePredatesLatestEntry(int,ULONGLONG at,ULONGLONG* laterEntry) {
+    if(!at)return false;
     auto latest=g_sgLatestSleepEntryFileTime.load(std::memory_order_acquire);
     const auto recorded=g_sgKernelCycles.latest().entry;
     if(recorded.generation&&recorded.at>latest)latest=recorded.at;
@@ -313,6 +359,12 @@ static void sgSleepTimeoutClassificationComplete(unsigned long long generation) 
         try{sgSleepTimeoutRetireClassification("classification-return-revoked",generation);}catch(...){}
         return;
     }
+    const auto now=sgNowFileTime();
+    if((g_sgSleepTimeoutWindow.requested||g_sgSleepTimeoutWindow.due(now))&&
+       !g_sgSleepTimeoutWindow.canDispatchAt(now)){
+        try{sgSleepTimeoutRetireClassification("timeout-dispatch-window-expired",generation);}catch(...){}
+        return;
+    }
     UINT_PTR timer=0;
     if(g_sgSleepTimeoutWindow.waiting)timer=SG_SLEEP_TIMEOUT_TIMER_ID;
     else if(g_sgSleepTimeoutWindow.requested&&sgSleepRetryActive()&&
@@ -329,6 +381,8 @@ static void sgSleepTimeoutClassificationComplete(unsigned long long generation) 
 }
 
 static void sgSleepTimeoutStop(const char* reason) noexcept {
+    g_sgSleepTimeoutOriginalNativeBoundary=g_sgSleepTimeoutEvidenceEndTick=g_sgSleepTimeoutEvidenceEntry=0;
+    g_sgSleepTimeoutPendingExitTick=g_sgSleepTimeoutPendingSuccessorExit=0;
     sgSleepTimeoutClearReentry();
     sgCancelRetryAdmission(SgRetryKind::SleepTimeout);
     // Retire only this settled original, including a newer Native cycle whose
@@ -354,6 +408,7 @@ static ULONGLONG sgSleepTimeoutOriginalIntent() {
     return g_sgSleepTimeoutWindow.active()?g_sgSleepTimeoutWindow.origin:0;
 }
 static bool sgSleepTimeoutCurrent() {
+    if(g_sgSleepTimeoutEvidenceEndTick)return false;
     if(g_sgSleepTimeoutGeneration!=currentPowerGeneration())sgSleepTimeoutAdoptReentry();
     if(!sgSleepTimeoutReentryCurrent())return false;
     const auto origin=g_sgSleepTimeoutWindow.origin;
@@ -389,8 +444,9 @@ static void sgSleepTimeoutResumeDeferredReentry() {
 static bool sgSleepTimeoutDispatchPermitted() {
     // Read the applicable AC/DC action only at arm/deadline/actual request.
     // Recheck callback-side veto after that OS read and immediately before dispatch.
-    return g_sgSleepTimeoutWindow.requested&&sgSleepTimeoutCurrent()&&
-        sgPowerButtonSleepMode()==SgSleepMode::S3&&sgSleepTimeoutCurrent();
+    return g_sgSleepTimeoutWindow.requested&&g_sgSleepTimeoutWindow.canDispatchAt(sgNowFileTime())&&
+        sgSleepTimeoutCurrent()&&sgPowerButtonSleepMode()==SgSleepMode::S3&&sgSleepTimeoutCurrent()&&
+        g_sgSleepTimeoutWindow.canDispatchAt(sgNowFileTime());
 }
 static void sgSleepTimeoutArm(int reason,ULONGLONG original) {
     // Only original physical-button506 Reason1 can arm this independent feature.
@@ -406,6 +462,9 @@ static void sgSleepTimeoutArm(int reason,ULONGLONG original) {
     if(!g_sgSleepTimeoutWindow.arm(original,now))return;
     sgSleepTimeoutClearReentry();
     g_sgSleepTimeoutGeneration=currentPowerGeneration();
+    g_sgSleepTimeoutOriginalNativeBoundary=g_sleepPowerDispatch.observedSleepBoundarySequence();
+    g_sgSleepTimeoutEvidenceEndTick=g_sgSleepTimeoutEvidenceEntry=0;
+    g_sgSleepTimeoutPendingExitTick=g_sgSleepTimeoutPendingSuccessorExit=0;
     if(g_sgSleepTimeoutObservation.waiting&&g_sgSleepTimeoutObservation.generation==currentPowerGeneration()&&
        original<=g_sgSleepTimeoutObservation.origin&&g_sgSleepTimeoutObservation.origin-original<=SG_S0_ENTRY_FAILURE_WINDOW_MS*10000ULL){
         g_sgSleepTimeoutObservation.waiting=false;g_sgSleepTimeoutObservation.joined=true;g_sgSleepTimeoutObservation.job.reset();
@@ -447,12 +506,107 @@ static void sgSleepTimeoutPowerBroadcast(ULONG code) {
     else if(code==PBT_APMSUSPEND&&(g_sgSleepTimeoutWindow.requested||!sgModernStandbyRepairSupported()))
         sgSleepTimeoutStop("windows-suspend-confirmed");
 }
+static const char* sgSleepTimeoutEvidenceVeto() {
+    const auto origin=g_sgSleepTimeoutWindow.origin;
+    if(!g_guardEnabled||!g_sgRetrySleepTimeout||g_exitRequested.load(std::memory_order_acquire))return "settings-or-exit";
+    if(g_sgSleepTimeoutGeneration!=currentPowerGeneration()||g_sleepPowerDispatch.pendingSuspend()||
+       g_sleepPowerDispatch.observedSleepBoundarySequence()!=g_sgSleepTimeoutOriginalNativeBoundary)return "new-native-suspend";
+    if(sgUserWakeCancelsSleepIntent(origin,g_sgLastPowerButtonWakeEventFileTime.load(std::memory_order_acquire)))return "manual-wake";
+    if(sgSleepTimeoutSuccessfulExitTime()>=origin)return "hibernate-or-s4";
+    const auto inherited=g_sgLastPowerButtonSleepIntentFileTime.load(std::memory_order_acquire);
+    if((inherited&&inherited!=origin)||g_sgLatestUserSleepEntryFileTime.load(std::memory_order_acquire)!=origin||
+       g_sgClosedSleepIntentFileTime.load(std::memory_order_acquire)>=origin)return "new-or-closed-human-intent";
+    const auto latest=g_sgKernelCycles.latest().exit;
+    if(latest.at>=origin&&!latest.continuing)return "final-kernel-exit";
+    return nullptr;
+}
+static bool sgSleepTimeoutWaitForContinuationEvidence(ULONGLONG now) {
+    auto& window=g_sgSleepTimeoutWindow;
+    if(!window.due(now)||!window.canDispatchAt(now)||g_sgSleepTimeoutAdoptedEntry||
+       sgSleepTimeoutEvidenceVeto()||sgPowerButtonSleepMode()!=SgSleepMode::S3||sgSleepTimeoutEvidenceVeto())return false;
+    const auto entry=g_sgLatestSleepEntryFileTime.load(std::memory_order_acquire);
+    const auto generation=g_sgSleepTimeoutGeneration;
+    using State=ymcc::sleeppower::KernelCycleObservations::BriefContinuationState;
+    const auto pair=g_sgKernelCycles.briefContinuationState(window.origin,generation,entry);
+    if(pair.state==State::Rejected||
+       entry!=g_sgLatestSleepEntryFileTime.load(std::memory_order_acquire)||sgSleepTimeoutEvidenceVeto())return false;
+    using Policy=ymcc::sleeptimeout::Window;
+    const auto remaining=Policy::delayMs+Policy::dispatchGraceMs-(now-window.origin)/Policy::unitsPerMs;
+    // Retain only observation until the original grace expires. This mode can never become a sender.
+    const auto pending=pair.state==State::AwaitingExit||pair.state==State::AwaitingEntry;
+    constexpr ULONGLONG pairRecheckMs=1000;
+    const auto interval=pending?(std::min)(static_cast<ULONGLONG>(remaining),pairRecheckMs):remaining;
+    if(!g_hwnd||!SetTimer(g_hwnd,SG_SLEEP_TIMEOUT_TIMER_ID,static_cast<UINT>(interval),nullptr))return false;
+    const auto tick=GetTickCount64();
+    g_sgSleepTimeoutEvidenceEndTick=tick+remaining;
+    g_sgSleepTimeoutPendingExitTick=pending?tick+interval:0;
+    g_sgSleepTimeoutPendingSuccessorExit=pair.state==State::AwaitingEntry?pair.tailExit:0;
+    g_sgSleepTimeoutEvidenceEntry=entry;
+    try {sgRecordFact(pending?"sleep-timeout-continuation-pair-pending":"sleep-timeout-continuation-evidence-wait",{{"originalHumanIntent100ns",window.origin},
+        {"originalDeadlineMs",Policy::delayMs},{"expiresAfterMs",remaining},{"latestEntry100ns",entry},
+         {"pairRecheckMs",pending?interval:0},{"pendingExit100ns",g_sgSleepTimeoutPendingSuccessorExit},
+        {"deadlineRestarted",false},{"powerActionAuthorized",false},{"mandatoryEvidence",true}});}catch(...){}
+    return true;
+}
 static void sgSleepTimeoutTick() {
+    if(g_sgSleepTimeoutEvidenceEndTick){
+        const auto entry=g_sgLatestSleepEntryFileTime.load(std::memory_order_acquire);
+        const auto veto=sgSleepTimeoutEvidenceVeto();
+        if(veto)sgSleepTimeoutStop(veto);
+        else if(g_sgSleepTimeoutPendingExitTick){
+            const auto tick=GetTickCount64(),now=sgNowFileTime();
+            const auto origin=g_sgSleepTimeoutWindow.origin;
+            const auto pendingExit=g_sgSleepTimeoutPendingSuccessorExit;
+            if(!pendingExit&&entry!=g_sgSleepTimeoutEvidenceEntry)sgSleepTimeoutStop("continuation-entry-unattributed");
+            else if(now<origin)sgSleepTimeoutStop("clock-rollback");
+            else if(tick>=g_sgSleepTimeoutEvidenceEndTick||!g_sgSleepTimeoutWindow.canDispatchAt(now))
+                sgSleepTimeoutStop("continuation-evidence-window-expired");
+            else if(tick>=g_sgSleepTimeoutPendingExitTick){
+                using State=ymcc::sleeppower::KernelCycleObservations::BriefContinuationState;
+                const auto pair=g_sgKernelCycles.briefContinuationState(origin,g_sgSleepTimeoutGeneration,entry);
+                if(pair.state!=State::Paired||(pendingExit&&pair.tailExit!=pendingExit)||
+                   entry!=g_sgLatestSleepEntryFileTime.load(std::memory_order_acquire)||sgSleepTimeoutEvidenceVeto())
+                    sgSleepTimeoutStop("continuation-pair-unconfirmed");
+                else {
+                    using Policy=ymcc::sleeptimeout::Window;
+                    const auto remaining=(std::min)(g_sgSleepTimeoutEvidenceEndTick-tick,static_cast<ULONGLONG>(
+                        Policy::delayMs+Policy::dispatchGraceMs-(now-origin)/Policy::unitsPerMs));
+                    if(!g_hwnd||!SetTimer(g_hwnd,SG_SLEEP_TIMEOUT_TIMER_ID,static_cast<UINT>(remaining),nullptr))
+                        sgSleepTimeoutStop("continuation-evidence-timer-failed");
+                    else {
+                        g_sgSleepTimeoutPendingExitTick=g_sgSleepTimeoutPendingSuccessorExit=0;
+                        g_sgSleepTimeoutEvidenceEntry=entry;
+                        try {sgRecordFact("sleep-timeout-continuation-evidence-wait",{{"originalHumanIntent100ns",origin},
+                            {"originalDeadlineMs",Policy::delayMs},{"expiresAfterMs",remaining},{"latestEntry100ns",entry},
+                            {"pairedAfterDeadline",true},{"pendingExit100ns",pendingExit},{"deadlineRestarted",false},{"powerActionAuthorized",false},
+                            {"mandatoryEvidence",true}});}catch(...){}
+                    }
+                }
+            }
+        }
+        else if(entry!=g_sgSleepTimeoutEvidenceEntry&&
+                !g_sgKernelCycles.briefContinuationsFrom(g_sgSleepTimeoutWindow.origin,g_sgSleepTimeoutGeneration,entry))
+            sgSleepTimeoutStop("continuation-entry-unattributed");
+        else if(sgNowFileTime()<g_sgSleepTimeoutWindow.origin)sgSleepTimeoutStop("clock-rollback");
+        else if(GetTickCount64()>=g_sgSleepTimeoutEvidenceEndTick||
+                !g_sgSleepTimeoutWindow.canDispatchAt(sgNowFileTime()))
+            sgSleepTimeoutStop("continuation-evidence-window-expired");
+        else g_sgSleepTimeoutEvidenceEntry=entry;
+        return;
+    }
     if(g_hwnd)KillTimer(g_hwnd,SG_SLEEP_TIMEOUT_TIMER_ID);
     if(g_sgSleepTimeoutObservation.waiting&&!sgSleepTimeoutResolveObservation())return;
     if(!g_sgSleepTimeoutWindow.waiting)return;
     if(!sgSleepTimeoutCurrent()||sgPowerButtonSleepMode()!=SgSleepMode::S3||!sgSleepTimeoutCurrent()) {
         if(sgSleepTimeoutDeferReentryPublication())return;
+        if(sgSleepTimeoutWaitForContinuationEvidence(sgNowFileTime()))return;
+        const auto origin=g_sgSleepTimeoutWindow.origin;
+        const auto ownedEntry=g_sgSleepTimeoutAdoptedEntry?g_sgSleepTimeoutAdoptedEntry:origin;
+        try {const auto veto=sgSleepTimeoutEvidenceVeto();sgRecordFact("sleep-timeout-deadline-blocked",{
+            {"originalHumanIntent100ns",origin},{"newerOriginalEntry",g_sgLatestSleepEntryFileTime.load(std::memory_order_acquire)>ownedEntry},
+            {"originalEntryHadSleep",g_sgKernelCycles.entered(origin,currentPowerGeneration(),SG_S0_ENTRY_FAILURE_WINDOW_MS)},
+            {"systemWakeAfterIntent",sgSleepTimeoutSuccessfulExitTime()>=origin},
+            {"hardVeto",veto?json(veto):json(nullptr)},{"powerActionAuthorized",false},{"mandatoryEvidence",true}});}catch(...){}
         sgSleepTimeoutStop("intent-setting-wake-or-success-veto");return;
     }
     const auto now=sgNowFileTime();
@@ -466,6 +620,9 @@ static void sgSleepTimeoutTick() {
     // An overdue timer can arrive with resume broadcasts. Preserve their
     // existing classification instead of racing a delayed human507.
     if(sgSleepTimeoutDeferClassification())return;
+    if(!g_sgSleepTimeoutWindow.canDispatchAt(now)){
+        sgSleepTimeoutStop("timeout-dispatch-window-expired");return;
+    }
     const auto sleepBoundary=g_sleepPowerDispatch.observedSleepBoundarySequence();
     // The deadline can join an unissued first request, but cannot own a
     // second send. Leave the window for the current Windows lifecycle to retire.

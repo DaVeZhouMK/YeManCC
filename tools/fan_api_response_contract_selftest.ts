@@ -42,6 +42,10 @@ try {
         capabilityModelClass:'HandheldCompanion.Devices.FixtureSource',capabilitySourceCommit:'f'.repeat(40),
         capabilityDeviceId:'fixture-source',capabilitySourceSha256:'a'.repeat(64)}};
     setReply(source);assert.equal((await adapter.handshake()).sourceModelClass,source.sourceModelClass);
+    const oemSource = {...source,sourceCommit:'a'.repeat(64),deviceIdentity:{...source.deviceIdentity,capabilitySourceCommit:'a'.repeat(64)}};
+    setReply(oemSource);assert.equal((await adapter.handshake()).sourceCommit,oemSource.sourceCommit);
+    setReply({...oemSource,deviceIdentity:{...oemSource.deviceIdentity,capabilitySourceSha256:'b'.repeat(64)}});
+    await invalid(()=>adapter.handshake(),'FAN_API_RESPONSE_INVALID');
     for(const delta of [{sourceModelClass:'different'},{sourceModelClass:null},{sourceCommit:'bad'},
       {sourceCommit:'e'.repeat(40)},{deviceClass:'HandheldCompanion.Devices.UnrelatedRuntime'},
       {deviceIdentity:{...source.deviceIdentity,capabilitySourceSha256:''}},

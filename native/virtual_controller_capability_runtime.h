@@ -11,7 +11,8 @@ static bool inputHostSteamDeckSelfOutputBlocked() noexcept {
     return g_machineIdentity.resolved && g_machineIdentity.family == YmccFamily::ValveSteamDeck;
 }
 static const char* inputHostMachineTargetRejectionReason(const std::string& persona) noexcept {
-    return ymcc::input::virtualTargetPolicy::rejectionReason(inputHostSteamDeckSelfOutputBlocked(), persona);
+    return ymcc::input::virtualTargetPolicy::rejectionReason(inputHostSteamDeckSelfOutputBlocked(), persona,
+        ymcc::hidHideInstalledVersion::tooOld());
 }
 // Bound output classification reuses the existing MSI authority and persona catalog.
 static bool msiUiBoundTargetAdmitted(const std::string& boundPersona) {

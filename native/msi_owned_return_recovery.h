@@ -68,21 +68,25 @@ public:
     // Zero power is unknown: it neither grants a probe nor refreshes a window.
     // Exhaustion stays dormant indefinitely until an existing topology/power
     // event changes these tokens; elapsed time alone never renews a window.
-    // sourceEvent is an existing physical identity/arrival edge when Windows
+    // suspendSerial distinguishes public suspend boundaries in the same power
+    // generation. sourceEvent is an existing physical identity/arrival edge when Windows
     // did not also emit a topology notification; it is not a per-frame tick.
     // The rate limit survives event refreshes; the retry budget is per episode.
     bool due(std::uint64_t now, std::uint64_t topology,
-             std::uint64_t power, std::uint64_t sourceEvent = 0) noexcept {
+             std::uint64_t power, std::uint64_t sourceEvent = 0,
+             std::uint64_t suspendSerial = 0) noexcept {
         if (!pending() || !acceptTime(now)) return false;
         if (power == 0) {
             miss();
             return false;
         }
-        if (!generationsKnown_ || topology != topology_ || power != power_ || sourceEvent != sourceEvent_) {
+        if (!generationsKnown_ || topology != topology_ || power != power_ ||
+            sourceEvent != sourceEvent_ || suspendSerial != suspendSerial_) {
             generationsKnown_ = true;
             topology_ = topology;
             power_ = power;
             sourceEvent_ = sourceEvent;
+            suspendSerial_ = suspendSerial;
             observations_ = 0;
             state_ = State::observing;
             miss();
@@ -192,6 +196,7 @@ private:
     std::uint64_t topology_ = 0;
     std::uint64_t power_ = 0;
     std::uint64_t sourceEvent_ = 0;
+    std::uint64_t suspendSerial_ = 0;
     std::uint64_t stableAt_ = 0;
     std::uint64_t firstSequence_ = 0;
     std::uint64_t lastSequence_ = 0;

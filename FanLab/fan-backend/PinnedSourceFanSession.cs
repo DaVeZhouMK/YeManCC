@@ -32,6 +32,7 @@ public sealed class PinnedSourceFanSession : IDisposable
     private string? endpoint;
     private int inFlight;
     private bool controlAttempted, automaticObserved;
+    private bool primaryDutyOwed, secondaryDutyOwed, automaticCommandsReturned;
     private string? lastFailure;
     internal PinnedSourceFanSession(PinnedFanDescriptor descriptor,long generation,string contextToken,
         Func<bool> permit,Func<IPinnedFanTransport> factory)
@@ -43,6 +44,7 @@ public sealed class PinnedSourceFanSession : IDisposable
     public bool PendingIo {get{lock(stateGate)return inFlight!=0;}}
     public bool ControlWasAttempted {get{lock(stateGate)return controlAttempted;}}
     public bool AutomaticReturnObserved {get{lock(stateGate)return automaticObserved;}}
+    public bool AutomaticCommandsReturned {get{lock(stateGate)return automaticCommandsReturned;}}
     public string? LastFailure {get{lock(stateGate)return lastFailure;}}
     public string? Endpoint {get{lock(stateGate)return endpoint;}}
 
@@ -50,6 +52,8 @@ public sealed class PinnedSourceFanSession : IDisposable
     {
         if(!double.IsFinite(percent)||percent<0||percent>100)
             throw new ArgumentOutOfRangeException(nameof(percent),"Fan percentage must be finite and within0..100");
+        if(Descriptor.SecondaryDutyRegister.HasValue)
+            return checked((byte)Math.Max(1,(int)(Descriptor.Maximum*((float)(int)percent/100f))));
         return checked((byte)Math.Round(percent*(Descriptor.Maximum-Descriptor.Minimum)/100d+Descriptor.Minimum,
             MidpointRounding.ToEven));
     }
@@ -102,9 +106,12 @@ public sealed class PinnedSourceFanSession : IDisposable
             // A manual bit is firmware state, not an exclusive owner receipt.
             // Known automatic/manual modes are read-only admission; catalog ownership and the
             // first issued control write/readback still establish this session.
-            var mode=opened.ReadByte(Descriptor.ControlRegister);Guard();
-            if(mode!=Descriptor.ControlOff&&mode!=Descriptor.ControlOn)
-                throw new InvalidOperationException($"PINNED_FAN_INVALID_CONTROL_MODE: 0x{mode:X2}");
+            if(!Descriptor.SecondaryDutyRegister.HasValue)
+            {
+                var mode=opened.ReadByte(Descriptor.ControlRegister);Guard();
+                if(mode!=Descriptor.ControlOff&&mode!=Descriptor.ControlOn)
+                    throw new InvalidOperationException($"PINNED_FAN_INVALID_CONTROL_MODE: 0x{mode:X2}");
+            }
             lock(stateGate){if(phase!=PinnedFanPhase.Opening)throw new InvalidOperationException("PINNED_FAN_OWNER_REVOKED");phase=PinnedFanPhase.Ready;}
             failed=false;
         }
@@ -123,6 +130,25 @@ public sealed class PinnedSourceFanSession : IDisposable
         try
         {
             var target=Target();StepGuard();GuardTarget(target);
+            if(Descriptor.SecondaryDutyRegister is ushort secondary)
+            {
+                void WriteDuty(ushort register,bool firstChannel)
+                {
+                    StepGuard();GuardTarget(target);
+                    // An issued write may change firmware even when the transport throws.
+                    lock(stateGate)
+                    {
+                        controlAttempted=true;automaticObserved=false;
+                        if(firstChannel)primaryDutyOwed=true;else secondaryDutyOwed=true;
+                    }
+                    target.WriteByte(register,value);StepGuard();
+                }
+                WriteDuty(Descriptor.DutyRegister,true);
+                WriteDuty(secondary,false);
+                lock(stateGate){if(phase is not (PinnedFanPhase.Ready or PinnedFanPhase.Active))throw new InvalidOperationException("PINNED_FAN_OWNER_REVOKED");phase=PinnedFanPhase.Active;}
+                failed=false;
+                return new PinnedFanWriteReceipt(Descriptor.DeviceId,Generation,value,Descriptor.SourceCommit);
+            }
             var mode=target.ReadByte(Descriptor.ControlRegister);StepGuard();
             bool first;lock(stateGate)first=!controlAttempted;
             if(first)
@@ -181,17 +207,25 @@ public sealed class PinnedSourceFanSession : IDisposable
             if(target is not null)
             {
                 target.PrepareRetirement();
-                if(controlAttempted&&!automaticObserved)
+                if(controlAttempted&&!automaticObserved&&!automaticCommandsReturned)
                 {
-                    GuardTarget(target);var mode=target.ReadByte(Descriptor.ControlRegister);
-                    if(mode!=Descriptor.ControlOff)
+                    if(Descriptor.SecondaryDutyRegister is ushort secondary)
                     {
-                        if(mode!=Descriptor.ControlOn)throw new InvalidOperationException($"PINNED_FAN_FOREIGN_RETURN_MODE: register=0x{Descriptor.ControlRegister:X4}, observed=0x{mode:X2}, manual=0x{Descriptor.ControlOn:X2}, automatic=0x{Descriptor.ControlOff:X2}");
-                        GuardTarget(target);target.WriteByte(Descriptor.ControlRegister,Descriptor.ControlOff);
-                        GuardTarget(target);mode=target.ReadByte(Descriptor.ControlRegister);
+                        ReturnDualDuty(target,secondary);
+                        lock(stateGate)automaticCommandsReturned=true;
                     }
-                    if(mode!=Descriptor.ControlOff)throw new IOException("PINNED_FAN_OEM_RETURN_NOT_OBSERVED");
-                    lock(stateGate)automaticObserved=true;
+                    else
+                    {
+                        GuardTarget(target);var mode=target.ReadByte(Descriptor.ControlRegister);
+                        if(mode!=Descriptor.ControlOff)
+                        {
+                            if(mode!=Descriptor.ControlOn)throw new InvalidOperationException($"PINNED_FAN_FOREIGN_RETURN_MODE: register=0x{Descriptor.ControlRegister:X4}, observed=0x{mode:X2}, manual=0x{Descriptor.ControlOn:X2}, automatic=0x{Descriptor.ControlOff:X2}");
+                            GuardTarget(target);target.WriteByte(Descriptor.ControlRegister,Descriptor.ControlOff);
+                            GuardTarget(target);mode=target.ReadByte(Descriptor.ControlRegister);
+                        }
+                        if(mode!=Descriptor.ControlOff)throw new IOException("PINNED_FAN_OEM_RETURN_NOT_OBSERVED");
+                        lock(stateGate)automaticObserved=true;
+                    }
                 }
                 // An exact retained transport remains owned if Dispose throws
                 // or still reports an open handle. No new lease may pass it.
@@ -207,6 +241,26 @@ public sealed class PinnedSourceFanSession : IDisposable
         }
         catch(Exception error){Failure(error);return false;}
         finally{lock(stateGate)inFlight=0;}
+    }
+    private void ReturnDualDuty(IPinnedFanTransport target,ushort secondary)
+    {
+        Exception? failure=null;
+        void ReturnChannel(ushort register,ref bool owed)
+        {
+            if(!owed)return;
+            try
+            {
+                target.PrepareRetirement();GuardTarget(target);
+                target.WriteByte(register,0);
+                // GPDTool issues zero without reading these duty registers. A
+                // checked write retires the command debt, not physical ownership.
+                owed=false;
+            }
+            catch(Exception error){failure=failure is null?error:new AggregateException(failure,error);}
+        }
+        ReturnChannel(Descriptor.DutyRegister,ref primaryDutyOwed);
+        ReturnChannel(secondary,ref secondaryDutyOwed);
+        if(failure is not null)throw failure;
     }
     public void Dispose()
     {if(!TryStop())throw new InvalidOperationException("PINNED_FAN_RETURN_PENDING: "+LastFailure);}

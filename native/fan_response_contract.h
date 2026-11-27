@@ -65,15 +65,21 @@ inline bool sourceResourcesRetired(const Json& state) {
     }
     return state["sourceFanClosed"].get<bool>();
 }
+inline bool sourceReleaseActionKind(std::string_view kind) {
+    return kind == "proven-by-source-auto-register-and-terminal-close"
+        || kind == "proven-by-source-duty-zero-commands-and-terminal-close";
+}
 inline bool sourceReleaseSafe(const Json& state) {
     if (!sourceResourcesRetired(state)) return false;
     const auto unknown = state.find("unknownState");
     if (unknown == state.end() || !unknown->is_boolean() || unknown->get<bool>()) return false;
     if (!state["hardwareWritesObserved"].get<bool>()) return true;
     const auto& claim = state["recoveryClaimEvidence"];
-    return state["sourceFanAutomaticReturned"].get<bool>()
-        && claim.value("oemReleaseActionKind", Json{}) == "proven-by-source-auto-register-and-terminal-close"
-        && claim.value("oemReleaseActionClass", Json{}) == "release-action-proven";
+    const auto kind = claim.value("oemReleaseActionKind", Json{});
+    const bool registerObserved = state["sourceFanAutomaticReturned"].get<bool>();
+    return claim.value("oemReleaseActionClass", Json{}) == "release-action-proven"
+        && (registerObserved ? kind == "proven-by-source-auto-register-and-terminal-close"
+                             : kind == "proven-by-source-duty-zero-commands-and-terminal-close");
 }
 inline bool stateValid(const Json& state) {
     if (!state.is_object() || !sourceStateValid(state)) return false;

@@ -6,6 +6,8 @@ export const LEGACY_MANAGED_CONTRACT='current105-exact21-v1';
 export const TERMINAL_MANAGED_CONTRACT='current105-terminal22-v1';
 export const TERMINAL_SD_DECODER_MANAGED_CONTRACT='current105-terminal23-sd-decoder-v1';
 export const TERMINAL_SIGNAL_EVIDENCE_MANAGED_CONTRACT='current105-terminal26-sdk-lifetime-compact-v1';
+export const TERMINAL_SHARED_INPUT_POWER_MANAGED_CONTRACT='current105-terminal29-shared-input-power-v1';
+export const SHARED_INPUT_POWER_SOURCES=Object.freeze(['InputHost/HostInputPowerBinding.cs','native/SharedSleepPower/RemotePowerContracts.cs','native/SharedSleepPower/RemoteNativePowerClient.cs']);
 const legacyNames=Object.freeze([
  "InputHost/Program.cs",
  "InputHost/PsEndpointOwnership.cs",
@@ -33,12 +35,14 @@ const terminalNames=Object.freeze([...legacyNames.slice(0,3),'InputHost/HostTerm
 const terminalSdDecoderNames=Object.freeze([...terminalNames,'InputHost/SteamDeckPadReportObservation.cs']);
 const signalEvidenceNames=Object.freeze(['InputHost/HostSdkFirstWitness.cs','InputHost/TargetCreationLifetimeEvidence.cs','InputHost/CompactFrameReplyBinding.cs']);
 const terminalSignalEvidenceNames=Object.freeze([...terminalSdDecoderNames,...signalEvidenceNames]);
+const terminalSharedPowerNames=Object.freeze([...terminalSignalEvidenceNames,...SHARED_INPUT_POWER_SOURCES]);
 // Build-only membership. The new decoder version grants no capture, compile-batch or runtime authority.
 const contracts=new Map([
  [LEGACY_MANAGED_CONTRACT,Object.freeze({id:LEGACY_MANAGED_CONTRACT,count:21,names:legacyNames,terminalCleanup:false,steamDeckPadDecoder:false})],
  [TERMINAL_MANAGED_CONTRACT,Object.freeze({id:TERMINAL_MANAGED_CONTRACT,count:22,names:terminalNames,terminalCleanup:true,steamDeckPadDecoder:false})],
  [TERMINAL_SD_DECODER_MANAGED_CONTRACT,Object.freeze({id:TERMINAL_SD_DECODER_MANAGED_CONTRACT,count:23,names:terminalSdDecoderNames,terminalCleanup:true,steamDeckPadDecoder:true})],
  [TERMINAL_SIGNAL_EVIDENCE_MANAGED_CONTRACT,Object.freeze({id:TERMINAL_SIGNAL_EVIDENCE_MANAGED_CONTRACT,count:26,names:terminalSignalEvidenceNames,terminalCleanup:true,steamDeckPadDecoder:true,signalEvidence:true})],
+ [TERMINAL_SHARED_INPUT_POWER_MANAGED_CONTRACT,Object.freeze({id:TERMINAL_SHARED_INPUT_POWER_MANAGED_CONTRACT,count:29,names:terminalSharedPowerNames,terminalCleanup:true,steamDeckPadDecoder:true,signalEvidence:true,sharedInputPower:true})],
 ]);
 export function managedCompileContract(id=LEGACY_MANAGED_CONTRACT){
  const contract=contracts.get(id);
@@ -58,7 +62,7 @@ export function validateManagedCompileRows(rows,id=LEGACY_MANAGED_CONTRACT){
 // Exact stage versions only. Membership and receipt relations grant no live authority.
 export function requireTerminalManagedContract(id=TERMINAL_MANAGED_CONTRACT){
  const contract=managedCompileContract(id);
- if(id!==TERMINAL_MANAGED_CONTRACT&&id!==TERMINAL_SD_DECODER_MANAGED_CONTRACT&&id!==TERMINAL_SIGNAL_EVIDENCE_MANAGED_CONTRACT)throw Error('CURRENT_MANAGED_TERMINAL_CONTRACT_REQUIRED');
+ if(id!==TERMINAL_MANAGED_CONTRACT&&id!==TERMINAL_SD_DECODER_MANAGED_CONTRACT&&id!==TERMINAL_SIGNAL_EVIDENCE_MANAGED_CONTRACT&&id!==TERMINAL_SHARED_INPUT_POWER_MANAGED_CONTRACT)throw Error('CURRENT_MANAGED_TERMINAL_CONTRACT_REQUIRED');
  return contract;
 }
 export function terminalManagedStageStatus(stage,id=TERMINAL_MANAGED_CONTRACT){
@@ -70,7 +74,7 @@ export function terminalLifecycleDeclarationKind(id=TERMINAL_MANAGED_CONTRACT){
  return 'TERMINAL'+requireTerminalManagedContract(id).count+'_LIFECYCLE_COMPILED_INPUTS';
 }
 export function terminalManagedContractFromDeclaration(kind){
- for(const id of [TERMINAL_MANAGED_CONTRACT,TERMINAL_SD_DECODER_MANAGED_CONTRACT,TERMINAL_SIGNAL_EVIDENCE_MANAGED_CONTRACT])if(kind===terminalLifecycleDeclarationKind(id))return requireTerminalManagedContract(id);
+ for(const id of [TERMINAL_MANAGED_CONTRACT,TERMINAL_SD_DECODER_MANAGED_CONTRACT,TERMINAL_SIGNAL_EVIDENCE_MANAGED_CONTRACT,TERMINAL_SHARED_INPUT_POWER_MANAGED_CONTRACT])if(kind===terminalLifecycleDeclarationKind(id))return requireTerminalManagedContract(id);
  throw Error('CURRENT_MANAGED_LIFECYCLE_DECLARATION_UNKNOWN');
 }
 // Cheap rejection before source capture; this checks known consumed dependencies,
@@ -80,6 +84,9 @@ export function validateManagedSourceRequirements(programText,id){
  const contract=managedCompileContract(id);
  const fields=[['HostSdkFirstWitness','_sdkFirstWitness'],['TargetCreationLifetimeEvidence','_targetCreationLifetime'],['CompactFrameReplyBinding','_compactFrameReplies']];
  const required=fields.filter(([type,field])=>new RegExp('\\b'+type+'[?]?\\s+'+field+'\\b').test(programText)).map(([type])=>'InputHost/'+type+'.cs');
+ const consumesPower=/\bHostInputPowerBinding[?]?\s+_powerBindings\b/.test(programText);
+ if(consumesPower)required.push(...SHARED_INPUT_POWER_SOURCES);
+ if(contract.sharedInputPower&&!consumesPower)throw Error('CURRENT_MANAGED_SHARED_POWER_SOURCE_REQUIRED');
  const missing=required.filter(relative=>!contract.names.includes(relative));
  if(missing.length)throw Error('CURRENT_MANAGED_SOURCE_DEPENDENCIES_MISSING:'+contract.id+':'+missing.join(','));
  return {contractId:contract.id,required,compileReadyProven:false,runtimeAuthorityGranted:false};
@@ -116,5 +123,18 @@ export function verifyManagedDecoderCompileEvidence(value,id,authorizedBuildRoot
    signalEvidence.push({source:input,generated:generated[0],compiled:compiled[0]});
   }
  }
- return {contractId:contract.id,source,generated:generated[0],compiled:compiled[0],...(contract.signalEvidence?{signalEvidence}:{}),runtimeAuthorityGranted:false};
+ const sharedInputPower=[];
+ if(contract.sharedInputPower){
+  need(value.sharedInputPowerCompiled===true,'SHARED_POWER_COMPILE_FLAG_REQUIRED');
+  for(const relative of SHARED_INPUT_POWER_SOURCES){
+   const input=value.inputBindings.sources.find(row=>row.relative===relative);
+   need(path.isAbsolute(input?.path??'')&&path.isAbsolute(input?.snapshot??'')&&owned(input.snapshot),'SHARED_POWER_OWNED_SOURCE_REQUIRED');
+   const expected=path.join(path.dirname(value.fixtureProject),path.basename(relative));
+   const generated=value.inputBindings.generatedInputs.filter(row=>key(row?.path)===key(expected));
+   const compiled=value.evaluatedCompilerInputs.filter(row=>row?.kind==='Compile'&&key(row.path)===key(expected));
+   need(generated.length===1&&compiled.length===1&&generated[0].sha256===input.sha256&&compiled[0].sha256===input.sha256,'SHARED_POWER_EXACT_COMPILE_IDENTITY_REQUIRED');
+   sharedInputPower.push({source:input,generated:generated[0],compiled:compiled[0]});
+  }
+ }
+ return {contractId:contract.id,source,generated:generated[0],compiled:compiled[0],...(contract.signalEvidence?{signalEvidence}:{}),...(contract.sharedInputPower?{sharedInputPower}:{}),runtimeAuthorityGranted:false};
 }

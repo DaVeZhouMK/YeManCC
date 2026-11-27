@@ -38,9 +38,8 @@ const SleepGuardView = () => import('./views/SleepGuardView.vue');
 const SettingsView = () => import('./views/SettingsView.vue');
 const QuickAppView = () => import('./views/QuickAppView.vue');
 const PerformanceScheduleView = () => import('./views/PerformanceScheduleView.vue');
-// Fan navigation is resident, not handshake-gated. Keep the existing bundled view;
-// rendering an entry is not hardware admission.
-import FanView from './views/FanView.vue';
+// Keep the fan route available before the hardware handshake, with its view loaded on entry.
+const FanView = () => import('./views/FanView.vue');
 const CustomSteamLibraryView = () => import('./views/CustomSteamLibraryView.vue');
 const TouchMouseView = () => import('./views/TouchMouseView.vue');
 const ButtonMappingView = () => import('./views/ButtonMappingView.vue');

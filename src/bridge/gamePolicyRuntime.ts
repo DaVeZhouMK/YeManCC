@@ -2,7 +2,7 @@ import { watch } from 'vue';
 import { performanceConsumptionSignature, normalizeHyperThreadMode, normalizeControlPowerSchemes, beginInvalidTdpRecovery, finishInvalidTdpRecovery, type InvalidTdpRecovery } from './performanceControls';
 import { isGameStatusCurrent, isCurrentGameTarget, subscribeGameTargetReadiness } from './gamedetect';
 import { powerSourceMode, powerSourceBatteryPresent } from './powerSource';
-import { detectPowerMode } from './yeman';
+import { detectPerformanceTemplate, detectPowerMode } from './yeman';
 import { loadGlobalFrameRates, onFrameRatesChanged, dedicatedFrameRatePair, applyIndependentFrameRates } from './frameRateLimits';
 import { setFloatRtssLinked, getFloatInfo } from './autofloat';
 import { subscribeMonitorSnapshot, type MonitorSnapshotView } from './monitorData';
@@ -13,7 +13,7 @@ import { loadGameCustomConfig, loadPerformanceSchedule, restorePerformanceSchedu
 import { applyGameCorePolicy, clearGameCorePolicy, detectGameCorePolicy } from './gameCorePolicy';
 import { registerScheduledTask } from '@/scheduler';
 import { powerLifecycle } from './api';
-import { getSharedPowerLifecycle, onSharedPowerLifecycle, isSharedPowerLifecycleAdmitted } from './powerLifecycleState';
+import { beginSharedPowerLifecycleReadback, getSharedPowerLifecycle, onSharedPowerLifecycle, isSharedPowerLifecycleAdmitted, sharedPowerWriteScope } from './powerLifecycleState';
 import { isQuickActionBusy } from './quickActionLock';
 import { createPowerResumeQueue } from './powerResume';
 
@@ -23,8 +23,28 @@ let epoch = 0;
 let running = false;
 const resumeQueue = createPowerResumeQueue();
 let runningCurrent: (() => boolean) | null = null;
+let runningRead: AbortController | null = null;
 function retireWork(): void {
+  const read = runningRead;
+  runningRead = null;
   resumeQueue.invalidate(); running = false; runningCurrent = null;
+  read?.abort();
+}
+async function withPolicyReadSignal<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const read = new AbortController();
+  runningRead = read;
+  try { return await work(read.signal); }
+  finally { if (runningRead === read) runningRead = null; }
+}
+async function readPolicyFrameTemplate(current: () => boolean): Promise<'portable' | 'desktop'> {
+  if (!current()) throw new Error('Frame template read retired');
+  return withPolicyReadSignal(async signal => {
+    let retire!: () => void;
+    const retired = new Promise<never>((_, reject) => { retire = () => reject(signal.reason); });
+    signal.addEventListener('abort', retire, { once: true });
+    try { return await Promise.race([retired, detectPerformanceTemplate()]); }
+    finally { signal.removeEventListener('abort', retire); }
+  });
 }
 let powerHeld = true, powerGeneration = 0;
 let powerNotificationSequence: number | undefined;
@@ -34,6 +54,8 @@ let appliedPerformance = '';
 let tdpAppliedIntent = '';
 let appliedCpuIntent = '';
 let appliedCore = '';
+let coreWritePending = false;
+let uncertainCore = '';
 let appliedFrames = '';
 let observedSchedule = '';
 let followsTemplateDefaults: boolean | null = null;
@@ -42,6 +64,7 @@ let stops: (() => void)[] = [];
 let stopRetry: (() => void) | null = null;
 let tdpPending = false, tdpNextCheck = 0, tdpChecksRemaining = 0, tdpCeiling = 0;
 let lastWakeGeneration = 0, tdpObservedAt = 0, tdpHighSince = 0, tdpCorrectionAfter = 0;
+let lastWakeSuspendSerial: number | undefined;
 function resetTdpChecks(): void {
   invalidTdpRecovery = null;
   tdpPending = true; tdpNextCheck = 0; tdpChecksRemaining = 2;
@@ -50,9 +73,22 @@ function resetTdpChecks(): void {
 }
 // Two bounded settle checks cover OEM software that writes after wake. Reuse
 // the existing resident task; healthy owners have no periodic hardware probe.
-export function requestGamePolicyTdpReconciliation(generation: number): void {
-  if (!active || !Number.isSafeInteger(generation) || generation <= lastWakeGeneration) return;
-  lastWakeGeneration = generation; epoch += 1; retireWork(); resetTdpChecks(); ensureRetry(); void reconcile();
+export function requestGamePolicyTdpReconciliation(generation: number): boolean {
+  const power = getSharedPowerLifecycle();
+  if (!active || powerHeld || !isSharedPowerLifecycleAdmitted(power) ||
+      power.generation !== generation || powerGeneration !== generation || generation < lastWakeGeneration) return false;
+  const serial = power.suspendSerial;
+  const newWake = generation > lastWakeGeneration || (serial !== undefined &&
+    lastWakeSuspendSerial !== undefined && serial > lastWakeSuspendSerial);
+  if (!newWake) {
+    lastWakeSuspendSerial ??= serial;
+    return false;
+  }
+  lastWakeGeneration = generation; lastWakeSuspendSerial = serial;
+  // The saved preference is unchanged, but RTSS may have lost it while asleep.
+  appliedFrames = ''; dirty = true;
+  epoch += 1; retireWork(); resetTdpChecks(); ensureRetry(); void reconcile();
+  return true;
 }
 function observeTdp(snapshot: MonitorSnapshotView | null): void {
   if (!active || powerHeld || tdpCeiling <= 0 || invalidTdpRecovery) return;
@@ -119,8 +155,18 @@ async function reconcile(): Promise<void> {
     // The invalid-only heartbeat consumes cached target/receipt state. It must
     // not reload settings, CPU topology or power on every slow check.
     if (!dirty && invalidTdpRecovery) { await reconcileInvalid(); return; }
-    const lifecycle = await powerLifecycle.get().catch(() => null);
-    if (!current() || lifecycle?.phase !== 'ready' || lifecycle.hardwareWritesAllowed !== true) return;
+    // Release a retired read from the scheduler without canceling writes that
+    // already belong to the performance, frame rate, or affinity owner.
+    const acceptReadback = beginSharedPowerLifecycleReadback();
+    const lifecycle = await withPolicyReadSignal(signal => powerLifecycle.get(undefined, signal));
+    if (!current()) return;
+    // Native ingress can advance before the public notification arrives.
+    // Let the shared source retire this scope and start the current owner.
+    acceptReadback(lifecycle);
+    if (!current() || !isSharedPowerLifecycleAdmitted(lifecycle) || lifecycle.generation !== admittedGeneration ||
+        (lifecycle.suspendSerial !== undefined && lifecycle.suspendSerial !== admittedPower?.suspendSerial) ||
+        (lifecycle.observedNotificationSequence !== undefined &&
+          lifecycle.observedNotificationSequence !== admittedPower?.observedNotificationSequence)) return;
     const config = await loadGameCustomConfig('ensure', { requireReady: true });
     if (!current()) return;
     const schedule = await loadPerformanceSchedule();
@@ -159,7 +205,10 @@ async function reconcile(): Promise<void> {
       return;
     }
     if (!dirty) { await reconcileTdp(); return; }
-    const globalFrames = await loadGlobalFrameRates();
+    // Settings reads can normalize or repair the file. Only the passive
+    // template probe after that transaction can release the scheduler early.
+    const globalFrames = await loadGlobalFrameRates(undefined, gameCurrent, () => readPolicyFrameTemplate(gameCurrent));
+    if (!gameCurrent()) return;
     const frameOwner = enabledEntry ? config.rtss?.[gamePolicyKey(game)] : undefined;
     const frames = dedicatedFrameRatePair(frameOwner, globalFrames);
     // Ownership is part of the lease even when both banks contain identical values.
@@ -186,7 +235,9 @@ async function reconcile(): Promise<void> {
       // Restore the current saved owner once when identity/side/bank changes.
       // Matching writer receipts keep ordinary retries free of hardware replay.
       if (!schedule.suspended && (enabledEntry || schedule.configured) && tdpBank.cpuValid !== false) {
-        const restored = await restorePerformanceScheduleIfConfigured(undefined, { automaticOnly: true, restoreRemembered: true, withReceipt: true });
+        const restored = await withPolicyReadSignal(signal => restorePerformanceScheduleIfConfigured(undefined, {
+          automaticOnly: true, restoreRemembered: true, withReceipt: true, ownsPowerRequest: gameCurrent, powerReadSignal: signal,
+        }));
         if (!gameCurrent()) return;
         if (restored.applied) { appliedPerformance = performanceSignature; bankApplied = true; }
         else if (restored.application && restored.application.cpu !== 'unconfirmed') appliedCpuIntent = performanceSignature;
@@ -207,17 +258,32 @@ async function reconcile(): Promise<void> {
       appliedFrames=frameSignature;
     }
     if (coreSignature !== appliedCore) {
-      const capabilities = await detectGameCorePolicy();
+      if (coreWritePending) return;
+      // Do not replay the same submitted write when IPC loses its receipt.
+      if (uncertainCore === coreSignature) { dirty = performancePending; return; }
+      const capabilities = await withPolicyReadSignal(detectGameCorePolicy);
       if (!capabilities) return; // failed probe is not permission to drop a lease.
       const mode = 'default';
       const hyper = capabilities.smtAvailable ? hyperIntent : 'default';
+      const powerScope = sharedPowerWriteScope(admittedPower);
+      if (!powerScope || !gameCurrent() || coreWritePending) return;
+      coreWritePending = true;
+      uncertainCore = '';
+      // A new write may change the prior policy before the reply is received.
+      appliedCore = '';
+      try {
+        if (game && (mode !== 'default' || hyper !== 'default')) {
+          const result = await applyGameCorePolicy(game, mode, hyper, powerScope, true);
+          if (!result.ok || !result.applied) return;
+        } else if (!await clearGameCorePolicy(powerScope, undefined, true)) return;
+        appliedCore = coreSignature;
+      } catch (error) {
+        uncertainCore = coreSignature;
+        throw error;
+      } finally {
+        coreWritePending = false;
+      }
       if (!gameCurrent()) return;
-      if (game && (mode !== 'default' || hyper !== 'default')) {
-        const result = await applyGameCorePolicy(game, mode, hyper);
-        if (!result.ok || !result.applied) return;
-      } else if (!await clearGameCorePolicy()) return;
-      if (!gameCurrent()) return;
-      appliedCore = coreSignature;
     }
     if (!gameCurrent()) return;
     dirty = performancePending;
@@ -238,7 +304,7 @@ function invalidate(tdp = false): void { epoch += 1; retireWork(); dirty = true;
 export function startGamePolicyRuntime(): void {
   if (active) return;
   active = true; dirty = true; powerHeld = true; powerGeneration = 0; powerNotificationSequence = undefined;
-  powerSuspendSerial = undefined;
+  powerSuspendSerial = undefined; lastWakeGeneration = 0; lastWakeSuspendSerial = undefined;
   followsTemplateDefaults = null;
   resetTdpChecks();
   ensureRetry();
@@ -254,14 +320,19 @@ export function startGamePolicyRuntime(): void {
       powerSuspendSerial = power.suspendSerial;
       if (!isSharedPowerLifecycleAdmitted(power)) {
         if (!powerHeld) epoch += 1;
-        retireWork(); powerHeld = true; stopRetry?.(); stopRetry = null;
+        powerHeld = true;
+        const retry = stopRetry; stopRetry = null;
+        retry?.();
+        // Aborting the old read can synchronously deliver the next Ready.
+        retireWork();
         return;
       }
       const previousGeneration = powerGeneration, wasHeld = powerHeld;
       powerGeneration = power.generation; powerHeld = false;
-      if (previousGeneration > 0 && power.generation > lastWakeGeneration) {
-        requestGamePolicyTdpReconciliation(power.generation);
-      } else if (wasHeld) {
+      if (previousGeneration === 0) {
+        lastWakeGeneration = power.generation; lastWakeSuspendSerial = power.suspendSerial;
+      } else if (requestGamePolicyTdpReconciliation(power.generation)) return;
+      if (wasHeld) {
         ensureRetry();
         if (previousGeneration > 0) void reconcile();
       } else if (scopeChanged && (running || dirty || tdpPending)) {
@@ -269,7 +340,6 @@ export function startGamePolicyRuntime(): void {
         // and cannot reset the original TDP checks, timing or completed owners.
         retireWork(); ensureRetry(); void reconcile();
       }
-      lastWakeGeneration = Math.max(lastWakeGeneration, power.generation);
     }, { observeNotificationSequence: true, observeSuspendSerial: true }),
     subscribeMonitorSnapshot(observeTdp),
     subscribePolicyGameStatus(() => invalidate(true)),

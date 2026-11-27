@@ -1,0 +1,9 @@
+{
+  "scope": "existing actual isolated mainline Release build; no rebuild or runtime execution",
+  "artifactRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Fan-Public-Wake-R35\\artifacts\\publish",
+  "buildEvidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Fan-Public-Wake-R35\\artifacts",
+  "metadataToolSha256": "fb4ea8f007aa26f0df172a2c2cb0829d7e41bb5036fcf0fc43615a84a9ffbdb4",
+  "preparationToolSha256": "9812cfa34a1485f46ae837cd3b223d92506c2d0526dd613a6d48cbb706f7cef5",
+  "isolatedBuildTargetsSha256": "91a34e78fc404785a373488b3f561eb716312beadef2aad933ff192243737e5d",
+  "projectSourceRebuildReproducibilityProven": false
+}

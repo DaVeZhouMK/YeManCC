@@ -24,6 +24,7 @@ export type ControllerShortcutRecordMode = 'controller' | 'keyboard-mouse' | 'oe
  * keyId 保持来源语义，不能按界面左右重编号或改写已保存的规则。
  */
 export type OemTriggerCapability = 'full' | 'click-only'; // click-only：WMI 一次性事件（MSI CLAW/QS），仅 press/double
+export const GPD_MENU_INPUT_CODE = 'gpd-menu';
 export type OemKeyPhysicalForm = 'keyboard-vk' | 'hid-button' | 'wmi-event' | 'embedded';
 /** A one-way keyboard contribution from the existing native profile, never a physical alias. */
 export interface OemKeyboardContribution {
@@ -592,6 +593,7 @@ export function validateControllerShortcutRules(rules: ControllerShortcutRule[],
   const oemClickOnly = new Set(oemKeys?.supported
     ? oemKeys.keys.filter((key) => key.triggerCapability === 'click-only').map((key) => key.keyId)
     : []);
+  let gpdMenuBound = false;
   for (const rule of rules) {
     if (seenIds.has(rule.id)) problems.push('动作编号重复，请重新新建动作。');
     seenIds.add(rule.id);
@@ -632,6 +634,11 @@ export function validateControllerShortcutRules(rules: ControllerShortcutRule[],
     // Persist real source/code pairs; only the preview classifies F13–F24 as handheld.
     for (const input of rule.inputs) {
       if (input.source !== 'oem') continue;
+      if (input.code === GPD_MENU_INPUT_CODE) {
+        if (rule.inputs.length !== 1 || rule.trigger !== 'press') problems.push('GPD Menu 仅支持单键短按。');
+        if (gpdMenuBound) problems.push('GPD Menu 只能有一个已启用的动作。');
+        gpdMenuBound = true;
+      }
       if (oemUnavailable.has(input.code)) {
         problems.push('此专用按键的输入暂不可用，请更换输入。');
       } else if (oemKnown && !oemKnown.has(input.code)) {

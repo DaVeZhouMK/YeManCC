@@ -900,7 +900,7 @@ async function main(): Promise<void> {
   // R8: renderer wake notification is missing, but telemetry discovers the
   // Host is still suspended. The automatic owner waits without touching HC,
   // then uses the same resume/Open/OpenEvents/acquire/enable chain once native
-  // reports that the new power generation is ready.
+  // reports that the new power generation has a published Fan wake.
   await runCase(
     'R8 telemetry discovers missed wake edge and continuous owner resumes without a click',
     async () => {
@@ -919,6 +919,10 @@ async function main(): Promise<void> {
       assert(!adapter.calls.includes('enable'), `R8: no curve write while native still suspended, calls=${JSON.stringify(adapter.calls)}`);
 
       native = nativeState(2, 'ready', true, false);
+      await pause(1000);
+      assert(lifecycle.recoveryActive, 'R8: plain Ready must keep the retained owner waiting');
+      assert(!adapter.calls.includes('resume') && !adapter.calls.includes('enable'), 'R8: plain Ready must not restore control');
+      native = nativeState(2, 'ready', true, true);
       await waitFor(() => !lifecycle.recoveryActive, 3000, 'R8 automatic owner to resume and write the retained curve');
       assert(adapter.remoteOpenCalled, 'R8: automatic recovery must prove Open/OpenEvents before writing');
       assert(adapter.calls.includes('acquire'), 'R8: automatic recovery must acquire a fresh lease');
@@ -1439,9 +1443,11 @@ async function main(): Promise<void> {
       try {
         await enterPostSleepStaleSuspended(lifecycle, adapter);
         lifecycle.observePowerBoundary('resumed', 2);
-        const failure = await lifecycle.resumeAfterCommittedPowerWake(2).then(() => '', (error: Error) => error.message);
-        assert(failure.startsWith('FAN_MANUAL_WAKE_NOT_READY:'), 'R6.4: native Fan write admission must be required even after public commit');
-        assert(!adapter.calls.includes('acquire') && adapter.enableCalls === 0, 'R6.4: public commit alone must not acquire or write');
+        adapter.calls.length = 0;
+        await lifecycle.resumeAfterCommittedPowerWake(2);
+        assert(lifecycle.coordinatorSnapshot.wakeReadyGeneration !== 2, 'R6.4: public commit alone must not grant local Fan readiness');
+        assert(!adapter.calls.includes('resume') && !adapter.calls.includes('acquire') && adapter.enableCalls === 0,
+          'R6.4: public commit alone must not ask the Host to resume, acquire or write');
         assert(lifecycle.hasControlIntent, 'R6.4: missing write admission must not discard the user curve');
       } finally {
         await closeQuietly(lifecycle);

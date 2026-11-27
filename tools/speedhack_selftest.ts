@@ -402,24 +402,34 @@ async function mainUncertainOwnership(){
  if(!sleepOnly&&process.argv.some(a=>a.startsWith('--sleep-mode=')))throw Error('Sleep mode requires its exact ownership leaf');
  if(process.argv.some(a=>a.startsWith('--ownership-case=')&&a!=='--ownership-case=reset-after-uncertain'&&a!=='--ownership-case=sleep-pending-cleanup'))throw Error('Unknown exact original ownership leaf');
  const results:any[]=[];
- function load(name:string,deps:any={}){const module={exports:{}};nodeVm.runInNewContext(esbuild.transformSync(nodeFs.readFileSync(nodePath.join(process.cwd(),name),'utf8'),{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,structuredClone,console,TextEncoder,TextDecoder,queueMicrotask,require:(name:string)=>{nodeAssert(Object.hasOwn(deps,name),'Unexpected dependency '+name);return deps[name];}});return module.exports as any;}
+ function load(name:string,deps:any={}){const module={exports:{}};nodeVm.runInNewContext(esbuild.transformSync(nodeFs.readFileSync(nodePath.join(process.cwd(),name),'utf8'),{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,structuredClone,AbortController,console,TextEncoder,TextDecoder,queueMicrotask,require:(name:string)=>{nodeAssert(Object.hasOwn(deps,name),'Unexpected dependency '+name);return deps[name];}});return module.exports as any;}
  function create(){
   let generation=1,selected:any={pid:222,name:'safe-game.exe',title:'Fixture',path:'C:/Fixture/safe-game.exe',processCreated:'222007',identityGeneration:1},owned=structuredClone(selected),inventoryKnown=true,inventoryPresent=true,invalidated=false,makeUncertain=true,cleanupFails=false,hooked=false,globalFactor=1,powerAllowed=true,powerKnown=true,inventoryReads=0,publication=1,sequence=1,suspendSerial=0;
-  let nativeNotificationPending=false;
+  let nativeNotificationPending=false,powerReplyOverride:any;
   const powerValue=()=>({generation,phase:'ready',known:powerKnown,hardwareWritesAllowed:powerAllowed,notificationPending:!powerAllowed||nativeNotificationPending,publicationRevision:publication,observedNotificationSequence:sequence,suspendSerial});
   const gameObservers=new Set<any>(),wakeObservers=new Set<any>(),files=new Map<string,string>(),scripts:any[]=[];
   const readinessObservers=new Set<any>();let gameCurrent=true;
   const finishGameRead=(reselected=false)=>{if(reselected)selected=structuredClone(owned);gameCurrent=true;for(const fn of [...readinessObservers])fn(true);};
   let heldInventory:Promise<void>|undefined,heldDispatch:Promise<void>|undefined,heldDetection:Promise<void>|undefined;
+  let heldRead:{command:string;reply:Promise<void>}|undefined,readAborts=0,readEntrances=0;
+  const holdRead=(command:string)=>{let release!:()=>void;heldRead={command,reply:new Promise<void>(resolve=>{release=resolve;})};return release;};
   const holdInventory=()=>{let release!:(error?:Error)=>void;heldInventory=new Promise<void>((resolve,reject)=>{release=error=>error?reject(error):resolve();});return release;};
   const holdDispatch=()=>{let reject!:(error:Error)=>void;heldDispatch=new Promise<void>((_resolve,fail)=>{reject=fail;});return reject;};
   const holdDetection=()=>{let release!:()=>void;heldDetection=new Promise<void>(resolve=>{release=resolve;});return release;};
   const detectGame=async()=>{const hold=heldDetection;heldDetection=undefined;if(hold)await hold;return selected?structuredClone(selected):null;};
-  const api=load('src/bridge/api.ts',{'./steamInstallationFacts':load('src/bridge/steamInstallationFacts.ts'),'./bootModeGlobalPreferences':{captureBootPreferenceWrite:()=>{throw Error('unused boot preference write forbidden');}},'./ipc':{invoke:async(command:string,args:any)=>{
+  const api=load('src/bridge/api.ts',{'./steamInstallationFacts':load('src/bridge/steamInstallationFacts.ts'),'./bootModeGlobalPreferences':{captureBootPreferenceWrite:()=>{throw Error('unused boot preference write forbidden');}},'./ipc':{invoke:async(command:string,args:any,options?:{signal?:AbortSignal})=>{
+   if(heldRead?.command===command){
+    const {reply}=heldRead;heldRead=undefined;++readEntrances;
+    await new Promise<void>((resolve,reject)=>{
+     const abort=()=>{++readAborts;reject(Error('fixture IPC read retired'));};
+     options?.signal?.addEventListener('abort',abort,{once:true});
+     void reply.then(()=>{options?.signal?.removeEventListener('abort',abort);resolve();});
+    });
+   }
    if(command==='fs.exists')return files.has(args.path)||args.path.toLowerCase().includes('\\openspeedy\\');
    if(command==='fs.readTextFile'){nodeAssert(files.has(args.path));return files.get(args.path);}
    if(command==='fs.writeTextFile'){nodeAssert(args.path.endsWith('speedhack.log'));files.set(args.path,args.content);return true;}
-   if(command==='power.lifecycle')return powerValue();
+   if(command==='power.lifecycle')return powerReplyOverride??powerValue();
    if(command==='proc.identities'){inventoryReads++;const hold=heldInventory;heldInventory=undefined;if(hold)await hold;return {known:inventoryKnown,processes:inventoryKnown&&inventoryPresent?[structuredClone(owned)]:[]};}
    nodeAssert.equal(command,'shell.run');const script=args.args[2],cleanup=script.includes('# Owned cleanup'),apply=script.includes('action=apply:')||script.includes('TARGET_MAPPING_BEFORE:');
    if(cleanup){const tx=script.slice(script.indexOf('# Owned cleanup'),script.indexOf('$pipe.Close()'));nodeAssert(tx.includes("'DISABLE 222'"));nodeAssert(!tx.includes('SETSPEED')&&!tx.includes('INJECT'));scripts.push({kind:'cleanup',globalSet:false,powerSequence:args.expectedPowerNotificationSequence,suspendSerial:args.expectedPowerSuspendSerial});const hold=heldDispatch;heldDispatch=undefined;if(hold)await hold;if(cleanupFails)return {exitCode:2,stdout:'RESULT:failed',stderr:''};hooked=false;}
@@ -436,7 +446,8 @@ async function mainUncertainOwnership(){
   const actions=adapter.createSpeedMirrorActions({featureAllowed:()=>true,game:()=>selected,power:()=>api.powerLifecycle.get(),nativeState:async()=>({active:true,connected:true,connection:'73',runId:'c'.repeat(32),connectionRevision:73,powerGeneration:generation,hardwareWritesAllowed:true}),acquire:()=>()=>releases++,presets:owner.SPEED_PRESETS,blocked:owner.isMinecraftTarget,state:owner.getGameSpeedState,apply:(target:any,factor:number,admission:any)=>owner.applyGameSpeed(target.pid,factor,target,'user-factor',admission),clear:(target:any,admission:any)=>owner.clearGameSpeed(target.pid,'user-reset',admission)});
   const intent=(factor:string)=>actions.execute({field:'speedFactor',value:factor},{generation,revision:1,nativePeer:{connection:'73',runId:'c'.repeat(32),connectionRevision:73},gameIdentity:game.gameMirrorIdentity(selected),gameAdmission:{speed:JSON.stringify(owner.getGameSpeedState())},checkpoint:()=>{}});
   const deliverPower=(value:any)=>powerEvents.get('power.lifecycleChanged')?.(value);
-  return {owner,intent,scripts,powerEvents,powerTimers,shared,holdInventory,holdDispatch,holdDetection,finishGameRead,invalidateGameRead:()=>{gameCurrent=false;},readinessObservers,get inventoryReads(){return inventoryReads;},setNotificationPending:(pending:boolean)=>{nativeNotificationPending=pending;},emitPower:(ready:boolean,known=true,newGeneration=false,notify=true)=>{if(newGeneration)generation++;powerAllowed=ready;powerKnown=known;publication++;sequence++;const value=powerValue();if(notify)deliverPower(value);return value;},emitCoalescedReady:()=>{nodeAssert(powerAllowed);publication++;suspendSerial++;const value=powerValue();deliverPower(value);return value;},deliverPower,firePowerRetry:()=>{nodeAssert.equal(powerTimers.size,1);const [id,timer]=powerTimers.entries().next().value;powerTimers.delete(id);timer.fn();},get hooked(){return hooked;},get factor(){return globalFactor;},get releases(){return releases;},gameObservers,wakeObservers,setUncertain:(value:boolean)=>makeUncertain=value,setInventory:(known:boolean,present=true)=>{inventoryKnown=known;inventoryPresent=present;},setCleanupFails:(value:boolean)=>cleanupFails=value,replaceBirth:()=>{owned={...owned,processCreated:'replacement'};},switchTarget:()=>{selected={...selected,pid:333,processCreated:'333007',path:'C:/Fixture/other.exe',identityGeneration:2};for(const fn of [...gameObservers])fn(selected);},exitTarget:()=>{selected=null;for(const fn of [...gameObservers])fn(null);}};
+  const overridePowerReply=(value:any)=>{powerReplyOverride=value;};
+  return {owner,intent,scripts,powerEvents,powerTimers,shared,overridePowerReply,holdInventory,holdDispatch,holdDetection,holdRead,get readAborts(){return readAborts;},get readEntrances(){return readEntrances;},finishGameRead,invalidateGameRead:()=>{gameCurrent=false;},readinessObservers,get inventoryReads(){return inventoryReads;},setNotificationPending:(pending:boolean)=>{nativeNotificationPending=pending;},emitPower:(ready:boolean,known=true,newGeneration=false,notify=true)=>{if(newGeneration)generation++;powerAllowed=ready;powerKnown=known;publication++;sequence++;const value=powerValue();if(notify)deliverPower(value);return value;},emitCoalescedReady:()=>{nodeAssert(powerAllowed);publication++;suspendSerial++;const value=powerValue();deliverPower(value);return value;},deliverPower,firePowerRetry:()=>{nodeAssert.equal(powerTimers.size,1);const [id,timer]=powerTimers.entries().next().value;powerTimers.delete(id);timer.fn();},get hooked(){return hooked;},get factor(){return globalFactor;},get releases(){return releases;},gameObservers,wakeObservers,setUncertain:(value:boolean)=>makeUncertain=value,setInventory:(known:boolean,present=true)=>{inventoryKnown=known;inventoryPresent=present;},setCleanupFails:(value:boolean)=>cleanupFails=value,replaceBirth:()=>{owned={...owned,processCreated:'replacement'};},switchTarget:()=>{selected={...selected,pid:333,processCreated:'333007',path:'C:/Fixture/other.exe',identityGeneration:2};for(const fn of [...gameObservers])fn(selected);},exitTarget:()=>{selected=null;for(const fn of [...gameObservers])fn(null);}};
  }
  const flush=async()=>{for(let i=0;i<500;i++)await Promise.resolve();};
  async function pending(f:any){const r=await f.intent('2');nodeAssert.equal(r.applied,false);nodeAssert.equal(r.pending,true);nodeAssert.equal(f.hooked,true);nodeAssert.equal(f.factor,2);nodeAssert.equal(f.owner.getGameSpeedState().cleanupPending,true);nodeAssert.equal(f.owner.getGameSpeedState().enabled,false);nodeAssert.equal(f.releases,1);}
@@ -471,10 +482,110 @@ async function mainUncertainOwnership(){
  if(sleepOnly){
   const selected=process.argv.find(a=>a.startsWith('--sleep-mode='))?.slice('--sleep-mode='.length),all=['pending-ready','unknown-ready','late-old-ready','missed-ready','duplicate-ready','manual-power-boundary','mirror-power-boundary'];
   const confirmed=['confirmed-session-interrupted-inventory','confirmed-session-reselected','confirmed-session-same-generation','confirmed-session-missing-receipt'];
-  const continuation=['same-generation-after-zero-dispatch','same-generation-before-zero-dispatch','same-generation-missing-receipt','same-generation-inventory-unknown','same-generation-inventory-rejected','same-generation-inventory-absent','coalesced-ready-zero-dispatch','coalesced-ready-missing-receipt',...confirmed];
-  nodeAssert(!selected||all.includes(selected)||continuation.includes(selected),'Unknown exact sleep cleanup boundary');
+  const continuation=['same-generation-after-zero-dispatch','same-generation-before-zero-dispatch','same-generation-missing-receipt','same-generation-inventory-unknown','same-generation-inventory-rejected','same-generation-inventory-absent','coalesced-ready-retained-lease','coalesced-ready-zero-dispatch','coalesced-ready-missing-receipt','coalesced-ready-inventory-unconfirmed',...confirmed];
+  const retiredReads=['held-inventory-releases-before-reply','held-power-releases-before-reply','dispatched-cleanup-retains-receipt','target-change-retained-read','target-change-waits-ready'];
+  const directReads=['direct-power-ready-successor','direct-power-fence-recovery'];
+  const manualReads=['manual-direct-fence','manual-delayed-ready'];
+  nodeAssert(!selected||all.includes(selected)||continuation.includes(selected)||retiredReads.includes(selected)||directReads.includes(selected)||manualReads.includes(selected),'Unknown exact sleep cleanup boundary');
   const modes=selected?[selected]:all,measurements:any[]=[];
   for(const mode of modes){
+   if(manualReads.includes(mode)){
+    const f=create();f.setUncertain(false);
+    const apply=(factor:number)=>f.owner.applyGameSpeed(222,factor,undefined,'user-factor');
+    nodeAssert.equal((await apply(2)).ok,true);await flush();
+    const ready=f.emitPower(true);await flush();
+    const release=f.holdDetection(),click=apply(4);await flush();
+    const late=mode==='manual-delayed-ready',suspend=f.emitPower(false,true,true,late);
+    if(late)f.overridePowerReply(ready);
+    release();
+    nodeAssert.equal((await click).ok,false,'a newer suspend must retire the old click before dispatch');
+    f.overridePowerReply(undefined);await flush();
+    nodeAssert.equal(f.scripts.length,1,'the old click never reaches the shell');
+    const observed=f.shared.getSharedPowerLifecycle();
+    nodeAssert.equal(observed?.observedNotificationSequence,suspend.observedNotificationSequence,'a manual preflight must share an unseen native suspend');
+    nodeAssert.equal(observed?.hardwareWritesAllowed,false);
+    const resumed=f.emitPower(true,true,false,false);f.firePowerRetry();await flush();
+    nodeAssert.equal(f.shared.getSharedPowerLifecycle()?.observedNotificationSequence,resumed.observedNotificationSequence);
+    nodeAssert.equal(f.scripts.filter(s=>s.kind==='apply').length,1,'Ready must not replay the old click');
+    nodeAssert.equal((await apply(4)).ok,true,'a fresh click works in the confirmed scope');
+    nodeAssert.equal(f.scripts.filter(s=>s.kind==='apply').at(-1)?.powerSequence,resumed.observedNotificationSequence);
+    nodeAssert.equal((await f.owner.cleanupOwnedSpeedTarget()).ok,true);
+    nodeAssert.equal(f.shared.getSharedPowerLifecycleDiagnostics().subscriberCount,0);
+    nodeAssert.equal(f.powerEvents.size,0);nodeAssert.equal(f.powerTimers.size,0);
+    results.push(mode);continue;
+   }
+   if(directReads.includes(mode)){
+    const f=create();await pending(f);await flush();
+    const release=f.holdRead('power.lifecycle');
+    const prior=f.emitCoalescedReady();await flush();
+    nodeAssert.equal(f.readEntrances,1);
+    nodeAssert.equal(f.scripts.length,1,'no cleanup was submitted before the read');
+    const closed=mode==='direct-power-fence-recovery';
+    let next=f.emitPower(!closed,true,closed,false);
+    release();await flush();
+    if(closed){
+     const observed=f.shared.getSharedPowerLifecycle();
+     nodeAssert.equal(observed?.generation,next.generation,'the direct write check must publish the missed native fence');
+     nodeAssert.equal(observed?.hardwareWritesAllowed,false);
+     nodeAssert.equal(f.scripts.length,1,'a blocked receipt authorizes zero cleanup');
+     nodeAssert.equal(f.owner.getGameSpeedState()?.cleanupPending,true);
+     next=f.emitPower(true,true,false,false);
+     f.firePowerRetry();await flush();
+    }
+    const calls=f.scripts.filter(s=>s.kind==='cleanup');
+    nodeAssert.equal(calls.length,1,'the original cleanup must continue once after the newer direct read');
+    nodeAssert.equal(calls[0].powerSequence,next.observedNotificationSequence);
+    nodeAssert.equal(calls[0].suspendSerial,next.suspendSerial);
+    f.deliverPower(prior);f.deliverPower(next);await flush();
+    nodeAssert.equal(f.scripts.length,2);nodeAssert.equal(f.factor,2);
+    nodeAssert.equal(f.owner.getGameSpeedState(),null);nodeAssert.equal(f.hooked,false);
+    nodeAssert.equal(f.shared.getSharedPowerLifecycleDiagnostics().subscriberCount,0);
+    nodeAssert.equal(f.powerEvents.size+f.powerTimers.size,0);
+    results.push(mode);continue;
+   }
+   if(mode==='target-change-waits-ready'){
+    const f=create();await pending(f);await flush();
+    const reads=f.inventoryReads;
+    f.emitPower(false);f.switchTarget();await flush();
+    nodeAssert.equal(f.inventoryReads,reads,'a changed target cannot start cleanup during a public fence');
+    nodeAssert.equal(f.scripts.filter(s=>s.kind==='cleanup').length,0);
+    const ready=f.emitPower(true);await flush();
+    const calls=f.scripts.filter(s=>s.kind==='cleanup');
+    nodeAssert.equal(calls.length,1);nodeAssert.equal(calls[0].powerSequence,ready.observedNotificationSequence);
+    nodeAssert.equal(f.owner.getGameSpeedState(),null);nodeAssert.equal(f.shared.getSharedPowerLifecycleDiagnostics().subscriberCount,0);
+    results.push(mode);continue;
+   }
+   if(retiredReads.includes(mode)){
+    const f=create();await pending(f);await flush();
+    const dispatched=mode==='dispatched-cleanup-retains-receipt';
+    const fail=dispatched?f.holdDispatch():undefined;
+    const release=dispatched?undefined:f.holdRead(mode==='held-power-releases-before-reply'?'power.lifecycle':'proc.identities');
+    try{
+     const first=mode==='target-change-retained-read'?f.emitPower(true):f.emitCoalescedReady();
+     if(mode==='target-change-retained-read')f.switchTarget();
+     await flush();
+     nodeAssert.equal(f.readEntrances,dispatched?0:1);
+     nodeAssert.equal(f.scripts.filter(s=>s.kind==='cleanup').length,dispatched?1:0);
+     // Presentation-only publication has no revocation authority.
+     f.deliverPower({...first,publicationRevision:first.publicationRevision+1});await flush();
+     nodeAssert.equal(f.readAborts,0);
+     const next=f.emitCoalescedReady();await flush();
+     const calls=f.scripts.filter(s=>s.kind==='cleanup');
+     nodeAssert.equal(calls.length,1,'the current cleanup must reach its original owner before the old read replies');
+     nodeAssert.equal(calls[0].suspendSerial,dispatched?first.suspendSerial:next.suspendSerial);
+     nodeAssert.equal(f.readAborts,dispatched?0:1);
+     if(dispatched){
+      fail!(Error('inert lost cleanup receipt'));await flush();
+      nodeAssert.equal(f.scripts.filter(s=>s.kind==='cleanup').length,1);
+      nodeAssert.equal(f.owner.getGameSpeedState()?.cleanupPending,true);
+      f.setInventory(true,false);nodeAssert((await f.owner.cleanupOwnedSpeedTarget()).ok);
+     }else{release!();await flush();nodeAssert.equal(f.scripts.filter(s=>s.kind==='cleanup').length,1);}
+     nodeAssert.equal(f.factor,2);nodeAssert.equal(f.owner.getGameSpeedState(),null);
+     nodeAssert.equal(f.shared.getSharedPowerLifecycleDiagnostics().subscriberCount,0);
+     nodeAssert.equal(f.powerEvents.size,0);nodeAssert.equal(f.powerTimers.size,0);
+     results.push(mode);continue;
+    }finally{release?.();fail?.(Error('inert fixture finished'));await flush();}
+   }
    if(mode==='mirror-power-boundary'){
     const f=create();f.setUncertain(false);
     f.setNotificationPending(true);
@@ -522,6 +633,42 @@ async function mainUncertainOwnership(){
     nodeAssert.equal(f.factor,1);
     nodeAssert.equal((await f.owner.cleanupOwnedSpeedTarget()).ok,true);
     nodeAssert.equal(f.wakeObservers.size,0);
+    results.push(mode);continue;
+   }
+   if(mode==='coalesced-ready-retained-lease'){
+    const f=create();await pending(f);await flush();
+    const before=f.shared.getSharedPowerLifecycle();nodeAssert(before);
+    const reads=f.inventoryReads;
+    f.deliverPower({...before,publicationRevision:before.publicationRevision+1});await flush();
+    nodeAssert.equal(f.inventoryReads,reads,'metadata-only publication is not a cleanup wake');
+    const next=f.emitCoalescedReady();await flush();
+    nodeAssert.equal(next.generation,before.generation);
+    nodeAssert.equal(next.observedNotificationSequence,before.observedNotificationSequence);
+    nodeAssert(next.suspendSerial>before.suspendSerial);
+    nodeAssert.deepEqual(f.scripts.slice(1).map(s=>[s.kind,s.suspendSerial]),[['cleanup',next.suspendSerial]],'the first coalesced wake must reconcile the retained lease');
+    f.deliverPower(next);await flush();
+    nodeAssert.equal(f.inventoryReads,reads+1);nodeAssert.equal(f.scripts.length,2);
+    nodeAssert.equal(f.factor,2);nodeAssert.equal(f.hooked,false);
+    nodeAssert.equal(f.owner.getGameSpeedState(),null);nodeAssert.equal(f.gameObservers.size,0);
+    nodeAssert.equal(f.shared.getSharedPowerLifecycleDiagnostics().subscriberCount,0);
+    results.push(mode);continue;
+   }
+   if(mode==='coalesced-ready-inventory-unconfirmed'){
+    const f=create();await pending(f);await flush();const reads=f.inventoryReads;
+    f.setInventory(false);
+    const old=f.emitCoalescedReady();await flush();
+    nodeAssert.equal(f.inventoryReads,reads+1);
+    nodeAssert.equal(f.scripts.length,1,'Unknown inventory must not submit cleanup');
+    nodeAssert.equal(f.owner.getGameSpeedState()?.cleanupPending,true);
+    f.setInventory(true);
+    f.deliverPower(old);f.emitPower(true);await flush();
+    nodeAssert.equal(f.inventoryReads,reads+1,'Duplicate Ready and sequence-only changes must not retry an unknown read');
+    const next=f.emitCoalescedReady();await flush();
+    nodeAssert.equal(next.generation,old.generation);
+    nodeAssert.deepEqual(f.scripts.slice(1).map(s=>[s.kind,s.suspendSerial]),[['cleanup',next.suspendSerial]],'A new suspend can reconcile a previous zero-dispatch attempt');
+    nodeAssert.equal(f.inventoryReads,reads+2);nodeAssert.equal(f.factor,2);nodeAssert.equal(f.hooked,false);
+    nodeAssert.equal(f.owner.getGameSpeedState(),null);nodeAssert.equal(f.gameObservers.size,0);
+    nodeAssert.equal(f.shared.getSharedPowerLifecycleDiagnostics().subscriberCount,0);
     results.push(mode);continue;
    }
    if(mode==='coalesced-ready-zero-dispatch'||mode==='coalesced-ready-missing-receipt'){

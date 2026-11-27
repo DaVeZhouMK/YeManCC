@@ -13,7 +13,7 @@ export function createLocalRadialFanActions(alive:()=>boolean) {
     curves:(source,preset)=>normalizeFanPresetCurves(source.presetCurves,source.nodes,
       ['soft','balanced','aggressive'].includes(String(source.preset))?source.preset as FanPreset:'balanced')[preset],
     save:saveFanPresetSelection,updateActive:setFanControlActive,updateDuty:setFanNavigationDuty,
-    power:()=>powerLifecycle.get(),featureAllowed:()=>alive()&&FAN_IMPORT_ENABLED&&!FAN_FORCE_PREVIEW,
+    power:signal=>powerLifecycle.get(undefined,signal),featureAllowed:()=>alive()&&FAN_IMPORT_ENABLED&&!FAN_FORCE_PREVIEW,
     uiBusy:isFanMirrorUiBusy,currentDisplay:getFanMirrorDisplay,display:observeFanMirrorDisplay,
     observeCapability:allowed=>recordFanHandshake(allowed),nextRevision:()=>crypto.randomUUID(),
   });

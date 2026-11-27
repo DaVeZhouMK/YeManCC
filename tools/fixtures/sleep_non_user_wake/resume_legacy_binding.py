@@ -19,6 +19,10 @@ def bind(c):
     # This legacy port allocates no timeout continuation or real sensor IO.
     # Actual timeout and input ownership are covered by their selected consumers.
     p+='\nstatic void sgSleepTimeoutClassificationComplete(unsigned long long) noexcept {}\n'
+    if c['args'].broadcast_consumer_only:
+        p+='\nstatic void clearPowerResumeReady();\n' # The complete broadcast binds the actual Ready receipt.
+    else:
+        p+='\nstatic void clearPowerResumeReady() {} // Ready receipt state is outside this legacy port.\n'
     p+='\nstatic unsigned legacySensorPowerSuspends=0;\nstatic void inputCaptureSuspendSensorsForPower(){++legacySensorPowerSuspends;}\n'
     p+='\nvoid steamOriginalRecoveryPowerReady(ULONGLONG){}\nvoid sleepRecoveryAutoCloseSuspendEpisode(){}\nvoid sleepRecoveryAutoInteractiveResume(ULONGLONG,int,ULONGLONG){}\n'
     # Reuse the same exact publisher binding as the original directed consumer.
@@ -46,5 +50,7 @@ static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* value,
         a='int '+name+'() {\n';assert h.count(a)==1
         code={'resumeAutomatic':'PBT_APMRESUMEAUTOMATIC','resumeInteractive':'PBT_APMRESUMESUSPEND','resumeCritical':'PBT_APMRESUMECRITICAL'}[name]
         receipt='const auto powerReceipt=g_sleepPowerDispatch.window('+code+',GetTickCount64(),sgNowFileTime());\nstruct Complete{ymcc::sleeppower::Dispatch::Receipt receipt;~Complete(){g_sleepPowerDispatch.complete(receipt,GetTickCount64());}} complete{powerReceipt};\n'
-        h=h.replace(a,a+receipt+'const bool resumeClassificationHeld=false; // original legacy common port, not shared classification execution\n')
+        consumer=('const WPARAM w='+code+';\n'+c['consumer_binding'] if
+                  'powerConsumer(' in h.split(a,1)[1].split('\n}\n',1)[0] else '')
+        h=h.replace(a,a+receipt+consumer+'const bool resumeClassificationHeld=false; // original legacy common port, not shared classification execution\n')
     return p,f,h

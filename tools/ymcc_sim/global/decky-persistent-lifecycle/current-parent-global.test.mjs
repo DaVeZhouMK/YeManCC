@@ -5,11 +5,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import vm from 'node:vm';
+import {OBSERVER_PUBLICATION_GENERATOR} from '../../../fixtures/steam_session_observer_publication.mjs';
 import {OWNED_SOURCES} from './owned-adapter.mjs';
 import {validateCurrentEnvelope,validateBaselineReceipt,aggregateSeven,coverageMap,allocateBudget,sourceMap,naturalExit,verifyCurrentDisk,parentDeclaration,legacyMigration,EXACT_25,REQUIREMENTS,JS_REGRESSIONS,NATIVE_REGRESSIONS,BUDGETS,currentChildToolPins} from './current-parent-global.mjs';
 import {typedIds,verifyDeferredResourceRevalidation,verifyDeferredResourceExecution,verifyDeferredResourceProof} from './typed-binding-gate.mjs';
 import {validateOriginalResult as validateCurrentOriginal,ORIGINAL_CASES as originalCoreCases} from './owned-run.mjs';
-import {createRequiredStageGuard,raceInitialProducerFailure,collectInitialProducersAfterFailure,originalJsRegressionArgs} from './current-parent-global.mjs';
+import {createRequiredStageGuard,raceInitialProducerFailure,collectInitialProducersAfterFailure,originalJsRegressionArgs,parseOriginalHostProof} from './current-parent-global.mjs';
 // Explicit finite factory controls only; the original history-bound suite stays in else.
 const requiredStageFilterText=process.env.YMCC_PARENT_GLOBAL_CASE_FILTER;
 if(requiredStageFilterText!==undefined){
@@ -66,6 +67,18 @@ if(requiredStageFilterText!==undefined){
   return {native,baseline,done,trace,proofs,cleanupErrors,cases,failures,stops,get cause(){return observedCause;}};
  }
  const directedControls=[
+  ['original Host stdout keeps diagnostics separate from its single terminal report',()=>{
+   const proof={status:'passed',cases:['original Host result']};
+   const terminal=JSON.stringify(proof,null,2),measurement='{"wakeInputOnly":{"power":4}}';
+   assert.deepEqual(parseOriginalHostProof(terminal),proof);
+   assert.deepEqual(parseOriginalHostProof('\uFEFF'+measurement+'\r\n'+terminal.replaceAll('\n','\r\n')+'\r\n'),proof);
+   const failed=JSON.stringify({status:'failed',cases:[{id:'old-request',passed:false}]});
+   assert.equal(parseOriginalHostProof(measurement+'\n'+failed).cases[0].passed,false);
+   assert.throws(()=>parseOriginalHostProof(measurement),/ORIGINAL_HOST_REPORT_REQUIRED/);
+   assert.throws(()=>parseOriginalHostProof(JSON.stringify(proof)+'\n'+terminal),/ORIGINAL_HOST_DIAGNOSTIC_OR_DUPLICATE_REPORT/);
+   assert.throws(()=>parseOriginalHostProof(terminal+'\n'+measurement));
+   assert.throws(()=>parseOriginalHostProof(measurement+'\n'+terminal.slice(0,-1)));
+  }],
   ['original Host runs once before both heavy producers and still honors diagnostic collection',async()=>{
    const parent=fs.readFileSync(new URL('./current-parent-global.mjs',import.meta.url),'utf8');
    const hostMatch=parent.match(/^const HOST_JS_REGRESSION='([^']+)';$/m);assert(hostMatch);
@@ -80,8 +93,8 @@ if(requiredStageFilterText!==undefined){
     const trace=[],cases=[],stops=[],report={rawEvidence:[]},repo=path.resolve('memory-repo'),work=path.join(repo,'work'),out=path.join(repo,'out');
     const add=(id,passed,details)=>cases.push({id,passed,...details});
     const guard=createRequiredStageGuard({cases,collectAfterFailure:collect,recordFailure:id=>add(id,false),recordStop:row=>stops.push(row)});
-    const context={assert,path,report,repo,work,out,process:{env:{}},processExec:'fake-node',guard,add,JS_REGRESSIONS,HOST_JS_REGRESSION:host,originalJsRegressionArgs,naturalExit,
-     fs:{existsSync:()=>true},pin:file=>file,read:()=>({status:'passed',cases:['original fake Host result']}),trace,
+    const context={assert,path,report,repo,work,out,process:{env:{}},processExec:'fake-node',guard,add,JS_REGRESSIONS,HOST_JS_REGRESSION:host,originalJsRegressionArgs,naturalExit,parseOriginalHostProof,
+     fs:{existsSync:()=>true,readFileSync:()=>'{"diagnostic":true}\n{"status":"passed","cases":["original fake Host result"]}'},pin:file=>file,read:()=>({status:'passed',cases:['original fake Host result']}),trace,
      exec(id,program,args,timeoutMs,{env,cwd}){trace.push(id);assert.equal(program,'fake-node');assert.equal(cwd,repo);assert.equal(timeoutMs,60000);
       if(id===hostId){assert.deepEqual(args,[path.join(repo,'tools',host+'.mjs')]);assert.equal(env.YMCC_DECKY_ARTIFACT_ROOT,path.join(work,host));}
       return {id,exitCode:failed&&id===hostId?1:0,elapsedMs:1,timeoutMs,stdout:{path:'fake-stdout'}};
@@ -159,12 +172,13 @@ if(requiredStageFilterText!==undefined){
 
   ['original typed source freeze includes every declared input before parent consumption',()=>{
    const repo=path.resolve(import.meta.dirname,'../../../..'),entry=path.join(repo,'tools/decky_binding_runtime_selftest.mjs'),text=fs.readFileSync(entry,'utf8');
-   const begin=text.indexOf('function freeze(file){'),boundary=text.indexOf('\nfreeze(path.join(repo,',begin),seedEnd=text.indexOf('\n// Explicit focused counterexample',boundary);
+   const begin=text.indexOf('function freeze(file){'),boundary=text.indexOf('\nfreeze(path.join(repo,',begin),seedEnd=text.indexOf('\nconst observerHeader=',boundary);
    assert(begin>=0&&boundary>begin&&seedEnd>boundary,'ORIGINAL_FREEZE_FUNCTION_AND_SEEDS_REQUIRED');
    const virtualRoot=path.join(repo,'__source_membership_readonly_memory__'),memory=new Map(),pins=[],seen=new Set();
    const memoryFs={...fs,mkdirSync:()=>undefined,writeFileSync(file,value){const relative=path.relative(virtualRoot,path.resolve(file));assert(relative&&!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep),'SOURCE_CONTROL_CANNOT_WRITE_OUTSIDE_MEMORY');memory.set(path.resolve(file).toLowerCase(),Buffer.isBuffer(value)?Buffer.from(value):Buffer.from(value));},
     readFileSync(file,options){const bytes=memory.get(path.resolve(file).toLowerCase());if(!bytes)return fs.readFileSync(file,options);const encoding=typeof options==='string'?options:options?.encoding;return encoding?bytes.toString(encoding):Buffer.from(bytes);}};
-   const context={repo,source:virtualRoot,pins,seen,search:[path.join(repo,'native'),path.join(repo,'deps/json'),repo],fs:memoryFs,path,assert,sha:bytes=>crypto.createHash('sha256').update(bytes).digest('hex')};
+   const context={repo,source:virtualRoot,pins,seen,search:[path.join(repo,'native'),path.join(repo,'deps/json'),repo],fs:memoryFs,path,assert,OBSERVER_PUBLICATION_GENERATOR,sha:bytes=>crypto.createHash('sha256').update(bytes).digest('hex')};
+   // Verify original freeze membership before the separate private derived-port write.
    vm.runInNewContext(text.slice(begin,boundary)+'\n'+text.slice(boundary+1,seedEnd),context,{timeout:2000});
    // Production freezes main.cpp separately as attribution, without recursing its includes.
    assert(text.includes("pins.push({path:'native/main.cpp'"),'ORIGINAL_MAIN_ATTRIBUTION_REQUIRED');const main=fs.readFileSync(path.join(repo,'native/main.cpp'));pins.push({path:'native/main.cpp',bytes:main.length,sha256:context.sha(main)});

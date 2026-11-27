@@ -20,7 +20,7 @@ export function validateParent(r,ctx,output){
  need(r.status==='ACTUAL_NATIVE_EXIT_LOCAL_OWNERS_RETIRED_SCOPED_PASS'&&r.localOwnerRegressionVerified===true&&r.sourceStable&&r.productPass===false&&r.parentStatus==='INCOMPLETE'&&r.realHostOrSdkExecuted===false&&r.realMainExecuted===false&&r.productionModified===false&&r.mainSha256===ctx.sources['native/main.cpp'],'NATIVE_EXIT_PARENT_SCOPE');
  inputs(r,ctx,path.join(output,'source'));
  const actualBuilds=validateBuild(r,ctx,output,'parent',2*contract.parentScenarios.length);
- return {...validateParentScenarios(r,output),...(actualBuilds?{actualBuilds}:{})};
+ return {...validateParentScenarios(r,output,{requireExecutionMarkers:ctx.requireFixedBuild}),...(actualBuilds?{actualBuilds}:{})};
 }
 function validateRetainedParentCase(name,x){
  const b=x.beforeFixtureFaultRelief,c=x.actualExitCleanup,cleanup=x.fixtureCleanup;
@@ -39,7 +39,7 @@ function validateRetainedParentCase(name,x){
  if(closeDebt)need(b.pipeState?.stopped===false,'NATIVE_EXIT_PARENT_RETAINED_CLOSE_DEBT');
  if(name==='capture-stop-exception')need(b.exceptionLogCount===1,'NATIVE_EXIT_PARENT_RETAINED_EXCEPTION');
 }
-export function validateParentScenarios(r,output,{historical=false}={}){
+export function validateParentScenarios(r,output,{historical=false,requireExecutionMarkers=false}={}){
  need(r.profiles?.length===2,'NATIVE_EXIT_PARENT_PROFILES');
  const expected=historical?contract.historicalParentScenarios:contract.parentScenarios;
  const scenarioResults=[];
@@ -48,6 +48,7 @@ export function validateParentScenarios(r,output,{historical=false}={}){
   need(p&&hash(path.join(folder,'fixture.exe'))===p.binarySha256&&exactNames(p.scenarios.map(s=>s.name),expected),'NATIVE_EXIT_PARENT_MATRIX');
   for(const s of p.scenarios){
    const x=s.result;
+   if(requireExecutionMarkers)need(s.executedThisRun===true,'NATIVE_EXIT_PARENT_CASE_NOT_EXECUTED:'+name+'/'+s.name);
    need(s.exitCode===0&&x.scopedLocalOwnerPass===true,'NATIVE_EXIT_PARENT_ACTUAL_CASE');
    need(x.fixtureCleanup?.childKillOrEventBackstop===false&&x.fixtureCleanup.productClosedOriginalOwners&&x.fixtureCleanup.privateHandlesClosed&&x.fixtureCleanup.permanentFaultDestructionAccepted===false&&x.endpointAndPhysicalReleaseProven===false,'NATIVE_EXIT_PARENT_NO_SALVAGE_OR_PHYSICAL_CLAIM');
    if(contract.historicalParentScenarios.includes(s.name)){

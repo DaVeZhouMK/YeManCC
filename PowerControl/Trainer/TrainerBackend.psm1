@@ -93,15 +93,32 @@ function ConvertFrom-TrainerJsonBytes($Snapshot,[string]$Path) {
     # Consume strings and the remaining JSON tokens in one pass. Leave a
     # trailing comma unmatched and bound regex backtracking storage on large files.
     $stringToken='"(?:\\["\\/bfnrt]|\\u[0-9a-fA-F]{4}|[^"\\\x00-\x1f])*"'
+    $flatCatalog=$false
+    if($leaf -in @('translations.json','fling_main.json','fling_archive.json','gcm_trainers.json') -and $trim.Length -le 1048576){
+        # Match the entire shallow catalog before waiving the decoded depth and
+        # number walk. Longer numbers, exponents and nested values use that walk.
+        $space='[ \t\r\n]*'
+        $atom='(?>'+$stringToken+'|true|false|null|-?(?:0|[1-9][0-9]{0,14}))'
+        $key=$stringToken+$space+':'+$space
+        $member=$key+$atom+$space
+        $row='\{'+$space+'(?:'+$member+'(?:,'+$space+$member+')*)?\}'+$space
+        $rows='\['+$space+'(?:'+$row+'(?:,'+$space+$row+')*)?\]'
+        if($trim[0] -eq '['){$shape=$rows}
+        elseif($parent -eq 'ymcc-validated'){
+            $field=$key+'(?>'+$rows+'|'+$atom+')'+$space
+            $shape='\{'+$space+'(?:'+$field+'(?:,'+$space+$field+')*)?\}'
+        }else{$shape=$null}
+        if($shape){$flatCatalog=[regex]::IsMatch($trim,'\A'+$shape+'\z')}
+    }
     $scalarToken='(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)(?=[ \t\r\n]*[,}\]]|$)'
     $token='\A(?>(?:'+$stringToken+'|'+$scalarToken+'|,(?!\s*[}\]])|[{}\[\]: \t\r\n])*)\z'
-    if($trim.Length -gt 524288 -or -not [regex]::IsMatch($trim,$token)){
+    if(-not $flatCatalog -and ($trim.Length -gt 524288 -or -not [regex]::IsMatch($trim,$token))){
         $outside=[regex]::Replace($trim,$stringToken,'""')
         if($outside -match "'|/|\b(?:NaN|Infinity)\b|,\s*[}\]]"){throw (New-TrainerJsonFault 'corrupt' '修改器JSON语法无效')}
         if([regex]::Replace($outside,'""|'+$scalarToken+'|[{}\[\],: \t\r\n]','').Length){throw (New-TrainerJsonFault 'corrupt' '修改器JSON包含非标准字段或数字')}
     }
     try{$value=ConvertFrom-Json -InputObject $trim -ErrorAction Stop}catch{throw (New-TrainerJsonFault 'corrupt' '修改器JSON损坏或截断')}
-    Assert-TrainerJsonNumbers $value 0 $true
+    if(-not $flatCatalog){Assert-TrainerJsonNumbers $value 0 $true}
     if($trim[0] -eq '{'){
         # GCM's version describes a game/catalog, not this application's schema.
         $foreign=-not $owned -and $leaf -in @('gcm_info.json','settings.json','translations.json','fling_main.json','fling_archive.json','gcm_trainers.json','cheat_table.json','xiaoxing.json')

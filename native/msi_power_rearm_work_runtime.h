@@ -40,7 +40,7 @@ static std::string encode(const Work& w) {
     return std::string(prefix)+std::to_string(w.power)+":"+std::to_string(w.intent)+":"+
         std::to_string(w.request)+":"+std::to_string(w.epoch)+":"+std::to_string(w.signal)+":"+
         std::to_string(w.deadline)+":"+(w.protectedPlayer?"1":"0")+":"+w.persona+":"+
-        w.requestPersona+":"+w.reason;
+        w.requestPersona+":"+w.reason+":"+std::to_string(w.origin.suspendSerial);
 }
 static bool decode(const std::string& wire,Work& w) {
     if(wire.rfind(prefix,0)!=0)return true;
@@ -48,13 +48,14 @@ static bool decode(const std::string& wire,Work& w) {
     const auto text=wire.substr(std::char_traits<char>::length(prefix));
     std::vector<std::string> parts;std::size_t begin=0;
     for(;;){const auto end=text.find(':',begin);parts.push_back(text.substr(begin,end==std::string::npos?end:end-begin));
-        if(end==std::string::npos)break;begin=end+1;if(parts.size()>10)return false;}
-    if(parts.size()!=10)return false;
+        if(end==std::string::npos)break;begin=end+1;if(parts.size()>11)return false;}
+    if(parts.size()!=11)return false;
     const auto number=[](const std::string& text,std::uint64_t& value){
         if(text.empty())return false;const auto r=std::from_chars(text.data(),text.data()+text.size(),value);
         return r.ec==std::errc{}&&r.ptr==text.data()+text.size();};
     if(!number(parts[0],w.power)||!number(parts[1],w.intent)||!number(parts[2],w.request)||
         !number(parts[3],w.epoch)||!number(parts[4],w.signal)||!number(parts[5],w.deadline)||
+        !number(parts[10],w.origin.suspendSerial)||
         !w.power||w.deadline<=w.signal||w.deadline-w.signal>maxMs||
         (parts[6]!="0"&&parts[6]!="1")||!personaValid(parts[7])||
         (!parts[8].empty()&&!personaValid(parts[8]))||parts[9].size()>reasonMax||
@@ -177,8 +178,8 @@ static void unqueue(const Work& w) {
     std::lock_guard<std::mutex> lock(g_inputHostPowerRequestMx);
     if(samePendingLocked(w))first.queued=false; // Original pending/deadline stay.
 }
-// Keep the historical ten-field queue format. An encoded string is never a
-// capability: restore only the EXACT retained original signal, not live ON data.
+// The in-process queue key includes the suspend boundary, even when both
+// callbacks got the same clock tick. Restore only the exact retained signal.
 static bool restoreQueued(Work& w) {
     std::lock_guard<std::mutex> lock(g_inputHostPowerRequestMx);
     if(!samePendingLocked(w)||!first.queued)return false;

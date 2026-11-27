@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import collections
 from contextlib import ExitStack
+from copy import deepcopy
 import datetime
 import hashlib
 import io
@@ -18,6 +19,12 @@ import re
 import zipfile
 from pathlib import Path
 from ai_log_reader import iter_log_members, canonical_name, ZIP_READ_ERRORS, evidence_json_loads, COST_ARCHIVE, json_rejection_evidence, evidence_error_type
+from ai_log_reader import frontend_trace_message_projection
+from ai_log_reader import VIRTUAL_PRODUCER_COPIES_MARKER, virtual_step_producer_copies
+from ai_log_reader import NATIVE_FILE_PROJECTION_MEMBER, oem_key_catalog_projection, hidhide_target_inventory_projection
+from ai_log_reader import CONNECTION_TRUTH_SCOPE, connection_truth_scope_projection
+from ai_log_reader import PHYSICAL_IDENTITY_EVENT, PHYSICAL_IDENTITY_SCOPE_FIELDS, physical_identity_scope_projection
+from ai_log_reader import LATE_HIDE_STAGE_DEFAULTS_MARKER, late_hide_stage_defaults_projection
 from steam_tail_alias_reader import PAIRS as STEAM_TAIL_PAIRS, TAIL_LIMIT, alias_claims
 
 NATIVE_DETAIL = {
@@ -27,6 +34,8 @@ NATIVE_DETAIL = {
     'legion-back-buttons', 'legion-s-back-buttons', 'gpd-back-buttons',
     'input-idle-window', 'input-capture-tick-cost', 'input-capture-ui-cost',
     'monitor-data-snapshot', 'input-host-scheduling-delay',
+    'input-native-signal-window', 'rog-raw-input-window',
+    'aya-oem-input-edge', 'aokzoe-oem-input-edge', 'gpd-oem-input-edge',
 }
 LANES = {
     'virtual-adaptation-session.jsonl': 'virtual-adaptation-process-export', 'model-adaptation-session.jsonl': 'model-adaptation-process-export', 'model-adaptation-signals-session.jsonl': 'model-signal-process-export', 'model-adaptation.log': 'adaptation-low', 'virtual-adaptation.log': 'virtual-adaptation-bounded', 'app.log': 'app-low', 'native-lifecycle.log': 'native-low',
@@ -52,6 +61,128 @@ TRANSPORT_FIELDS = {'time', 'timestamp', 'timestampUtc', 'timestampLocal', 'ts',
                     'writerThreadId', 'writerProcessCreation100ns', 'writerInstanceId', 'writerIdentityStatus',
                     'writerPowerGeneration', 'observedTickMs', 'writerSequence', 'utcEpochMs', 'utcOffsetMinutes',
                     'clockScope', 'observationScope'}
+
+
+_ROOT_LOG_ROTATION = r'(?:\.log(?:\.(?:prev|previous|[0-9]+))?|\.(?:prev|previous|[0-9]+)\.log)'
+NATIVE_LOW_ROOT_MEMBER = re.compile(r'native-lifecycle' + _ROOT_LOG_ROTATION)
+APP_LOW_ROOT_MEMBER = re.compile(r'app' + _ROOT_LOG_ROTATION)
+ROG_FACE_TEXT_ROW = re.compile(
+    rb'\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}\] '
+    rb'\[INFO\] rog\.xbox-face-enabled reason=([a-zA-Z0-9_-]{0,64}) wrote=(true|false)'
+    rb'(?: fallback=native-face-row-unconfirmed writeOpCalls=([0-5]))?')
+
+
+def rog_face_text_evidence(data):
+    roles = {}
+    if b'rog.xbox-face-enabled' not in data:
+        return roles
+    for line, raw in enumerate(io.BytesIO(data), 1):
+        if b'rog.xbox-face-enabled' not in raw:
+            continue
+        payload = raw.removesuffix(b'\n').removesuffix(b'\r')
+        if line == 1:
+            payload = payload.removeprefix(b'\xef\xbb\xbf')
+        match = ROG_FACE_TEXT_ROW.fullmatch(payload)
+        if not match:
+            continue
+        _, wrote, calls = match.groups()
+        if calls == b'0' and wrote == b'true':
+            continue
+        role = 'legacyUnmarked' if calls is None else 'flushUnconfirmedFallback'
+        stats = roles.setdefault(role, dict(count=0, rawRowBytes=0, firstLine=line))
+        stats['count'] += 1
+        stats['rawRowBytes'] += len(raw)
+        stats['lastLine'] = line
+        if calls is not None:
+            key = 'operationNotInvoked' if calls == b'0' else 'operationReportedSuccess' if wrote == b'true' else 'operationInvokedWithoutSuccess'
+            outcomes = stats.setdefault('reportedOperation', {})
+            outcomes[key] = outcomes.get(key, 0) + 1
+    return roles
+
+
+PLAYBACK_ATTEMPT = 'game-media.playback30-attempt'
+_APP_JSON_BODY = re.compile(rb'\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}\] \[(?:INFO|WARN)\] (\{.*\})')
+
+
+def playback_cpu_retry_sample(row):
+    streak = row.get('sameCpuVetoStreak')
+    return (row.get('event') == PLAYBACK_ATTEMPT and row.get('playbackCpuRetryRepeatV1') is True
+            and type(streak) is int and 1 < streak < (1 << 32) and streak % 8 != 0
+            and type(row.get('code')) is int and row['code'] == 17
+            and row.get('stage') == 'admission-withdrawn' and row.get('retry') is True
+            and type(row.get('win32')) is int and row['win32'] == 0
+            and row.get('veto') in ('cpu-busy', 'cpu-recovering'))
+
+
+def playback_retry_app_evidence(data):
+    roles = {}
+    needle = PLAYBACK_ATTEMPT.encode('ascii')
+    if needle not in data:
+        return roles
+    for line, raw in enumerate(io.BytesIO(data), 1):
+        if needle not in raw:
+            continue
+        payload = raw.removesuffix(b'\n').removesuffix(b'\r')
+        if line == 1:
+            payload = payload.removeprefix(b'\xef\xbb\xbf')
+        match = _APP_JSON_BODY.fullmatch(payload)
+        if not match:
+            continue
+        try:
+            row = evidence_json_loads(match[1])
+        except (ValueError, RecursionError):
+            continue
+        if not isinstance(row, dict) or row.get('event') != PLAYBACK_ATTEMPT:
+            continue
+        if playback_cpu_retry_sample(row):
+            role = 'markedDetailInAppLow'
+        elif ('playbackCpuRetryRepeatV1' not in row and 'sameCpuVetoStreak' not in row
+                and type(row.get('code')) is int and row['code'] == 17
+                and row.get('stage') == 'admission-withdrawn' and row.get('retry') is True):
+            role = 'unmarkedAdmissionRequeue'
+        else:
+            continue
+        counts = roles.setdefault(role, dict(count=0, rawRowBytes=0, firstLine=line))
+        counts['count'] += 1
+        counts['rawRowBytes'] += len(raw)
+        counts['lastLine'] = line
+    return roles
+
+
+XINPUT_SLOT_TEXT_ROW = re.compile(
+    rb'\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}\] '
+    rb'\[INFO\] gamepad\.xinput-slots slots=\[([0-3](?:,[0-3]){0,3})?\] primary=[0-3]'
+    rb'(?: fallback=native-slot-row-unconfirmed admittedMask=(?:[0-9]|1[0-5]))?')
+
+
+def xinput_slot_text_evidence(data):
+    roles = {}
+    if b'gamepad.xinput-slots' not in data:
+        return roles
+    for line, raw in enumerate(io.BytesIO(data), 1):
+        payload = raw.removesuffix(b'\n').removesuffix(b'\r')
+        if line == 1:
+            payload = payload.removeprefix(b'\xef\xbb\xbf')
+        match = XINPUT_SLOT_TEXT_ROW.fullmatch(payload)
+        if not match:
+            continue
+        slots = (match[1] or b'').split(b',')
+        if slots != sorted(set(slots)):
+            continue
+        role = 'flushUnconfirmedFallback' if b' fallback=' in payload else 'legacyUnmarked'
+        stats = roles.setdefault(role, dict(count=0, rawRowBytes=0, firstLine=line))
+        stats['count'] += 1
+        stats['rawRowBytes'] += len(raw)
+        stats['lastLine'] = line
+    return roles
+
+
+NATIVE_DETAIL_ROOT_MEMBER = re.compile(r'native-detail' + _ROOT_LOG_ROTATION)
+FRONTEND_TRACE_ROOT_MEMBER = re.compile(r'frontend-trace(?:-detail)?' + _ROOT_LOG_ROTATION)
+FRONTEND_FAILURE_ROOT_MEMBER = re.compile(r'(?:frontend-errors|webview-failures)' + _ROOT_LOG_ROTATION)
+_ROOT_LANE_MEMBER = {'native-lifecycle.log': NATIVE_LOW_ROOT_MEMBER, 'native-detail.log': NATIVE_DETAIL_ROOT_MEMBER,
+                     'frontend-trace.log': FRONTEND_TRACE_ROOT_MEMBER, 'frontend-trace-detail.log': FRONTEND_TRACE_ROOT_MEMBER,
+                     'frontend-errors.log': FRONTEND_FAILURE_ROOT_MEMBER, 'webview-failures.log': FRONTEND_FAILURE_ROOT_MEMBER}
 
 
 def canonical_log_name(name):
@@ -265,6 +396,11 @@ def carrier_policy(name):
         return dict(disposition='ignored',canonicalName=base,lane=None,format=None)
     if base=='ai-log-index.jsonl':return dict(disposition='export-index-metadata',canonicalName=base,lane=None,format=None)
     lane='observer-detail' if re.fullmatch(r'msi-controller-visibility(?:-wake-\d+)?\.log',base) else LANES.get(base,'unclassified')
+    # Canonical basenames also serve display and nested readers. They cannot
+    # grant a root Native/Frontend lane to a nested alias or a double rotation.
+    root_member = _ROOT_LANE_MEMBER.get(base)
+    if root_member is not None and not root_member.fullmatch(name):
+        lane = 'unclassified'
     if local_launch:return dict(disposition='inspect',canonicalName=base,lane='launcher-text',format='plain-text')
     if re.fullmatch(r'yeman-fan-host[0-9]{8}\.log',base):return dict(disposition='inspect',canonicalName=base,lane='hc-text',format='plain-text')
     if base=='gamepad-driver-setup.json.hidhide.log':return dict(disposition='inspect',canonicalName=base,lane='external-installer-text',format='plain-text')
@@ -356,6 +492,173 @@ def event_name(row):
                  if isinstance(row.get(k), str)), '<unnamed>')
 
 
+ROG_TREE_NOISE = 'rog.controller-remap-noise-ignored'
+ROG_TREE_NOISE_SELECTION_FIELDS = ('signatureObservation', 'terminal', 'repeatDeviceTreeNoise')
+
+
+def rog_tree_noise_lane_state(row):
+    if not any(key in row for key in ROG_TREE_NOISE_SELECTION_FIELDS):
+        return 'no-selection-fields'
+    signature, terminal, repeat = (row.get(key) for key in ROG_TREE_NOISE_SELECTION_FIELDS)
+    if (row.get('event') != ROG_TREE_NOISE or type(terminal) is not bool or type(repeat) is not bool or
+            signature not in ('baseline-established', 'cached-signature-unchanged')):
+        return 'invalid-selection-fields'
+    if not repeat:
+        return 'resident'
+    return 'detail' if signature == 'cached-signature-unchanged' and not terminal else 'invalid-selection-fields'
+
+
+def native_exit_failure_repeat(event, row):
+    if row.get('event') != event or row.get('exitFailureRepeatSample') is not True:
+        return False
+    if event == 'session-clean-exit-failed':
+        writer = row.get('pid')
+        return (type(writer) is int and 0 < writer < (1 << 32) and
+                row.get('reason') == 'session-marker-write-failed' and
+                type(row.get('schemaVersion')) is int and row['schemaVersion'] == 1 and
+                row.get('scope') == 'session-marker-file-write-result;not-host-process-or-device-retirement' and
+                all(row.get(key) is False for key in ('sessionMarkerWriteSucceeded', 'nativeProcessExitProven',
+                                                     'inputHostRetirementProven', 'deviceReturnProven')))
+    if event not in ('exit-cleanup-wait-failed', 'exit-kernel-wait-failed'):
+        return False
+    session, win32 = row.get('exitSessionId'), row.get('win32')
+    writer = row.get('pid')
+    if not isinstance(session, str) or len(session) > 31 or type(writer) is not int or not 0 < writer < (1 << 32):
+        return False
+    owner, _, tick = session.partition('-')
+    return (owner == str(writer) and re.fullmatch(r'(?:0|[1-9][0-9]{0,19})', tick) is not None and
+            int(tick) < (1 << 64) and type(win32) is int and 0 <= win32 < (1 << 32) and
+            (event == 'exit-kernel-wait-failed' or
+             type(row.get('ownerRetained')) is bool and row.get('retryWithMessageWait') is True))
+
+
+def msi_return_debt_repeat(row):
+    # Native replaces powerGeneration with the writer observation and retains
+    # a separate producerPowerGeneration. The two observations can differ.
+    if (row.get('event') != 'msi-claw-return-debt' or row.get('returnDebtRepeatSample') is not True or
+            row.get('action') != 'retained' or row.get('basis') != 'release-unproven' or
+            row.get('policy') != 'qualified device-side fact only; retained until readback/xinput-readmission' or
+            not isinstance(row.get('where'), str) or row.get('readbackVerified') is not False or
+            row.get('xinputReAdmitted') is not False or row.get('returnDebtRetained') is not True):
+        return False
+
+    def integer(key, bits, minimum=0):
+        value = row.get(key)
+        return type(value) is int and minimum <= value < 1 << bits
+
+    return (integer('returnDebtEpisodeId', 64, 1) and integer('nativePid', 32, 1) and
+            integer('pid', 32, 1) and row['nativePid'] == row['pid'] and
+            all(integer(key, 64) for key in ('powerGeneration', 'producerPowerGeneration', 'observedPowerGeneration')) and
+            row['powerGeneration'] == row['observedPowerGeneration'] and
+            all(integer(key, 32) for key in ('admittedMask', 'connectedMask', 'physicalSourceMask', 'externalPrioritySourceMask')) and
+            all(type(row.get(key)) is bool for key in ('boardAuthorized', 'externalPrioritySuspended', 'routeDisarmed')))
+
+
+def native_explicit_detail_observation(event, row):
+    """Wire predicates that do not need history or a guessed legacy source."""
+    if event == 'gamepad-driver-setup':
+        state = row.get('state')
+        return (row.get('phase') == 'usbip-progress' and row.get('usbipProgressRepeat') is True
+                and type(state) is int and state in (1, 5))
+    if event in ('oem-key-usage-query', 'rog.hid-bound', 'gamepad.feedbackCaps'):
+        return row.get('event') == event and row.get('inputSnapshotRepeatSample') is True
+    if event == 'input-host-late-hide-decision':
+        if (row.get('event') != event or row.get('lateHideOffRepeatSample') is not True or
+                'virtualSessionEnabledAtGate' in row):
+            return False
+        expected = dict(outcome='skipped', gate='virtual-target-not-enabled', reason='xinput-connect',
+                        bypass='none', bypassSource='msi-xinput-connect-confirmed')
+        flags = ('virtualTargetEnabled', 'journalActive', 'wakeHold', 'deferredStartHide',
+                 'msiSourceActive', 'msiGenerationValid')
+        numbers = ('powerGen', 'hostGen', 'sourceGen', 'msiMainSourceGeneration', 'msiReconfirmGeneration')
+        return (all(row.get(key) == value for key, value in expected.items()) and
+                row.get('runIdEmpty') is True and all(row.get(key) is False for key in flags) and
+                all(type(row.get(key)) is int and 0 <= row[key] < 1 << 64 for key in numbers) and
+                row['powerGen'] > 0 and row['sourceGen'] > 0 and row['hostGen'] == row['msiMainSourceGeneration'] == 0)
+    if event == 'gyro-calibration-awaiting-current-recipe':
+        return ('calibrationWaitResidentReasonV1' not in row and row.get('calibrationSessionWaitSample') is True
+                and is_scoped_calibration_fusion_wait(row))
+    if event == 'gyro-power-command-rejected':
+        return (row.get('event') == event and row.get('sensorPowerRefusalRepeatSample') is True
+                and row.get('request') in ('suspend', 'resume') and row.get('phase') == 'admission'
+                and row.get('reason') in ('sta-owner-or-wake-unavailable', 'resume-scope-not-current',
+                                          'mailbox-admission-refused', 'unspecified')
+                and row.get('submissionAccepted') is False and row.get('commandCompleted') is False)
+    if event == 'power-projection-consumer-failed':
+        return (row.get('event') == event and row.get('consumer') == 'lifecycle-publication' and
+                row.get('publicationFailureRepeatSample') is True)
+    if event in ('native-foreground-isolation', 'msi-native-foreground-isolation'):
+        return (row.get('event') == event and row.get('foregroundWaitRepeat') is True and
+                (row.get('phase'), row.get('reason')) in (
+                    ('restore-wait', 'same-cycle-helper-still-live'),
+                    ('virtual-work-deferred', 'same-native-ownership-still-unresolved')))
+    if event == 'gamepad-touch-haptics-summary':
+        sent, failed, dropped = (row.get(key) for key in ('sent', 'failed', 'dropped'))
+        return (row.get('event') == event and row.get('touchHapticSuccessRepeat') is True
+                and type(sent) is int and 0 < sent < 2**64
+                and type(failed) is int and failed == 0 and type(dropped) is int and dropped == 0)
+    if event == 'screen-touchpads-state':
+        return row.get('callSite') == 'screenTouchpads.get' and row.get('screenReadRepeat') is True
+    if event == 'input-host-switch-settle':
+        return row.get('switchWaitSample') is True
+    if event == 'input-host-switch-audit':
+        return row.get('switchWaitSample') is True and row.get('beat') in ('throttled', 'enqueue', 'dequeue')
+    if event == 'input-host-player-start-work':
+        return row.get('switchWaitSample') is True and row.get('action') == 'consuming'
+    if event == 'late-hide-enqueue':
+        return (row.get('switchWaitSample') is True and row.get('outcome') == 'coalesced'
+                and row.get('coalesced') is True)
+    if event == 'mouse-mode-context':
+        def positive(key, decimal=False):
+            value = row.get(key)
+            if not decimal:
+                return type(value) is int and 0 < value <= 2**64 - 1
+            return (isinstance(value, str) and 0 < len(value) <= 20 and value[0] != '0'
+                    and value.isascii() and value.isdecimal() and int(value) <= 2**64 - 1)
+        return (row.get('cachedWindowSample') is True and row.get('backendReadbackFresh') is False
+                and row.get('ok') is True and row.get('stateKnown') is True and row.get('controlAllowed') is True
+                and row.get('provider') == 'ymcc' and type(row.get('on')) is bool
+                and isinstance(row.get('foregroundImage'), str) and bool(row['foregroundImage'])
+                and all(positive(key) for key in ('backendObservedAt', 'observedAt', 'foregroundPid', 'sequence'))
+                and all(positive(key, True) for key in ('foregroundCreated', 'foregroundWindow')))
+    if event in ('hidhide.sweep-all-devices', 'hidhide.p-hid-restore'):
+        if row.get('reason') != 'quarantine-endpoint-absent' or row.get('repeatQuarantineResult') is not True:
+            return False
+        if event == 'hidhide.sweep-all-devices':
+            return row.get('listAttempted') is True and row.get('listOk') is False
+        return (row.get('unhideAttempted') is True and row.get('status') == 'release-unproven'
+                and row.get('commandResult') == 'cli-fallback-failed' and row.get('configReadback') == 'UNKNOWN')
+    if event == 'input-host-exit-fence':
+        return row.get('phase') == 'refused' and row.get('repeatRefusalSample') is True
+    if event == 'input-host-command-result':
+        if row.get('command') == 'HIDHIDE_CYCLE_POLL':
+            return (row.get('phase') == 'accepted' and row.get('ok') is True
+                    and row.get('cyclePollRepeat') is True)
+        return (row.get('command') == 'HIDHIDE_QUERY_STATE' and row.get('phase') == 'slow-read-accepted'
+                and row.get('ok') is True and row.get('slowReadSample') is True)
+    if event == 'physical-controller-identity':
+        return row.get('snapshotReason') == 'repeat'
+    if event in ('input-host-frame-evidence', 'onex-x2-owner'):
+        return row.get('snapshotReason') == 'periodic'
+    if event == 'msi-dinput-feedback':
+        managed, ok = row.get('managed'), row.get('ok')
+        return type(managed) is bool and type(ok) is bool and (not managed or ok)
+    if event == 'gamepad-vibrate-request':
+        return type(row.get('schema')) is int and row['schema'] == 2 and row.get('requestSource') == 'unclassified'
+    if event == 'gamepad-vibrate':
+        return (row.get('event') == event and row.get('requestSource') == 'unclassified' and
+                row.get('ok') is True and row.get('touchFeedback') is False and
+                type(row.get('rc')) is int and row['rc'] == 0)
+    if event in ('shortcut-action-request', 'shortcut-action-result'):
+        if not all(isinstance(row.get(key), str) and row[key] for key in ('id', 'actionId')):
+            return False
+        if event == 'shortcut-action-request':
+            return row.get('status') == 'issued'
+        return (type(row.get('schemaVersion')) is int and row['schemaVersion'] == 1 and
+                row.get('origin') == 'controller-shortcut' and row.get('state') in ('applied', 'saved'))
+    return False
+
+
 def process_identity(row, filename=''):
     """Schema-specific field roles, with bounded positive Windows DWORD IDs."""
     def process_id(value):
@@ -382,22 +685,22 @@ def process_identity(row, filename=''):
         if value is not None:
             return value, 'pid'
         return 'unknown', 'fan-native-pid-missing;payload-identity-is-not-writer'
-    frontend = re.fullmatch(r'(frontend-trace(?:-detail)?|frontend-errors|webview-failures)\.log(?:\.(?:prev|previous|\d+))?', filename)
-    if frontend:
+    frontend_trace = FRONTEND_TRACE_ROOT_MEMBER.fullmatch(filename)
+    if frontend_trace or FRONTEND_FAILURE_ROOT_MEMBER.fullmatch(filename):
         if 'writerEnvelopeSchema' in row:
             if type(row['writerEnvelopeSchema']) is int and row['writerEnvelopeSchema'] == 1:
                 value = process_id(row.get('writerPid'))
                 if value is not None:
                     return value, 'writerPid'
             return 'unknown', 'frontend-writer-envelope-invalid;subject-pids-not-writer'
-        if (frontend[1] in ('frontend-trace', 'frontend-trace-detail') and
+        if (frontend_trace and
                 row.get('origin') == 'renderer-observation' and row.get('where') in
                 ('monitor-notice-lifecycle', 'controller-calibration', 'cpu-ccd-visibility')):
             value = process_id(row.get('pid'))
             if value is not None:
                 return value, 'pid'
         return 'unknown', 'frontend-writer-envelope-missing;subject-pids-not-writer'
-    native = bool(re.fullmatch(r'native-(?:lifecycle|detail)\.log(?:\.(?:prev|previous|\d+))?', filename))
+    native = NATIVE_LOW_ROOT_MEMBER.fullmatch(filename) or NATIVE_DETAIL_ROOT_MEMBER.fullmatch(filename)
     # Decky's Native logger overwrites processPid at record emission. Its
     # allowed payload pid is a subject (for example a child), never a writer.
     if re.fullmatch(r'decky-sidebar\.log(?:\.(?:prev|previous|\d+))?', filename):
@@ -729,9 +1032,15 @@ def continuity_rows(records, unknown_lines=()):
         yield line, row, reset
 
 
+def recovery_queue_refusal_repeat_sample(row):
+    return (row.get('event') == 'input-host-recovery-fallback' and row.get('state') == 'queue-refused' and
+            row.get('recoveryQueueRefusalRepeatSample') is True and
+            all(type(row.get(key)) is int and 0 < row[key] < (1 << 64) for key in ('serial', 'requestId')))
+
+
 def repeated_recovery_fallback_observations(records, filename='native-lifecycle.log', *, unknown_lines=()):
     """Same received queue refusal; no retry/action or whole-lifetime inference."""
-    if not re.fullmatch(r'native-lifecycle\.log(?:\.(?:prev|previous|\d+))?', filename):
+    if NATIVE_LOW_ROOT_MEMBER.fullmatch(filename) is None:
         return []
     states, repeated = {}, []
     envelope = {'time', 'event', 'pid', 'hwnd', 'powerLifecycle', 'powerGeneration',
@@ -740,67 +1049,67 @@ def repeated_recovery_fallback_observations(records, filename='native-lifecycle.
         if reset:
             states.clear()
         event, writer = event_name(row), pid(row, filename)
-        if event == 'boot-single-instance-acquired':
-            states = {} if writer == 'unknown' else {key:value for key,value in states.items() if key[0] != writer}
+        if _snapshot_comparison_boundary(states, row, writer, event):
             continue
         if event != 'input-host-recovery-fallback':
             continue
         if writer == 'unknown':
             states.clear()
             continue
-        generation, birth = row.get('powerGeneration'), row.get('writerProcessCreation100ns')
-        valid_birth = birth is None or (isinstance(birth, str) and 0 < len(birth) <= 20 and birth.isascii()
-            and birth.isdecimal() and 0 < int(birth) < (1 << 64))
+        generation, birth = row.get('powerGeneration'), _snapshot_comparison_birth(row)
         if (row.get('state') != 'queue-refused' or type(generation) is not int or not 0 <= generation < (1 << 64)
-                or not valid_birth or any(type(row.get(key)) is not int or not 0 < row[key] < (1 << 64)
+                or birth is None or any(type(row.get(key)) is not int or not 0 < row[key] < (1 << 64)
                                          for key in ('serial', 'requestId'))):
-            states = {key:value for key,value in states.items() if key[0] != writer}
+            states.pop(writer, None)
             continue
-        key = writer, birth
         try:
             signature = json.dumps({name:value for name,value in row.items() if name not in envelope},
                                    sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
         except (ValueError, TypeError, RecursionError):
-            states.pop(key, None)
+            states.pop(writer, None)
             continue
-        current = generation, signature
-        if states.get(key) == current:
+        current = birth, generation, signature
+        if states.get(writer) == current and not recovery_queue_refusal_repeat_sample(row):
             repeated.append((line, row))
-        states[key] = current
+        states[writer] = current
     return repeated
+
+
+QUARANTINE_OBSERVATIONS = ('input-host-quarantine-endpoint-probe', 'input-host-quarantine-restore-held')
+QUARANTINE_LANE_MARKER = 'quarantineRepeatSample'
+
+
+def quarantine_observation_lane(row):
+    marker = row.get(QUARANTINE_LANE_MARKER)
+    return marker if row.get('event') in QUARANTINE_OBSERVATIONS and type(marker) is bool else None
 
 
 def repeated_quarantine_observations(records, filename='native-lifecycle.log', *, unknown_lines=()):
     """Same received wire state; never infer duplicate actions or missing probes."""
-    if not re.fullmatch(r'native-lifecycle\.log(?:\.(?:prev|previous|\d+))?', filename):
+    if NATIVE_LOW_ROOT_MEMBER.fullmatch(filename) is None:
         return {}
     states, repeated = {}, collections.defaultdict(list)
     envelope = {'time', 'event', 'pid', 'hwnd', 'powerLifecycle', 'powerGeneration', 'writerProcessCreation100ns'}
-    probe, held = 'input-host-quarantine-endpoint-probe', 'input-host-quarantine-restore-held'
+    probe, held = QUARANTINE_OBSERVATIONS
     for line, row, reset in continuity_rows(records, unknown_lines):
         if reset:
             states.clear()
-        event = row.get('event')
+        event = event_name(row)
         writer = pid(row, filename)
-        if event in ('input-host-quarantine-cleared', 'boot-single-instance-acquired'):
-            if writer == 'unknown':
-                states.clear()  # Do not prove repeats across an unattributed boundary.
-            else:
-                states = {key: value for key, value in states.items() if key[0] != writer}
+        if _snapshot_comparison_boundary(states, row, writer, event, 'input-host-quarantine-cleared'):
             continue
         if event not in (probe, held):
             continue
         if writer == 'unknown':
             states.clear()  # An unattributed target row may cross any writer boundary.
             continue
-        generation = row.get('powerGeneration')
-        if type(generation) is not int or not 0 <= generation < (1 << 64):
-            states = {key: value for key, value in states.items() if key[0] != writer}
+        if QUARANTINE_LANE_MARKER in row:
+            # This heuristic is only for rows without a writer selection marker.
+            states.pop(writer, None)
             continue
-        birth = row.get('writerProcessCreation100ns')
-        if birth is not None and not (isinstance(birth, str) and 0 < len(birth) <= 20 and birth.isascii()
-                and birth.isdecimal() and 0 < int(birth) < (1 << 64)):
-            states = {key: value for key, value in states.items() if key[0] != writer}
+        generation, birth = row.get('powerGeneration'), _snapshot_comparison_birth(row)
+        if birth is None or type(generation) is not int or not 0 <= generation < (1 << 64):
+            states.pop(writer, None)
             continue
         if event == held:
             producer = 'held'
@@ -809,19 +1118,21 @@ def repeated_quarantine_observations(records, filename='native-lifecycle.log', *
         elif row.get('owner') == 'capture-lifecycle-thread':
             producer = 'lifecycle'
         else:
-            states = {key: value for key, value in states.items() if key[0] != writer}
+            states.pop(writer, None)
             continue
-        key = writer, birth, producer
+        prior = states.get(writer)
+        if prior is None or prior[:2] != (birth, generation):
+            prior = states[writer] = (birth, generation, {})
+        by_producer = prior[2]
         payload = {name: value for name, value in row.items() if name not in envelope}
         try:
             signature = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
         except (ValueError, TypeError, RecursionError):
-            states.pop(key, None)
+            by_producer.pop(producer, None)
             continue
-        current = generation, signature
-        if states.get(key) == current:
+        if by_producer.get(producer) == signature:
             repeated[event].append((line, row))
-        states[key] = current
+        by_producer[producer] = signature
     return dict(repeated)
 
 
@@ -838,14 +1149,13 @@ def _snapshot_comparison_birth(row):
     return None
 
 
-def _snapshot_comparison_scope(previous, row, filename, target):
-    process, event = pid(row, filename), event_name(row)
-    if event == 'boot-single-instance-acquired':
+def _snapshot_comparison_boundary(previous, row, process, event, additional_reset=None):
+    if event == 'boot-single-instance-acquired' or event == additional_reset:
         if process == 'unknown':
             previous.clear()
         else:
             previous.pop(process, None)
-        return None
+        return True
     prior = previous.get(process)
     # Readable non-target rows only split comparisons when they explicitly
     # report a different/invalid writer birth or power generation.
@@ -854,7 +1164,12 @@ def _snapshot_comparison_scope(previous, row, filename, target):
             ('powerGeneration' in row and (type(row['powerGeneration']) is not int or
              not 0 <= row['powerGeneration'] < (1 << 64) or row['powerGeneration'] != prior[1]))):
         previous.pop(process, None)
-    if event != target:
+    return False
+
+
+def _snapshot_comparison_scope(previous, row, filename, target):
+    process, event = pid(row, filename), event_name(row)
+    if _snapshot_comparison_boundary(previous, row, process, event) or event != target:
         return None
     if process == 'unknown':
         previous.clear()
@@ -864,6 +1179,84 @@ def _snapshot_comparison_scope(previous, row, filename, target):
         previous.pop(process, None)
         return None
     return process, birth, generation
+
+
+LEGACY_MSI_NEUTRAL_SUBMIT_MAX_GAP_MS = 100
+_NATIVE_MILLISECOND_TIMESTAMP = re.compile(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}')
+
+
+def _legacy_msi_neutral_submit_outcome(row, power):
+    def positive(value):
+        return type(value) is int and 0 < value < (1 << 64)
+
+    if ('neutralFrameSample' in row or 'linkPowerGeneration' in row or not positive(power) or
+            row.get('site') != 'frame-submit-boundary' or row.get('receiptScope') != 'submit-boundary' or
+            row.get('source') != 'msi-dinput' or row.get('verificationScope') != 'ymcc-native-producer' or
+            row.get('powerLifecycle') != 'ready' or row.get('encodedBackButtons') != 'UNKNOWN' or
+            row.get('wireBackBits') != 'UNKNOWN' or
+            any(type(row.get(k)) is not int or row[k] != 0 for k in ('effectiveBackButtons', 'frameBackButtons')) or
+            any(not positive(row.get(k)) for k in ('epoch', 'sourceGeneration', 'frameSequence'))):
+        return None
+    outcome, reason, linked = row.get('submitOutcome'), row.get('dropReason'), row.get('linked')
+    if ((outcome == 'accepted' and reason == '' and linked is True) or
+            (outcome == 'not-submitted' and reason == 'semantic-neutral' and linked is False)):
+        return outcome
+    return None
+
+
+def legacy_msi_neutral_submit_repeats(records, filename, *, unknown_lines=()):
+    """Find short alternations in old zero-back-bit witnesses, within one member."""
+    previous, repeats = {}, []
+    max_gap = datetime.timedelta(milliseconds=LEGACY_MSI_NEUTRAL_SUBMIT_MAX_GAP_MS)
+
+    for line, row, reset in continuity_rows(records, unknown_lines):
+        if reset:
+            previous.clear()
+        if 'powerLifecycle' in row and row['powerLifecycle'] != 'ready':
+            previous.pop(pid(row, filename), None)
+        scope = _snapshot_comparison_scope(previous, row, filename, 'msi-backkey-frame-link')
+        if scope is None:
+            continue
+        process, birth, power = scope
+        prior = previous.pop(process, None)
+        # Explicit selections, Host receipts, failures and key edges break the sequence.
+        outcome = _legacy_msi_neutral_submit_outcome(row, power)
+        if outcome is None:
+            continue
+        stamp = row.get('time')
+        if not isinstance(stamp, str) or not _NATIVE_MILLISECOND_TIMESTAMP.fullmatch(stamp):
+            continue
+        try:
+            clock = datetime.datetime.fromisoformat(stamp)
+        except ValueError:
+            continue
+        context = birth, power, row['epoch'], row['sourceGeneration']
+        sequence = row['frameSequence']
+        if (prior is not None and prior[:4] == context and prior[4] != outcome and sequence > prior[5] and
+                datetime.timedelta(0) <= clock - prior[6] <= max_gap):
+            repeats.append((line, row))
+        previous[process] = (*context, outcome, sequence, clock)
+    return repeats
+
+
+def legacy_msi_neutral_unattributed_evidence(data, records):
+    selected = ((line, row) for line, row in records if row.get('event') == 'msi-backkey-frame-link' and
+                _native_low_writer_bucket(row, None) == 'writer-unresolved' and
+                _legacy_msi_neutral_submit_outcome(row, row.get('powerGeneration')) is not None)
+    by_outcome = {}
+    for line, row, size in _measured_native_low_rows(data, selected):
+        stats = by_outcome.setdefault(row['submitOutcome'], {'rows': 0, 'rawRowBytes': 0,
+                                                            'firstLine': line, 'exampleLines': []})
+        stats['rows'] += 1
+        stats['rawRowBytes'] += size
+        stats['lastLine'] = line
+        if len(stats['exampleLines']) < 8:
+            stats['exampleLines'].append(line)
+    if not by_outcome:
+        return None
+    return {'schemaVersion': 1, 'bySubmitOutcome': by_outcome, 'writerIdentity': 'writer-unresolved',
+            'scope': 'one root Native low member;independent legacy zero-back-bit submit rows;'
+                     'may overlap alternation evidence;not an explicit lane marker, unique frame, M2 edge or Host consumption'}
 
 
 def duplicate_snapshots(records, filename="native-lifecycle.log", *, unknown_lines=()):
@@ -990,12 +1383,48 @@ def frame_comparison_context(row):
     return (version, generation, birth, signature), None
 
 
+COMMON_FRAME_EVIDENCE_EVENT = 'input-host-frame-evidence'
+
+
+def is_common_frame_resident_transition(row):
+    if (row.get('event') != COMMON_FRAME_EVIDENCE_EVENT or
+            type(row.get('formatVersion')) is not int or row['formatVersion'] != 2 or
+            row.get('diagnosticOnly') is not True or row.get('snapshotReason') != 'state-change' or
+            type(row.get('diagnosticRecoveryReoffer')) is not bool or 'frameScopeSchema' in row):
+        return False
+    source = row.get('source')
+    return (isinstance(source, dict) and 'inactiveTopologySample' not in source and
+            type(source.get('snapshotKnown')) is bool and isinstance(row.get('frameProof'), dict))
+
+
+def frame_topology_only_evidence(records):
+    marked = supported = 0
+    examples, rejected = [], []
+    key = 'frameTopologyOnlyV1'
+    for line, row in records:
+        if row.get('event') != 'input-host-frame-evidence' or key not in row:
+            continue
+        marked += 1
+        if (row[key] is True and type(row.get('formatVersion')) is int and row['formatVersion'] == 2 and
+                row.get('snapshotReason') == 'state-change' and row.get('diagnosticRecoveryReoffer') is False and
+                frame_comparison_context(row)[1] is None):
+            supported += 1
+            if len(examples) < 8:
+                examples.append(line)
+        elif len(rejected) < 8:
+            rejected.append(line)
+    if not marked:
+        return None
+    return dict(markedRows=marked, reportedTopologyOnly=supported, unverifiedRows=marked-supported,
+                exampleLines=examples, unverifiedExampleLines=rejected,
+                scope='producer-reported-local-transition-cause;not-periodic-or-device-change-proof')
+
+
 def repeated_frame_observations(records, filename='native-lifecycle.log', *, unknown_lines=(), evidence=None):
     """Only comparable contexts can prove a repeat; unknowns clear the writer.
 
-    Ordinary neutrality/timing remain sampled. A known-version explicit periodic
-    row proves its own lane classification even without a comparable context.
-    No invalid frame becomes history for the next valid observation.
+    Explicit periodic markers are checked separately from this comparison.
+    They still clear history and may have incomplete comparison context.
     """
     previous, repeats = {}, []
 
@@ -1027,12 +1456,8 @@ def repeated_frame_observations(records, filename='native-lifecycle.log', *, unk
         if reset:
             previous.clear()
         process = pid(row, filename)
-        if event_name(row) == 'boot-single-instance-acquired':
-            if process == 'unknown':
-                previous.clear()
-            else:
-                previous.pop(process, None)
-        if event_name(row) != 'input-host-frame-evidence':
+        event = event_name(row)
+        if _snapshot_comparison_boundary(previous, row, process, event) or event != 'input-host-frame-evidence':
             continue
         if process == 'unknown':
             reject(line, process, 'writer-unattributed')
@@ -1042,7 +1467,6 @@ def repeated_frame_observations(records, filename='native-lifecycle.log', *, unk
             reject(line, process, reason)
             continue
         if row.get('snapshotReason') == 'periodic':
-            repeats.append((line, row))
             previous.pop(process, None)
             continue
         if row.get('diagnosticRecoveryReoffer') is True:
@@ -1050,9 +1474,10 @@ def repeated_frame_observations(records, filename='native-lifecycle.log', *, unk
             # It proves neither source recovery nor delivery, and seeds no history.
             previous.pop(process, None)
             continue
-        if previous.get(process) == context:
+        current = _snapshot_comparison_birth(row), row['powerGeneration'], context
+        if previous.get(process) == current:
             repeats.append((line, row))
-        previous[process] = context
+        previous[process] = current
     return repeats
 
 
@@ -2956,6 +3381,11 @@ def virtual_journal_first_sample(row):
     sample = row.get('firstSample')
     if not isinstance(sample, dict):
         return None
+    if VIRTUAL_PRODUCER_COPIES_MARKER in row:
+        copies = virtual_step_producer_copies(row)
+        if copies is None:
+            return None
+        return {**sample, 'producer': {**sample['producer'], **copies}}
     if VIRTUAL_FRAME_SAMPLE_MARKER not in row:
         return sample
     marker = row[VIRTUAL_FRAME_SAMPLE_MARKER]
@@ -3476,7 +3906,21 @@ def _native_control_window_record(value,wrapper=True):
     return result
 
 
-CONTROLLER_LOCAL_VISIBILITY_EVENTS=('input-host-switch-audit','system-xinput-readback','xinput-slot-devices','input-host-open-result')
+SYSTEM_XINPUT_READBACK = 'system-xinput-readback'
+SYSTEM_XINPUT_SOURCE = 'system32-xinput1_4'
+SYSTEM_XINPUT_SCOPE = 'same-YMCC-process; HidHide exemption may apply; not external Steam proof'
+CONTROLLER_LOCAL_VISIBILITY_EVENTS=('input-host-switch-audit',SYSTEM_XINPUT_READBACK,'xinput-slot-devices','input-host-open-result')
+
+
+def is_system_xinput_resident_readback(row):
+    if (row.get('event') != SYSTEM_XINPUT_READBACK or row.get('source') != SYSTEM_XINPUT_SOURCE or
+            row.get('observerScope') != SYSTEM_XINPUT_SCOPE):
+        return False
+    reason = row.get('reason')
+    if reason == 'module-or-entrypoint-unavailable':
+        return row.get('available') is False and 'connectedMask' not in row
+    mask = row.get('connectedMask')
+    return reason in ('first', 'mask-change') and 'available' not in row and type(mask) is int and 0 <= mask <= 15
 
 
 def connection_truth_log_record(row):
@@ -3492,34 +3936,355 @@ def connection_truth_log_record(row):
         value=row.get(key)
         if type(value) is int and 0<=value<=maximum:fields[key]=value
         else:issues.append(key+':missing-or-invalid')
-    if 'diagnosticRecoveryReoffer' not in row:
+    scope = connection_truth_scope_projection(row)
+    if 'diagnosticRecoveryReoffer' not in row and scope is None:
         if issues:result['state']='legacy-invalid-connection-truth'
         return result
     reoffer=row.get('diagnosticRecoveryReoffer')
     if type(reoffer) is not bool:issues.append('diagnosticRecoveryReoffer:invalid-type')
     else:fields['diagnosticRecoveryReoffer']=reoffer
-    if row.get('observationScope')!='current-connection-truth;not-input-edge-or-device-recovery':issues.append('observationScope:unsupported')
+    if not (scope['state'] == 'restorable' if scope is not None else row.get('observationScope') == CONNECTION_TRUTH_SCOPE):
+        issues.append('observationScope:unsupported')
     result['state']='invalid-connection-truth-fields' if issues else 'reported-current-truth-after-log-recovery' if reoffer else 'reported-original-connection-truth-observation'
     return result
 
 
-def connection_truth_log_evidence(members,current_pid):
-    head=[];tail=collections.deque(maxlen=8);witnesses={};counts=collections.Counter();total=0
-    current=str(current_pid) if type(current_pid) is int and 0<current_pid<(1<<32) else current_pid if isinstance(current_pid,str) and 0<len(current_pid)<=10 and current_pid.isascii() and current_pid.isdecimal() and 0<int(current_pid)<(1<<32) else None
-    for filename,rows,metadata in members:
-        if not re.fullmatch(r'native-lifecycle\.log(?:\.(?:prev|previous|[0-9]+))?',filename):continue
-        for line,row in rows:
-            if row.get('event')!='domain-pad-truth':continue
-            total+=1;record=connection_truth_log_record(row);counts[record['state']]+=1;pid=row.get('pid');birth=row.get('writerProcessCreation100ns');knownPid=type(pid) is int and 0<pid<(1<<32);knownBirth=isinstance(birth,str) and 0<len(birth)<=20 and birth.isascii() and birth.isdecimal() and 0<int(birth)<(1<<64)
-            relation='unknown-writer-tuple' if not(knownPid and knownBirth) else 'current-pid-match' if current is not None and str(pid)==current else 'other-or-uncompared'
-            item={'encounterOrdinal':total,'file':filename[:160],'line':line if type(line) is int and 0<line<(1<<64) else None,'writerPid':pid if knownPid else None,'writerProcessCreation100ns':birth if knownBirth else None,'writerIdentityProven':False,'pidRelation':relation,'record':record}
-            if len(head)<8:head.append(item)
-            else:tail.append(item)
-            if record['state'] in ('reported-current-truth-after-log-recovery','invalid-connection-truth-fields','legacy-invalid-connection-truth'):witnesses.setdefault((relation,record['state']),item)
-    selected={item['encounterOrdinal']:item for item in head+list(tail)+list(witnesses.values())}
-    return {'schemaVersion':1,'rowsObserved':total,'rowsByState':dict(counts),'observations':[selected[k] for k in sorted(selected)],'maxListedObservations':25,'rowsNotListed':total-len(selected),
-        'scope':'retained-domain-pad-truth-rows;current-observation-after-log-recovery-is-not-a-replayed-input-edge',
-        'newInputEdgesCounted':False,'deviceRecoveryProven':False,'uniqueControllerCountProven':False,'fileDeliveryProven':False,'completeHistoryProven':False}
+def is_resident_connection_truth(row):
+    buttons, guide = row.get('buttonMask'), row.get('guide')
+    return (type(buttons) is int and 0 <= buttons <= 0xffff and type(guide) is bool and
+            guide == bool(buttons & 0x0400) and connection_truth_log_record(row)['state'] in
+            ('reported-original-connection-truth-observation', 'reported-current-truth-after-log-recovery'))
+
+
+def connection_truth_log_evidence(members, current_pid, *, export_writer=None):
+    head, tail, witnesses, writer_witnesses = [], collections.deque(maxlen=8), {}, {}
+    counts, writers, total = collections.Counter(), collections.Counter(), 0
+    current = str(current_pid) if type(current_pid) is int and 0 < current_pid < 1 << 32 else current_pid
+    if not isinstance(current, str) or not (0 < len(current) <= 10 and current.isascii() and
+                                             current.isdecimal() and 0 < int(current) < 1 << 32):
+        current = None
+    for filename, rows, metadata in members:
+        if metadata.get('containerOnly') or NATIVE_LOW_ROOT_MEMBER.fullmatch(filename) is None:
+            continue
+        occurrence = metadata.get('archiveEntryOccurrence')
+        for line, row in rows:
+            if row.get('event') != 'domain-pad-truth':
+                continue
+            total += 1
+            record = connection_truth_log_record(row)
+            state = record['state']
+            writer_relation = _native_low_writer_bucket(row, export_writer)
+            counts[state] += 1
+            writers[writer_relation] += 1
+            writer_pid, birth = row.get('pid'), row.get('writerProcessCreation100ns')
+            known_pid = type(writer_pid) is int and 0 < writer_pid < 1 << 32
+            known_birth = (isinstance(birth, str) and 0 < len(birth) <= 20 and birth.isascii() and
+                           birth.isdecimal() and 0 < int(birth) < 1 << 64)
+            pid_relation = ('unknown-writer-tuple' if not (known_pid and known_birth) else
+                            'current-pid-match' if str(writer_pid) == current else 'other-or-uncompared')
+            item = {'encounterOrdinal': total, 'file': filename[:160],
+                    'archiveEntryOccurrence': occurrence if type(occurrence) is int and occurrence >= 0 else None,
+                    'line': line if type(line) is int and 0 < line < 1 << 64 else None,
+                    'writerPid': writer_pid if known_pid else None,
+                    'writerProcessCreation100ns': birth if known_birth else None,
+                    'writerIdentityProven': False, 'pidRelation': pid_relation,
+                    'writerRelation': writer_relation, 'record': record}
+            (head if len(head) < 8 else tail).append(item)
+            writer_witnesses.setdefault(writer_relation, item)
+            if state in ('reported-current-truth-after-log-recovery', 'invalid-connection-truth-fields',
+                         'legacy-invalid-connection-truth'):
+                witnesses.setdefault((pid_relation, state), item)
+    selected = {item['encounterOrdinal']: item for item in
+                head + list(tail) + list(witnesses.values()) + list(writer_witnesses.values())}
+    return {'schemaVersion': 1, 'rowsObserved': total, 'rowsByState': dict(counts),
+        'rowsByWriterRelation': dict(writers), 'reportedExportWriter': _native_low_reported_writer(export_writer),
+        'observations': [selected[k] for k in sorted(selected)], 'maxListedObservations': 30,
+        'rowsNotListed': total-len(selected),
+        'scope': 'retained-root-native-low-domain-pad-truth;writer-relation-compares-reported-pid-and-birth;not-a-replayed-input-edge',
+        'newInputEdgesCounted': False, 'deviceRecoveryProven': False, 'uniqueControllerCountProven': False,
+        'fileDeliveryProven': False, 'completeHistoryProven': False}
+
+
+def input_host_submit_stats_record(row):
+    def text(value):
+        return isinstance(value, str) and 0 < len(value) <= 128
+
+    def uint(value, minimum=0):
+        return type(value) is int and minimum <= value < (1 << 64)
+
+    out = {'state': 'invalid-result', 'issues': [], 'nativeScope': {}, 'acceptedRequest': None,
+           'hostStats': None, 'physicalDeliveryProven': False}
+    issues = out['issues']
+    native = out['nativeScope']
+    for name in ('runId', 'hostInstanceId', 'persona', 'phase'):
+        if text(row.get(name)):
+            native[name] = row[name]
+    for name in ('epoch', 'queryPowerGeneration', 'queryCompletedPowerGeneration'):
+        if uint(row.get(name), 1 if name == 'epoch' else 0):
+            native[name] = row[name]
+    if all(k in native for k in ('queryPowerGeneration', 'queryCompletedPowerGeneration')):
+        out['nativePowerChangedDuringQuery'] = native['queryPowerGeneration'] != native['queryCompletedPowerGeneration']
+
+    wire = row.get('submitStatsReceipt')
+    accepted = row.get('ok')
+    if type(accepted) is not bool:
+        return out
+    if not accepted:
+        out['state'] = 'query-failed' if wire is None else 'contradictory-failed-query'
+        return out
+    if wire is not None:
+        if (not isinstance(wire, dict) or type(wire.get('schema')) is not int or wire['schema'] != 1 or
+                not all(text(wire.get(k)) for k in ('requestId', 'persona')) or
+                not uint(wire.get('sequence'), 1) or not uint(wire.get('protocolPowerGeneration')) or
+                not all(k in native for k in ('runId', 'epoch', 'hostInstanceId'))):
+            out['state'] = 'invalid-accepted-request'
+            return out
+        out['acceptedRequest'] = {k:wire[k] for k in ('requestId', 'sequence', 'persona', 'protocolPowerGeneration')}
+
+    raw = row.get('detail')
+    stats = None
+    if isinstance(raw, str) and 0 < len(raw) <= 8192:
+        try:
+            stats = evidence_json_loads(raw)
+        except ValueError:
+            pass
+    numbers = ('frameOk', 'frameFail', 'neutralOk', 'neutralFail', 'lastSequence')
+    if (not isinstance(stats, dict) or stats.get('ok') is not True or
+            not all(uint(stats.get(k)) for k in numbers) or not uint(stats.get('epoch'), 1) or
+            not all(text(stats.get(k)) for k in ('runId', 'persona')) or
+            not isinstance(stats.get('lastDetail'), str) or len(stats['lastDetail']) > 1024):
+        out['state'] = 'invalid-or-missing-host-stats'
+        return out
+    out['hostStats'] = {k:stats[k] for k in ('runId', 'epoch', 'persona', *numbers, 'lastDetail')}
+    for k in ('runId', 'epoch', 'persona'):
+        reported = out['acceptedRequest']['persona'] if k == 'persona' and wire is not None else native.get(k)
+        if reported is None:
+            issues.append(k + ':missing-native-value')
+        elif reported != stats[k]:
+            issues.append(k + ':host-stats-disagree')
+    out['state'] = ('same-row-scope-unresolved' if issues else 'reported-bound-accepted-request' if wire is not None else
+                    'accepted-request-identity-unavailable' if 'submitStatsReceipt' in row else 'legacy-identity-unavailable')
+    return out
+
+
+def input_host_submit_stats_evidence(members):
+    counts = collections.Counter()
+    head, tail, first_by_state = [], collections.deque(maxlen=8), {}
+    total = 0
+    for filename, rows, meta in members:
+        if meta.get('containerOnly') or NATIVE_LOW_ROOT_MEMBER.fullmatch(filename) is None:
+            continue
+        for line, row in rows:
+            if row.get('event') != 'input-host-submit-stats':
+                continue
+            record = input_host_submit_stats_record(row)
+            total += 1
+            state = record['state']
+            counts[state] += 1
+            item = {'ordinal':total, 'file':filename, 'archiveEntryOccurrence':meta.get('archiveEntryOccurrence'),
+                    'line':line, 'record':record}
+            (head if len(head)<8 else tail).append(item)
+            first_by_state.setdefault(state,item)
+    selected = {item['ordinal']:item for item in head+list(tail)+list(first_by_state.values())}
+    return {'schemaVersion':1, 'rowsObserved':total, 'rowsByState':dict(counts),
+            'observations':[selected[k] for k in sorted(selected)], 'rowsNotListed':total-len(selected),
+            'scope':'same-low-frequency-row-only;no-command-joins;host-stats-do-not-prove-physical-delivery'}
+
+
+_FALLBACK_EDGE_CONTEXT_FIELDS = ('connectionEdgeSequence', 'connectionEdgeAgeMs',
+                                 'connectionEdgePowerGeneration', 'connectionEdgePowerLifecycle')
+_FALLBACK_EDGE_PHASES = ('ready', 'suspending', 'suspended', 'resuming')
+_FALLBACK_EDGE_REASONS = ('no-matching-edge', 'edge-write-unconfirmed', 'edge-context-changed', 'edge-outside-recent-window')
+_FALLBACK_EDGE_REFERENCES = 16
+_FALLBACK_EDGE_MAX_ANCHORS = 4096
+_FALLBACK_EDGE_ROOT_MEMBER = re.compile(r'native-(lifecycle|detail)(?:\.log(?:\.(?:prev|previous|[0-9]+))?|\.(?:prev|previous|[0-9]+)\.log)')
+_HIDHIDE_DISCONNECT_HOLD = 'hidhide.unplugged-unhide-held'
+_HIDHIDE_DISCONNECT_HOLD_REASONS = ('handheld-builtin-pad-while-virtual', 'xinput-disconnect-during-wake-hold')
+
+
+def _fallback_edge_observation(row):
+    reason = row.get('connectionObservation')
+    marked = 'connectionObservation' in row
+    nested = 'connectionEdgeReference' in row
+    flat = any(key in row for key in _FALLBACK_EDGE_CONTEXT_FIELDS)
+    if row.get('duplicateConnectionEdge') is True:
+        if marked or nested:
+            return 'conflicting-selection', None
+        ref = dict(zip(('sequence', 'ageMs', 'powerGeneration', 'powerLifecycle'),
+                       (row.get(k) for k in _FALLBACK_EDGE_CONTEXT_FIELDS)))
+        valid = (_control_uint(ref['ageMs']) and ref['ageMs'] <= 150 and
+                 _control_uint(ref['powerGeneration']) and ref['powerGeneration'] > 0)
+        selection = 'explicit-duplicate'
+    elif reason in _FALLBACK_EDGE_REASONS and not flat and 'duplicateConnectionEdge' not in row:
+        if not nested:
+            return (reason if reason == 'no-matching-edge' else 'retained-without-reference'), None
+        ref = row['connectionEdgeReference']
+        if (reason == 'no-matching-edge' or not isinstance(ref, dict) or
+                type(ref.get('schema')) is not int or ref['schema'] != 1):
+            return 'invalid-reference', None
+        age = ref.get('ageMs')
+        generation, observed = ref.get('powerGeneration'), ref.get('observedPowerGeneration')
+        phase, observed_phase = ref.get('powerLifecycle'), ref.get('observedPowerLifecycle')
+        confirmed = ref.get('appendConfirmed')
+        valid = ('ageMs' in ref and (age is None or _control_uint(age)) and _control_uint(generation) and
+                 _control_uint(observed) and observed_phase in _FALLBACK_EDGE_PHASES and type(confirmed) is bool)
+        same_context = generation != 0 and generation == observed and phase == observed_phase
+        valid = valid and (
+            reason == 'edge-write-unconfirmed' and not confirmed or
+            reason == 'edge-context-changed' and confirmed and not same_context or
+            reason == 'edge-outside-recent-window' and confirmed and same_context and (age is None or age > 150))
+        selection = reason
+        ref = {k: ref.get(k) for k in ('sequence', 'ageMs', 'powerGeneration', 'powerLifecycle',
+                                      'appendConfirmed', 'observedPowerGeneration', 'observedPowerLifecycle')}
+    else:
+        return ('invalid-selection' if marked or flat or nested or 'duplicateConnectionEdge' in row else 'legacy-unmarked'), None
+    if (not valid or not _control_uint(ref['sequence']) or ref['sequence'] == 0 or
+            ref['powerLifecycle'] not in _FALLBACK_EDGE_PHASES or type(row.get('connected')) is not bool):
+        return 'invalid-reference', None
+    return selection, ref
+
+
+def is_resident_fallback_connection(row):
+    if row.get('event') != 'gamepad-fallback-tick' or type(row.get('connected')) is not bool:
+        return False
+    selection, _ = _fallback_edge_observation(row)
+    return selection in (*_FALLBACK_EDGE_REASONS, 'retained-without-reference')
+
+
+def is_resident_physical_identity(row):
+    if (row.get('event') != PHYSICAL_IDENTITY_EVENT or row.get('snapshotReason') != 'state-change' or
+            row.get('resolved') is not True or not isinstance(row.get('sourcePath'), str) or not row['sourcePath'] or
+            not _control_uint(row.get('sourceGeneration')) or row['sourceGeneration'] == 0):
+        return False
+    scope = physical_identity_scope_projection(row)
+    if scope is not None:
+        return scope['state'] == 'restorable'
+    return all(row.get(key) == expected for key, expected in PHYSICAL_IDENTITY_SCOPE_FIELDS.items())
+
+
+def is_resident_msi_rear_context(row):
+    schema = row.get('schema')
+    number, limit = row.get('row'), row.get('rowLimit')
+    return (row.get('event') == 'msi-rear-source-observation' and type(schema) is int and schema in (1, 2) and
+            row.get('snapshotReason') == 'context-change' and
+            type(limit) is int and limit == 48 and type(number) is int and 1 <= number <= limit and
+            all(type(row.get(key)) is bool for key in ('rearDemand', 'keyboardHookHandlePresent', 'virtualTargetEnabled')) and
+            (schema == 1 or type(row.get('shortcutRecordingActive')) is bool))
+
+
+def gamepad_fallback_edge_evidence(members, writer):
+    roots = [(name, rows, meta, match[1]) for name, rows, meta in members
+             if not meta.get('containerOnly') and (match := _FALLBACK_EDGE_ROOT_MEMBER.fullmatch(name))]
+    edges = {}
+    omitted_anchors = 0
+    for name, rows, meta, base in roots:
+        if base != 'lifecycle':
+            continue
+        for line, row in rows:
+            event, sequence = row.get('event'), row.get('connectionEdgeSequence')
+            if (event not in ('gamepad-controller-wake', 'gamepad-controller-sleep') or
+                    not _control_uint(sequence) or sequence == 0 or _native_low_writer_bucket(row, None) == 'writer-unresolved'):
+                continue
+            key = (row['pid'], row['writerProcessCreation100ns'], sequence)
+            if key in edges:
+                edges[key] = None  # Even byte-identical copies are ambiguous member occurrences.
+            elif len(edges) == _FALLBACK_EDGE_MAX_ANCHORS:
+                omitted_anchors += 1
+            else:
+                edges[key] = ({'file': name, 'archiveEntryOccurrence': meta.get('archiveEntryOccurrence'), 'line': line},
+                              event == 'gamepad-controller-wake', row.get('powerGeneration'), row.get('powerLifecycle'))
+    def link_edge(row, relation, sequence, connected, power, phase):
+        if relation == 'writer-unresolved':
+            return 'writer-unresolved', None
+        key = (row['pid'], row['writerProcessCreation100ns'], sequence)
+        if key not in edges:
+            return ('anchor-index-limited' if omitted_anchors else 'anchor-not-retained'), None
+        if edges[key] is None:
+            return 'ambiguous-anchor', None
+        anchor, state, generation, anchor_phase = edges[key]
+        status = ('linked' if state == connected and _control_uint(generation) and
+                  generation == power and anchor_phase == phase else 'anchor-context-mismatch')
+        return status, anchor
+
+    counts, links, writers = collections.Counter(), collections.Counter(), collections.Counter()
+    hold_links = collections.Counter()
+    hold_first, hold_last = [], collections.deque(maxlen=_FALLBACK_EDGE_REFERENCES // 2)
+    witnesses, first = collections.deque(maxlen=_FALLBACK_EDGE_REFERENCES // 2), []
+    marked_rows = 0
+    for name, rows, meta, base in roots:
+        lane = 'low' if base == 'lifecycle' else 'detail'
+        for line, row in rows:
+            if row.get('event') == _HIDHIDE_DISCONNECT_HOLD and 'connectionEdgeSequence' in row:
+                sequence, power, phase = (row.get(k) for k in ('connectionEdgeSequence', 'powerGeneration', 'powerLifecycle'))
+                reason = row.get('reason')
+                relation = _native_low_writer_bucket(row, writer)
+                witness = {'file': name, 'archiveEntryOccurrence': meta.get('archiveEntryOccurrence'),
+                           'line': line, 'lane': lane, 'writerRelation': relation}
+                if relation != 'writer-unresolved':
+                    witness.update(writerPid=row['pid'], writerProcessCreation100ns=row['writerProcessCreation100ns'])
+                if reason not in _HIDHIDE_DISCONNECT_HOLD_REASONS or row.get('pXinput') != 'UNENCLOSED':
+                    status = 'unrecognized-hold'
+                elif sequence is None:
+                    status = 'current-anchor-unconfirmed'
+                elif not (_control_uint(sequence) and sequence and _control_uint(power) and power and phase in _FALLBACK_EDGE_PHASES):
+                    status = 'invalid-reference'
+                else:
+                    witness.update(connectionEdgeSequence=sequence, powerGeneration=power, powerLifecycle=phase)
+                    status, anchor = link_edge(row, relation, sequence, False, power, phase)
+                    if anchor is not None:
+                        witness['anchor'] = anchor
+                if reason in _HIDHIDE_DISCONNECT_HOLD_REASONS:
+                    witness['reportedReason'] = reason
+                witness['linkState'] = status
+                hold_links[lane, status] += 1
+                if len(hold_first) < _FALLBACK_EDGE_REFERENCES // 2:
+                    hold_first.append(witness)
+                else:
+                    hold_last.append(witness)
+                continue
+            if row.get('event') != 'gamepad-fallback-tick':
+                continue
+            selection, ref = _fallback_edge_observation(row)
+            counts[(lane, selection)] += 1
+            relation = _native_low_writer_bucket(row, writer)
+            writers[relation] += 1
+            if selection == 'legacy-unmarked':
+                continue
+            marked_rows += 1
+            witness = {'file': name, 'archiveEntryOccurrence': meta.get('archiveEntryOccurrence'), 'line': line,
+                       'lane': lane, 'selection': selection, 'writerRelation': relation}
+            if relation != 'writer-unresolved':
+                witness.update(writerPid=row['pid'], writerProcessCreation100ns=row['writerProcessCreation100ns'])
+            if row.get('connectionObservation') in _FALLBACK_EDGE_REASONS:
+                witness['reportedReason'] = row['connectionObservation']
+            if ref is not None:
+                witness['edgeReference'] = ref
+                status, anchor = link_edge(row, relation, ref['sequence'], row['connected'], ref['powerGeneration'], ref['powerLifecycle'])
+                if anchor is not None:
+                    witness['anchor'] = anchor
+                links[(lane, status)] += 1
+                witness['linkState'] = status
+            if len(first) < _FALLBACK_EDGE_REFERENCES // 2:
+                first.append(witness)
+            else:
+                witnesses.append(witness)
+    if not counts and not hold_links:
+        return None
+    result = {'schemaVersion': 1,
+            'scope': 'retained-root-native-members;same-reported-writer-and-edge-sequence;no-time-based-join',
+            'countsByLaneAndSelection': {lane: {state: n for (kind, state), n in counts.items() if kind == lane} for lane in ('low', 'detail')},
+            'linkCountsByLane': {lane: {state: n for (kind, state), n in links.items() if kind == lane} for lane in ('low', 'detail')},
+            'rowsByWriterRelation': dict(writers), 'reportedExportWriter': _native_low_reported_writer(writer),
+            'omittedAnchorRows': omitted_anchors, 'witnesses': first + list(witnesses),
+            'omittedWitnesses': marked_rows - len(first) - len(witnesses)}
+    if hold_links:
+        result['disconnectHoldEvidence'] = {
+            'scope': 'explicit-field-only;retained-disconnect-anchor;not-device-visibility-or-input-delivery',
+            'linkCountsByLane': {lane: {state: n for (kind, state), n in hold_links.items() if kind == lane}
+                                 for lane in ('low', 'detail')},
+            'witnesses': hold_first + list(hold_last),
+            'omittedWitnesses': sum(hold_links.values()) - len(hold_first) - len(hold_last)}
+    return result
 
 
 def slot_hid_enumeration_record(row):
@@ -3558,6 +4323,28 @@ def slot_hid_enumeration_record(row):
         view.update(state=state,sizeCount=size,listCount=count,scannedCount=scanned,deviceReadFailures=failures,
                     firstFailureStage=stage,firstWin32Error=error,reportedPaths=len(paths))
     return view
+
+
+def restore_xinput_slot_results(row):
+    if row.get('event') != 'xinput-slot-devices' or 'slotResultsV1' not in row:
+        return row, None
+    packed = row['slotResultsV1']
+    if 'slots' in row:
+        return row, 'conflict'
+    if not isinstance(packed, list) or len(packed) != 4:
+        return row, 'invalid'
+    slots = []
+    for index, entry in enumerate(packed):
+        if type(entry) is int and entry == 1167:
+            slots.append({'slot': index, 'result': 1167})
+        elif (isinstance(entry, dict) and type(entry.get('slot')) is int and entry['slot'] == index
+              and type(entry.get('result')) is int and 0 <= entry['result'] < 1 << 32):
+            slots.append(entry)
+        else:
+            return row, 'invalid'
+    restored = dict(row, slots=slots)
+    del restored['slotResultsV1']
+    return restored, 'restored'
 
 
 def controller_local_visibility_record(row):
@@ -3607,9 +4394,9 @@ def controller_local_visibility_record(row):
         result['legacyVisibilityLabelIsReadbackProof']=False
         result['interpretation']='source-pending-at-log' if fields.get('physicalSourcePending') is True else 'local-start-hide-admission-only'
         return result
-    if event=='system-xinput-readback':
+    if event==SYSTEM_XINPUT_READBACK:
         result['kind']='same-process-xinput-readback'
-        if row.get('source')!='system32-xinput1_4' or row.get('observerScope')!='same-YMCC-process; HidHide exemption may apply; not external Steam proof':result['state']='unsupported-xinput-observer-contract';return result
+        if row.get('source')!=SYSTEM_XINPUT_SOURCE or row.get('observerScope')!=SYSTEM_XINPUT_SCOPE:result['state']='unsupported-xinput-observer-contract';return result
         if row.get('available') is False:
             result['state']='reported-local-xinput-api-unavailable' if row.get('reason')=='module-or-entrypoint-unavailable' else 'unsupported-xinput-unavailable-reason'
             fields['available']=False;return result
@@ -3628,7 +4415,13 @@ def controller_local_visibility_record(row):
             mask('admittedMask');mask('prevAdmittedMask')
         result['hidEnumeration']=slot_hid_enumeration_record(row)
         for key in ('pendingDelete','physicalStable'):flag(key)
-        slots=row.get('slots');seen=set();successMask=0;valid=True
+        slot_row, encoding = restore_xinput_slot_results(row)
+        if encoding is not None:
+            result['slotResultsV1State'] = encoding
+            if encoding != 'restored':
+                issues.append('slots:packed-' + encoding)
+        slots = slot_row.get('slots') if encoding in (None, 'restored') else None
+        seen=set();successMask=0;valid=True
         if not isinstance(slots,list) or len(slots)!=4:issues.append('slots:expected-four-reports');valid=False
         if isinstance(slots,list):
             for item in slots[:4]:
@@ -3867,9 +4660,26 @@ def native_control_window_evidence(members,current_pid):
             'phase/tuple/clock/driver/game proof requires its own source;this view performs no join,no device IO and no automatic recovery']}
 
 
+def restore_foreground_idle_exit_query(row):
+    key = 'helperExitQueryIdleV1'
+    if row.get('event') not in ('native-foreground-isolation', 'msi-native-foreground-isolation') or key not in row:
+        return row, None
+    if 'helperExitQuery' in row:
+        return row, 'conflicting-idle-query-marker'
+    if type(row[key]) is not int or row[key] != 1:
+        return row, 'invalid-idle-query-marker'
+    restored = dict(row, helperExitQuery=dict(schema=1, api='GetExitCodeProcess', attempted=False,
+                                             succeeded=None, errorDomain=None, error=None))
+    del restored[key]
+    return restored, 'restored'
+
+
 def native_foreground_exit_query_record(row):
+    row, encoding = restore_foreground_idle_exit_query(row)
     value=row.get('helperExitQuery')
     state='missing' if 'helperExitQuery' not in row else 'null' if value is None else 'object' if isinstance(value,dict) else 'invalid-type'
+    if encoding not in (None, 'restored'):
+        state = encoding
     result={'state':state,'reported':{},'fieldIssues':[],'reportedQuerySucceeded':None,'exitValueValidatedByReportedQuery':False}
     if state!='object':return result
     if type(value.get('schema')) is not int or value['schema']!=1 or value.get('api')!='GetExitCodeProcess':
@@ -3958,7 +4768,217 @@ def native_foreground_cycle_details(row):
     return groups
 
 
+FOREGROUND_RECEIPT_SCOPE_FLAG = 'foregroundScopeDefaultsV1'
+_CONFIGURATION_EVIDENCE_SCOPE = 'selected-source configuration only; no authority to clear inherited/foreign entries'
+FOREGROUND_RECEIPT_SCOPES = (
+    ('inputBoundary', 'existing-canonical-cache-only;no-device-read-or-game-receipt'),
+    ('nativeRefreshWriter', 'helper writer only; no node-enabled or external input delivery proof'),
+    ('beforeConfigurationEvidence', _CONFIGURATION_EVIDENCE_SCOPE),
+    ('hiddenConfigurationEvidence', _CONFIGURATION_EVIDENCE_SCOPE),
+    ('returnConfigurationEvidence', _CONFIGURATION_EVIDENCE_SCOPE),
+)
+
+
+def native_foreground_scope_defaults(row):
+    """Report explicitly encoded scopes; raw values and legacy omissions stay as recorded."""
+    mask = row.get(FOREGROUND_RECEIPT_SCOPE_FLAG)
+    if type(mask) is not int or not 0 < mask < (1 << len(FOREGROUND_RECEIPT_SCOPES)):
+        return {'state': 'invalid-default-mask', 'restored': {}, 'conflicts': []}
+    restored, conflicts = {}, []
+    for index, (key, text) in enumerate(FOREGROUND_RECEIPT_SCOPES):
+        if not mask & (1 << index):
+            continue
+        node = row.get(key)
+        if not isinstance(node, dict) or 'scope' in node:
+            conflicts.append(key)
+        else:
+            restored[key] = text
+    return {'state': 'conflicting-default-mask' if conflicts else 'reported-defaults',
+            'restored': restored, 'conflicts': conflicts}
+
+
+FOREGROUND_BOUNDARY_CLOCK_MARKER = 'clockCopiesV1'
+FOREGROUND_BOUNDARY_CLOCK_COPIES = (
+    ('captureBeginTick', 'captureEndTick'), ('readStartedTick', 'readCompletedTick'),
+    ('powerGeneration', 'currentPowerGeneration'), ('topologyGeneration', 'currentTopologyGeneration'),
+)
+
+
+def restore_foreground_boundary_clocks(row):
+    if row.get('event') not in ('native-foreground-isolation', 'msi-native-foreground-isolation'):
+        return row, None
+    boundary = row.get('inputBoundary')
+    marker = FOREGROUND_BOUNDARY_CLOCK_MARKER
+    if not isinstance(boundary, dict) or marker not in boundary:
+        return row, None
+    mask = boundary[marker]
+    if type(mask) is not int or not 0 < mask < 1 << len(FOREGROUND_BOUNDARY_CLOCK_COPIES):
+        return row, {'state': 'invalid-mask'}
+    if boundary.get('captured') is not True:
+        return row, {'state': 'capture-not-reported'}
+    restored = {}
+    for bit, (source, target) in enumerate(FOREGROUND_BOUNDARY_CLOCK_COPIES):
+        if not mask & (1 << bit):
+            continue
+        if target in boundary:
+            return row, {'state': 'conflicting-destination', 'field': target}
+        value = boundary.get(source)
+        if type(value) is not int or not 0 <= value < 1 << 64:
+            return row, {'state': 'invalid-source', 'field': source}
+        restored[target] = value
+    expanded = {**boundary, **restored}
+    del expanded[marker]
+    return {**row, 'inputBoundary': expanded}, {'state': 'restored', 'fields': restored}
+
+
+def restore_foreground_boundary_zero_fields(row):
+    if row.get('event') not in ('native-foreground-isolation', 'msi-native-foreground-isolation'):
+        return row, None
+    boundary = row.get('inputBoundary')
+    marker = 'zeroFieldsV1'
+    if not isinstance(boundary, dict) or marker not in boundary:
+        return row, None
+    value = boundary[marker]
+    if type(value) is not int or value not in (1, 3):
+        return row, {'state': 'invalid-mask'}
+    if boundary.get('captured') is not True:
+        return row, {'state': 'capture-not-reported'}
+    fields = dict.fromkeys(('lx', 'ly', 'rx', 'ry', 'lt', 'rt'), 0)
+    if value == 3:
+        fields.update(buttons=0, guide=False)
+    for key in fields:
+        if key in boundary:
+            return row, {'state': 'conflicting-destination', 'field': key}
+    expanded = {**boundary, **fields}
+    del expanded[marker]
+    return {**row, 'inputBoundary': expanded}, {'state': 'restored', 'fields': fields}
+
+
+FOREGROUND_CONFIGURATION_LIMITS = 'foregroundConfigurationLimitsV1'
+FOREGROUND_CONFIGURATION_PATHS = ('beforeConfigurationEvidence', 'hiddenConfigurationEvidence', 'returnConfigurationEvidence')
+FOREGROUND_CONFIGURATION_DEFAULTS = {'externalInputDeliveryProven': False, 'inheritedEntryOwnershipProven': False}
+
+
+def restore_foreground_configuration_limits(row):
+    marker = FOREGROUND_CONFIGURATION_LIMITS
+    if (row.get('event') not in ('native-foreground-isolation', 'msi-native-foreground-isolation') or
+            marker not in row):
+        return row, None
+    mask = row[marker]
+    if type(mask) is not int or not 0 < mask < 1 << len(FOREGROUND_CONFIGURATION_PATHS):
+        return row, {'state': 'invalid-default-mask', 'restored': {}, 'conflicts': []}
+    restored, conflicts = {}, []
+    for bit, key in enumerate(FOREGROUND_CONFIGURATION_PATHS):
+        if not mask & (1 << bit):
+            continue
+        node = row.get(key)
+        if (not isinstance(node, dict) or type(node.get('schema')) is not int or node['schema'] != 1 or
+                any(field in node for field in FOREGROUND_CONFIGURATION_DEFAULTS)):
+            conflicts.append(key)
+        else:
+            restored[key] = dict(FOREGROUND_CONFIGURATION_DEFAULTS)
+    if conflicts:
+        return row, {'state': 'conflicting-default-mask', 'restored': {}, 'conflicts': conflicts}
+    expanded = {**row, **{key: {**row[key], **values} for key, values in restored.items()}}
+    del expanded[marker]
+    return expanded, {'state': 'reported-defaults', 'restored': restored, 'conflicts': []}
+
+
+FOREGROUND_STATIC_SCOPES_FLAG = 'foregroundStaticScopesV1'
+FOREGROUND_STATIC_SCOPES = {
+    'verificationScope': 'config-and-cycle-command-only',
+    'helperIdentityScope': 'on-disk-before-launch-not-loaded-image-proof',
+    'xusbTargetEvidence': 'active-XUSB-interface-and-exact-PnP-ancestor',
+}
+
+
+def restore_foreground_static_scopes(row):
+    if (row.get('event') not in ('native-foreground-isolation', 'msi-native-foreground-isolation') or
+            FOREGROUND_STATIC_SCOPES_FLAG not in row):
+        return row, None
+    flag = row[FOREGROUND_STATIC_SCOPES_FLAG]
+    if type(flag) is not int or flag != 1:
+        return row, 'invalid-static-scope-marker'
+    if any(key in row for key in FOREGROUND_STATIC_SCOPES):
+        return row, 'conflicting-static-scope-marker'
+    restored = {**row, **FOREGROUND_STATIC_SCOPES}
+    del restored[FOREGROUND_STATIC_SCOPES_FLAG]
+    return restored, 'reported-defaults'
+
+
+FOREGROUND_HELPER_TARGET_COPY_FLAG = 'foregroundHelperTargetCopyV1'
+
+
+def restore_foreground_helper_target(row):
+    if (row.get('event') not in ('native-foreground-isolation', 'msi-native-foreground-isolation') or
+            FOREGROUND_HELPER_TARGET_COPY_FLAG not in row):
+        return row, None
+    marker = row[FOREGROUND_HELPER_TARGET_COPY_FLAG]
+    if type(marker) is not int or marker not in (1, 2):
+        return row, 'invalid-target-copy-marker'
+    if 'helperGameTarget' in row:
+        return row, 'conflicting-target-copy-marker'
+    key = 'sourceRoot' if marker == 1 else 'gameSourceCandidate'
+    value = row.get(key)
+    if type(value) is not str or not 6 <= len(value) <= 2048:
+        return row, 'invalid-target-copy-source'
+    try:
+        if not 24 <= len(value.encode('utf-8')) <= 2048:
+            return row, 'invalid-target-copy-source'
+    except UnicodeError:
+        return row, 'invalid-target-copy-source'
+    restored = {**row, 'helperGameTarget': value}
+    del restored[FOREGROUND_HELPER_TARGET_COPY_FLAG]
+    return restored, key
+
+
+def restore_foreground_xusb_targets(row):
+    key = 'foregroundXusbRootCopyV1'
+    if row.get('event') not in ('native-foreground-isolation', 'msi-native-foreground-isolation') or key not in row:
+        return row, None
+    if type(row[key]) is not int or row[key] != 1:
+        return row, 'invalid-xusb-root-marker'
+    if 'xusbGameTargets' in row:
+        return row, 'conflicting-xusb-root-marker'
+    value = row.get('sourceRoot')
+    if type(value) is not str or not 24 <= len(value) <= 2048 or any(ch < ' ' or ch > '~' for ch in value):
+        return row, 'invalid-xusb-root-source'
+    restored = {**row, 'xusbGameTargets': [value]}
+    del restored[key]
+    return restored, 'restored'
+
+
+FOREGROUND_HELPER_EMPTY_STDOUT_FLAG = 'foregroundHelperEmptyStdoutV1'
+FOREGROUND_HELPER_EMPTY_STDOUT = {
+    'state': 'record-missing',
+    'transport': 'delete-on-close-stdout',
+    'scope': 'helper-self-reported-existing-call-facts',
+    'stdoutBytes': 0,
+    'hardwareSuccessProven': False,
+}
+
+
+def restore_foreground_helper_empty_stdout(row):
+    key = FOREGROUND_HELPER_EMPTY_STDOUT_FLAG
+    if row.get('event') not in ('native-foreground-isolation', 'msi-native-foreground-isolation') or key not in row:
+        return row, None
+    if type(row[key]) is not int or row[key] != 1:
+        return row, 'invalid-helper-empty-stdout-marker'
+    if 'helperDiagnostic' in row:
+        return row, 'conflicting-helper-empty-stdout-marker'
+    restored = {**row, 'helperDiagnostic': dict(FOREGROUND_HELPER_EMPTY_STDOUT)}
+    del restored[key]
+    return restored, 'restored'
+
+
 def native_foreground_helper_record(row):
+    row, xusb_root_copy = restore_foreground_xusb_targets(row)
+    row, helper_target_copy = restore_foreground_helper_target(row)
+    row, static_scopes_state = restore_foreground_static_scopes(row)
+    row, configuration_limits = restore_foreground_configuration_limits(row)
+    row, boundary_clocks = restore_foreground_boundary_clocks(row)
+    row, boundary_zero_fields = restore_foreground_boundary_zero_fields(row)
+    row, empty_stdout = restore_foreground_helper_empty_stdout(row)
     def project(value, spec):
         fields, states = {}, {}
         for key, kind in spec.items():
@@ -3996,8 +5016,26 @@ def native_foreground_helper_record(row):
             'helperExitCode':'uint32','helperFailure':'text','helperError':'uint32'}),
         'outerState': project(row, {'refreshFailed':'bool','cycleAccepted':'bool','configurationReturned':'bool'}),
         'writerSettlement': writer, 'helperDiagnostic': diagnostic}
+    if empty_stdout not in (None, 'restored'):
+        result['helperEmptyStdout'] = {'state': empty_stdout}
+    if xusb_root_copy is not None:
+        result['xusbRootCopy'] = {'state': xusb_root_copy}
+    if helper_target_copy is not None:
+        result['helperTargetCopy'] = ({'state': 'restored', 'sourceField': helper_target_copy}
+            if helper_target_copy in ('sourceRoot', 'gameSourceCandidate') else {'state': helper_target_copy})
     if 'cycleDetailsDefaultsV1' in row or 'coldReturnCycle' in row or 'postHideCycle' in row:
         result['cycleDetails'] = native_foreground_cycle_details(row)
+    if FOREGROUND_RECEIPT_SCOPE_FLAG in row:
+        result['scopeDefaults'] = native_foreground_scope_defaults(row)
+    if configuration_limits is not None:
+        result['configurationLimits'] = configuration_limits
+    if boundary_clocks is not None:
+        result['inputBoundaryClockCopies'] = boundary_clocks
+    if boundary_zero_fields is not None:
+        result['inputBoundaryZeroFields'] = boundary_zero_fields
+    if static_scopes_state is not None:
+        result['staticScopeDefaults'] = {'state': static_scopes_state,
+            'restored': dict(FOREGROUND_STATIC_SCOPES) if static_scopes_state == 'reported-defaults' else {}}
     return result
 
 
@@ -4084,14 +5122,45 @@ def native_bus_rate_scope_supported(row, is_sample):
 
 
 def native_bus_rate_evidence(members):
-    """Summarize retained BUS windows and transitions without joining the lanes."""
-    pattern = re.compile(r'native-(lifecycle|detail)(?:.log(?:.(?:prev|previous|[0-9]+))?|.(?:prev|previous|[0-9]+).log)')
-    window_event, change_event = 'input-capture-bus-rate-sample', 'input-capture-bus-rate'
+    """Summarize retained BUS windows, transitions and interruptions without joining rows."""
+    pattern = re.compile(r'native-(lifecycle|detail)(?:\.log(?:\.(?:prev|previous|[0-9]+))?|\.(?:prev|previous|[0-9]+)\.log)')
+    window_event, change_event, boundary_event = ('input-capture-bus-rate-sample', 'input-capture-bus-rate',
+                                                 'input-capture-bus-rate-boundary')
     counts, rejected, samples, transitions = (collections.Counter() for _ in range(4))
-    groups, witnesses = {}, {}
+    interruptions = collections.Counter()
+    groups, interruption_groups, witnesses = {}, {}, {}
+    group_limit = 32
 
     def uint(value, maximum=(1 << 64) - 1):
         return type(value) is int and 0 <= value <= maximum
+
+    def writer_power_key(row):
+        pid, birth, power = row.get('pid'), row.get('writerProcessCreation100ns'), row.get('powerGeneration')
+        if (uint(pid, 0xffffffff) and pid and isinstance(birth, str) and
+                re.fullmatch(r'[1-9][0-9]{0,19}', birth) and uint(int(birth)) and uint(power)):
+            return pid, birth, power
+        return None
+
+    def record_interruption(kind, reason, lane, filename, line, occurrence, row):
+        key = writer_power_key(row)
+        if key is None:
+            counts['interruptionUnboundRows'] += 1
+            return
+        buckets = interruption_groups.get(key)
+        if buckets is None:
+            if len(interruption_groups) == group_limit:
+                counts['interruptionWriterPowerGroupLimitRows'] += 1
+                return
+            buckets = interruption_groups[key] = {}
+        bucket_key = kind, lane, reason
+        bucket = buckets.get(bucket_key)
+        if bucket is None:
+            first = dict(file=filename, line=line, archiveEntryOccurrence=occurrence)
+            if kind == 'boundary':
+                first.update(startReadyPowerGeneration=row['startReadyPowerGeneration'],
+                             endReadyPowerGeneration=row['endReadyPowerGeneration'])
+            bucket = buckets[bucket_key] = dict(carrier=kind, physicalLane=lane, reason=reason, count=0, first=first)
+        bucket['count'] += 1
 
     def save_witness(key, filename, line, occurrence, row, flags):
         if key in witnesses:
@@ -4100,7 +5169,7 @@ def native_bus_rate_evidence(members):
                               event=row['event'], rateFlags=flags, tickCount=row['tickCount'],
                               busySkips=row['busySkips'], windowMs=row['windowMs'],
                               expectedPublishHz=row['expectedPublishHz'],
-                              previousRateFlags=row.get('previousRateFlags') if row['event'] == change_event else None)
+                              previousRateFlags=row.get('previousRateFlags') if row['event'] in (change_event, boundary_event) else None)
 
     for filename, rows, metadata in members:
         carrier = pattern.fullmatch(filename)
@@ -4110,10 +5179,11 @@ def native_bus_rate_evidence(members):
         occurrence = occurrence if uint(occurrence) else None
         for line, row in rows:
             event = row.get('event')
-            if event not in (window_event, change_event):
+            if event not in (window_event, change_event, boundary_event):
                 continue
             is_sample = event == window_event
-            counts['sampleRows' if is_sample else 'transitionRows'] += 1
+            is_boundary = event == boundary_event
+            counts['sampleRows' if is_sample else 'boundaryRows' if is_boundary else 'transitionRows'] += 1
             if carrier[1] != ('detail' if is_sample else 'lifecycle'):
                 counts['unexpectedLaneRows'] += 1
             flags = row.get('rateFlags')
@@ -4127,6 +5197,31 @@ def native_bus_rate_evidence(members):
             if (row.get('excessiveCallbackRate') is not bool(flags & 4) or bool(row['busySkips']) != bool(flags & 1)
                     or (flags & 2 and not row['tickCount'])):
                 rejected['inconsistent-rate-flags'] += 1
+                continue
+            kind = 'sample' if is_sample else 'boundary' if is_boundary else 'legacy-transition'
+            reason = row.get('windowInterruption')
+            if is_boundary or 'windowInterruption' in row:
+                if ((not is_boundary and not is_sample) or reason not in ('power-context-changed', 'window-too-long')
+                        or (reason == 'window-too-long' and row['windowMs'] <= 2000)):
+                    rejected['invalid-window-interruption'] += 1
+                    continue
+                if is_boundary:
+                    start, end = row.get('startReadyPowerGeneration'), row.get('endReadyPowerGeneration')
+                    if (not uint(start) or not uint(end) or not uint(row.get('previousRateFlags'), 7)
+                            or 'state' in row or (reason == 'power-context-changed' and start and start == end)
+                            or (reason == 'window-too-long' and (not start or start != end))):
+                        rejected['invalid-window-interruption'] += 1
+                        continue
+            elif row.get('powerLifecycle') in ('suspending', 'suspended', 'resuming'):
+                reason = 'legacy-power-not-ready'
+            elif row['windowMs'] > 2000:
+                reason = 'legacy-window-too-long'
+            if reason:
+                interruptions[kind, reason] += 1
+                key = ('interruption', kind, reason)
+                save_witness(key, filename, line, occurrence, row, flags)
+                witnesses[key]['windowInterruption'] = reason
+                record_interruption(kind, reason, carrier[1], filename, line, occurrence, row)
                 continue
             if is_sample:
                 kind = 'zero-callback-window' if row['tickCount'] == 0 else 'nonzero-callback-window'
@@ -4142,17 +5237,16 @@ def native_bus_rate_evidence(members):
                 transitions[previous, flags, subtype] += 1
                 save_witness(('transition', subtype), filename, line, occurrence, row, flags)
 
-            pid, birth, power = row.get('pid'), row.get('writerProcessCreation100ns'), row.get('powerGeneration')
-            if (not uint(pid, 0xffffffff) or not pid or not isinstance(birth, str) or
-                    not re.fullmatch(r'[1-9][0-9]{0,19}', birth) or not uint(int(birth)) or not uint(power)):
+            key = writer_power_key(row)
+            if key is None:
                 counts['unboundRows'] += 1
                 continue
-            key = pid, birth, power
             group = groups.get(key)
             if group is None:
-                if len(groups) == 32:
+                if len(groups) == group_limit:
                     counts['writerPowerGroupLimitRows'] += 1
                     continue
+                pid, birth, power = key
                 group = groups[key] = dict(pid=pid, writerProcessCreation100ns=birth, powerGeneration=power,
                                            sampleRows=0, flaggedSamples=0, zeroCallbackSamples=0, transitionRows=0)
             group['sampleRows' if is_sample else 'transitionRows'] += 1
@@ -4162,8 +5256,17 @@ def native_bus_rate_evidence(members):
 
     return dict(schemaVersion=1, scope='retained-direct-timer-callback-records;sample-rows-and-category-transitions-counted-separately',
                 observedSamples=counts['sampleRows'], observedTransitions=counts['transitionRows'],
+                observedBoundaries=counts['boundaryRows'],
+                interruptionCounts=[dict(carrier=carrier, reason=reason, count=count)
+                                    for (carrier, reason), count in sorted(interruptions.items())],
+                # Use each row's reported generation; Ready endpoints in the witness describe the boundary only.
+                interruptionWriterPowerGroups=[dict(pid=pid, writerProcessCreation100ns=birth, powerGeneration=power,
+                                                   counts=[buckets[key] for key in sorted(buckets)])
+                                               for (pid, birth, power), buckets in interruption_groups.items()],
+                interruptionUnboundRows=counts['interruptionUnboundRows'],
+                interruptionWriterPowerGroupLimitRows=counts['interruptionWriterPowerGroupLimitRows'],
                 unexpectedLaneRows=counts['unexpectedLaneRows'], unboundRows=counts['unboundRows'],
-                writerPowerGroupLimitRows=counts['writerPowerGroupLimitRows'], writerPowerGroupLimit=32,
+                writerPowerGroupLimitRows=counts['writerPowerGroupLimitRows'], writerPowerGroupLimit=group_limit,
                 unprojectedRows=dict(rejected),
                 sampleCounts=[dict(rateFlags=flags, kind=kind, count=count) for (flags, kind), count in sorted(samples.items())],
                 transitionCounts=[dict(previousRateFlags=previous, rateFlags=flags, kind=kind, count=count)
@@ -4258,6 +5361,64 @@ TOUCHPAD_FAILURE_STAGES = (
     'sync-rebind-context','sync-rebind-geometry','transparency-context','transparency-style')
 
 
+TOUCHPAD_SCOPE_DEFAULTS_FLAG = 'touchpadScopeDefaultsV1'
+TOUCHPAD_SCOPE_DEFAULTS = (
+    (1, ('cursorVisibilityContext',), 'Sequential current-window reads at first active Deck SHOWING/hidden pair only; WindowFromPoint is context, not hardware hit delivery, cursor owner/API caller, historical process identity, or an atomic snapshot'),
+    (2, ('cursorVisibilityObserver', 'eventTrace'), 'WinEvent payload thread only; not hidden-API caller identity or a binding to later GetCursorInfo samples'),
+    (4, ('cursorVisibilityObserver', 'sourceOwnerObservations'), 'First source-TID delivery per hook generation, owner queried on existing dispatch. TID reuse/delivery delay remain possible; later events referencing this observation do not prove unchanged ownership.'),
+    (8, ('exitInputRelease',), 'Touchpad sender-owned signals, controlled sources and original window handles only'),
+)
+
+
+def restore_touchpad_scope_defaults(row):
+    if row.get('event') != 'screen-touchpads-state' or TOUCHPAD_SCOPE_DEFAULTS_FLAG not in row:
+        return row, None
+    mask, state = row[TOUCHPAD_SCOPE_DEFAULTS_FLAG], row.get('state')
+    if (row.get('callSite') != 'screenTouchpads.get' or type(mask) is not int or
+            not 1 <= mask <= 15 or not isinstance(state, dict)):
+        return row, 'invalid-default-mask'
+    restored = dict(state)
+    for bit, path, text in TOUCHPAD_SCOPE_DEFAULTS:
+        if not mask & bit:
+            continue
+        node = restored
+        for key in path:
+            value = node.get(key)
+            if not isinstance(value, dict):
+                return row, 'conflicting-default-mask'
+            node[key] = node = dict(value)
+        if 'scope' in node:
+            return row, 'conflicting-default-mask'
+        node['scope'] = text
+    result = {**row, 'state': restored}
+    del result[TOUCHPAD_SCOPE_DEFAULTS_FLAG]
+    return result, 'restored'
+
+
+TOUCHPAD_CURSOR_POLICY_FLAG = 'touchpadCursorPolicyV1'
+TOUCHPAD_CURSOR_POLICY_DEFAULTS = {
+    'cursorDeckSoftwareCursorEnabled': False, 'cursorDeckForceVisibleEnabled': False,
+    'cursorDeckContactShapeBridgeEnabled': False, 'cursorDeckForceVisibleVersion': 3,
+    'cursorDeckContactShapeBridgeVersion': 2, 'cursorDeckMoveSubmitOrderVersion': 1,
+    'cursorDeckMotionGateVersion': 1, 'cursorHiddenQueryBudgetVersion': 1,
+    'cursorSubmitOrderVersion': 1, 'cursorDeckHandoffGraceMs': 0,
+}
+
+
+def restore_touchpad_cursor_policy(row):
+    if row.get('event') != 'screen-touchpads-state' or TOUCHPAD_CURSOR_POLICY_FLAG not in row:
+        return row, None
+    mark, state = row[TOUCHPAD_CURSOR_POLICY_FLAG], row.get('state')
+    version = state.get('cursorPolicyVersion') if isinstance(state, dict) else None
+    if row.get('callSite') != 'screenTouchpads.get' or type(mark) is not int or mark != 1 or type(version) is not int or version != 19:
+        return row, 'invalid-cursor-policy-marker'
+    if any(key in state for key in TOUCHPAD_CURSOR_POLICY_DEFAULTS):
+        return row, 'conflicting-cursor-policy-marker'
+    result = {**row, 'state': {**state, **TOUCHPAD_CURSOR_POLICY_DEFAULTS}}
+    del result[TOUCHPAD_CURSOR_POLICY_FLAG]
+    return result, 'restored'
+
+
 def touchpad_recovery_record(value, snapshot=False):
     """Typed fields at their original levels; reported recovery never certifies input."""
     if not isinstance(value,dict):return {'state':'invalid-document','reported':{},'fieldStates':{},'fieldIssues':['document:invalid-type']}
@@ -4349,7 +5510,13 @@ def touchpad_recovery_evidence(members,current_pid,snapshot=None,selection=None)
         if not re.fullmatch(r'native-(?:lifecycle|detail)(?:\.log(?:\.(?:prev|previous|[0-9]+))?|\.(?:prev|previous|[0-9]+)\.log)',filename):continue
         for line,row in rows:
             if not isinstance(row,dict) or row.get('event')!='screen-touchpads-state':continue
-            record=touchpad_recovery_record(row);total+=1;classes[record['state']]+=1;signals.update(record['reportedSignals'])
+            restored, scope_state = restore_touchpad_scope_defaults(row)
+            restored, cursor_policy_state = restore_touchpad_cursor_policy(restored)
+            record=touchpad_recovery_record(restored);total+=1;classes[record['state']]+=1;signals.update(record['reportedSignals'])
+            if scope_state is not None:
+                record['scopeDefaultsState'] = scope_state
+            if cursor_policy_state is not None:
+                record['cursorPolicyState'] = cursor_policy_state
             writer,role=process_identity(row,filename);birth=row.get('writerProcessCreation100ns')
             known=isinstance(birth,str) and 0<len(birth)<=20 and birth.isascii() and birth.isdecimal() and 0<int(birth)<(1<<64)
             relation='writerPidUnknown' if writer=='unknown' else 'currentPidUnspecified' if current_pid is None else 'currentPidMatch' if writer==str(current_pid) else 'otherPid'
@@ -4636,6 +5803,113 @@ def overlay_surface_session_evidence(members):
         joinsAcrossArchivesOrByTimeProximity=False, screenOrInputVerified=False)
 
 
+CONTROLLER_BOUNDARY_WINDOW_FLAG = 'windowCopiesV1'
+
+
+def restore_controller_boundary_windows(row):
+    """Decode exact same-row copies, leaving legacy and conflicting receipts in original form."""
+    if not isinstance(row, dict) or row.get('event') != 'controller-isolation-boundary':
+        return row, None, ()
+    presentation = row.get('presentation')
+    if not isinstance(presentation, dict) or CONTROLLER_BOUNDARY_WINDOW_FLAG not in presentation:
+        return row, 'legacy', ()
+    schema, mask = row.get('schema'), presentation[CONTROLLER_BOUNDARY_WINDOW_FLAG]
+    if type(schema) is not int or schema != 1 or type(mask) is not int or mask not in (1, 2, 3):
+        return row, 'invalid-marker', ()
+    targets = tuple(name for bit, name in ((1, 'display'), (2, 'foreground')) if mask & bit)
+    main = presentation.get('main')
+    if not isinstance(main, dict) or not {'hwnd', 'valid'} <= main.keys() or any(name in presentation for name in targets):
+        return row, 'conflict', ()
+    restored = dict(presentation)
+    del restored[CONTROLLER_BOUNDARY_WINDOW_FLAG]
+    for name in targets:
+        restored[name] = deepcopy(main)
+    return {**row, 'presentation': restored}, 'restored', targets
+
+
+def restore_game_overlay_frame_bounds(row):
+    if not isinstance(row, dict) or row.get('event') != 'game-overlay-surface':
+        return row, None, ()
+    presentation = row.get('presentation')
+    if not isinstance(presentation, dict):
+        return row, None, ()
+    flag = 'frameBoundsCopiesV1'
+    if flag not in presentation:
+        return row, 'legacy', ()
+    mask = presentation[flag]
+    if type(mask) is not int or not 1 <= mask <= 7:
+        return row, 'invalid-marker', ()
+    targets = tuple(name for bit, name in ((1, 'main'), (2, 'display'), (4, 'foreground')) if mask & bit)
+    restored = dict(presentation)
+    for name in targets:
+        window = presentation.get(name)
+        if not isinstance(window, dict) or 'frameBounds' in window or window.get('boundsRead') is not True:
+            return row, 'conflict', ()
+        bounds, hr = window.get('bounds'), window.get('frameHresult')
+        if (type(hr) is not int or not 0 <= hr < 1 << 31 or not isinstance(bounds, list) or len(bounds) != 4 or
+                any(type(v) is not int or not -(1 << 31) <= v < 1 << 31 for v in bounds)):
+            return row, 'conflict', ()
+        restored[name] = {**window, 'frameBounds': list(bounds)}
+    del restored[flag]
+    return {**row, 'presentation': restored}, 'restored', targets
+
+
+GAME_OVERLAY_LIMITS = (
+    (None, 'crossSourceAtomic'), (None, 'screenVisibleVerified'), ('main', 'screenVisibleVerified'),
+    ('display', 'screenVisibleVerified'), ('foreground', 'screenVisibleVerified'), ('zOrder', 'pixelOcclusionProven'),
+)
+
+
+def restore_game_overlay_observation_limits(row):
+    if not isinstance(row, dict) or row.get('event') != 'game-overlay-surface':
+        return row, None, ()
+    presentation = row.get('presentation')
+    if not isinstance(presentation, dict):
+        return row, None, ()
+    marker = 'observationLimitsV1'
+    if marker not in presentation:
+        return row, 'legacy', ()
+    mask = presentation[marker]
+    if type(mask) is not int or not 1 <= mask < 1 << len(GAME_OVERLAY_LIMITS):
+        return row, 'invalid-marker', ()
+    restored = dict(presentation)
+    targets = []
+    for i, (child, field) in enumerate(GAME_OVERLAY_LIMITS):
+        if not mask & (1 << i):
+            continue
+        owner = presentation if child is None else presentation.get(child)
+        if not isinstance(owner, dict) or field in owner:
+            return row, 'conflict', ()
+        if child is None:
+            restored[field] = False
+            targets.append(field)
+        else:
+            restored[child] = {**owner, field: False}
+            targets.append(f'{child}.{field}')
+    del restored[marker]
+    return {**row, 'presentation': restored}, 'restored', tuple(targets)
+
+
+def presentation_window_copy_evidence(members, restore):
+    states = collections.Counter()
+    copies = collections.Counter()
+    witnesses = {}
+    for filename, rows, metadata in members:
+        for line, row in rows:
+            _, status, targets = restore(row)
+            if status is None:
+                continue
+            states[status] += 1
+            copies.update(targets)
+            if status != 'legacy' and status not in witnesses:
+                item = {'file': filename, 'line': line, 'targets': list(targets)}
+                if 'archiveEntryOccurrence' in metadata:
+                    item['archiveEntryOccurrence'] = metadata['archiveEntryOccurrence']
+                witnesses[status] = item
+    return {'scope': 'retained-member-rows;same-row-values-only;no-atomic-capture-or-pixel-proof',
+            'countsByState': dict(states), 'restoredByTarget': dict(copies), 'firstWitnessByState': witnesses}
+
+
 def ui_presentation_evidence(members,current_pid):
     head=[];tail=collections.deque(maxlen=8);witnesses={};total=omitted=0;classes=collections.Counter();signals=collections.Counter()
     for filename,rows,metadata in members:
@@ -4677,7 +5951,83 @@ def ui_presentation_evidence(members,current_pid):
             'first8,last8,first32 typed witnesses in encounter order;no repeat-row lane violation or absence-of-crash inference']}
 
 
+WEBVIEW_DIAGNOSTIC_ROOT_MEMBER = re.compile(r'webview-failures\.log(?:\.(?:prev|previous|[0-9]+))?')
+
+
+def webview_post_show_nudge_evidence(members, export_writer):
+    """Count show-timer call receipts separately from WebView failure evidence."""
+    counts = collections.defaultdict(collections.Counter)
+    witnesses = {}
+    total = 0
+    for name, rows, metadata in members:
+        if metadata.get('containerOnly') or not WEBVIEW_DIAGNOSTIC_ROOT_MEMBER.fullmatch(name):
+            continue
+        for line, row in rows:
+            if row.get('event') != 'post-show-nudge':
+                continue
+            flag = row.get('firstMainReveal')
+            mode = ('first-main-reveal' if flag is True else 'ordinary-refresh' if flag is False else
+                    'not-reported' if 'firstMainReveal' not in row else 'reported-null' if flag is None else
+                    'invalid-type')
+            schema = row.get('writerEnvelopeSchema')
+            relation = (_reported_writer_bucket(row.get('writerPid'), row.get('writerProcessCreation100ns'), export_writer)
+                        if type(schema) is int and schema == 1 else 'writer-unresolved')
+            total += 1
+            counts[relation][mode] += 1
+            key = relation, mode
+            if key not in witnesses:
+                witnesses[key] = {'file': name[:160], 'fileNameTruncated': len(name) > 160,
+                                  'archiveEntryOccurrence': metadata.get('archiveEntryOccurrence'),
+                                  'line': line, 'writerRelation': relation, 'reportedMode': mode}
+    if not total:
+        return None
+    return {'schemaVersion': 1, 'scope': 'retained-post-show-timer-call-receipts', 'rowsObserved': total,
+            'exportWriter': _native_low_reported_writer(export_writer),
+            'rowCountsByWriterAndMode': {relation: dict(modes) for relation, modes in counts.items()},
+            'firstWitnessPerWriterRelationAndMode': list(witnesses.values()),
+            'comResultOrVisiblePixelsOrInputRecoveryProven': False,
+            'readingRules': ['only current root WebView diagnostic members and their named rotations; overlapping copies count as retained rows',
+                'export writer match requires PID and birth from the manifest and the same row; subject PID and PID-only matches do not qualify',
+                'firstMainReveal describes the requested path; missing or malformed values cannot imply an ordinary refresh',
+                'the row reports a show-timer call, not a failure, periodic sample, or successful refresh; timing and row counts alone cannot establish a lane violation']}
+
+
 CALIBRATION_RESTORE_EVENTS = ('gyro-calibration-awaiting-current-source','gyro-calibration-awaiting-current-recipe','gyro-calibration-restored')
+CALIBRATION_RECHECK_REASONS = ('first-recipe', 'fusion-session-changed', 'recipe-or-device-changed',
+                               'calibration-owner-changed', 'currentness-rechecked')
+CALIBRATION_WAIT_RESIDENT_REASONS = ('no-prior-wait', 'power-context', 'log-delivery-recovery', 'clock-regressed',
+                                    'window-expired', 'binding-or-recipe-change')
+
+
+def calibration_restore_context(row):
+    if 'restoreContext' not in row:
+        return {'state': 'not-reported'}
+    value = row['restoreContext']
+    if value is None:
+        return {'state': 'reported-null'}
+    if not isinstance(value, dict):
+        return {'state': 'invalid-fields'}
+    if type(value.get('schema')) is not int or value['schema'] != 1:
+        return {'state': 'unsupported-schema'}
+
+    def canonical_decimal(text, low, high):
+        return (isinstance(text, str) and 0 < len(text) <= 20 and
+                re.fullmatch(r'-?(?:0|[1-9][0-9]*)', text) and text != '-0' and low <= int(text) < high)
+
+    reason = value.get('recheckReason')
+    scope = value.get('sourceScope')
+    checks = {'recheckReason': reason in CALIBRATION_RECHECK_REASONS,
+              'sourceScope': scope in ('scoped-frame', 'capture-owner-observation'),
+              'sessionStartSteadyTicks': canonical_decimal(value.get('sessionStartSteadyTicks'), -(1 << 63), 1 << 63)}
+    for key in ('bindingGeneration', 'choiceGeneration'):
+        generation = value.get(key)
+        checks[key] = key in value and (generation is None or canonical_decimal(generation, 1, 1 << 64))
+    if scope == 'capture-owner-observation' and value.get('choiceGeneration') is not None:
+        checks['choiceGeneration'] = False
+    issues = [key for key, valid in checks.items() if not valid]
+    if issues:
+        return {'state': 'invalid-fields', 'fieldIssues': issues}
+    return {'state': 'reported-fields', 'reported': {key: value[key] for key in checks}}
 
 
 def calibration_restore_record(row):
@@ -4737,15 +6087,66 @@ def calibration_restore_record(row):
     state=('contradictory' if conflicts else 'invalid-fields' if any(':invalid-type-range' in q for q in issues) else
         'unsupported-values' if any(':unsupported-value' in q for q in issues) else 'null-fields' if any(':null' in q for q in issues) else
         'missing-fields' if issues else 'reported-fields')
+    context=calibration_restore_context(row) if shape=='recipe-result' else {'state':'not-applicable'}
+    if shape=='recipe-result':requested.add('restoreContext')
     return {'state':state,'shape':shape,'reported':fields,'fieldStates':states,'fieldIssues':issues+conflicts,
         'reportedDisposition':disposition if state=='reported-fields' else None,
+        'restoreContext':context,
         'unprojectedFieldCount':len(set(row)-requested-TRANSPORT_FIELDS-{'event'}),
         'storedRecordPresenceIndependentlyVerified':False,'currentSensorOrInputHealthProven':False,'operationsPaired':False}
+
+
+def is_scoped_calibration_fusion_wait(row):
+    if (row.get('event') != 'gyro-calibration-awaiting-current-recipe' or
+            row.get('sourceQualified') is not True or row.get('loaded') is not False or
+            type(row.get('weight')) is not int or row['weight'] != 0 or
+            type(row.get('confidence')) not in (int, float) or row['confidence'] != 0):
+        return False
+    ctx = calibration_restore_context(row)
+    return (ctx['state'] == 'reported-fields' and ctx['reported']['recheckReason'] == 'fusion-session-changed' and
+            ctx['reported']['sourceScope'] == 'scoped-frame' and
+            all(ctx['reported'][key] is not None for key in ('bindingGeneration', 'choiceGeneration')) and
+            all(isinstance(row.get(key), str) and row[key] for key in ('deviceId', 'matrixId', 'matrixSourceSha256')))
+
+
+def calibration_restore_lane_state(row):
+    event = row.get('event')
+    if event not in CALIBRATION_RESTORE_EVENTS:
+        return None
+    if 'calibrationWaitResidentReasonV1' in row:
+        reason = row['calibrationWaitResidentReasonV1']
+        if ('calibrationSessionWaitSample' not in row and reason in CALIBRATION_WAIT_RESIDENT_REASONS and
+                is_scoped_calibration_fusion_wait(row)):
+            return 'reported-resident-fusion-wait'
+        return 'unverified-marker'
+    if 'calibrationSessionWaitSample' in row:
+        return ('reported-detail-sample' if native_explicit_detail_observation(event, row)
+                and event == 'gyro-calibration-awaiting-current-recipe' else 'unverified-marker')
+    receipt = calibration_restore_record(row)
+    if receipt['state'] != 'reported-fields':
+        return 'unverified-receipt'
+    if event != 'gyro-calibration-awaiting-current-recipe':
+        return 'resident-receipt'
+    ctx = receipt['restoreContext']
+    if ctx['state'] == 'not-reported':
+        return 'no-recheck-context'
+    if ctx['state'] != 'reported-fields':
+        return 'unverified-receipt'
+    fields = ctx['reported']
+    if fields['recheckReason'] != 'fusion-session-changed':
+        return 'resident-receipt'
+    if fields['sourceScope'] == 'capture-owner-observation':
+        return 'resident-receipt'
+    if (any(fields[key] is None for key in ('bindingGeneration', 'choiceGeneration')) or
+            not isinstance(row.get('deviceId'), str) or not row['deviceId']):
+        return 'unverified-receipt'
+    return 'unmarked-scoped-fusion-wait'
 
 
 def calibration_restore_evidence(members,current_pid):
     head=[];tail=collections.deque(maxlen=8);witnesses={};total=omitted=0
     events=collections.Counter();states=collections.Counter();dispositions=collections.Counter();relations=collections.Counter()
+    context_states=collections.Counter();recheck_reasons=collections.Counter()
     for filename,rows,metadata in members:
         if not re.fullmatch(r'native-(?:lifecycle|detail)(?:\.log(?:\.(?:prev|previous|[0-9]+))?|\.(?:prev|previous|[0-9]+)\.log)',filename):continue
         for line,row in rows:
@@ -4753,6 +6154,9 @@ def calibration_restore_evidence(members,current_pid):
             if record is None:continue
             total+=1;events[row['event']]+=1;states[record['state']]+=1
             if record['reportedDisposition']:dispositions[record['reportedDisposition']]+=1
+            context=record['restoreContext'];context_states[context['state']]+=1
+            if context['state']=='reported-fields' and record['state']=='reported-fields':
+                recheck_reasons[context['reported']['recheckReason']]+=1
             pid,role=process_identity(row,filename)
             relation='writerPidUnknown' if pid=='unknown' else 'currentPidUnspecified' if current_pid is None else 'currentPidMatch' if pid==str(current_pid) else 'otherPid'
             relations[relation]+=1
@@ -4772,9 +6176,11 @@ def calibration_restore_evidence(members,current_pid):
     listed=sorted({q['encounterOrdinal']:q for q in head+list(tail)+list(witnesses.values())}.values(),key=lambda q:q['encounterOrdinal'])
     return {'schemaVersion':1,'scope':'retained-calibration-restore-reports;not-storage-census-or-input-recovery',
         'rowsObserved':total,'countsByEvent':dict(events),'countsByState':dict(states),'countsByReportedDisposition':dict(dispositions),'rowCountsByPidRelation':dict(relations),
+        'countsByRestoreContextState':dict(context_states),'countsByRecheckReason':dict(recheck_reasons),
         'observations':listed,'maxListedObservations':48,'rowsNotListed':total-len(listed),'maxClassificationWitnesses':32,'classificationWitnessRowsNotTracked':omitted,
         'storedRecordPresenceIndependentlyVerified':False,'currentSensorOrInputHealthProven':False,'operationsPaired':False,'sourceCurrentOrLoadedProven':False,
-        'readingRules':['source wait and missing stored calibration are distinct producer paths;sourceQualified is recipe admission,not physical source health',
+        'readingRules':['source wait and recipe load returning no accepted record are distinct producer paths;sourceQualified is recipe admission,not physical source health',
+            'restore context counts retained rows,not unique sessions or operations;steady ticks are opaque and process-local',
             'restored is reported loading/application,not live sensor samples,game consumption or independently reread storage;legacy offset and recipe payloads remain distinct',
             'missing,null,type/range/finite errors,unsupported values and contradictions remain visible;absence is never healthy or zero',
             'device IDs,matrix strings,source digest strings and arbitrary extras stay in raw bytes;presence flags do not validate provenance',
@@ -5393,7 +6799,7 @@ def frame_capacity_highest_power_evidence(value):
     return {**result, 'state': 'reported', 'power': power, 'firstOutcomes': witnesses}
 
 
-def common_evidence_summary(availability, members, current_pid):
+def common_evidence_summary(availability, members, current_pid, *, export_writer=None):
     """Offline observations only. Never infer native admission from renderer/Steam."""
     def obj(value):
         return value if isinstance(value, dict) else {}
@@ -5527,11 +6933,18 @@ def common_evidence_summary(availability, members, current_pid):
         'exportCopyFailureEvidence':export_copy_failure_evidence(members,current_pid),
         'hidHideWriterObservationEvidence':hidhide_writer_observation_evidence(members,current_pid),
         'hidHideOutputBytesEvidence':hidhide_output_bytes_evidence(members,current_pid),
-        'connectionTruthLogEvidence':connection_truth_log_evidence(members,current_pid),
+        'connectionTruthLogEvidence':connection_truth_log_evidence(members,current_pid,export_writer=export_writer),
+        'inputHostSubmitStatsEvidence':input_host_submit_stats_evidence(members),
         'controllerLocalVisibilityEvidence':controller_local_visibility_evidence(members,current_pid),
         'nativeControlWindowEvidence':native_control_window_evidence(members,current_pid),
         'nativeBusRateEvidence':native_bus_rate_evidence(members),
         'nativeForegroundHelperEvidence':native_foreground_helper_evidence(members,current_pid),
+        'controllerBoundaryWindowCopies':presentation_window_copy_evidence(members, restore_controller_boundary_windows),
+        'gameOverlayFrameBoundsCopies':presentation_window_copy_evidence(members, restore_game_overlay_frame_bounds),
+        'gameOverlayObservationLimits':presentation_window_copy_evidence(
+            ((name,rows,meta) for name,rows,meta in members
+             if not meta.get('containerOnly') and (NATIVE_LOW_ROOT_MEMBER.fullmatch(name) or NATIVE_DETAIL_ROOT_MEMBER.fullmatch(name))),
+            restore_game_overlay_observation_limits),
         'nativeHttpFailureEvidence':native_http_failure_evidence(members,current_pid),
         'nativeSensorRetirementFailureEvidence':native_sensor_retirement_evidence(members,current_pid),
         'nativeIpcFailureEvidence':native_ipc_failure_evidence(members,current_pid),
@@ -5607,9 +7020,19 @@ class VirtualRecoveryFirstWitnessEvidence:
         event, origin = identity.get('event'), sample.get('observedFrom')
         if event not in cls.events and origin not in cls.events:
             return None, None
+        process = canonical_log_name(filename) == 'virtual-adaptation-session.jsonl'
+        invalid_copy = False
+        observed_row = row
+        if not process and VIRTUAL_PRODUCER_COPIES_MARKER in row:
+            restored = virtual_journal_first_sample(row)
+            invalid_copy = restored is None
+            if restored is not None:
+                sample = restored
+                observed_row = {k: v for k, v in row.items() if k != VIRTUAL_PRODUCER_COPIES_MARKER}
         producer = obj(sample.get('producer')); context = obj(identity.get('recoveryOperationContext'))
         shape = obj(identity.get('recoveryStepShape')); issues = []
-        process = canonical_log_name(filename) == 'virtual-adaptation-session.jsonl'
+        if invalid_copy:
+            issues.append('unsupported-producer-identity-copies')
         layout = (row.get('record') == 'first_witness' if process else
                   row.get('schema') == 'ymcc.model-adaptation/1' and row.get('event') == 'virtual-adaptation-witness')
         layout = (layout and row.get('category') == 'virtual-step-witness'
@@ -5675,7 +7098,7 @@ class VirtualRecoveryFirstWitnessEvidence:
             'contextState': context_state, 'context': cls.project(context, context_spec),
             'producerStep': projected, 'fieldIssues': unique_issues[:16],
             'fieldIssuesNotListed': max(0, len(unique_issues) - 16),
-            'capturedTicks': {'row': cls.project(row, {'capturedTickMs': 'uint'}),
+            'capturedTicks': {'row': cls.project(observed_row, {'capturedTickMs': 'uint'}),
                               'firstSample': cls.project(sample, {'capturedTickMs': 'uint'})},
             'slotOrdinal': row.get('slotOrdinal') if cls.uint(row.get('slotOrdinal'), positive=True) else None,
             'queuePhaseAtSnapshot': row.get('queuePhaseAtSnapshot') if row.get('queuePhaseAtSnapshot') in
@@ -7644,12 +9067,46 @@ def input_host_exit_evidence(members):
 
 
 HIDHIDE_WRITER_SCOPE='CLI writer only; no target/physical-return/game proof'
+HIDHIDE_WRITER_OWNED_SETTLEMENT='exact-owned-CLI-root-and-subtree-exited'
 HIDHIDE_WRITER_REASONS=(
-    'exact-native-child-and-job-writer-quiescent','exact-owned-CLI-root-and-subtree-exited',
+    'exact-native-child-and-job-writer-quiescent',HIDHIDE_WRITER_OWNED_SETTLEMENT,
     'empty-history-cache-miss-current-owner-acquired','writer-record-open-exception',
     'recorded-native-owner-alive-or-unknown','recorded-CLI-child-alive-or-unknown',
     'recorded-CLI-subtree-active-or-unknown','atomic-CLI-job-unavailable',
     'CLI-child-identity-not-durably-published')
+
+
+def _hidhide_writer_attempt_id(value):
+    return (type(value) is str and 0<len(value)<=100 and value not in ('.','..') and
+            re.fullmatch(r'[A-Za-z0-9_{}:.\-]+',value) is not None)
+
+
+def _hidhide_writer_birth(value):
+    return (type(value) is str and 0 < len(value) <= 20 and value[0] != '0' and
+            value.isascii() and value.isdecimal() and int(value) < 1 << 64)
+
+
+def restore_hidhide_cli_receipt(row):
+    if not isinstance(row, dict) or row.get('event') != 'hidhide-cli-writer':
+        return row,None
+    v1, v2 = 'writerReceiptDefaultsV1', 'writerReceiptDefaultsV2'
+    if v1 not in row and v2 not in row:
+        return row, None
+    copy_parent = v2 in row
+    flag = v2 if copy_parent else v1
+    if (type(row[flag]) is not int or row[flag] != (2 if copy_parent else 1) or 'scope' in row or 'jobName' in row or
+            row.get('phase') != 'settled' or row.get('reason') not in HIDHIDE_WRITER_REASONS[:2] or
+            not _hidhide_writer_attempt_id(row.get('attemptId'))):
+        return row,'invalid-writer-receipt-defaults'
+    if copy_parent and (any(key in row for key in (v1, 'parentPid', 'parentBirth')) or
+                        row.get('reason') != HIDHIDE_WRITER_OWNED_SETTLEMENT or type(row.get('pid')) is not int or
+                        not 0 < row['pid'] < 1 << 32 or not _hidhide_writer_birth(row.get('writerProcessCreation100ns'))):
+        return row, 'invalid-writer-receipt-defaults'
+    restored={**row,'scope':HIDHIDE_WRITER_SCOPE,'jobName':'Local\\YMCC.HidHide.Cli.'+row['attemptId']}
+    if copy_parent:
+        restored.update(parentPid=row['pid'], parentBirth=row['writerProcessCreation100ns'])
+    del restored[flag]
+    return restored,None
 
 
 def hidhide_writer_observation_record(row):
@@ -7657,6 +9114,9 @@ def hidhide_writer_observation_record(row):
         'writerSettlementReported':False,'physicalReturnProven':False,'virtualTargetRetiredProven':False,
         'externalGameInputProven':False,'liveProcessOrJobStateProven':False,'errorCodeInferred':False}
     if not isinstance(row,dict) or row.get('event')!='hidhide-cli-writer':return result
+    row,issue=restore_hidhide_cli_receipt(row)
+    if issue:
+        result['state']='invalid-fields';result['fieldIssues'].append(issue);return result
     if row.get('scope')!=HIDHIDE_WRITER_SCOPE:result['state']='unsupported-scope';return result
     out=result['reported'];issues=result['fieldIssues'];phase=row.get('phase');reason=row.get('reason')
     if phase not in ('settled','deferred','launch-rejected','history-hint') or type(phase) is not str:result['state']='unsupported-phase-or-reason';return result
@@ -7664,15 +9124,14 @@ def hidhide_writer_observation_record(row):
     if type(reason) is not str or not reason or len(reason)>256:issues.append('reason:missing-or-invalid')
     out['reasonKnown']=type(reason) is str and reason in HIDHIDE_WRITER_REASONS
     if out['reasonKnown']:out['reason']=reason
-    def birth(value):return type(value) is str and 0<len(value)<=20 and value[0]!='0' and value.isascii() and value.isdecimal() and int(value)<(1<<64)
     def process(prefix):
         p=row.get(prefix+'Pid');b=row.get(prefix+'Birth')
         if type(p) is int and p==0 and b=='':out[prefix+'IdentityState']='not-supplied';return 'not-supplied'
-        if type(p) is int and 0<p<(1<<32) and birth(b):out.update({prefix+'IdentityState':'reported-tuple',prefix+'Pid':p,prefix+'Birth':b});return 'reported-tuple'
+        if type(p) is int and 0<p<(1<<32) and _hidhide_writer_birth(b):out.update({prefix+'IdentityState':'reported-tuple',prefix+'Pid':p,prefix+'Birth':b});return 'reported-tuple'
         out[prefix+'IdentityState']='invalid-or-incomplete';issues.append(prefix+'Identity:invalid-or-incomplete');return 'invalid-or-incomplete'
     parent=process('parent');child=process('child');attempt=row.get('attemptId');job=row.get('jobName')
     if attempt=='' and job=='' and parent==child=='not-supplied':out['attemptIdentityState']='not-supplied'
-    elif type(attempt) is str and 0<len(attempt)<=100 and re.fullmatch(r'[A-Za-z0-9_{}:.\-]+',attempt) and attempt not in ('.','..') and job=='Local\\YMCC.HidHide.Cli.'+attempt and parent=='reported-tuple':
+    elif _hidhide_writer_attempt_id(attempt) and job=='Local\\YMCC.HidHide.Cli.'+attempt and parent=='reported-tuple':
         out.update(attemptIdentityState='reported-attempt-and-parent',attemptId=attempt,jobNameMatchesAttempt=True)
     else:out['attemptIdentityState']='invalid-or-incomplete';issues.append('attemptIdentity:invalid-or-incomplete')
     if phase=='settled' and (reason not in HIDHIDE_WRITER_REASONS[:2] or out['attemptIdentityState']!='reported-attempt-and-parent'):issues.append('settled:unrecognised-reason-or-missing-attempt')
@@ -8319,12 +9778,86 @@ def windows_query_outcome_timing_record(value):
     return result
 
 
+def windows_query_context_gate_record(value):
+    gate = value['queryContextGate']
+    if not isinstance(gate, dict) or type(gate.get('schema')) is not int or gate['schema'] != 1:
+        return {'state': 'invalid-gate-schema'}
+    blocker = gate.get('blocker')
+    if blocker not in ('native-exit-requested', 'power-not-ready', 'power-generation-changed'):
+        return {'state': 'invalid-gate-blocker'}
+    attempts, reason = value.get('queryAttempts'), value.get('reason')
+    checkpoint = None
+    if type(attempts) is int:
+        if reason == 'export-context-not-current' and attempts == 0:
+            checkpoint = 'before-query-selection'
+        elif reason == 'export-context-changed' and attempts in (0, 1):
+            checkpoint = 'after-cooldown-selection' if attempts == 0 else 'after-query-return'
+    if (checkpoint is None or value.get('schema') != 'ymcc.sleep-export-diagnostics.v1' or
+            value.get('status') != 'UNKNOWN' or value.get('reportAvailable') is not False or
+            any(k in value for k in ('query', 'recentDeadline', 'querySuppressed', 'reportFile', 'deadlineRetryPolicy'))):
+        return {'state': 'contradictory-gate-receipt'}
+    return {'state': 'reported-blocker', 'blocker': blocker, 'checkpoint': checkpoint,
+            'scope': 'first-failed-receipt-predicate;not-child-outcome-or-power-transition-cause'}
+
+
+WINDOWS_POWER_RECEIPT_MEMBER = re.compile(
+    r'windows-systempowerreport-\{[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\}\.json')
+WINDOWS_POWER_RECEIPT_SCHEMA = 'ymcc.sleep-export-diagnostics.v1'
+MAX_WINDOWS_POWER_RECEIPT_BYTES = 128 * 1024
+
+
+def windows_power_receipt_evidence(archive_entries, member, availability, selection):
+    """Compare the two retained copies; neither authorizes or proves a power action."""
+    def supported(value):
+        return (isinstance(value, dict) and value.get('schema') == WINDOWS_POWER_RECEIPT_SCHEMA and
+                value.get('diagnostic') == 'WindowsSystemPowerReport')
+
+    diagnostic = availability.get('windowsSleepDiagnostics')
+    if not archive_entries and not supported(diagnostic):
+        return None
+    view = {'scope': 'root-windows-query-receipt-and-selected-availability-copy;not-XML-or-sleep-proof',
+            'archiveEntries': archive_entries, 'state': 'member-not-retained'}
+    if not archive_entries:
+        return view
+    if archive_entries != 1:
+        return dict(view, state='ambiguous-members')
+    if member is None:
+        return dict(view, state='member-unreadable')
+    name, data = member
+    view.update(file=name, archiveEntryOccurrence=0, bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
+    if view['bytes'] > MAX_WINDOWS_POWER_RECEIPT_BYTES:
+        return dict(view, state='member-parse-byte-limit')
+    try:
+        document = evidence_json_loads(data.decode('utf-8-sig'))
+    except ValueError as exc:
+        return dict(view, state='invalid-member-json', errorType=evidence_error_type(exc))
+    if not supported(document):
+        return dict(view, state='unsupported-member-receipt')
+    if selection['status'] != 'selected':
+        return dict(view, state='availability-not-selected', availabilitySelection=selection['status'])
+    if not supported(diagnostic):
+        return dict(view, state='availability-receipt-missing-or-unsupported')
+    # Canonical JSON preserves bool/int/float distinctions that Python equality omits.
+    def token(value):
+        return json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(',', ':'))
+    missing = object()
+    changes = {key for key in document.keys() | diagnostic.keys()
+               if document.get(key, missing) is missing or diagnostic.get(key, missing) is missing or
+               token(document[key]) != token(diagnostic[key])}
+    timing_keys = ('query', 'queryAttempts', 'queryPhaseElapsedMs', 'timeoutMs', 'commandCaptureFinalization',
+                   'querySuppressed', 'recentDeadline', 'deadlineRetryPolicy', 'status', 'reason', 'reportAvailable', 'reportFile')
+    return dict(view, state='copies-conflict' if changes else 'copies-agree',
+                changedTopLevelFieldCount=len(changes), changedTimingOrOutcomeFields=[k for k in timing_keys if k in changes])
+
+
 def windows_export_query_record(availability):
     result={'state':'missing','reported':{},'fieldIssues':[],'query':{},'recentDeadline':{},
             'currentReportOrSleepSuccessInferred':False}
     if 'windowsSleepDiagnostics' not in availability:return result
     value=availability['windowsSleepDiagnostics']
     if not isinstance(value,dict):result['state']='invalid-type';return result
+    if 'queryContextGate' in value:
+        result['queryContextGate'] = windows_query_context_gate_record(value)
     if value.get('reason')=='skipped-by-request' or value.get('status')=='NOT_COLLECTED':
         keys=('status','reason','reportAvailable','queryAttempts')
         reported={k:value.get(k) for k in keys}
@@ -9424,7 +10957,7 @@ def fan_lifecycle_log_failure_evidence(availability, selection, current_pid):
     return view
 
 
-def buffered_native_sink_evidence(availability, selection, current_pid):
+def buffered_native_sink_evidence(availability, selection, current_pid, *, names=(), warnings=()):
     """Fixed in-process buffer slots;never a successful-write certificate."""
     limit = 9007199254740991
     result = {'schemaVersion': 1, 'scope': 'bounded-current-Native-buffer-slot-observations;not-file-delivery-proof',
@@ -9535,6 +11068,11 @@ def buffered_native_sink_evidence(availability, selection, current_pid):
         if count != 1:
             continue
         index, row = matches[name][0];item['sourceRowIndex'] = index
+        if 'tailSeparatorEvidence' in row:
+            item['tailSeparatorEvidence'] = tail_separator_offset_evidence(
+                row['tailSeparatorEvidence'], (name, name + '.1'), names, warnings,
+                accepted_state='reported-separator-flushed', counter_limit=limit,
+                malformed_kinds=('invalid-json-row', 'invalid-utf8-row', 'invalid-json-evidence'))
         selected, errors = item['reported'], item['fieldIssues']
         for key in ('failureObservations', 'counterSaturated', 'pendingRows', 'streamOpen', 'streamGood'):
             if key not in row:
@@ -10690,6 +12228,702 @@ def resident_event_byte_evidence(data, groups):
     return selected
 
 
+def _native_low_writer_buckets():
+    return {key: {'rows': 0, 'bytes': 0} for key in (
+        'export-writer', 'same-pid-other-birth', 'other-writer', 'writer-unresolved', 'export-writer-unresolved')}
+
+
+def _native_low_writer_bucket(row, writer):
+    return _reported_writer_bucket(row.get('pid'), row.get('writerProcessCreation100ns'), writer)
+
+
+def _reported_writer_bucket(pid_value, birth, writer):
+    if (type(pid_value) is not int or not 0 < pid_value < 1 << 32 or not isinstance(birth, str) or
+            not 0 < len(birth) <= 20 or not birth.isascii() or not birth.isdecimal() or
+            birth.startswith('0') or int(birth) >= 1 << 64):
+        return 'writer-unresolved'
+    if writer is None:
+        return 'export-writer-unresolved'
+    if str(pid_value) != writer[0]:
+        return 'other-writer'
+    if birth != writer[1]:
+        return 'same-pid-other-birth'
+    return 'export-writer'
+
+
+def _native_low_reported_writer(writer):
+    return None if writer is None else {'writerPid': int(writer[0]), 'writerProcessCreation100ns': writer[1]}
+
+
+def _measured_native_low_rows(data, rows):
+    """Yield sizes from ascending parser line references; one line may belong to several findings."""
+    previous_line = cursor = start = 0
+    for line, row in rows:
+        for _ in range(line - previous_line):
+            start = cursor
+            lf = data.find(b'\n', start)
+            cursor = len(data) if lf < 0 else lf + 1
+        previous_line = line
+        yield line, row, cursor - start
+
+
+def focus_resume_completion_evidence(data, records):
+    """Recognize adjacent copies emitted by one focus-resume completion."""
+    counts = dict(completionRows=0, activationRows=0, paired=0, writerBirthMissingCandidates=0,
+                  pairedActivationRawBytes=0)
+    examples, missing_examples, previous = [], [], None
+
+    def shared(row):
+        numbers = tuple(row.get(k) for k in ('pid', 'gamePid', 'processCreated', 'requestId', 'generation', 'powerGeneration'))
+        text = tuple(row.get(k) for k in ('gameStatus', 'powerLifecycle'))
+        if (row.get('policy') != 'identity-bound-bounded-worker' or row.get('attached') is not False or
+                type(row.get('focused')) is not bool or any(type(n) is not int or not 0 <= n < 1 << 64 for n in numbers) or
+                any(not 0 < n < 1 << 32 for n in numbers[:2]) or not all(numbers[2:4]) or
+                any(not isinstance(t, str) or not 0 < len(t) <= 96 for t in text)):
+            return None
+        return (*numbers, *text, row['focused'])
+
+    for line, row, size in _measured_native_low_rows(data, records):
+        event = row.get('event')
+        if event == 'focus-resume-health' and row.get('stage') == 'complete':
+            counts['completionRows'] += 1
+            previous = (line, row)
+            continue
+        if event == 'focus-resume-activate':
+            counts['activationRows'] += 1
+            if previous is not None and previous[0] + 1 == line:
+                prior = previous[1]
+                common = shared(row)
+                if common is not None and common == shared(prior):
+                    birth = row.get('writerProcessCreation100ns')
+                    witness = dict(completionLine=previous[0], activationLine=line)
+                    if _hidhide_writer_birth(birth) and birth == prior.get('writerProcessCreation100ns'):
+                        counts['paired'] += 1
+                        counts['pairedActivationRawBytes'] += size
+                        if len(examples) < 8:
+                            examples.append(witness)
+                    elif 'writerProcessCreation100ns' not in row and 'writerProcessCreation100ns' not in prior:
+                        counts['writerBirthMissingCandidates'] += 1
+                        if len(missing_examples) < 8:
+                            missing_examples.append(witness)
+        previous = None
+    if not counts['completionRows'] and not counts['activationRows']:
+        return None
+    return dict(**counts, unpairedCompletionRows=counts['completionRows']-counts['paired'],
+                unpairedActivationRows=counts['activationRows']-counts['paired'], examples=examples,
+                missingBirthExampleLines=missing_examples,
+                scope='one-root-member;physically-adjacent-same-reported-writer-and-request;not-focus-success-or-lane-violation')
+
+
+BATTERY_CLIENT_ROOT_MEMBER = re.compile(
+    r'battery-charge-client(?:\.log(?:\.(?:prev|previous|[0-9]+))?|\.(?:prev|previous|[0-9]+)\.log)')
+BATTERY_CLIENT_LOCAL_TIME = re.compile(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}')
+BATTERY_CLIENT_CLOSE_READ = datetime.timedelta(milliseconds=250)
+BATTERY_CLIENT_READ_SOURCES = frozenset(('settings-edge', 'settings-poll', 'settings-retry', 'boot-capture', 'boot-preflight'))
+
+
+def battery_client_read_cadence(data, rows):
+    """Measure adjacent GET receipts and report matching caller tags without inferring a writer lifetime."""
+    starts = results = paired = close = close_bytes = 0
+    outcomes = dict(ok=0, failed=0, unknown=0)
+    source_pairs, close_sources = collections.Counter(), collections.Counter()
+    tagged_pairs = 0
+    examples, start, previous_pair = [], None, None
+    for line, row, size in _measured_native_low_rows(data, rows):
+        event, detail = row.get('event'), row.get('detail')
+        if (event not in ('request-start', 'request-result') or not isinstance(detail, dict) or
+                detail.get('operation') != 'get'):
+            start = previous_pair = None
+            continue
+        if event == 'request-start':
+            starts += 1
+        else:
+            results += 1
+        pid, build, timestamp = row.get('pid'), row.get('build'), row.get('time')
+        if (type(row.get('schema')) is not int or row['schema'] != 1 or type(pid) is not int or
+                not 0 < pid < 1 << 32 or not isinstance(build, str) or not 0 < len(build) <= 48 or
+                'target' in detail or not isinstance(timestamp, str) or not BATTERY_CLIENT_LOCAL_TIME.fullmatch(timestamp)):
+            start = previous_pair = None
+            continue
+        try:
+            local = datetime.datetime.fromisoformat(timestamp)
+        except ValueError:
+            start = previous_pair = None
+            continue
+        identity = (pid, build)
+        if event == 'request-start':
+            if start is not None:
+                previous_pair = None
+            start = (line, identity, local, size, 'readSource' in detail, detail.get('readSource'))
+            continue
+        if (start is None or start[0] + 1 != line or start[1] != identity or local < start[2] or
+                type(detail.get('elapsedMs')) is not int or not 0 <= detail['elapsedMs'] < 1 << 64):
+            start = previous_pair = None
+            continue
+        paired += 1
+        outcome = detail.get('ok')
+        outcomes['ok' if outcome is True else 'failed' if outcome is False else 'unknown'] += 1
+        source = detail.get('readSource')
+        if start[4] or 'readSource' in detail:
+            tagged_pairs += 1
+        if isinstance(source, str) and source in BATTERY_CLIENT_READ_SOURCES and source == start[5]:
+            source_pairs[source] += 1
+        else:
+            source = None
+        if previous_pair is not None and previous_pair[0] + 1 == start[0] and previous_pair[1] == identity:
+            gap = start[2] - previous_pair[2]
+            if datetime.timedelta(0) <= gap <= BATTERY_CLIENT_CLOSE_READ:
+                close += 1
+                close_bytes += start[3] + size
+                if source is not None:
+                    close_sources[source] += 1
+                if len(examples) < 8:
+                    examples.append(dict(previousResultLine=previous_pair[0], startLine=start[0], resultLine=line,
+                                         localClockGapMs=gap // datetime.timedelta(milliseconds=1)))
+                    if source is not None:
+                        examples[-1]['readSource'] = source
+        previous_pair = (line, identity, local)
+        start = None
+    if not starts and not results:
+        return None
+    volume = dict(startRows=starts, resultRows=results, adjacentPairs=paired, unpairedStartRows=starts-paired,
+                unpairedResultRows=results-paired, pairedResultOutcomes=outcomes,
+                closeSuccessorPairs=close, closeSuccessorRawBytes=close_bytes, thresholdMs=250,
+                examples=examples, scope='one-root-member;physical-adjacency;reported-pid-build-and-local-clock',
+                writerLifetimeVerified=False, callerInferred=False, periodicSamplingInferred=False)
+    if tagged_pairs:
+        volume['reportedSources'] = dict(adjacentPairs=dict(source_pairs), closeSuccessorPairs=dict(close_sources),
+                                         unresolvedTaggedPairs=tagged_pairs-sum(source_pairs.values()),
+                                         untaggedPairs=paired-tagged_pairs)
+    return volume
+
+
+def native_low_writer_footprint(data, rows, writer):
+    """Partition one root Native member by reported writer; do not pair events."""
+    buckets = _native_low_writer_buckets()
+    bytes_by_event = collections.Counter()
+    rows_by_event = collections.Counter()
+    covered = 0
+    for _, row, size in _measured_native_low_rows(data, rows):
+        covered += size
+        bucket = _native_low_writer_bucket(row, writer)
+        if bucket == 'export-writer':
+            event = event_name(row)
+            rows_by_event[event] += 1
+            bytes_by_event[event] += size
+        buckets[bucket]['rows'] += 1
+        buckets[bucket]['bytes'] += size
+
+    top = []
+    for event, size in bytes_by_event.most_common(8):
+        shown = event[:128].encode('utf-8', errors='backslashreplace').decode('utf-8')[:128]
+        item = {'event': shown, 'rows': rows_by_event[event], 'bytes': size}
+        if shown != event:
+            item['originalNameSha256Utf8Surrogatepass'] = hashlib.sha256(event.encode('utf-8', errors='surrogatepass')).hexdigest()
+        top.append(item)
+    return {'schema': 1,
+        'reportedExportWriter': _native_low_reported_writer(writer),
+        'buckets': buckets, 'bytesOutsideParsedObjectRows': len(data) - covered,
+        'topExportWriterEventsByBytes': top, 'exportWriterEventGroupsNotListed': len(bytes_by_event) - len(top),
+        'scope': 'one root Native lifecycle occurrence;root pid and writer birth only;raw member bytes including LF;not rate, ZIP size, or lane verdict'}
+
+
+def native_low_finding_footprints(data, findings, writer):
+    """Attribute the matching rows after rule evaluation, without reclassifying them."""
+    from heapq import merge
+    from operator import itemgetter
+
+    def keyed(key, items):
+        for line, row in items:
+            yield line, (key, row)
+
+    footprints = {key: {'schema': 1, 'reportedExportWriter': _native_low_reported_writer(writer),
+                       'buckets': _native_low_writer_buckets(), 'exportWriterExampleLines': [],
+                       'scope': 'matched rows in one root Native member occurrence;raw bytes including LF;'
+                                'attribution does not prove comparison continuity, complete history, or unique events'}
+                  for key in findings}
+    merged = merge(*(keyed(key, items) for key, items in findings.items()), key=itemgetter(0))
+    for line, (key, row), size in _measured_native_low_rows(data, merged):
+        footprint = footprints[key]
+        relation = _native_low_writer_bucket(row, writer)
+        bucket = footprint['buckets'][relation]
+        bucket['rows'] += 1
+        bucket['bytes'] += size
+        if relation == 'export-writer' and len(footprint['exportWriterExampleLines']) < 8:
+            footprint['exportWriterExampleLines'].append(line)
+    return footprints
+
+
+SLEEP_FACTS_ROOT_MEMBER = re.compile(r'sleep-facts\.log(?:\.(?:prev|previous|[0-9]+))?')
+
+
+FRAME_ADMISSION_EVENT = 'input-host-frame-admission'
+FRAME_ADMISSION_RECEIPTS = ('episode-start', 'first-recovery', 'context-changed', 'repeat-summary')
+FRAME_ADMISSION_ASSEMBLY_CAUSES = ('input-power-scope-unavailable', 'shared-power-observation-retired',
+                                  'canonical-source-unavailable', 'canonical-window-or-binding-retired',
+                                  'canonical-read-already-consumed', 'none')
+
+
+def frame_admission_marker_state(row):
+    if row.get('event') != FRAME_ADMISSION_EVENT:
+        return None
+    record = row.get('readRepeatRecord')
+    if row.get('readRepeatSample') is True:
+        if 'readRepeatRecord' not in row:
+            return 'reported-detail-sample'
+        return 'conflicting-markers' if record in FRAME_ADMISSION_RECEIPTS else 'unrecognized-marker'
+    if ('readRepeatSample' in row or
+            'readRepeatRecord' in row and record not in FRAME_ADMISSION_RECEIPTS or
+            'assemblyCause' in row and row['assemblyCause'] not in FRAME_ADMISSION_ASSEMBLY_CAUSES):
+        return 'unrecognized-marker'
+    if 'readRepeatRecord' in row:
+        return 'reported-resident-receipt'
+    if 'assemblyCause' in row:
+        return 'assembly-cause-only'
+    return 'unmarked'
+
+
+def frame_admission_lane_coverage(data, rows, writer):
+    states = {}
+    resident = []
+    for line, row, size in _measured_native_low_rows(data, rows):
+        state = frame_admission_marker_state(row)
+        if state is None:
+            continue
+        if state == 'reported-resident-receipt':
+            resident.append((line, row))
+        if state not in states:
+            states[state] = {'rows': 0, 'exampleLines': [], 'exportWriterExampleLines': [],
+                             'writerBuckets': _native_low_writer_buckets()}
+        item = states[state]
+        item['rows'] += 1
+        if len(item['exampleLines']) < 8:
+            item['exampleLines'].append(line)
+        relation = _native_low_writer_bucket(row, writer)
+        bucket = item['writerBuckets'][relation]
+        bucket['rows'] += 1
+        bucket['bytes'] += size
+        if relation == 'export-writer' and len(item['exportWriterExampleLines']) < 8:
+            item['exportWriterExampleLines'].append(line)
+    return {'schema': 1, 'reportedExportWriter': _native_low_reported_writer(writer),
+            'observedRows': sum(state['rows'] for state in states.values()), 'states': states,
+            'scope': 'one root Native member occurrence;reported markers only;unmarked can include ordinary current receipts;'
+                     'absence of misplaced samples does not prove the producer ran or that detail was retained'}, resident
+
+
+def steam_inspection_periodic_sample(value):
+    return (isinstance(value, dict) and type(value.get('snapshotSchemaVersion')) is int and
+            value['snapshotSchemaVersion'] == 2 and value.get('snapshotPurpose') == 'observation' and
+            value.get('snapshotReason') == 'periodic')
+
+
+def sleep_device_change_lane_evidence(data, observations, writer):
+    counts, examples = collections.Counter(), collections.defaultdict(list)
+    footprint = {'reportedExportWriter': _native_low_reported_writer(writer),
+                 'buckets': _native_low_writer_buckets(), 'exportWriterExampleLines': [],
+                 'scope': 'root writerPid and process birth;raw matching row bytes including line endings'}
+    for line, row, size in _measured_native_low_rows(data, observations):
+        detail = row.get('details')
+        code = detail.get('code') if isinstance(detail, dict) else None
+        if type(code) is not int or not 0 <= code < 1 << 64:
+            state = 'unverified-context'
+        elif code != 7:
+            state = 'other-device-change'
+        else:
+            user = detail.get('userStandby')
+            age = detail.get('standbyAgeEligible')
+            if user is False and age is False:
+                # Same lane rule as sleepDeviceTreeSample. retryCandidate alone is not standby evidence.
+                state = 'detail-only'
+                relation = _reported_writer_bucket(row.get('writerPid'), row.get('writerProcessCreation100ns'), writer)
+                bucket = footprint['buckets'][relation]
+                bucket['rows'] += 1
+                bucket['bytes'] += size
+                if relation == 'export-writer' and len(footprint['exportWriterExampleLines']) < 8:
+                    footprint['exportWriterExampleLines'].append(line)
+            elif type(user) is bool and type(age) is bool:
+                state = 'standby-context'
+            else:
+                state = 'unverified-context'
+        counts[state] += 1
+        if len(examples[state]) < 8:
+            examples[state].append(line)
+    return {'counts': dict(counts), 'exampleLinesByClass': dict(examples),
+            'scope': 'one retained sleep-facts member occurrence under the current lane rule;not cadence or unique events'}, footprint
+
+
+FAN_HOST_POWER_BOUNDARY_ROOT_MEMBER = re.compile(
+    r'(?:fan-host-fault|yeman-fan-host-runtime)(?:\.log(?:\.(?:prev|previous|[0-9]+))?|\.(?:prev|previous|[0-9]+)\.log)')
+FAN_HOST_RUNTIME_ONLY_EVENTS = ('api.request-success', 'hc-operation.begin', 'hc-operation.phase',
+                                'hc-operation.return', 'host.runtime-sample')
+
+
+def fan_host_power_boundary_lane_state(row):
+    event = row.get('eventName')
+    contract = FanHostOutcomeEvidence
+    if event not in (contract.POWER_BOUNDARY, contract.POWER_BOUNDARY_SAMPLE, contract.POWER_BOUNDARY_SUMMARY):
+        return None
+    if (type(row.get('schemaVersion')) is not int or row['schemaVersion'] != 2 or
+            type(row.get('diagnosticSchemaVersion')) is not int or row['diagnosticSchemaVersion'] != 1):
+        return 'unverified-boundary'
+    if event == contract.POWER_BOUNDARY_SAMPLE:
+        return 'explicit-repeat-sample'
+    detail = row.get('details')
+    if not isinstance(detail, dict):
+        return 'unclassified-summary' if event == contract.POWER_BOUNDARY_SUMMARY else 'unverified-boundary'
+    count = detail.get('repeatCount')
+    if event == contract.POWER_BOUNDARY_SUMMARY:
+        return ('bounded-repeat-summary' if type(count) is int and 0 < count < 1 << 31 and count % 32 == 0 and
+                detail.get('evidenceScope') == 'repeated-Host-boundaries-only-not-WMI-or-physical-success'
+                else 'unclassified-summary')
+    if detail.get('state') not in ('entered', 'scope-ended') or type(count) is not int or not 1 <= count < 1 << 31:
+        return 'unverified-boundary'
+    if count == 1:
+        return 'first-boundary'
+    metadata = detail.get('metadata')
+    return ('repeat-marked-boundary' if isinstance(metadata, dict) and
+            type(metadata.get(contract.POWER_SCOPE_MARKER)) is int and metadata[contract.POWER_SCOPE_MARKER] == 1 and
+            contract._boundary_pair_key(row, detail) is not None else 'unverified-boundary')
+
+
+def fan_host_runtime_envelope_valid(row):
+    pid, instance = row.get('processId'), row.get('hostInstanceId')
+    return (type(row.get('schemaVersion')) is int and row['schemaVersion'] == 2 and
+            type(row.get('diagnosticSchemaVersion')) is int and row['diagnosticSchemaVersion'] == 1 and
+            _control_uint(pid, 32) and pid > 0 and isinstance(instance, str) and
+            re.fullmatch(r'[0-9a-f]{32}', instance) is not None and row.get('runId') == f'fan-host:{pid}:{instance}')
+
+
+def fan_host_lane_evidence(data, rows, fault):
+    counts, examples, hits = collections.Counter(), collections.defaultdict(list), {}
+    routine, unverified = {}, {}
+    for line, row, size in _measured_native_low_rows(data, rows):
+        event = row.get('eventName')
+        if event in FAN_HOST_RUNTIME_ONLY_EVENTS:
+            target = routine if fan_host_runtime_envelope_valid(row) else unverified
+            item = target.setdefault(event, {'count': 0, 'rawRowBytes': 0, 'exampleLines': []})
+            item['count'] += 1
+            item['rawRowBytes'] += size
+            if len(item['exampleLines']) < 8:
+                item['exampleLines'].append(line)
+            continue
+        state = fan_host_power_boundary_lane_state(row)
+        if state is None:
+            continue
+        counts[state] += 1
+        if len(examples[state]) < 8:
+            examples[state].append(line)
+        if not fault or state not in ('explicit-repeat-sample', 'repeat-marked-boundary'):
+            continue
+        hit = hits.setdefault(row['eventName'], {'count': 0, 'rawRowBytes': 0, 'exampleLines': []})
+        hit['count'] += 1
+        hit['rawRowBytes'] += size
+        if len(hit['exampleLines']) < 8:
+            hit['exampleLines'].append(line)
+    boundary = {'counts': dict(counts), 'exampleLinesByClass': dict(examples),
+                'scope': 'one retained FanHost member; explicit event or scoped repeat count; not a leaf outcome or operation rate'}
+    runtime = {'scope': 'one retained FanHost member; explicit writer envelope and runtime-only event names; not a rate or hardware outcome',
+               'events': routine, 'unverifiedEnvelopes': unverified}
+    return boundary, hits, runtime
+
+
+TDP_AUTOFLOAT_ROOT_MEMBER = re.compile(r'tdp(?:-detail)?\.log(?:\.(?:prev|previous|[0-9]+))?')
+TDP_AUTOFLOAT_DETAIL_STEPS = frozenset(('tdp.request', 'tdp.target-resolved', 'tdp.route-selected', 'tdp.lifecycle',
+                                       'tdp.helper-start', 'tdp.helper-result', 'tdp.completed'))
+TDP_AUTOFLOAT_PROTECTED_EVENTS = frozenset(('tdp.failed', 'tdp.skipped', 'tdp.unverified', 'tdp.runtime-identity'))
+
+
+def tdp_logged_operation(row):
+    pid, run, operation = (row.get(key) for key in ('pid', 'runId', 'operationId'))
+    if (type(row.get('schemaVersion')) is not int or row['schemaVersion'] != 1 or
+            type(pid) is not int or not 0 < pid < 1 << 32 or not isinstance(run, str) or
+            re.fullmatch(rf'ymcc:{pid}:(?:0|[1-9][0-9]{{0,19}})', run) is None or
+            int(run.rsplit(':', 1)[1]) >= 1 << 64 or not isinstance(operation, str) or
+            re.fullmatch(r'tdp:[0-9]{1,20}:[1-9][0-9]{0,19}', operation) is None):
+        return None
+    return pid, run, operation
+
+
+def tdp_amd_failure_receipt_evidence(rows):
+    """Compare retained Strix Halo readback receipts without counting physical writes."""
+    mismatch = 'amd_tdp_readback_mismatch'
+    backoff = 'TDP hardware write is in backoff'
+    scope = 'StrixHalo_PM_table_limit_fields_only'
+    transport = {'event', 'time', 'timeWithOffset', 'monotonicTick'}
+    request_fields = ('requestId', 'responseRequestId', 'requestPowerGeneration', 'helperResult', 'helperCommandReturned', 'rc', 'ok')
+    counts, example_lines, backoff_sources = collections.Counter(), collections.defaultdict(list), collections.Counter()
+    by_request, contextual = collections.defaultdict(list), collections.defaultdict(list)
+    operations_by_request = collections.defaultdict(set)
+
+    def count(kind, line):
+        counts[kind] += 1
+        if len(example_lines[kind]) < 8:
+            example_lines[kind].append(line)
+
+    def number(value):
+        return type(value) in (int, float) and 0 < value < 1000
+
+    def limits(value):
+        return isinstance(value, dict) and value.keys() == {'stapm', 'fast', 'slow'} and all(map(number, value.values()))
+
+    for line, row in rows:
+        event = row.get('event')
+        if event not in ('tdp.helper-result', 'tdp.failed'):
+            continue
+        error, request = row.get('error'), row.get('requestId')
+        operation = tdp_logged_operation(row)
+        request_key = (operation + (request,) if operation and isinstance(request, str) and
+                       re.fullmatch(rf'{operation[0]}-(?:0|[1-9][0-9]{{0,19}})', request) and
+                       int(request.rsplit('-', 1)[1]) < 1 << 64 else None)
+        no_command_observed = (row.get('hardwareCommandReturned') == row.get('readbackMatched') == 'not-observed' and
+                               row.get('processStarted') is False and not any(key in row for key in request_fields))
+        if event == 'tdp.failed' and error == backoff:
+            kind = 'backoff-text-no-command-observed' if no_command_observed and operation else 'backoff-shape-unverified'
+            count(kind, line)
+            if kind == 'backoff-text-no-command-observed':
+                source = row.get('source')
+                backoff_sources[source if source in ('schedule', 'autofloat') else 'other-or-unknown'] += 1
+        helper = row.get('helperResult')
+        amd = helper.get('amdObservation') if isinstance(helper, dict) else None
+        structured = isinstance(amd, dict) and amd.get('reason') == mismatch
+        is_mismatch = isinstance(error, str) and (error == mismatch or error.startswith(mismatch + ':'))
+        reported = False
+        if is_mismatch or structured:
+            generation = row.get('requestPowerGeneration')
+            reported = (request_key is not None and row.get('responseRequestId') == request and
+                        type(generation) is int and 0 < generation < 1 << 64 and
+                        type(row.get('powerGeneration')) is int and row['powerGeneration'] == generation and
+                        row.get('route') == 'daemon' and row.get('helperCommandReturned') is True and
+                        row.get('ok') is False and type(row.get('rc')) is int and row['rc'] != 0 and
+                        row.get('stale') is False and row.get('ignored') is False and
+                        row.get('hardwareCommandReturned') is True and row.get('readbackMatched') is False and
+                        row.get('verificationScope') == scope and is_mismatch and structured and
+                        type(amd.get('schemaVersion')) is int and amd['schemaVersion'] == 1 and
+                        amd.get('vendor') == 'amd' and amd.get('unit') == 'w' and amd.get('verificationScope') == scope and
+                        amd.get('readbackState') == 'mismatch' and amd.get('hardwareCommandReturned') is True and
+                        amd.get('readbackMatched') is False and amd.get('physicalPowerVerified') is False and
+                        limits(amd.get('requestedLimitsW')) and limits(amd.get('observedLimitsW')))
+            if reported:
+                count('structured-helper-result' if event == 'tdp.helper-result' else 'structured-failure', line)
+            elif is_mismatch and event == 'tdp.failed' and no_command_observed:
+                count('mismatch-text-no-command-observed', line)
+                if operation:
+                    contextual[operation].append((line, row))
+            else:
+                count('mismatch-shape-unverified', line)
+        if request_key:
+            by_request[request_key].append((line, row, reported))
+            operations_by_request[(request_key[0], request_key[1], request)].add(request_key[2])
+
+    if not counts:
+        return None
+    group_counts, examples, text_echoes = collections.Counter(), [], 0
+    mismatch_requests_by_op = collections.Counter(key[:3] for key, records in by_request.items() if any(r[2] for r in records))
+    for key, records in by_request.items():
+        if not any(record[2] for record in records):
+            continue
+        undisputed_operation = len(operations_by_request[(key[0], key[1], key[3])]) == 1
+        paired = False
+        if len(records) == 2 and undisputed_operation:
+            (result_line, result, result_known), (failed_line, failed, failed_known) = records
+            paired = (result_known and failed_known and result_line < failed_line and
+                      result['event'] == 'tdp.helper-result' and failed['event'] == 'tdp.failed' and
+                      json.dumps({k: v for k, v in result.items() if k not in transport}, sort_keys=True) ==
+                      json.dumps({k: v for k, v in failed.items() if k not in transport}, sort_keys=True))
+        state = ('same-request-pair' if paired else
+                 'single-structured-receipt' if len(records) == 1 and undisputed_operation else 'ambiguous-or-conflicting')
+        group_counts[state] += 1
+        example = None
+        if len(examples) < 16:
+            example = dict(state=state, pid=key[0], runId=key[1], operationId=key[2], requestId=key[3],
+                           lines=[line for line, _, _ in records[:8]], retainedRows=len(records))
+            if paired:
+                observed = result['helperResult']['amdObservation']
+                example.update(requestedLimitsW=observed['requestedLimitsW'], observedLimitsW=observed['observedLimitsW'])
+            examples.append(example)
+        if not paired or mismatch_requests_by_op[key[:3]] != 1:
+            continue
+        possible_echoes = contextual.get(key[:3], ())
+        if len(possible_echoes) == 1:
+            line, row = possible_echoes[0]
+            if (line > failed_line and type(row.get('powerGeneration')) is int and
+                    number(row.get('requestedW')) and number(failed.get('requestedW')) and
+                    all(row.get(k) == failed.get(k) for k in ('powerGeneration', 'route', 'source', 'requestedW', 'error'))):
+                text_echoes += 1
+                if example is not None:
+                    example['textEchoCandidateLine'] = line
+    return {'schemaVersion': 1, 'rowsByClass': dict(counts), 'exampleLinesByClass': dict(example_lines),
+            'requestGroupsByClass': dict(group_counts), 'requestGroupExamples': examples, 'textEchoCandidates': text_echoes,
+            'backoffRowsBySource': dict(backoff_sources), 'writerLifetimeVerified': False, 'physicalPowerVerified': False,
+            'scope': 'one retained root member; reported PID, TDP run, operation and matching daemon IDs; '
+                     'text only is not a hardware attempt; counts are not a complete operation history or device power proof'}
+
+
+def tdp_autofloat_lane_state(row):
+    event = row.get('event')
+    summary = event == 'tdp.autofloat-summary'
+    if not summary and row.get('source') != 'autofloat':
+        return None
+    if not isinstance(event, str):
+        return 'unverified'
+    if event in TDP_AUTOFLOAT_PROTECTED_EVENTS:
+        return 'protected-event'
+    pid, run = row.get('pid'), row.get('runId')
+    known_run = (type(pid) is int and 0 < pid < 1 << 32 and isinstance(run, str) and len(run) <= 36 and
+                 re.fullmatch(rf'ymcc:{pid}:(?:0|[1-9][0-9]{{0,19}})', run) is not None and
+                 int(run.rsplit(':', 1)[1]) < 1 << 64)
+    if summary:
+        total = row.get('completedCount')
+        return ('completion-summary' if known_run and type(total) is int and 0 < total < 1 << 32 and total % 32 == 0 and
+                row.get('verificationScope') == 'software-receipts-only-not-continuous-power-proof' else 'unverified-summary')
+    rc, ok = row.get('rc'), row.get('ok')
+    if (type(rc) is int and rc != 0) or ok is False:
+        return 'explicit-failure'
+    # Mirror a confirmed subset of successfulFloatingDetail. Leave old or
+    # ambiguous receipt shapes alone even if the producer could route them.
+    operation = row.get('operationId')
+    if (event not in TDP_AUTOFLOAT_DETAIL_STEPS or not known_run or
+            type(row.get('schemaVersion')) is not int or row['schemaVersion'] != 1 or
+            not isinstance(operation, str) or len(operation) > 45 or
+            re.fullmatch(r'tdp:[0-9]{1,20}:[1-9][0-9]{0,19}', operation) is None or
+            ('rc' in row and (type(rc) is not int or rc != 0)) or ('ok' in row and ok is not True) or
+            (event == 'tdp.helper-result' and (type(rc) is not int or ok is not True)) or
+            any(row.get(key, False) is not False for key in ('stale', 'ignored', 'outcomeUnknown')) or
+            row.get('error', '') != '' or 'outcome' in row):
+        return 'unverified'
+    return 'routine-detail'
+
+
+def tdp_failure_witness_lane_state(row):
+    if row.get('source') != 'autofloat':
+        return None
+    marker = 'failureRepeatAfterRetainedObservation'
+    event, rc = row.get('event'), row.get('rc')
+    if not isinstance(event, str) or not (event in ('tdp.failed', 'tdp.skipped') or
+            event in TDP_AUTOFLOAT_DETAIL_STEPS and (type(rc) is int and rc != 0 or row.get('ok') is False)):
+        return None
+    if not any(key in row for key in ('failureWitness', marker, 'repeatCount')):
+        return None
+    witness, repeat = 'failureWitness' in row, marker in row
+    if not witness and not repeat:
+        return 'unmarked'
+    count = row.get('repeatCount')
+    if (witness and repeat or type(count) is not int or not 0 < count < 1 << 64 or
+            tdp_logged_operation(row) is None):
+        return 'unverified'
+    if repeat:
+        retained = row[marker]
+        return 'detail-repeat' if type(retained) is int and 0 < retained < count else 'unverified'
+    value = row['failureWitness']
+    if value == 'first-observation' and count == 1:
+        return 'resident-first'
+    if value == 'reoffered-after-unconfirmed-append' and count > 1:
+        return 'resident-reoffer'
+    return 'unverified'
+
+
+def tdp_autofloat_lane_evidence(data, rows, low):
+    counts, examples = collections.Counter(), collections.defaultdict(list)
+    misplaced, byte_counts = collections.defaultdict(list), collections.Counter()
+    witness_counts, witness_examples = collections.Counter(), collections.defaultdict(list)
+    witness_hits = collections.defaultdict(lambda: {'rows': [], 'bytes': 0})
+    for line, row, size in _measured_native_low_rows(data, rows):
+        state = tdp_autofloat_lane_state(row)
+        if state is None:
+            continue
+        counts[state] += 1
+        if len(examples[state]) < 8:
+            examples[state].append(line)
+        if low and state == 'routine-detail':
+            misplaced[row['event']].append((line, row))
+            byte_counts[row['event']] += size
+        witness = tdp_failure_witness_lane_state(row)
+        if witness is not None:
+            witness_counts[witness] += 1
+            if len(witness_examples[witness]) < 8:
+                witness_examples[witness].append(line)
+            if (low and witness == 'detail-repeat' or
+                    not low and witness in ('resident-first', 'resident-reoffer')):
+                hit = witness_hits[(row['event'], witness)]
+                hit['rows'].append((line, row))
+                hit['bytes'] += size
+    evidence = {'counts': dict(counts), 'exampleLinesByClass': dict(examples), 'writerLifetimeVerified': False,
+                'scope': 'retained member; reported source and run only; counts are not unique operations or hardware proof'}
+    if witness_counts:
+        evidence['failureWitnessRouting'] = {'counts': dict(witness_counts), 'exampleLinesByClass': dict(witness_examples),
+            'scope': 'reported per-row selection only; no earlier append, retention or durability independently verified'}
+    return evidence, misplaced, byte_counts, witness_hits
+
+
+def input_host_command_result_lane_state(row):
+    if row.get('event') != 'input-host-command-result':
+        return None
+    command, phase, ok = (row.get(key) for key in ('command', 'phase', 'ok'))
+    if not isinstance(command, str) or not command or type(ok) is not bool:
+        return 'unverified-result'
+    if not ok:
+        return ('resident-failure' if phase in ('transport', 'parse', 'tuple', 'rejected', 'exception')
+                else 'unverified-result')
+    if command == 'SUBMIT_FRAME':
+        return 'reported-detail-frame-success'
+    if native_explicit_detail_observation('input-host-command-result', row):
+        return 'reported-detail-repeat'
+    if command == 'HIDHIDE_QUERY_STATE' and phase == 'slow-read-accepted':
+        if 'slowReadReason' not in row and 'slowReadSample' not in row:
+            return 'unmarked-slow-read'
+        if ('slowReadSample' not in row and row.get('sameRequest') is True and
+                row.get('slowReadReason') in ('first', 'first-over-allowance', 'interval',
+                                             'unknown-scope', 'power-changed-during-read')):
+            return 'reported-resident-slow-read'
+        return 'unverified-result'
+    return 'accepted-command' if phase == 'accepted' else 'unverified-result'
+
+
+def xinput_slot_gate_kind(row):
+    def mask(row, key):
+        value = row.get(key)
+        return value if type(value) is int and 0 <= value <= 15 else None
+
+    current, previous = mask(row, 'connectedMask'), mask(row, 'prevMask')
+    admitted, previous_admitted = mask(row, 'admittedMask'), mask(row, 'prevAdmittedMask')
+    raw = None if current is None or previous is None else current != previous
+    admission = None if admitted is None or previous_admitted is None else admitted != previous_admitted
+    if current is not None and 'prevMask' in row and row['prevMask'] is None:
+        return 'raw-baseline'
+    if raw is True:
+        return 'both-changed' if admission is True else 'raw-only' if admission is False else 'raw-changed-admission-unresolved'
+    if admission is True:
+        return 'admission-only' if raw is False else 'admission-changed-raw-unresolved'
+    if raw is False and admission is False:
+        return 'both-reported-unchanged'
+    return 'insufficient-mask-evidence'
+
+
+def xinput_slot_gate_evidence(data, rows, writer, *, detail=False):
+    """Explain reported selection inputs without reconstructing an edge from adjacent rows."""
+    groups = {}
+    for line, row, size in _measured_native_low_rows(data, rows):
+        kind = xinput_slot_gate_kind(row)
+        group = groups.get(kind)
+        if group is None:
+            group = groups[kind] = {'rows': 0, 'bytes': 0, 'exampleLines': [], 'exportWriterExampleLines': [],
+                                    'writerBuckets': _native_low_writer_buckets()}
+        group['rows'] += 1
+        group['bytes'] += size
+        if len(group['exampleLines']) < 8:
+            group['exampleLines'].append(line)
+        relation = _native_low_writer_bucket(row, writer)
+        bucket = group['writerBuckets'][relation]
+        bucket['rows'] += 1
+        bucket['bytes'] += size
+        if relation == 'export-writer' and len(group['exportWriterExampleLines']) < 8:
+            group['exportWriterExampleLines'].append(line)
+    return {'schema': 1, 'groups': groups, 'reportedExportWriter': _native_low_reported_writer(writer),
+            'scope': ('one root native detail member;' if detail else 'one root native low member;') +
+                     'strict same-row masks;raw LF-delimited bytes;'
+                     'not a lane violation, proof of physical connection change, or complete gate history'}
+
+
 def resident_reported_ok_field_evidence(records, current_pid, filename):
     """Read only the root ok field; no event/status/nested-field inference."""
     categories = ('true', 'false', 'missing', 'null', 'nonBoolean')
@@ -10777,6 +13011,147 @@ def domain_writer_envelope_record(row):
     result['reportedWriterTupleComplete']=result['writerProcessCreation100ns'] is not None
     result['state']='reported-pid-and-birth' if result['reportedWriterTupleComplete'] else 'reported-pid-birth-unavailable'
     return result
+
+
+GYRO_LANE_ROOT_MEMBER = re.compile(r'gyro-motion(?:-samples)?\.log(?:\.(?:prev|previous|[0-9]+))?')
+
+
+def light_isolation_ticket_evidence(members, writer, *, max_anchors=2048):
+    fields = {'summon-isolation-selected': 'lightTicketSerial', 'summon-light-gamepad': 'intentLightTicketSerial'}
+
+    def rows(events):
+        for file, items, meta in members:
+            if meta.get('containerOnly') or not (NATIVE_LOW_ROOT_MEMBER.fullmatch(file) or NATIVE_DETAIL_ROOT_MEMBER.fullmatch(file)):
+                continue
+            for line, row in items:
+                event = row.get('event')
+                if isinstance(event, str) and event in events:
+                    yield event, row, {'file': file, 'archiveEntryOccurrence': meta.get('archiveEntryOccurrence'), 'line': line}
+
+    def ticket_state(event, row):
+        field = fields[event]
+        if field not in row:
+            return 'ticket-unreported', None
+        serial = row[field]
+        if not _control_uint(serial):
+            return 'invalid-ticket-fields', None
+        if event == 'summon-isolation-selected':
+            if row.get('mode') != ('light-no-game' if serial else 'original'):
+                return 'invalid-ticket-fields', None
+        elif row.get('scope') != 'steam-gamepad-navigation':
+            return 'invalid-ticket-fields', None
+        if serial == 0:
+            return 'no-ticket', None
+        if _native_low_writer_bucket(row, writer) == 'writer-unresolved':
+            return 'writer-unresolved', None
+        return 'reported-ticket', (row['pid'], row['writerProcessCreation100ns'], serial)
+
+    anchors, overflow = {}, 0
+    for event, row, location in rows(('summon-isolation-selected',)):
+        _, key = ticket_state(event, row)
+        if key is None:
+            continue
+        if key in anchors:
+            anchors[key] = None  # A repeated anchor cannot select one physical line.
+        elif len(anchors) < max_anchors:
+            anchors[key] = location
+        else:
+            overflow += 1
+
+    counts = collections.defaultdict(collections.Counter)
+    examples = collections.defaultdict(list)
+    for event, row, location in rows(fields):
+        state, key = ticket_state(event, row)
+        if key is not None:
+            if key not in anchors:
+                state = 'selection-index-incomplete' if overflow else 'selection-not-retained'
+            elif anchors[key] is None:
+                state = 'ambiguous-retained-selection'
+            elif event != 'summon-isolation-selected':
+                state = 'linked-to-retained-selection'
+        counts[event][state] += 1
+        group = examples[(event, state)]
+        if len(group) < 8:
+            evidence = dict(location, writerRelation=_native_low_writer_bucket(row, writer))
+            if key is not None:
+                pid, birth, serial = key
+                evidence.update(writerPid=pid, writerProcessCreation100ns=birth, ticketSerial=serial)
+            if state == 'linked-to-retained-selection':
+                evidence['selection'] = anchors[key]
+            group.append(evidence)
+    if not counts:
+        return None
+    return {'schemaVersion': 1, 'events': {event: {state: {'rows': n, 'examples': examples[event, state]}
+                                                   for state, n in states.items()} for event, states in counts.items()},
+            'selectionKeyLimit': max_anchors, 'selectionRowsOutsideIndex': overflow,
+            'scope': 'one archive;exact reported Native writer pid,birth and positive intent ticket;not a release target, '
+                     'lease success, physical input proof, chronological ordering or complete history'}
+
+
+def manifest_export_writer(pairs, current_pid, selection):
+    values = [value.strip() for key, value in pairs if key == 'exportOperation']
+    if selection not in ('selected', 'selected-with-ambiguous-fields') or len(values) != 1 or len(values[0]) > 4096:
+        return None
+    try:
+        operation = export_operation_record({'exportOperation': evidence_json_loads(values[0])})
+    except (ValueError, UnicodeError):
+        return None
+    fields = operation['reported']
+    if operation['state'] != 'reported-process-operation' or str(fields['writerPid']) != current_pid:
+        return None
+    return str(fields['writerPid']), fields['writerProcessCreation100ns']
+
+
+def gyro_sample_lane_evidence(samples, writer):
+    counts, examples = collections.defaultdict(collections.Counter), collections.defaultdict(list)
+    for line, row in samples:
+        envelope = domain_writer_envelope_record(row)
+        if not envelope['reportedWriterTupleComplete']:
+            relation = 'writer-unresolved'
+        elif writer is None:
+            relation = 'export-writer-unresolved'
+        else:
+            identity = envelope['writerPid'], envelope['writerProcessCreation100ns']
+            relation = 'export-writer' if identity == writer else 'other-writer'
+        if row.get('ok') is False or row.get('success') is False:
+            shape = 'explicit-failure'
+        elif any(key in row and type(row[key]) is not bool for key in ('ok', 'success')):
+            shape = 'unknown-result-fields'
+        else:
+            shape = 'periodic-sample'
+        counts[relation][shape] += 1
+        if relation == 'export-writer' and len(examples[shape]) < 8:
+            examples[shape].append(line)
+    return {'schema': 1, 'countsByWriterAndShape': dict(counts), 'exportWriterExampleLines': dict(examples),
+            'scope': 'retained gyro-status-second rows;manifest PID and birth match is reported, not verified OS identity'}
+
+
+def gyro_sample_lane_comparison(members, occurrences, writer):
+    supporting, candidates = [], []
+    for name, (base, evidence) in members.items():
+        count = evidence['countsByWriterAndShape'].get('export-writer', {}).get('periodic-sample', 0)
+        if not count:
+            continue
+        if base == 'gyro-motion-samples.log':
+            supporting.append(name)
+        else:
+            candidates.append({'file': name, 'event': 'gyro-status-second',
+                'kind': 'gyro-periodic-sample-in-event-carrier', 'archiveEntryOccurrence': 0,
+                'containerOnly': False, 'counts': {'all': count, 'currentPidMatch': count, 'otherPid': 0,
+                    'pidUnknown': 0, 'byPid': {writer[0]: count}},
+                'exampleLines': evidence['exportWriterExampleLines']['periodic-sample'],
+                'scope': 'same reported writer also has periodic rows in the dedicated sample carrier'})
+    findings = candidates if supporting else []
+    return {'schema': 1,
+        'state': 'separate-sampling-observed' if supporting else 'export-writer-unresolved' if writer is None
+                 else 'separate-sampling-not-observed',
+        'reportedExportWriter': None if writer is None else {
+            'writerPid': int(writer[0]), 'writerProcessCreation100ns': writer[1]},
+        'eligibleReadMembers': list(members), 'dedicatedSampleWitnessMembers': supporting,
+        'excludedRepeatedMembers': {name: n for name, n in occurrences.items() if n > 1},
+        'uninspectedUniqueMembers': [name for name, n in occurrences.items() if n == 1 and name not in members],
+        'confirmedEventCarrierSampleRows': sum(item['counts']['all'] for item in findings) if supporting else None,
+        'scope': 'retained valid rows in readable unique root gyro members;no inference for missing or undecodable rows'}, findings
 
 
 def gyro_sample_tick(row):
@@ -11478,6 +13853,285 @@ def frontend_exec_guard_evidence(records):
     return dict(scope='retained-exec-drop-original-first-predicate-failure;no-cross-row-join',rows=total,counts=dict(counts),
                 witnesses=first+list(last),witnessLimit=16,omittedWitnesses=max(0,total-len(first)-len(last)),
                 missingIsUnknown=True,actionOrDeliveryProven=False,nativeAdmissionProven=False)
+
+
+def frontend_linked_action_is_detail(row):
+    """Mirror the write-time lane predicate, without inferring a linked receipt."""
+    trace = row.get('trace')
+    if (row.get('where') != 'gamepad-admission' or not isinstance(trace, dict) or
+            trace.get('stage') not in ('entry-pass', 'exec-run')):
+        return False
+    link = trace.get('uiActionLink')
+    return (isinstance(link, dict) and link.keys() == {'schema', 'sequence', 'session'} and
+            type(link['schema']) is int and link['schema'] == 1 and
+            type(link['sequence']) is int and 0 < link['sequence'] < 1 << 53 and
+            isinstance(link['session'], str) and len(link['session']) <= 31 and
+            re.fullmatch(r'[1-9][0-9]{0,9}:[1-9][0-9]{0,19}', link['session']) is not None)
+
+
+def frontend_unlinked_navigation_is_detail(row):
+    trace = row.get('trace')
+    if (row.get('event') != 'frontend-trace' or row.get('where') != 'gamepad-admission' or
+            row.get('traceParseStatus') != 'parsed' or row.get('messageTruncated') is not False or
+            not isinstance(trace, dict) or 'uiActionLink' in trace or
+            trace.get('stage') not in ('entry-pass', 'exec-run') or
+            trace.get('action') not in ('page-prev', 'page-next')):
+        return False
+    epoch = trace.get('admissionEpoch')
+    return type(epoch) is int and 0 <= epoch < 1 << 53
+
+
+def frontend_preview_is_detail(row):
+    """Mirror preview schema admission and frontendPreviewRepeatSample, not a performance verdict."""
+    trace = row.get('trace')
+    if (row.get('where') != 'controller-preview' or not isinstance(trace, dict) or
+            type(trace.get('schemaVersion')) is not int or trace['schemaVersion'] != 1 or
+            trace.get('stage') != 'window' or trace.get('policy') != 'VC-PREVIEW-TRACE-20261024-R1'):
+        return False
+
+    def integer_in(obj, key, minimum, maximum):
+        value = obj.get(key)
+        return type(value) is int and minimum <= value <= maximum
+
+    def time_at_most(obj, key, maximum):
+        value = obj.get(key)
+        return type(value) in (int, float) and 0 <= value <= maximum
+
+    max_count = (1 << 53) - 1
+    if (trace.get('endedBy') != 'window-budget' or trace.get('partial') is not False or
+            not integer_in(trace, 'windowSequence', 2, 6) or not time_at_most(trace, 'finalizationOverrunMs', 125) or
+            not all(integer_in(trace, key, 1, max_count) for key in
+                    ('gamepadStateDeliveryCount', 'presentedCount', 'updateCount')) or
+            trace.get('patchStartWithoutCompletionAtEnd') is not False or
+            not all(integer_in(trace, key, 0, 0) for key in ('overwrittenPatchStartCount', 'updateWithoutPatchStartCount'))):
+        return False
+    context, raf, timeout = (trace.get(key) for key in ('context', 'raf', 'timeout'))
+    if (not isinstance(context, dict) or not integer_in(context, 'changed', 0, 0) or context.get('mixed') is not False or
+            not isinstance(raf, dict) or raf.get('pendingWhenEnding') is not False or
+            not all(integer_in(raf, key, 0, 0) for key in
+                    ('missingCallbackCount', 'outsideWindowCallbackCount', 'cancelFailedCount', 'unavailableCount')) or
+            not isinstance(timeout, dict) or timeout.get('cancelFailed') is not False):
+        return False
+    for key, limit in (('latestReceiptAgeAtPatch', 250), ('patchSpan', 125), ('patchToRafCallback', 125)):
+        metric = trace.get(key)
+        if (not isinstance(metric, dict) or not integer_in(metric, 'count', 1, max_count) or
+                metric.get('saturated') is not False or not time_at_most(metric, 'maxMs', limit)):
+            return False
+    return True
+
+
+def frontend_trace_lane_evidence(data, rows, export_writer, low):
+    selected = ((line, row) for line, row in rows if row.get('event') == 'frontend-trace')
+    counts = dict.fromkeys(('event', 'detail', 'missing', 'unrecognized'), 0)
+    buckets = _native_low_writer_buckets()
+    misplaced, writer_examples = [], []
+    linked_samples = explicit_and_linked = unlinked_samples = preview_samples = explicit_and_preview = 0
+    for line, row, size in _measured_native_low_rows(data, selected):
+        lane = row.get('lane')
+        counts[lane if lane in ('detail', 'event') else 'unrecognized' if 'lane' in row else 'missing'] += 1
+        linked = frontend_linked_action_is_detail(row)
+        unlinked = frontend_unlinked_navigation_is_detail(row)
+        preview = frontend_preview_is_detail(row)
+        linked_samples += linked
+        unlinked_samples += unlinked
+        explicit_and_linked += linked and lane == 'detail'
+        preview_samples += preview
+        explicit_and_preview += preview and lane == 'detail'
+        if lane != 'detail' and not linked and not unlinked and not preview:
+            continue
+        version = row.get('writerEnvelopeSchema')
+        relation = (_reported_writer_bucket(row.get('writerPid'), row.get('writerProcessCreation100ns'), export_writer)
+                    if type(version) is int and version == 1 else 'writer-unresolved')
+        bucket = buckets[relation]
+        bucket['rows'] += 1
+        bucket['bytes'] += size
+        if relation == 'export-writer' and len(writer_examples) < 8:
+            writer_examples.append(line)
+        if low:
+            misplaced.append((line, row))
+    return {'schema': 1, 'reportedLaneCounts': counts, 'linkedDetailSampleRows': linked_samples,
+            'explicitAndLinkedRows': explicit_and_linked,
+            'unlinkedNavigationDetailSampleRows': unlinked_samples,
+            'previewDetailSampleRows': preview_samples, 'explicitAndPreviewRows': explicit_and_preview,
+            'detailOnlyWriterFootprint': {'reportedExportWriter': _native_low_reported_writer(export_writer),
+                                          'buckets': buckets, 'exportWriterExampleLines': writer_examples},
+            'scope': 'one root frontend trace member;explicit detail marker or strict linked-action, unlinked-navigation or preview sample shape;'
+                     'raw LF-delimited bytes;not action delivery, complete history or unique events'}, misplaced
+
+
+FRONTEND_RESIDENT_TRACE_SOURCES = ('monitor-notice-lifecycle', 'controller-calibration', 'cpu-ccd-visibility')
+
+
+def frontend_resident_trace_envelope(row):
+    if (row.get('origin') != 'renderer-observation' or row.get('severity') != 'trace' or
+            row.get('lane') not in ('event', 'detail') or row.get('traceParseStatus') != 'parsed' or
+            row.get('messageTruncated') is not False or not isinstance(row.get('trace'), dict) or not row['trace']):
+        return None
+    native_pid = row.get('pid')
+    if type(native_pid) is not int or not 0 < native_pid < 1 << 32:
+        return None
+    fields = ('writerEnvelopeSchema', 'writerPid', 'writerProcessCreation100ns')
+    if not any(key in row for key in fields):
+        return 'legacy-pid-only'
+    if not all(key in row for key in fields):
+        return None
+    schema, writer_pid, birth = (row[key] for key in fields)
+    if type(schema) is not int or schema != 1 or type(writer_pid) is not int or writer_pid != native_pid:
+        return None
+    if birth is not None and _reported_writer_bucket(writer_pid, birth, None) == 'writer-unresolved':
+        return None
+    return 'writer-envelope-v1'
+
+
+def frontend_resident_lane_evidence(data, rows, export_writer):
+    selected = ((line, row) for line, row in rows if row.get('event') == 'frontend-trace' and
+                row.get('where') in FRONTEND_RESIDENT_TRACE_SOURCES)
+    observations, qualified = {}, collections.defaultdict(list)
+    for line, row, size in _measured_native_low_rows(data, selected):
+        where = row['where']
+        item = observations.setdefault(where, {'qualifiedRows': 0, 'rawQualifiedBytes': 0,
+            'legacyPidOnlyRows': 0, 'unverifiedEnvelopeRows': 0, 'rawUnverifiedBytes': 0,
+            'unverifiedExampleLines': [], 'writerBuckets': _native_low_writer_buckets()})
+        envelope = frontend_resident_trace_envelope(row)
+        if envelope is None:
+            item['unverifiedEnvelopeRows'] += 1
+            item['rawUnverifiedBytes'] += size
+            if len(item['unverifiedExampleLines']) < 8:
+                item['unverifiedExampleLines'].append(line)
+            continue
+        item['qualifiedRows'] += 1
+        item['rawQualifiedBytes'] += size
+        item['legacyPidOnlyRows'] += envelope == 'legacy-pid-only'
+        bucket = _reported_writer_bucket(row.get('writerPid'), row.get('writerProcessCreation100ns'), export_writer)
+        item['writerBuckets'][bucket]['rows'] += 1
+        item['writerBuckets'][bucket]['bytes'] += size
+        qualified[where].append((line, row))
+    return {'schema': 1, 'reportedExportWriter': _native_low_reported_writer(export_writer), 'sources': observations,
+            'scope': 'one root frontend trace member;resident renderer observations;raw LF-delimited bytes;'
+                     'not notice delivery, device release, or scheduling behavior'}, qualified
+
+
+FAN_RESUME_LANE_ROOT_MEMBER = re.compile(
+    r'(?:fan-lifecycle|virtual-gamepad)(?:\.log(?:\.(?:prev|previous|[0-9]+))?|\.(?:prev|previous|[0-9]+)\.log)')
+
+
+DECKY_LANE_ROOT_MEMBER = re.compile(
+    r'(?:decky-sidebar|native-lifecycle|native-detail)(?:\.log(?:\.(?:prev|previous|[0-9]+))?|\.(?:prev|previous|[0-9]+)\.log)')
+DECKY_MODE_SIGNAL = 'steam-mode-signal'
+DECKY_MODE_PUBLICATION_TRIGGERS = frozenset((
+    'no-prior-publication', 'mode', 'document', 'update-residue', 'empty-frontend',
+    'backend-connection', 'hooks', 'client-connection', 'client-checking', 'client-verification'))
+
+
+def decky_mode_publication_evidence(rows):
+    triggers, examples = {}, {}
+    counts = dict(reported=0, missing=0, unverified=0)
+    for line, row in rows:
+        if row.get('event') != DECKY_MODE_SIGNAL:
+            continue
+        trigger = row.get('publicationTrigger')
+        if 'publicationTrigger' not in row:
+            state = key = 'missing'
+        elif (type(row.get('diagnosticSchema')) is int and row['diagnosticSchema'] == 2 and
+              row.get('reason') == 'shared-verified-mode' and
+              isinstance(trigger, str) and trigger in DECKY_MODE_PUBLICATION_TRIGGERS):
+            state, key = 'reported', trigger
+            triggers[key] = triggers.get(key, 0) + 1
+        else:
+            state = key = 'unverified'
+        counts[state] += 1
+        lines = examples.setdefault(key, [])
+        if len(lines) < 4:
+            lines.append(line)
+    if not examples:
+        return None
+    return dict(counts=counts, reportedTriggerCounts=triggers, exampleLines=examples,
+                scope='first-matching-publication-condition-per-row;not-poll-cadence-or-action-count',
+                missingMeans='unknown-trigger', laneViolationInferred=False)
+
+
+DECKY_MIRROR_QUEUED = 'mirror-snapshot-queued'
+DECKY_MIRROR_DETAIL = 'decky-mirror-snapshot-detail'
+
+
+def decky_mirror_snapshot_lane_evidence(data, rows, low):
+    selected = ((line, row) for line, row in rows if row.get('event') in (DECKY_MIRROR_QUEUED, DECKY_MIRROR_DETAIL))
+    counts, hits = {}, {}
+    for line, row, size in _measured_native_low_rows(data, selected):
+        event, marker = row['event'], row.get('snapshotReason')
+        if event == DECKY_MIRROR_QUEUED and marker == 'state-change':
+            state = 'state-change'
+        elif marker == 'periodic' and (event == DECKY_MIRROR_QUEUED or row.get('sourceEvent') == DECKY_MIRROR_QUEUED):
+            state = 'periodic'
+        else:
+            state = 'unverified'
+        buckets = [counts.setdefault(state, {'count': 0, 'rawRowBytes': 0, 'exampleLines': []})]
+        if low and state == 'periodic':
+            buckets.append(hits.setdefault(event, {'count': 0, 'rawRowBytes': 0, 'exampleLines': []}))
+        for bucket in buckets:
+            bucket['count'] += 1
+            bucket['rawRowBytes'] += size
+            if len(bucket['exampleLines']) < 8:
+                bucket['exampleLines'].append(line)
+    return {'schema': 1, 'counts': counts,
+            'scope': 'one root member occurrence; explicit mirror snapshot markers; not reply delivery, cadence or unique operations'}, hits
+
+
+DECKY_ADMISSION_RUNTIME = 'runtime'
+DECKY_ADMISSION_DETAIL = 'decky-runtime-admission-detail'
+
+
+def decky_admission_runtime_lane_evidence(data, rows, low):
+    counts, hits = {}, {}
+    for line, row, size in _measured_native_low_rows(data, rows):
+        event = row.get('event')
+        repeat = row.get('runtimeObservation') == 'slow-admission-repeat'
+        batch = row.get('admissionRepeatBatchCount')
+        if event == DECKY_ADMISSION_RUNTIME and 'runtimeObservation' not in row and 'admissionRepeatBatchCount' not in row:
+            continue  # Legacy and ordinary runtime rows make no lane claim.
+        pid, birth, generation = (row.get(key) for key in
+                                  ('admissionSteamPid', 'admissionSteamBirth', 'admissionPowerGeneration'))
+        valid = (row.get('phase') == 'waiting-manual-steam' and type(pid) is int and 0 < pid < 1 << 32 and
+                 isinstance(birth, str) and re.fullmatch(r'[1-9][0-9]{0,19}', birth) is not None and
+                 int(birth) < 1 << 64 and type(generation) is int and 0 < generation < 1 << 64 and
+                 (row.get('reason'), row.get('admissionDetail')) in
+                 (('steam-ui-state-pending', 'shared-mode-pending'), ('steam-bigpicture-required', 'desktop')))
+        if valid and repeat and row.get('sourceEvent') == DECKY_ADMISSION_RUNTIME and 'admissionRepeatBatchCount' not in row:
+            state = 'slow-repeat'
+        elif (valid and event == DECKY_ADMISSION_RUNTIME and type(batch) is int and batch == 64 and
+              'runtimeObservation' not in row and 'sourceEvent' not in row):
+            state = 'checkpoint'
+        else:
+            state = 'unverified'
+        buckets = [counts.setdefault(state, {'count': 0, 'rawRowBytes': 0, 'exampleLines': []})]
+        if (low and state == 'slow-repeat') or (not low and state == 'checkpoint'):
+            buckets.append(hits.setdefault((state, event), {'count': 0, 'rawRowBytes': 0, 'exampleLines': []}))
+        for bucket in buckets:
+            bucket['count'] += 1
+            bucket['rawRowBytes'] += size
+            if len(bucket['exampleLines']) < 8:
+                bucket['exampleLines'].append(line)
+    return {'schema': 1, 'counts': counts,
+            'scope': 'one root member occurrence; explicit Decky runtime lane markers; checkpoint counts publications, not Steam reads'}, hits
+
+
+def fan_resume_observe_lane_evidence(data, observations, expected):
+    counts = {marker: {'rows': 0, 'bytes': 0} for marker in ('state-change', 'periodic', 'missing', 'unrecognized')}
+    misplaced, unknown_lines = [], []
+    for line, row, size in _measured_native_low_rows(data, observations):
+        marker = row.get('snapshotReason')
+        if marker not in ('state-change', 'periodic'):
+            marker = 'unrecognized' if 'snapshotReason' in row else 'missing'
+            if len(unknown_lines) < 8:
+                unknown_lines.append(line)
+        elif marker != expected:
+            misplaced.append((line, row))
+        counts[marker]['rows'] += 1
+        counts[marker]['bytes'] += size
+    return {'schema': 1, 'expectedMarker': expected, 'countsByMarker': counts,
+            'wrongLaneRows': len(misplaced), 'unknownMarkerExampleLines': unknown_lines,
+            'scope': 'one root member occurrence;explicit snapshotReason and raw LF-delimited bytes;'
+                     'not probe cadence, recovery success or unique operation counts'}, misplaced
 
 
 class UiActionLinkEvidence:
@@ -12521,6 +15175,8 @@ def export_checkpoint_wall_terminal_comparison(bound, pre_snapshot_phases, view,
     if not bound or bound['state'] != 'reported-lower-bound':
         return None
     sources, conflicts = {}, list((snapshot_comparison or {}).get('conflicts', ()))
+    join_sources = []
+    combined_phase = 'windowsReportAndRemainingState'
 
     def compare(source, terminal, attempts):
         if terminal is None:
@@ -12536,6 +15192,9 @@ def export_checkpoint_wall_terminal_comparison(bound, pre_snapshot_phases, view,
         phases = terminal['phaseTiming']['elapsedMs']
         if any(phases[k] != pre_snapshot_phases[k] for k in phases.keys() & pre_snapshot_phases.keys()):
             conflicts.append(source + '-vs-pre-snapshot-phases')
+        if (total and terminal['phaseTiming']['state'] == 'reported-completed-phases' and
+                combined_phase in phases and phases[combined_phase] == pre_snapshot_phases.get(combined_phase)):
+            join_sources.append(source)
         if reported.get('attempts', bound['attempt']) < bound['attempt']:
             reason = source + '-attempt-count'
             if reason not in conflicts:
@@ -12554,8 +15213,21 @@ def export_checkpoint_wall_terminal_comparison(bound, pre_snapshot_phases, view,
     if core is not None:
         steps = carry.get('details', {}).get('archiveAttemptSteps') or {}
         compare('preceding-terminal-carry', core['terminal'], steps.get('value'))
-    return dict(state='conflicting-report' if conflicts else 'reported-timings-compatible' if sources else 'no-comparable-terminal',
-                checkpointLowerBoundMs=bound['lowerBoundMs'], terminalElapsedMsBySource=sources, conflicts=conflicts)
+    result = dict(state='conflicting-report' if conflicts else 'reported-timings-compatible' if sources else 'no-comparable-terminal',
+                  checkpointLowerBoundMs=bound['lowerBoundMs'], terminalElapsedMsBySource=sources, conflicts=conflicts)
+    join = bound.get('windowsReportJoin')
+    totals = {timing['exportElapsedMs'] for timing in sources.values() if timing['exportElapsedMs'] is not None}
+    if (join is not None and len(totals) == 1 and join_sources and not conflicts and
+            view['state'] != 'ambiguous-or-conflicting-terminal' and
+            carry.get('state') != 'conflicting-carried-terminals' and
+            carry.get('nativeTerminalProjectionComparison') != 'reported-core-fields-conflict'):
+        total, = totals
+        elapsed = join['elapsedMs']
+        if 0 <= elapsed <= total:
+            result['windowsReportJoinShareOfNativeExport'] = dict(joinMs=elapsed, nativeExportMs=total,
+                remainingNativeWallMs=total-elapsed, agreeingSources=join_sources,
+                scope='reported-overlapped-task-join-within-native-export;not-query-duration-or-measured-speedup')
+    return result
 
 
 def cross_archive_terminal_details(row):
@@ -13192,7 +15864,13 @@ def monitor_tail_separator_evidence(availability, names, warnings):
     monitor = availability.get('monitorDetail')
     if not isinstance(monitor, dict) or 'tailSeparatorEvidence' not in monitor:
         return None
-    receipt = monitor['tailSeparatorEvidence']
+    return tail_separator_offset_evidence(monitor['tailSeparatorEvidence'],
+                                          ('monitor-detail.log', 'monitor-detail.log.1'), names, warnings)
+
+
+def tail_separator_offset_evidence(receipt, member_names, names, warnings, *,
+                                   accepted_state='reported-stream-accepted', counter_limit=(1 << 64)-1,
+                                   malformed_kinds=('invalid-json-row',)):
     view = dict(state='invalid-fields', accepted=None, last=None, offsetMatches=[],
                 scope='retained-malformed-lines-at-reported-lf-offset;not-file-identity-or-causation',
                 fileIdentityProven=False)
@@ -13202,7 +15880,7 @@ def monitor_tail_separator_evidence(availability, names, warnings):
     def uint(value):
         return type(value) is int and 0 <= value < (1 << 64)
     count, last = receipt['accepted'], receipt['last']
-    if not uint(count):
+    if not uint(count) or count > counter_limit:
         return view
     if count == 0 and last is None:
         return dict(view, state='reported-none-accepted', accepted=0)
@@ -13210,16 +15888,16 @@ def monitor_tail_separator_evidence(availability, names, warnings):
             not uint(last['tick']) or not uint(last['offsetBytes']) or last['offsetBytes'] == 0):
         return view
     offset = last['offsetBytes']
-    comparable = {name for name in ('monitor-detail.log', 'monitor-detail.log.1') if names.count(name) == 1}
+    comparable = {name for name in member_names if names.count(name) == 1}
     for warning in warnings:
         if warning['file'] not in comparable:
             continue
         for row in warning.get('invalidLineByteEvidence', {}).get('observations', []):
-            if (row['kind'] == 'invalid-json-row' and row['terminatedByLf'] and
+            if (row['kind'] in malformed_kinds and row['terminatedByLf'] and
                     row['byteOffset'] + row['byteLength'] == offset):
                 view['offsetMatches'].append(dict(file=warning['file'], archiveEntryOccurrence=0,
                     line=row['line'], rawLineSha256=row['rawLineSha256']))
-    return dict(view, state='reported-stream-accepted', accepted=count, last=last)
+    return dict(view, state=accepted_state, accepted=count, last=last)
 
 
 def audit_zip(path, policy, *, cross_archive_exports=None):
@@ -13234,10 +15912,13 @@ def audit_zip(path, policy, *, cross_archive_exports=None):
         result['zipSha256'] = archive_hash
         archive = stack.enter_context(zipfile.ZipFile(stream))
         names = archive.namelist()
+        windows_power_receipt_count = sum(WINDOWS_POWER_RECEIPT_MEMBER.fullmatch(name) is not None for name in names)
+        windows_power_receipt = None
         steam_mirrors = SteamTailMirrorAudit(archive.infolist())
         metadata_names = AUDIT_RECEIPT_NAMES
         reserved = (AUDIT_MANIFEST_NAME,) + metadata_names
         occurrences = collections.Counter(name for name in names if name in reserved)
+        gyro_member_counts = collections.Counter(name for name in names if GYRO_LANE_ROOT_MEMBER.fullmatch(name))
         virtual_member_counts = collections.Counter(name for name in names if name in (VIRTUAL_JOURNAL, VIRTUAL_SESSION))
         virtual_journal_member = virtual_session_member = None
         selections = {name: {'file': name, 'archiveEntries': occurrences[name],
@@ -13292,6 +15973,8 @@ def audit_zip(path, policy, *, cross_archive_exports=None):
         result['manifest'] = {key: fields.get(key) for key in AUDIT_MANIFEST_FIELDS}
         result['manifest']['logExportMode'] = manifest_mode['reportedMode']
         current_pid = fields.get('processId')
+        export_writer = manifest_export_writer(pairs, current_pid, state['status'])
+        gyro_lane_members = {}
         common_members=[]
         host_exit_members=[]
         ui_presentation_members=[]
@@ -13325,6 +16008,8 @@ def audit_zip(path, policy, *, cross_archive_exports=None):
                         metadata_blobs[failure['entry']] = None
         for name, data, member_metadata in iter_log_members(archive,on_member_error=member_failure):
             steam_mirrors.observe(name, data, member_metadata)
+            if windows_power_receipt_count == 1 and WINDOWS_POWER_RECEIPT_MEMBER.fullmatch(name) is not None:
+                windows_power_receipt = (name, data)
             if name in selections:
                 reference(name, member_metadata['archiveEntryOccurrence'], data=data)
             if name in metadata_names and occurrences[name] == 1:
@@ -13361,6 +16046,20 @@ def audit_zip(path, policy, *, cross_archive_exports=None):
                 hits = [(i, line) for i, line in enumerate(lines, 1) if base == 'app.log' and 'rog.hid-discovery' in line]
                 entry.update({'format': 'plain-text', 'lineCount': len(lines), 'rogDiscoveryRows': len(hits),
                               'processIdentity': 'not-recorded; never attributed to manifest PID'})
+                if APP_LOW_ROOT_MEMBER.fullmatch(name) and member_metadata.get('containerOnly') is False:
+                    slot_text = xinput_slot_text_evidence(data)
+                    if slot_text:
+                        entry['xinputSlotTextEvidence'] = slot_text
+                    face_text = rog_face_text_evidence(data)
+                    if face_text:
+                        entry['rogXboxFaceTextEvidence'] = face_text
+                    playback = playback_retry_app_evidence(data)
+                    if playback:
+                        entry['playbackRetryAppEvidence'] = playback
+                        misplaced = playback.get('markedDetailInAppLow')
+                        if misplaced:
+                            result['violations'].append({'kind': 'known-detail-in-app-low', 'file': name,
+                                **member_metadata, 'event': PLAYBACK_ATTEMPT, **misplaced, 'currentPidMatch': None})
                 if len(hits) > 1:
                     result['violations'].append({'kind': 'rog-discovery-text-bypasses-lane-router', 'file': name,
                                                   'event': 'rog.hid-discovery', 'count': len(hits),
@@ -13369,6 +16068,41 @@ def audit_zip(path, policy, *, cross_archive_exports=None):
                 result['files'].append(entry)
                 continue
             rows, quality = load_rows(data,compact_quality=True)
+            if NATIVE_FILE_PROJECTION_MEMBER.fullmatch(name) and not member_metadata.get('containerOnly', False):
+                catalogs, snapshots = collections.Counter(), collections.Counter()
+                late_hide_defaults = collections.Counter()
+                for index, (line, row) in enumerate(rows):
+                    if row.get('event') == 'oem-key-usage-query':
+                        projection, counts = oem_key_catalog_projection(row), catalogs
+                    elif row.get('event') == 'hidhide.visibility-snapshot':
+                        projection, counts = hidhide_target_inventory_projection(row), snapshots
+                    elif LATE_HIDE_STAGE_DEFAULTS_MARKER in row:
+                        projection, counts = late_hide_stage_defaults_projection(row), late_hide_defaults
+                    else:
+                        continue
+                    if projection is None:
+                        continue
+                    counts[projection['state']] += 1
+                    if projection['state'] == 'restorable':
+                        rows[index] = line, {**row, **projection['restoredFields']}
+                if catalogs:
+                    entry['oemKeyCatalogCounts'] = dict(catalogs)
+                if snapshots:
+                    entry['hidHideTargetInventoryCopiesCounts'] = dict(snapshots)
+                if late_hide_defaults:
+                    entry['lateHideStageDefaultsCounts'] = dict(late_hide_defaults)
+            if FRONTEND_TRACE_ROOT_MEMBER.fullmatch(name) and not member_metadata.get('containerOnly', False):
+                projections = collections.Counter()
+                for index, (line, row) in enumerate(rows):
+                    projection = frontend_trace_message_projection(row)
+                    if projection is None:
+                        continue
+                    state = projection['state']
+                    projections[state] += 1
+                    if state == 'restorable':
+                        rows[index] = line, {**row, **projection['restoredFields']}
+                if projections:
+                    entry['frontendTraceFromMessageCounts'] = dict(projections)
             if base in ('native-detail.log','virtual-gamepad.log'):
                 input_source_readback.observe(name,rows,member_metadata)
             if base in ('fan-host-fault.log','yeman-fan-host-runtime.log'):
@@ -13399,6 +16133,10 @@ def audit_zip(path, policy, *, cross_archive_exports=None):
             if base in ('native-lifecycle.log','native-detail.log','gyro-motion.log'):
                 gyro_power_members.append((name,rows,member_metadata))
             entry.update({'format': 'json-lines', 'quality': quality, **row_stats(rows, current_pid, name)})
+            if base == 'battery-charge-client.log' and not member_metadata['containerOnly'] and BATTERY_CLIENT_ROOT_MEMBER.fullmatch(name):
+                cadence = battery_client_read_cadence(data, rows)
+                if cadence is not None:
+                    entry['batteryChargeReadCadence'] = cadence
             if base in ('input-host-signal.log', 'input-host-cost.log'):
                 writer_evidence = host_signal_writer_evidence(name, rows)
                 if writer_evidence is not None:
@@ -13412,6 +16150,24 @@ def audit_zip(path, policy, *, cross_archive_exports=None):
             if base in ('frontend-trace.log','frontend-trace-detail.log'):
                 entry['ownerTransitionEvidence']=frontend_owner_transition_evidence(rows)
                 entry['executionGuardEvidence']=frontend_exec_guard_evidence(rows)
+                if not member_metadata['containerOnly'] and FRONTEND_TRACE_ROOT_MEMBER.fullmatch(name):
+                    lane_evidence, wrong_low = frontend_trace_lane_evidence(data, rows, export_writer, lane == 'frontend-low')
+                    entry['frontendTraceLaneEvidence'] = lane_evidence
+                    if wrong_low:
+                        result['violations'].append({**member_metadata, 'kind': 'known-detail-in-frontend-low',
+                                                     'file': name, 'event': 'frontend-trace',
+                                                     **row_stats(wrong_low, current_pid, name),
+                                                     'exampleLines': [line for line, _ in wrong_low[:8]],
+                                                     'frontendDetailWriterFootprint': lane_evidence['detailOnlyWriterFootprint']})
+                    resident, qualified = frontend_resident_lane_evidence(data, rows, export_writer)
+                    if resident['sources']:
+                        entry['frontendResidentLaneEvidence'] = resident
+                    if lane == 'frontend-detail':
+                        for where, misplaced in qualified.items():
+                            result['violations'].append({**member_metadata, 'kind': 'frontend-resident-observation-in-detail',
+                                'file': name, 'event': 'frontend-trace', 'where': where,
+                                **row_stats(misplaced, current_pid, name), 'exampleLines': [line for line, _ in misplaced[:8]],
+                                'rawRowBytes': resident['sources'][where]['rawQualifiedBytes']})
                 if lane == 'frontend-detail':
                     misplaced = [(line, row) for line, row in rows
                                  if row.get('event') == 'frontend-trace' and row.get('where') == 'monitor-hud-startup']
@@ -13434,12 +16190,119 @@ def audit_zip(path, policy, *, cross_archive_exports=None):
             events = collections.defaultdict(list)
             for line, row in rows:
                 events[event_name(row)].append((line, row))
-            if base in ('gyro-motion.log', 'gyro-motion-samples.log') and events.get('gyro-status-second'):
-                gyro_samples = events['gyro-status-second']
-                entry['gyroReceiptAgeEvidence'] = gyro_receipt_age_evidence(gyro_samples)
-                cadence = gyro_sample_cadence_evidence(gyro_samples)
-                if cadence is not None:
-                    entry['gyroSampleCadenceEvidence'] = cadence
+            if ((NATIVE_LOW_ROOT_MEMBER.fullmatch(name) or NATIVE_DETAIL_ROOT_MEMBER.fullmatch(name))
+                    and member_metadata.get('containerOnly') is False):
+                topology_cause = frame_topology_only_evidence(events.get('input-host-frame-evidence', ()))
+                if topology_cause is not None:
+                    entry['commonFrameTopologyEvidence'] = topology_cause
+            if SLEEP_FACTS_ROOT_MEMBER.fullmatch(name) and not member_metadata['containerOnly']:
+                inspections = [(line, row) for line, row in events.get('sleep-steam-inspected', ())
+                               if row.get('event') == 'sleep-steam-inspected' and
+                               steam_inspection_periodic_sample(row.get('details'))]
+                if inspections:
+                    measured = list(_measured_native_low_rows(data, inspections))
+                    result['violations'].append(dict(file=name, event='sleep-steam-inspected',
+                        kind='steam-inspection-periodic-in-sleep-low', count=len(measured),
+                        rawRowBytes=sum(size for _, _, size in measured),
+                        exampleLines=[line for line, _, _ in measured[:8]], **member_metadata))
+                event = 'device-change'
+                observations = [(line, row) for line, row in events.get(event, ()) if row.get('event') == event]
+                if observations:
+                    evidence, footprint = sleep_device_change_lane_evidence(data, observations, export_writer)
+                    entry['sleepDeviceChangeLaneEvidence'] = evidence
+                    for state, kind, output in (
+                            ('detail-only', 'device-tree-sample-in-sleep-low', 'violations'),
+                            ('unverified-context', 'sleep-device-change-lane-unverified', 'coverageWarnings')):
+                        if state in evidence['counts']:
+                            finding = {'file': name, 'event': event, 'kind': kind, **member_metadata,
+                                       'count': evidence['counts'][state],
+                                       'exampleLines': evidence['exampleLinesByClass'][state]}
+                            if state == 'detail-only':
+                                finding['writerFootprint'] = footprint
+                            result[output].append(finding)
+            if FAN_HOST_POWER_BOUNDARY_ROOT_MEMBER.fullmatch(name) and not member_metadata['containerOnly']:
+                fault = lane == 'fan-host-fault'
+                view, hits, runtime = fan_host_lane_evidence(data, rows, fault)
+                if view['counts']:
+                    entry['fanHostPowerBoundaryLaneEvidence'] = view
+                for event, hit in hits.items():
+                    result['violations'].append({'kind': 'fan-host-power-boundary-repeat-in-fault', 'file': name,
+                        'event': event, **member_metadata, **hit})
+                if runtime['events'] or runtime['unverifiedEnvelopes']:
+                    entry['fanHostRuntimeLaneEvidence'] = runtime
+                if fault:
+                    for event, hit in runtime['events'].items():
+                        result['violations'].append({'kind': 'fan-host-runtime-only-in-fault', 'file': name,
+                            'event': event, **member_metadata, **hit})
+            if TDP_AUTOFLOAT_ROOT_MEMBER.fullmatch(name) and not member_metadata['containerOnly']:
+                failure_receipts = tdp_amd_failure_receipt_evidence(rows)
+                if failure_receipts:
+                    entry['tdpAmdFailureReceiptEvidence'] = failure_receipts
+                evidence, misplaced, byte_counts, witness_hits = tdp_autofloat_lane_evidence(data, rows, lane == 'tdp-low')
+                if evidence['counts']:
+                    entry['tdpAutofloatLaneEvidence'] = evidence
+                for event, items in misplaced.items():
+                    result['violations'].append({'kind': 'tdp-autofloat-step-in-low', 'file': name, 'event': event,
+                        **member_metadata, **row_stats(items, current_pid, name), 'rawRowBytes': byte_counts[event],
+                        'writerLifetimeVerified': False, 'exampleLines': [line for line, _ in items[:8]]})
+                for (event, state), hit in witness_hits.items():
+                    items = hit['rows']
+                    result['violations'].append({'kind': ('tdp-failure-repeat-in-low' if state == 'detail-repeat'
+                                                         else 'tdp-failure-witness-in-detail'),
+                        'file': name, 'event': event, 'witnessState': state, **member_metadata,
+                        **row_stats(items, current_pid, name), 'rawRowBytes': hit['bytes'],
+                        'writerLifetimeVerified': False, 'exampleLines': [line for line, _ in items[:8]]})
+            decky_lane_member = DECKY_LANE_ROOT_MEMBER.fullmatch(name) and not member_metadata['containerOnly']
+            if decky_lane_member and base == 'decky-sidebar.log' and DECKY_MODE_SIGNAL in events:
+                publication = decky_mode_publication_evidence(events[DECKY_MODE_SIGNAL])
+                if publication is not None:
+                    entry['deckyModePublicationEvidence'] = publication
+            if (decky_lane_member and
+                    (DECKY_MIRROR_QUEUED in events or DECKY_MIRROR_DETAIL in events)):
+                view, hits = decky_mirror_snapshot_lane_evidence(data, rows, base != 'native-detail.log')
+                if view['counts']:
+                    entry['deckyMirrorSnapshotLaneEvidence'] = view
+                for event, hit in hits.items():
+                    result['violations'].append({'kind': 'decky-mirror-periodic-in-low', 'file': name,
+                        'event': event, **member_metadata, **hit})
+            if decky_lane_member and (DECKY_ADMISSION_RUNTIME in events or DECKY_ADMISSION_DETAIL in events):
+                observations = sorted((line, row) for event in (DECKY_ADMISSION_RUNTIME, DECKY_ADMISSION_DETAIL)
+                                      for line, row in events.get(event, ()) if row.get('event') == event and
+                                      (event == DECKY_ADMISSION_DETAIL or 'runtimeObservation' in row or
+                                       'admissionRepeatBatchCount' in row))
+                if observations:
+                    view, hits = decky_admission_runtime_lane_evidence(data, observations, base != 'native-detail.log')
+                    entry['deckyAdmissionRuntimeLaneEvidence'] = view
+                    for (state, event), hit in hits.items():
+                        kind = 'decky-admission-repeat-in-low' if state == 'slow-repeat' else 'decky-admission-checkpoint-in-detail'
+                        result['violations'].append({'kind': kind, 'file': name, 'event': event, **member_metadata, **hit})
+            if FAN_RESUME_LANE_ROOT_MEMBER.fullmatch(name) and not member_metadata.get('containerOnly'):
+                event = 'fan-host-resume-observe'
+                observations = [(line, row) for line, row in events.get(event, ()) if row.get('event') == event]
+                if observations:
+                    low = base == 'fan-lifecycle.log'
+                    evidence, misplaced = fan_resume_observe_lane_evidence(data, observations, 'state-change' if low else 'periodic')
+                    entry['fanResumeObserveLaneEvidence'] = evidence
+                    if misplaced:
+                        kind = 'fan-resume-periodic-in-fan-low' if low else 'fan-resume-state-change-in-gamepad-detail'
+                        result['violations'].append({'kind': kind, 'file': name, 'event': event, **member_metadata,
+                                                     **row_stats(misplaced, current_pid, base),
+                                                     'exampleLines': [line for line, _ in misplaced[:8]]})
+                    if evidence['unknownMarkerExampleLines']:
+                        result['coverageWarnings'].append({'kind': 'fan-resume-observe-lane-unverified', 'file': name,
+                            'event': event, **member_metadata, 'exampleLines': evidence['unknownMarkerExampleLines'],
+                            'scope': 'missing or unrecognized snapshotReason;not a lane violation'})
+            if base in ('gyro-motion.log', 'gyro-motion-samples.log'):
+                gyro_samples = events.get('gyro-status-second', ())
+                lane_evidence = gyro_sample_lane_evidence(gyro_samples, export_writer)
+                entry['gyroSampleLaneEvidence'] = lane_evidence
+                if gyro_member_counts[name] == 1 and not member_metadata['containerOnly']:
+                    gyro_lane_members[name] = (base, lane_evidence)
+                if gyro_samples:
+                    entry['gyroReceiptAgeEvidence'] = gyro_receipt_age_evidence(gyro_samples)
+                    cadence = gyro_sample_cadence_evidence(gyro_samples)
+                    if cadence is not None:
+                        entry['gyroSampleCadenceEvidence'] = cadence
             entry['events'] = [{'event': event, **row_stats(items, current_pid, name),
                                 'baseRegisteredInCurrentSource': event in policy['baseEvents'] if lane == 'native-low' else None}
                                for event, items in sorted(events.items(), key=lambda x: -len(x[1]))]
@@ -13452,6 +16315,193 @@ def audit_zip(path, policy, *, cross_archive_exports=None):
                 entry['_residentVolumeReportedOk'] = {
                     event: resident_reported_ok_field_evidence(items, current_pid, name)
                     for event, items in groups.items()}
+            root_native_low = (lane == 'native-low' and not member_metadata['containerOnly'] and
+                               NATIVE_LOW_ROOT_MEMBER.fullmatch(name) is not None)
+            root_native_detail = (lane == 'native-detail' and not member_metadata['containerOnly'] and
+                                  NATIVE_DETAIL_ROOT_MEMBER.fullmatch(name) is not None)
+            if root_native_low or root_native_detail:
+                command_event = 'input-host-command-result'
+                command_states = {}
+                resident_commands = []
+                for line, row, size in _measured_native_low_rows(data, events.get(command_event, ())):
+                    state = input_host_command_result_lane_state(row)
+                    if state is None:
+                        continue
+                    group = command_states.setdefault(state, {'rows': 0, 'bytes': 0, 'exampleLines': []})
+                    group['rows'] += 1
+                    group['bytes'] += size
+                    if len(group['exampleLines']) < 8:
+                        group['exampleLines'].append(line)
+                    if root_native_detail and state in ('resident-failure', 'reported-resident-slow-read'):
+                        resident_commands.append((line, row))
+                if command_states:
+                    entry['inputHostCommandResultLaneCoverage'] = {
+                        'states': command_states,
+                        'scope': 'one root Native member occurrence;unmarked slow reads and ordinary accepted commands '
+                                 'cannot establish a repeat;outer ok is not device operation success'}
+                if resident_commands:
+                    key = (command_event, 'input-host-command-resident-in-native-detail')
+                    footprint = native_low_finding_footprints(data, {key: resident_commands}, export_writer)[key]
+                    result['violations'].append({**member_metadata, 'kind': key[1], 'file': name, 'event': command_event,
+                                                 **row_stats(resident_commands, current_pid, name),
+                                                 'exampleLines': [line for line, _ in resident_commands[:8]],
+                                                 'nativeDetailFindingWriterFootprint': footprint})
+            if root_native_low or root_native_detail:
+                calibration_lanes = {}
+                for event in CALIBRATION_RESTORE_EVENTS:
+                    states = {}
+                    resident = []
+                    for line, row, size in _measured_native_low_rows(data, events.get(event, ())):
+                        state = calibration_restore_lane_state(row)
+                        if state is None:
+                            continue
+                        item = states.setdefault(state, {'rows': 0, 'bytes': 0, 'exampleLines': []})
+                        item['rows'] += 1
+                        item['bytes'] += size
+                        if len(item['exampleLines']) < 8:
+                            item['exampleLines'].append(line)
+                        if state == 'reported-resident-fusion-wait':
+                            reasons = item.setdefault('residentReasons', {})
+                            reason = row['calibrationWaitResidentReasonV1']
+                            reasons[reason] = reasons.get(reason, 0) + 1
+                        if root_native_detail and state in ('resident-receipt', 'reported-resident-fusion-wait'):
+                            resident.append((line, row))
+                    if states:
+                        calibration_lanes[event] = states
+                    if resident:
+                        kind = 'gyro-calibration-resident-in-native-detail'
+                        key = (event, kind)
+                        footprints = native_low_finding_footprints(data, {key: resident}, export_writer)
+                        result['violations'].append({**member_metadata, 'kind': kind, 'file': name, 'event': event,
+                                                     **row_stats(resident, current_pid, name),
+                                                     'exampleLines': [line for line, _ in resident[:8]],
+                                                     'nativeDetailFindingWriterFootprint': footprints[key]})
+                if calibration_lanes:
+                    entry['calibrationRestoreLaneCoverage'] = {
+                        'events': calibration_lanes, 'scope': 'one root Native member occurrence;'
+                        'unmarked scoped fusion waits do not establish a sample or a wrong lane'}
+            admission_rows = events.get(FRAME_ADMISSION_EVENT, ())
+            if admission_rows and (root_native_low or root_native_detail):
+                coverage, resident = frame_admission_lane_coverage(data, admission_rows, export_writer)
+                if coverage['observedRows']:
+                    entry['frameAdmissionLaneCoverage'] = coverage
+                if root_native_detail and resident:
+                    kind = 'frame-admission-resident-in-native-detail'
+                    finding_key = (FRAME_ADMISSION_EVENT, kind)
+                    footprints = native_low_finding_footprints(data, {finding_key: resident}, export_writer)
+                    result['violations'].append({**member_metadata, 'kind': kind, 'file': name, 'event': FRAME_ADMISSION_EVENT,
+                                                 **row_stats(resident, current_pid, name),
+                                                 'exampleLines': [line for line, _ in resident[:8]],
+                                                 'nativeDetailFindingWriterFootprint': footprints[finding_key]})
+            if root_native_detail:
+                rog_resident = []
+                rog_unknown = collections.Counter()
+                rog_examples = []
+                for line, row in events.get(ROG_TREE_NOISE, ()):
+                    selection = rog_tree_noise_lane_state(row)
+                    if selection == 'resident':
+                        rog_resident.append((line, row))
+                    elif selection != 'detail':
+                        rog_unknown[selection] += 1
+                        if len(rog_examples) < 8:
+                            rog_examples.append(line)
+                if rog_resident:
+                    kind = 'rog-tree-noise-resident-in-native-detail'
+                    key = (ROG_TREE_NOISE, kind)
+                    footprint = native_low_finding_footprints(data, {key: rog_resident}, export_writer)[key]
+                    result['violations'].append({**member_metadata, 'kind': kind, 'file': name, 'event': ROG_TREE_NOISE,
+                                                 **row_stats(rog_resident, current_pid, name),
+                                                 'exampleLines': [line for line, _ in rog_resident[:8]],
+                                                 'nativeDetailFindingWriterFootprint': footprint})
+                if rog_unknown:
+                    result['coverageWarnings'].append({'file': name, **member_metadata, 'event': ROG_TREE_NOISE,
+                        'kind': 'device-tree-lane-selection-unverified', 'counts': dict(rog_unknown),
+                        'exampleLines': rog_examples,
+                        'scope': 'retained detail member;not a lane violation or writer attribution'})
+                frame_transitions = [(line, row) for line, row in events.get(COMMON_FRAME_EVIDENCE_EVENT, ())
+                                     if is_common_frame_resident_transition(row)]
+                if frame_transitions:
+                    kind = 'common-frame-transition-in-native-detail'
+                    key = (COMMON_FRAME_EVIDENCE_EVENT, kind)
+                    footprint = native_low_finding_footprints(data, {key: frame_transitions}, export_writer)[key]
+                    result['violations'].append({**member_metadata, 'kind': kind, 'file': name,
+                                                 'event': COMMON_FRAME_EVIDENCE_EVENT,
+                                                 **row_stats(frame_transitions, current_pid, name),
+                                                 'exampleLines': [line for line, _ in frame_transitions[:8]],
+                                                 'nativeDetailFindingWriterFootprint': footprint})
+                resident_readback = [(line, row) for line, row in events.get(SYSTEM_XINPUT_READBACK, ())
+                                     if is_system_xinput_resident_readback(row)]
+                if resident_readback:
+                    kind = 'system-xinput-resident-in-native-detail'
+                    key = (SYSTEM_XINPUT_READBACK, kind)
+                    footprint = native_low_finding_footprints(data, {key: resident_readback}, export_writer)[key]
+                    result['violations'].append({**member_metadata, 'kind': kind, 'file': name, 'event': SYSTEM_XINPUT_READBACK,
+                                                 **row_stats(resident_readback, current_pid, name),
+                                                 'exampleLines': [line for line, _ in resident_readback[:8]],
+                                                 'nativeDetailFindingWriterFootprint': footprint})
+                for event in QUARANTINE_OBSERVATIONS:
+                    misplaced = [(line, row) for line, row in events.get(event, ())
+                                 if quarantine_observation_lane(row) is False]
+                    if misplaced:
+                        kind = 'quarantine-resident-in-native-detail'
+                        key = (event, kind)
+                        footprint = native_low_finding_footprints(data, {key: misplaced}, export_writer)[key]
+                        result['violations'].append({**member_metadata, 'kind': kind, 'file': name, 'event': event,
+                                                     **row_stats(misplaced, current_pid, name),
+                                                     'exampleLines': [line for line, _ in misplaced[:8]],
+                                                     'nativeDetailFindingWriterFootprint': footprint})
+                for event in IPC_FAILURE_EVENTS:
+                    misplaced = [(line, row) for line, row in events.get(event, ())
+                                 if row.get('event') == event and
+                                 native_ipc_failure_record(row)['selection']['laneExpectation'] == 'low-type-witness']
+                    if misplaced:
+                        kind = 'ipc-failure-witness-in-native-detail'
+                        key = (event, kind)
+                        footprint = native_low_finding_footprints(data, {key: misplaced}, export_writer)[key]
+                        result['violations'].append({**member_metadata, 'kind': kind, 'file': name, 'event': event,
+                                                     **row_stats(misplaced, current_pid, name),
+                                                     'exampleLines': [line for line, _ in misplaced[:8]],
+                                                     'nativeDetailFindingWriterFootprint': footprint})
+                for event, kind, is_resident in (
+                        ('input-capture-bus-rate', 'bus-rate-transition-in-native-detail', None),
+                        ('input-capture-bus-rate-boundary', 'bus-rate-boundary-in-native-detail', None),
+                        ('msi-dinput-feedback', 'msi-managed-feedback-failure-in-native-detail',
+                         lambda row: row.get('managed') is True and row.get('ok') is False),
+                        ('gamepad-fallback-tick', 'fallback-connection-resident-in-native-detail', is_resident_fallback_connection),
+                        ('domain-pad-truth', 'connection-truth-resident-in-native-detail', is_resident_connection_truth),
+                        (PHYSICAL_IDENTITY_EVENT, 'physical-identity-resident-in-native-detail', is_resident_physical_identity),
+                        ('msi-rear-source-observation', 'msi-rear-context-in-native-detail', is_resident_msi_rear_context)):
+                    misplaced = [(line, row) for line, row in events.get(event, ())
+                                 if row.get('event') == event and (is_resident is None or is_resident(row))]
+                    if misplaced:
+                        key = (event, kind)
+                        footprint = native_low_finding_footprints(data, {key: misplaced}, export_writer)[key]
+                        result['violations'].append({**member_metadata, 'kind': kind, 'file': name, 'event': event,
+                                                     **row_stats(misplaced, current_pid, name),
+                                                     'exampleLines': [line for line, _ in misplaced[:8]],
+                                                     'nativeDetailFindingWriterFootprint': footprint})
+            if root_native_low or root_native_detail:
+                slot_rows = [(line, row) for line, row in events.get('xinput-slot-devices', ())
+                             if row.get('event') == 'xinput-slot-devices']
+                if slot_rows:
+                    entry['xinputSlotGateEvidence'] = xinput_slot_gate_evidence(data, slot_rows, export_writer, detail=root_native_detail)
+                    if root_native_detail:
+                        selected = [(line, row) for line, row in slot_rows if xinput_slot_gate_kind(row) not in (
+                            'both-reported-unchanged', 'insufficient-mask-evidence')]
+                        if selected:
+                            key = ('xinput-slot-devices', 'xinput-slot-gate-receipt-in-native-detail')
+                            footprint = native_low_finding_footprints(data, {key: selected}, export_writer)[key]
+                            result['violations'].append({**member_metadata, 'kind': key[1], 'file': name, 'event': key[0],
+                                                         **row_stats(selected, current_pid, name),
+                                                         'exampleLines': [line for line, _ in selected[:8]],
+                                                         'nativeDetailFindingWriterFootprint': footprint})
+            if root_native_low:
+                entry['nativeLowWriterFootprint'] = native_low_writer_footprint(data, rows, export_writer)
+                focus_receipts = sorted((*events.get('focus-resume-health', ()), *events.get('focus-resume-activate', ())),
+                                        key=lambda item: item[0])
+                focus_completion = focus_resume_completion_evidence(data, focus_receipts)
+                if focus_completion is not None:
+                    entry['focusResumeCompletionEvidence'] = focus_completion
             result['files'].append(entry)
             if base == 'virtual-gamepad.log':
                 result['nativeProcessCostSummaries'].append(native_process_cost_summary(rows, current_pid, name))
@@ -13461,6 +16511,19 @@ def audit_zip(path, policy, *, cross_archive_exports=None):
             # It invalidates sequential equality, not each retained row's facts
             # or transactions correlated by explicit immutable identifiers.
             unknown_lines = _quality_unknown_lines(quality)
+            if root_native_low and 'msi-backkey-frame-link' in events:
+                unattributed = legacy_msi_neutral_unattributed_evidence(data, events['msi-backkey-frame-link'])
+                if unattributed is not None:
+                    entry['legacyMsiNeutralUnattributedEvidence'] = unattributed
+                legacy_repeats = legacy_msi_neutral_submit_repeats(rows, name, unknown_lines=unknown_lines)
+                if legacy_repeats:
+                    entry['legacyMsiNeutralSubmitRepeatEvidence'] = {
+                        **row_stats(legacy_repeats, current_pid, name),
+                        'exampleLines': [line for line, _ in legacy_repeats[:8]],
+                        'maxGapMs': LEGACY_MSI_NEUTRAL_SUBMIT_MAX_GAP_MS,
+                        'writerFootprint': native_low_finding_footprints(data, {'legacy': legacy_repeats}, export_writer)['legacy'],
+                        'scope': 'retained legacy zero-back-bit submit-boundary alternation;not an explicit lane marker, '
+                                 'M2 activity, Host consumption, or proof of writer identity'}
             if unknown_lines:
                 entry['sequentialComparisonEvidence'] = {
                     'uninterpretedLines': len(unknown_lines),
@@ -13471,15 +16534,78 @@ def audit_zip(path, policy, *, cross_archive_exports=None):
                 'archiveEntryOccurrence': member_metadata['archiveEntryOccurrence'],
                 **late_hide_episodes(rows, current_pid, name)})
             findings = collections.defaultdict(list)
+            rog_lane_unknown = collections.Counter()
+            rog_lane_examples = []
             for line, row in rows:
                 event = event_name(row)
                 reason = None
-                if (event == 'system-xinput-readback' and row.get('reason') == 'buttons-change') or event in NATIVE_DETAIL or (event == 'oem-producer-edge' and row.get('status') == 'queued' and row.get('reason') == 'state-transition') or (event == 'msi-wmi-key' and row.get('reason') == 'queued' and row.get('accepted') is True and row.get('posted') is True):
+                if (event == SYSTEM_XINPUT_READBACK and row.get('reason') == 'buttons-change') or event in NATIVE_DETAIL or (event == 'oem-producer-edge' and row.get('status') == 'queued' and row.get('reason') == 'state-transition') or (event == 'msi-wmi-key' and row.get('reason') == 'queued' and row.get('accepted') is True and row.get('posted') is True):
                     reason = 'known-detail-in-native-low'
                 elif ((event == 'gpd-back-chord-state' and row.get('reason') == 'physical-edge') or
                       (event in ('gpd-back-chord-match', 'virtual-pad-backbuttons') and row.get('reason') in ('press', 'release', 'masked'))):
                     reason = 'known-detail-in-native-low'
                 elif event == 'desktop-hud-event' and row.get('hudEvent') == 'desktopHud.painted':
+                    reason = 'known-detail-in-native-low'
+                elif (root_native_low and event == 'sleep-steam-inspected' and row.get('event') == event and
+                      steam_inspection_periodic_sample(row)):
+                    reason = 'known-detail-in-native-low'
+                elif root_native_low and event == PLAYBACK_ATTEMPT and playback_cpu_retry_sample(row):
+                    reason = 'known-detail-in-native-low'
+                elif root_native_low and recovery_queue_refusal_repeat_sample(row):
+                    reason = 'known-detail-in-native-low'
+                elif root_native_low and event == 'msi-claw-return-debt' and msi_return_debt_repeat(row):
+                    reason = 'known-detail-in-native-low'
+                elif (root_native_low and event in ('exit-cleanup-wait-failed', 'exit-kernel-wait-failed',
+                                                    'session-clean-exit-failed') and native_exit_failure_repeat(event, row)):
+                    reason = 'known-detail-in-native-low'
+                elif (root_native_low and row.get('event') == 'focus-foreground-changed' and
+                      row.get('why') == '1hz'):
+                    reason = 'known-detail-in-native-low'
+                elif (root_native_low and row.get('event') in ('rog.hid-discovery-summary', 'gamepad-openxinput-slot-guard',
+                                                               'gamepad-openxinput-assign-slot') and
+                      row.get('inputSnapshotRepeatSample') is True):
+                    reason = 'known-detail-in-native-low'
+                elif native_explicit_detail_observation(event, row):
+                    reason = 'known-detail-in-native-low'
+                elif event == 'msi-backkey-frame-link' and row.get('neutralFrameSample') is True:
+                    reason = 'known-detail-in-native-low'
+                elif event == 'msi-dinput-trigger-evidence' and row.get('legacyRecordSelected') is False:
+                    reason = 'known-detail-in-native-low'
+                elif (root_native_low and event == FRAME_ADMISSION_EVENT and
+                      frame_admission_marker_state(row) == 'reported-detail-sample'):
+                    reason = 'known-detail-in-native-low'
+                elif (root_native_low and event in QUARANTINE_OBSERVATIONS and
+                      quarantine_observation_lane(row) is True):
+                    reason = 'quarantine-repeat-in-native-low'
+                elif event == 'gamepad-fallback-tick' and row.get('duplicateConnectionEdge') is True:
+                    reason = 'known-detail-in-native-low'
+                elif (event == 'hidhide.unplugged-unhide' and row.get('state') == 'no-journaled-physical' and
+                      row.get('unhideAttempted') is False and row.get('repeatNoJournalObservation') is True):
+                    reason = 'known-detail-in-native-low'
+                elif (event == 'hidhide.visibility-snapshot' and row.get('phase') == 'restore' and
+                      row.get('readback') is False and row.get('repeatRestoreSnapshot') is True and
+                      type(row.get('restoreSnapshotSequence')) is int and row['restoreSnapshotSequence'] > 0 and
+                      isinstance(row.get('restoreSnapshotTransactionId'), str) and row['restoreSnapshotTransactionId']):
+                    reason = 'known-detail-in-native-low'
+                elif event == ROG_TREE_NOISE:
+                    selection = rog_tree_noise_lane_state(row)
+                    if selection == 'detail':
+                        reason = 'known-detail-in-native-low'
+                    elif selection != 'resident':
+                        rog_lane_unknown[selection] += 1
+                        if len(rog_lane_examples) < 8:
+                            rog_lane_examples.append(line)
+                elif (event == 'input-host-wake-rescan' and row.get('action') == 'hot-replace-queued' and
+                      row.get('repeatPhysicalReturnDispatch') is True):
+                    reason = 'known-detail-in-native-low'
+                elif (event == 'msi-dinput-transition' and row.get('phase') == 'exhausted-reprobe' and
+                      row.get('result') == 'main-interface-not-found' and row.get('repeatReprobeSample') is True):
+                    reason = 'known-detail-in-native-low'
+                elif (event == 'msi-wmi-source-capability' and row.get('repeatRetrySample') is True and
+                      row.get('availability') == 'absent'):
+                    reason = 'known-detail-in-native-low'
+                elif (event == 'oem-vendor-stack' and row.get('wakeGuardQuietRepeat') is True and
+                      row.get('state') in ('task-absent', 'process-stop-observation', 'applied')):
                     reason = 'known-detail-in-native-low'
                 elif event == 'input-host-command-result' and row.get('command') == 'SUBMIT_FRAME' and row.get('ok') is True:
                     reason = 'successful-frame-in-native-low'
@@ -13496,6 +16622,12 @@ def audit_zip(path, policy, *, cross_archive_exports=None):
                     reason = 'input-activity-counters-in-native-low'
                 if reason:
                     findings[(event, reason)].append((line, row))
+            if rog_lane_unknown:
+                result['coverageWarnings'].append({'file': name, **member_metadata,
+                    'event': ROG_TREE_NOISE,
+                    'kind': 'device-tree-lane-selection-unverified',
+                    'counts': dict(rog_lane_unknown), 'exampleLines': rog_lane_examples,
+                    'scope': 'retained low-frequency member;not a lane violation or writer attribution'})
             duplicates = duplicate_snapshots(rows, name, unknown_lines=unknown_lines)
             if duplicates:
                 findings[('rog.hid-discovery-summary', 'unchanged-discovery-snapshot-in-native-low')] = duplicates
@@ -13516,10 +16648,14 @@ def audit_zip(path, policy, *, cross_archive_exports=None):
             if recovery_refusals:
                 findings[('input-host-recovery-fallback', 'unchanged-recovery-queue-refusal-in-native-low')] = recovery_refusals
             violated_events = set()
+            finding_footprints = native_low_finding_footprints(data, findings, export_writer) if root_native_low and findings else {}
             for (event, reason), items in findings.items():
                 violated_events.add(event)
                 result['violations'].append({'kind': reason, 'file': name, 'event': event,
                                               **row_stats(items, current_pid, name), 'exampleLines': [i for i, _ in items[:8]]})
+                if (event, reason) in finding_footprints:
+                    result['violations'][-1].update({**member_metadata,
+                        'nativeLowFindingWriterFootprint': finding_footprints[(event, reason)]})
                 if reason in ('unchanged-quarantine-observation-in-native-low', 'unchanged-recovery-queue-refusal-in-native-low',
                               'unchanged-discovery-snapshot-in-native-low', 'unchanged-periodic-guard-success-in-native-low'):
                     result['violations'][-1].update({**member_metadata,
@@ -13558,7 +16694,13 @@ def audit_zip(path, policy, *, cross_archive_exports=None):
                     selections[name]['status'] = 'parse-failed'
                     result['coverageWarnings'].append({'file': name, 'metadataParseError': str(exc),**json_rejection_evidence(exc)})
         link_staged_tail_witnesses(staged_tail_candidates, names, copy_receipts.get('log-export-snapshot.json'))
-        result['commonEvidence']=common_evidence_summary(common_availability,common_members,current_pid)
+        result['commonEvidence']=common_evidence_summary(common_availability,common_members,current_pid,export_writer=export_writer)
+        fallback_edges = gamepad_fallback_edge_evidence(common_members, export_writer)
+        if fallback_edges is not None:
+            result['commonEvidence']['gamepadFallbackEdgeEvidence'] = fallback_edges
+        light_tickets = light_isolation_ticket_evidence(common_members, export_writer)
+        if light_tickets is not None:
+            result['commonEvidence']['lightIsolationTicketEvidence'] = light_tickets
         separator = monitor_tail_separator_evidence(common_availability, names, result['coverageWarnings'])
         if separator is not None:
             result['commonEvidence']['monitorTailSeparatorEvidence'] = separator
@@ -13582,9 +16724,16 @@ def audit_zip(path, policy, *, cross_archive_exports=None):
                 'evidence':outcomes.evidence()} for name,metadata,_,outcomes in fan_host_instance_members]}
         result['commonEvidence']['inputHostExitEvidence']=input_host_exit_evidence(host_exit_members)
         result['commonEvidence']['uiPresentationEvidence']=ui_presentation_evidence(ui_presentation_members,current_pid)
+        post_show_nudge=webview_post_show_nudge_evidence(ui_presentation_members,export_writer)
+        if post_show_nudge is not None:
+            result['commonEvidence']['webviewPostShowNudgeEvidence']=post_show_nudge
         result['commonEvidence']['overlayRendererProbeEvidence']=overlay_renderer_probe_evidence(ui_presentation_members)
         result['commonEvidence']['overlaySurfaceSessionEvidence']=overlay_surface_session_evidence(ui_presentation_members)
         result['commonEvidence']['gyroPowerObservationEvidence']=gyro_power_observation_evidence(gyro_power_members,current_pid)
+        if gyro_member_counts:
+            comparison, gyro_findings = gyro_sample_lane_comparison(gyro_lane_members, gyro_member_counts, export_writer)
+            result['commonEvidence']['gyroSampleLaneComparison'] = comparison
+            result['violations'].extend(gyro_findings)
         result['commonEvidence']['domainWriterEnvelopeEvidence']=domain_writer_envelopes.evidence()
         result['commonEvidence']['fanNativeWriterEnvelopeEvidence']=fan_native_writer_envelopes.evidence()
         result['commonEvidence']['gamepadUiGateEvidence']=gamepad_ui_gate_evidence_record(common_availability)
@@ -13594,6 +16743,10 @@ def audit_zip(path, policy, *, cross_archive_exports=None):
         timing=common_availability.get('exportPhaseTiming')
         result['commonEvidence']['exportPhaseTimingEvidence']=export_phase_timing_record(timing if isinstance(timing,dict) else {},'elapsedMs')
         result['commonEvidence']['windowsExportQueryEvidence']=windows_export_query_record(common_availability)
+        power_receipt_comparison = windows_power_receipt_evidence(
+            windows_power_receipt_count, windows_power_receipt, common_availability, selections['log-export-availability.json'])
+        if power_receipt_comparison is not None:
+            result['commonEvidence']['windowsPowerReceiptComparison'] = power_receipt_comparison
         result['commonEvidence']['processExportEnvelopeEvidence']=process_export_envelopes.evidence()
         result['commonEvidence']['virtualJournalComparison'] = virtual_journal_comparison(
             virtual_member_counts, virtual_journal_member, virtual_session_member)
@@ -13652,7 +16805,8 @@ def audit_zip(path, policy, *, cross_archive_exports=None):
         result['commonEvidence']['criticalDiagnosticQueueEvidence']=critical_diagnostic_queue_evidence(
             manifest_data,selections[AUDIT_MANIFEST_NAME],current_pid)
         result['commonEvidence']['bufferedNativeSinkEvidence']=buffered_native_sink_evidence(
-            common_availability,selections['log-export-availability.json'],current_pid)
+            common_availability,selections['log-export-availability.json'],current_pid,
+            names=names,warnings=result['coverageWarnings'])
         result['commonEvidence']['adaptationStoreCoverageEvidence']=adaptation_store_coverage_evidence(
             common_availability,selections['log-export-availability.json'])
         result['commonEvidence']['costRetentionEvidence']=cost_retention_evidence(

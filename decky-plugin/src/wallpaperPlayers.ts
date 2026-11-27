@@ -1,10 +1,13 @@
 import {applyGameMediaRange,DEFAULT_GAME_MEDIA_PLAYBACK,randomGameMediaRange} from '../../src/bridge/gameMediaPlayback';
 import {enterWallpaper,type WallpaperEntrance} from './wallpaperEntrance';
 export interface WallpaperVideoFrame {contextSeq:number;appId:string;opacity?:number;blur?:number;entry:{assetId:string;revision:string;bindingRevision:number;kind:string;url:string;reducedPlayback?:true;recoverOriginal?:true;playback?:typeof DEFAULT_GAME_MEDIA_PLAYBACK};}
-interface PlayerOptions {entrance?:WallpaperEntrance;allowed?:()=>boolean;presented?:(frame:WallpaperVideoFrame)=>void;observeComposition?:()=>boolean;composited?:(frame:WallpaperVideoFrame,detail:{sinceRevealMs:number;presentedFrames:number})=>void;recovering?:(frame:WallpaperVideoFrame,detail:{reason:string;inactiveMs:number;retryDelayMs:number;readyState:number;errorCode?:number;position?:number})=>void;now?:()=>number;schedule?:(run:()=>void,delay:number)=>ReturnType<typeof setTimeout>;cancel?:(timer:ReturnType<typeof setTimeout>)=>void;}
-type Slot={node:HTMLVideoElement;frame:WallpaperVideoFrame;key:string;ready:boolean;dead:boolean;presented:boolean;compositionRequest:number|null;animation:Animation|null;playRequested:boolean;styleKey:string;playback:{start:number;end:number;initialStart:number}|null;position:number;progressAt:number;stableAt:number|null;interruption:{at:number;reason:string}|null;};
+type StartupTiming={reducedPlayback:boolean;prepareMs:number;metadataMs:number|null;seekedMs:number|null;seekTargetS:number|null;};
+interface PlayerOptions {entrance?:WallpaperEntrance;allowed?:()=>boolean;presented?:(frame:WallpaperVideoFrame,detail:StartupTiming)=>void;observeComposition?:()=>boolean;composited?:(frame:WallpaperVideoFrame,detail:{sinceRevealMs:number;presentedFrames:number})=>void;recovering?:(frame:WallpaperVideoFrame,detail:{reason:string;inactiveMs:number;retryDelayMs:number;readyState:number;errorCode?:number;position?:number}&Partial<StartupTiming>)=>void;now?:()=>number;schedule?:(run:()=>void,delay:number)=>ReturnType<typeof setTimeout>;cancel?:(timer:ReturnType<typeof setTimeout>)=>void;}
+type Slot={node:HTMLVideoElement;frame:WallpaperVideoFrame;key:string;ready:boolean;dead:boolean;presented:boolean;compositionRequest:number|null;animation:Animation|null;playRequested:boolean;styleKey:string;playback:{start:number;end:number;initialStart:number}|null;position:number;startedAt:number;metadataAt:number|null;seekedAt:number|null;progressAt:number;stableAt:number|null;interruption:{at:number;reason:string}|null;};
 const identity=(frame:WallpaperVideoFrame)=>JSON.stringify([frame.appId,frame.entry.assetId,frame.entry.revision,frame.entry.bindingRevision,frame.entry.url,frame.entry.playback||DEFAULT_GAME_MEDIA_PLAYBACK]);
 const progressDeadlineMs=15000,interruptionDeadlineMs=2500,stablePlaybackMs=30000,foregroundRetryMs=60000;
+const derivativeStartupMs=900;
+const canRecoverOriginal=(frame:WallpaperVideoFrame)=>frame.entry.reducedPlayback===true&&frame.entry.recoverOriginal===true;
 // Only the selected video owns a source. No neighbor reads or predicted decoder.
 export class WallpaperPlayers {
   private current:Slot|null=null;private container:HTMLElement|null=null;
@@ -59,9 +62,10 @@ export class WallpaperPlayers {
   // Stall signals may shorten the current watch but never replace an earlier
   // check. The callback rechecks real progress before taking recovery action.
   private confirmationDue(slot:Slot){
+    if(!slot.ready&&!this.selectedPresented&&canRecoverOriginal(slot.frame))return slot.startedAt+derivativeStartupMs;
     return Math.min(slot.progressAt+progressDeadlineMs,slot.interruption?slot.interruption.at+(slot.interruption.reason==='seek-timeout'?5000:interruptionDeadlineMs):Infinity);
   }
-  private watch(slot:Slot,due=this.now()+progressDeadlineMs){
+  private watch(slot:Slot,due=this.confirmationDue(slot)){
     if(!this.active(slot))return;
     if(this.mediaTimer!==null){
       if(this.mediaWatchDue<=due)return;
@@ -74,7 +78,14 @@ export class WallpaperPlayers {
       if(!this.admitted()){this.stop();return;}
       this.progress(slot);
       const nextDue=this.confirmationDue(slot);
-      if(nextDue>this.now())this.watch(slot,nextDue);else this.recover(slot,slot.interruption?.reason??'progress-timeout');
+      if(nextDue>this.now()){this.watch(slot,nextDue);return;}
+      if(!slot.ready&&!this.selectedPresented&&canRecoverOriginal(slot.frame)){
+        // The media task may already have finished while its ready event is queued.
+        this.updateReady(slot);
+        if(this.active(slot)&&!slot.ready)this.recover(slot,slot.node.error?'media-error':'derivative-startup-timeout');
+        return;
+      }
+      this.recover(slot,slot.interruption?.reason??'progress-timeout');
     },Math.max(0,due-this.now()));
   }
   private progress(slot:Slot){
@@ -112,14 +123,15 @@ export class WallpaperPlayers {
     if(!container||this.selectedKey!==key)return;
     // A failed read or rejected source before the first frame does not prove
     // the derivative is corrupt. Use the original for this selection now.
+    const coldStartupTimeout=reason==='derivative-startup-timeout';
     const coldReadFailure=!this.selectedPresented&&reason==='media-error'&&(errorCode===2||errorCode===4);
     const warmRetryFailed=this.selectedPresented&&this.retries>=1&&errorCode!==3;
-    const temporary=frame.entry.reducedPlayback===true&&frame.entry.recoverOriginal===true&&(coldReadFailure||warmRetryFailed);
+    const temporary=canRecoverOriginal(frame)&&(coldStartupTimeout||coldReadFailure||warmRetryFailed);
     const terminal=temporary||this.retries>=2&&(errorCode===3||errorCode===4&&frame.entry.reducedPlayback===true);
     // Exhausted transient failures retain one selected-foreground retry. Only
     // sustained playback progress restores the quick budget; rerenders do not.
     const delay=terminal?0:this.retries>=2?foregroundRetryMs:[500,2000][this.retries++];
-    try{this.options.recovering?.(frame,{reason,inactiveMs,retryDelayMs:delay,readyState,errorCode,position});}catch{}
+    try{this.options.recovering?.(frame,{reason,inactiveMs,retryDelayMs:delay,readyState,errorCode,position,...(coldStartupTimeout?this.startupTiming(slot):{})});}catch{}
     if(terminal){this.reportFailure(key,frame,temporary);return;}
     const recovery={key,frame,container,position};this.recovery=recovery;
     this.mediaTimer=this.schedule(()=>{
@@ -134,22 +146,32 @@ export class WallpaperPlayers {
     const failure={key,seq:frame.contextSeq,deferred:false,temporary};this.failure=failure;
     failure.deferred=this.failed(frame,temporary)===false;
   }
+  private startupTiming(slot:Slot):StartupTiming {
+    const elapsed=(at:number|null)=>at===null?null:Math.max(0,Math.round(at-slot.startedAt));
+    const target=slot.playback?.initialStart;
+    return {reducedPlayback:slot.frame.entry.reducedPlayback===true,prepareMs:elapsed(this.now())!,metadataMs:elapsed(slot.metadataAt),seekedMs:elapsed(slot.seekedAt),seekTargetS:target===undefined?null:Math.round(target*1000)/1000};
+  }
+  private updateReady(slot:Slot){
+    if(!this.active(slot))return;if(!this.admitted()){this.stop();return;}
+    const {node,playback:range}=slot;
+    if(node.error||node.readyState<2||node.seeking||!range)return;
+    if(!slot.ready){
+      if(node.currentTime<range.initialStart-.08)return;
+      slot.progressAt=this.now();slot.ready=true;node.dataset.ymccPrepared='true';
+      // Retire the short cold watch; healthy derivatives use the normal watch.
+      if(!this.selectedPresented&&canRecoverOriginal(slot.frame)){this.cancelMedia();this.watch(slot);}
+    }
+    this.reveal(slot);
+  }
   private create(frame:WallpaperVideoFrame,position?:number):Slot {
+    const startedAt=this.now();
     const node=this.doc.createElement('video');node.muted=true;node.loop=true;node.playsInline=true;node.preload='metadata';node.style.width='100%';node.style.height='100%';node.setAttribute('aria-hidden','true');
-    const slot:Slot={node,frame,key:identity(frame),ready:false,dead:false,presented:false,compositionRequest:null,animation:null,playRequested:false,styleKey:'',playback:null,position:0,progressAt:this.now(),stableAt:null,interruption:null};
-    const ready=()=>{
-      if(!this.active(slot))return;if(!this.admitted()){this.stop();return;}
-      if(node.readyState<2||node.seeking)return;const range=slot.playback;if(!range)return;
-      if(!slot.ready){
-        if(node.currentTime<range.initialStart-.08)return;
-        // First usable frame ends cold loading; the existing watch will recheck
-        // this new progress point without a timer replacement or a retry refill.
-        slot.progressAt=this.now();slot.ready=true;node.dataset.ymccPrepared='true';
-      }
-      this.reveal(slot);
-    };
-    node.addEventListener('loadedmetadata',()=>{if(!this.active(slot))return;if(!this.admitted()){this.stop();return;}if(slot.playback)return;slot.playback=randomGameMediaRange(node.duration,frame.entry.playback||DEFAULT_GAME_MEDIA_PLAYBACK);if(position!==undefined&&position>=slot.playback.start&&position<slot.playback.end-.08)slot.playback.initialStart=position;node.dataset.ymccPlaybackStart=String(slot.playback.initialStart);node.dataset.ymccPlaybackEnd=String(slot.playback.end);slot.position=slot.playback.initialStart;node.currentTime=slot.position;});
-    for(const event of ['loadeddata','seeked','canplay'])node.addEventListener(event,ready);
+    const slot:Slot={node,frame,key:identity(frame),ready:false,dead:false,presented:false,compositionRequest:null,animation:null,playRequested:false,styleKey:'',playback:null,position:0,startedAt,metadataAt:null,seekedAt:null,progressAt:startedAt,stableAt:null,interruption:null};
+    node.addEventListener('loadedmetadata',()=>{if(!this.active(slot))return;if(!this.admitted()){this.stop();return;}if(slot.playback)return;slot.metadataAt=this.now();slot.playback=randomGameMediaRange(node.duration,frame.entry.playback||DEFAULT_GAME_MEDIA_PLAYBACK);if(position!==undefined&&position>=slot.playback.start&&position<slot.playback.end-.08)slot.playback.initialStart=position;node.dataset.ymccPlaybackStart=String(slot.playback.initialStart);node.dataset.ymccPlaybackEnd=String(slot.playback.end);slot.position=slot.playback.initialStart;node.currentTime=slot.position;});
+    for(const event of ['loadeddata','seeked','canplay'])node.addEventListener(event,()=>{
+      if(event==='seeked'&&!slot.ready&&this.active(slot)&&slot.playback&&slot.seekedAt===null)slot.seekedAt=this.now();
+      this.updateReady(slot);
+    });
     node.addEventListener('timeupdate',()=>{if(!this.active(slot))return;if(!this.admitted()){this.stop();return;}applyGameMediaRange(node,slot.playback||DEFAULT_GAME_MEDIA_PLAYBACK);this.progress(slot);});
     node.addEventListener('error',()=>this.recover(slot));
     node.addEventListener('seeking',()=>this.seeking(slot));
@@ -169,7 +191,7 @@ export class WallpaperPlayers {
     if(!this.active(slot)||!this.container)return;
     if(!this.admitted()){this.stop();return;}
     const node=slot.node;if(node.style.visibility!=='visible')node.style.visibility='visible';
-    if(!slot.presented){slot.presented=true;this.selectedPresented=true;slot.animation=enterWallpaper(node,this.options.entrance);node.dataset.ymccEntrance=this.options.entrance||'fade';this.options.presented?.(slot.frame);this.observeComposition(slot);}
+    if(!slot.presented){slot.presented=true;this.selectedPresented=true;slot.animation=enterWallpaper(node,this.options.entrance);node.dataset.ymccEntrance=this.options.entrance||'fade';this.options.presented?.(slot.frame,this.startupTiming(slot));this.observeComposition(slot);}
     const target=this.container.parentElement;
     if(target!==this.readyTarget){this.clearReadyTarget();this.readyTarget=target;}
     if(target&&target.getAttribute('data-ymcc-wallpaper-ready')!=='true')target.setAttribute('data-ymcc-wallpaper-ready','true');

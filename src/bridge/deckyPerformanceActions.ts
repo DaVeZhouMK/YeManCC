@@ -50,11 +50,11 @@ export function performanceMirrorPatch(patch:Record<string,PerformanceScalar>,vi
 import type {RelayMutationContext} from './deckyMirrorRelay';
 import type {ContinuousPerformanceIdentity} from './performanceControls';
 type TdpOwnerSettlement={generation:number;requestedW:number;outcome:'write-ack'|'saved-unconfirmed'};
-export function createPerformanceMirrorActions(deps:{allowed:()=>boolean;read:()=>Promise<ContinuousPerformanceSnapshot>;update:(identity:ContinuousPerformanceIdentity,patch:ContinuousSidePatch,admit?:()=>boolean)=>Promise<ContinuousPerformanceSnapshot>;power:()=>Promise<{phase:string;hardwareWritesAllowed:boolean;generation:number}>;acquire:(label:string)=>(()=>void)|null;reportTdpSettled?:(detail:TdpOwnerSettlement)=>Promise<unknown>}) {
+export function createPerformanceMirrorActions(deps:{allowed:()=>boolean;read:()=>Promise<ContinuousPerformanceSnapshot>;update:(identity:ContinuousPerformanceIdentity,patch:ContinuousSidePatch,admit?:()=>boolean)=>Promise<ContinuousPerformanceSnapshot>;power:(context:RelayMutationContext)=>Promise<{phase:string;hardwareWritesAllowed:boolean;generation:number}>;acquire:(label:string)=>(()=>void)|null;reportTdpSettled?:(detail:TdpOwnerSettlement)=>Promise<unknown>}) {
  return {async execute(args:Record<string,unknown>,context:RelayMutationContext){
   if(Object.keys(args).length!==1||!args.patch||typeof args.patch!=='object'||Array.isArray(args.patch))throw Error('PERFORMANCE_MIRROR_INVALID_REQUEST');
   const checkpoint=()=>{context.checkpoint();if(!deps.allowed())throw Error('PERFORMANCE_MIRROR_NOT_READY');};
-  const gate=async()=>{checkpoint();const p=await deps.power();checkpoint();if(p.phase!=='ready'||!p.hardwareWritesAllowed||p.generation!==context.generation)throw Error('PERFORMANCE_MIRROR_POWER_NOT_READY');};
+  const gate=async()=>{checkpoint();const p=await deps.power(context);checkpoint();if(p.phase!=='ready'||!p.hardwareWritesAllowed||p.generation!==context.generation)throw Error('PERFORMANCE_MIRROR_POWER_NOT_READY');};
   await gate();const release=deps.acquire('Decky 性能调度');if(!release)throw Error('PERFORMANCE_MIRROR_BUSY');
   let tdpSettlement:TdpOwnerSettlement|undefined;
   try{const current=await deps.read();checkpoint();

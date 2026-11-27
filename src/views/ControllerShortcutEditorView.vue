@@ -31,6 +31,7 @@ import {
   CONTROLLER_SHORTCUT_MIN_INPUTS,
   CONTROLLER_SHORTCUT_ACTIONS,
   CONTROLLER_TRIGGER_OPTIONS,
+  GPD_MENU_INPUT_CODE,
   NATIVE_DEFAULT_SHORTCUTS,
   OEM_EMPTY_SNAPSHOT,
   actionById,
@@ -216,8 +217,11 @@ const activeOemKey = computed(() => {
   return oemKeys.value.keys.find((key) => key.keyId === input.code);
 });
 /** WMI 一次性事件（MSI CLAW/QS）仅支持 press/double；hold/release/repeat 禁用 */
-const activeOemClickOnly = computed(() => activeRule.value?.inputs.some(input => input.source === 'oem' && oemKeys.value.keys.some(key => key.keyId === input.code && key.triggerCapability === 'click-only')) || false);
+const isGpdMenu = (input: ControllerShortcutInput) => input.source === 'oem' && input.code === GPD_MENU_INPUT_CODE;
+const activeGpdMenu = computed(() => activeRule.value?.inputs.some(isGpdMenu) || false);
+const activeOemClickOnly = computed(() => !activeGpdMenu.value && (activeRule.value?.inputs.some(input => input.source === 'oem' && oemKeys.value.keys.some(key => key.keyId === input.code && key.triggerCapability === 'click-only')) || false));
 const oemTriggerOptions = computed(() => {
+  if (activeGpdMenu.value) return CONTROLLER_TRIGGER_OPTIONS.filter((option) => option.value === 'press');
   if (!activeOemClickOnly.value) return CONTROLLER_TRIGGER_OPTIONS;
   return CONTROLLER_TRIGGER_OPTIONS.filter((option) => option.value === 'press' || option.value === 'double');
 });
@@ -254,7 +258,8 @@ function commitCombination(inputs: ControllerShortcutInput[]): void {
   const changed = inputs.length > 0 && (inputs.length !== current.inputs.length ||
     inputs.some(input => !current.inputs.some(previous => inputIdentity(previous) === inputIdentity(input))));
   const clickOnly = inputs.some(input => input.source === 'oem' && oemKeys.value.keys.some(key => key.keyId === input.code && key.triggerCapability === 'click-only'));
-  const resetTrigger = changed || (clickOnly && current.trigger !== 'press' && current.trigger !== 'double');
+  const resetTrigger = changed || (inputs.some(isGpdMenu) && current.trigger !== 'press') ||
+    (clickOnly && current.trigger !== 'press' && current.trigger !== 'double');
   updateRule({ inputs, ...(resetTrigger ? { trigger: 'press' as const } : {}) });
 }
 function stageCombination(inputs: ControllerShortcutInput[]): void {

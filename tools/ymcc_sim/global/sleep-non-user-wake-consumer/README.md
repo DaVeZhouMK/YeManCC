@@ -24,7 +24,7 @@ classification generator, nor claim a full current sleep-consumer execution.
 
 `node tools/ymcc_sim/global/sleep-non-user-wake-consumer/run.mjs --evidence-dir <new owned evidence> --resume-classification-only`
 
-This explicit selector runs only33 S0 plus1 classic and1 unknown-capability cases through the actual common helper, three original wake-worker arms, original timeout and classifier bodies. The unchanged legacy parent is not executed or claimed by this selection. Ordinary default scope and old failures remain. The source-delta gate, exact tool/environment, native port boundary, Python audit, compiler ledger and owned Job are retained. No OS sleep, device, game or Steam is operated.
+This explicit selector runs exactly 61 S0, one classic and one unknown-capability case through the actual common helper, three original wake-worker arms, original timeout and classifier bodies. The unchanged legacy parent is not executed or claimed by this selection. Ordinary default scope and old failures remain. The source-delta gate, exact tool/environment, native port boundary, Python audit, compiler ledger and owned Job are retained. No OS sleep, device, game or Steam is operated.
 
 `--resume-classification-edge-only` selects exactly the two late original506 after classified507 cases. It is mutually exclusive with other selectors and preserves the original full selection. The earlier successful cases are referenced with their actual source epoch, not rerun by this continuation.
 

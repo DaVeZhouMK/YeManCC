@@ -90,7 +90,8 @@ class Carrier {
    int width=0,height=0,position=1;unsigned long long seq=0,expires=0;
    DWORD policyGamePid=0;hudvisibility::Mode visibility=hudvisibility::Mode::Always;bool policyWaiting=false;unsigned long long visibilityRevision=0;
    Json inputWithdrawal; // Last actual input withdrawal only; no periodic collection.
-   std::string url,reason="creating",layoutKey;unsigned long long paintedSeq=0;
+   std::string url,reason="creating";unsigned long long paintedSeq=0;
+   hudserialization::DesktopLayoutKey<Json> layoutKey;
    std::optional<Viewport> lastViewport;
  };
  std::shared_ptr<State> current;
@@ -898,9 +899,7 @@ public:
    s->policyGamePid=s->visibility==hudvisibility::Mode::Always?0:hudvisibility::policyGamePid(payload);
    const auto crosshair=appearance->value("crosshair",std::string{"none"});
    s->crosshair=crosshair=="dot"||crosshair=="cross"||crosshair=="gap"||crosshair=="ring"||crosshair=="ring-dot";
-   const auto shape=Json{{"crosshair",s->crosshair},{"layout",appearance->value("layout",std::string{})},{"scale",appearance->value("scale",1.0)},{"gap",appearance->value("gap",8)},
-     {"fields",appearance->value("fields",Json::object())}}.dump();
-   if(shape!=s->layoutKey){s->layoutKey=shape;s->layout=false;hideOutput(s.get());RECT r{};if(clientArea(*s,r))SetWindowPos(s->hwnd,nullptr,r.left,r.top,r.right-r.left,r.bottom-r.top,SWP_NOACTIVATE|SWP_NOZORDER);}
+   if(s->layoutKey.update(s->crosshair,*appearance)){s->layout=false;hideOutput(s.get());RECT r{};if(clientArea(*s,r))SetWindowPos(s->hwnd,nullptr,r.left,r.top,r.right-r.left,r.bottom-r.top,SWP_NOACTIVATE|SWP_NOZORDER);}
    if(!pendingCurrent(s)||!requestCurrent(owner))return false;
    s->seq=seq;s->expires=expires;s->armed=payload.value("show",false);s->reason=s->armed?"active":"hidden";
    if(!SetTimer(s->hwnd,leaseTimer,(UINT)std::max(1ULL,expires-now),nullptr)){

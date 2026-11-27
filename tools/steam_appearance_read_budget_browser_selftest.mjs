@@ -713,23 +713,76 @@ try{
  cases.push('An in-flight Status from before suspend cannot repair after Ready; the fresh Status can');
  await late.close();
 
- const merged=await sessionPage({power:{...powerState(7,1),suspendSerial:7},holdStatus:true,status:{...statusSession(steamSession()),packOwned:true,configuredMatchesBackend:false}});
+ for(const boundary of ['suspend-serial','notification-sequence']){
+ const priorReady={...powerState(7,1),suspendSerial:7};
+ const merged=await sessionPage({power:priorReady,holdStatusReceipt:true,status:{...statusSession(steamSession()),packOwned:true,configuredMatchesBackend:false}});
  await merged.mode('桌面Steam运行中');
- await merged.page.waitForFunction(()=>typeof window.__sessionProbe.releaseStatus==='function'&&window.__powerVisibility().powerGeneration===7);
- const mergedReady={...powerState(7,2),suspendSerial:8};
+ await merged.page.waitForFunction(()=>typeof window.__sessionProbe.releaseStatusReceipt==='function'&&window.__powerVisibility().powerGeneration===7);
+ const mergedReady={...priorReady,publicationRevision:3,...(boundary==='suspend-serial'?{suspendSerial:8}:{observedNotificationSequence:8})};
  const publishMerged=state=>merged.page.evaluate(state=>{
   const p=window.__sessionProbe;p.power=state;p.deliver({event:'power.lifecycleChanged',data:state});
  },state);
- await publishMerged(mergedReady);await merged.release('Status');await merged.page.clock.fastForward(20);
+ // Keep the retired reply held while permitting the next request to complete.
+ await merged.page.evaluate(()=>window.__sessionProbe.holdStatusReceipt=false);
+ if(boundary==='notification-sequence'){
+  await publishMerged({...priorReady,publicationRevision:2});await merged.advance();
+  await assertSessionReads(merged,1,'a publication revision alone cannot retire the held read');
+ }
+ await publishMerged(mergedReady);await merged.page.clock.fastForward(20);
  assert.deepEqual(await merged.reads(),['Status'],'held Status from before coalesced Ready must not start a repair');
  assert.equal(await merged.page.evaluate(()=>window.__draft.getState().snapshot),null,'held Status from before coalesced Ready must not publish');
  await merged.advance();await merged.advance();
- assert.deepEqual(await merged.reads(),['Status','Status','Reconcile'],'one new Status owns repair after same-generation Ready');
- await publishMerged({...mergedReady,publicationRevision:3,inputReady:false});
- await publishMerged({...mergedReady,publicationRevision:4,suspendSerial:7});
+ assert.deepEqual(await merged.reads(),['Status','Status','Reconcile'],boundary+': new Status and repair must finish before the retired reply arrives');
+ await merged.snapshot();
+ const mergedSnapshot=()=>merged.page.evaluate(()=>window.__draft.getState().snapshot);
+ const confirmedMerged=await mergedSnapshot();
+ await merged.release('StatusReceipt');await merged.advance();
+ assert.deepEqual(await mergedSnapshot(),confirmedMerged,'the retired receipt must not replace the recovered snapshot');
+ await publishMerged({...mergedReady,publicationRevision:4,inputReady:false});
+ await publishMerged({...priorReady,publicationRevision:5});
  await merged.advance();assert.deepEqual(await merged.reads(),['Status','Status','Reconcile']);
- cases.push('Coalesced Ready retires a held theme Status before either publication or automatic repair');
+ if(boundary==='notification-sequence'){
+  await publishMerged({...mergedReady,publicationRevision:6,observedNotificationSequence:9});
+  await merged.advance();assert.deepEqual(await merged.reads(),['Status','Status','Reconcile'],'idle cards do not read on sequence advancement');
+  await merged.page.evaluate(()=>{
+   window.__sessionProbe.holdStatusReceipt=true;
+   window.__sessionProbe.releaseStatusReceipt=null;
+   window.dispatchEvent(new Event('global:refresh'));
+  });
+  await merged.page.waitForFunction(()=>typeof window.__sessionProbe.releaseStatusReceipt==='function');
+  await merged.page.evaluate(()=>window.dispatchEvent(new Event('ipc:window.hidden')));
+  await publishMerged({...mergedReady,publicationRevision:7,observedNotificationSequence:10});
+  await merged.release('StatusReceipt');await merged.advance();
+  assert.deepEqual(await merged.reads(),['Status','Status','Reconcile','Status'],'hidden cards neither read again nor repair');
+  assert.deepEqual(await mergedSnapshot(),confirmedMerged);
+ }
+ cases.push('Coalesced Ready '+boundary+' retires a held theme Status before either publication or automatic repair');
  await merged.close();
+ }
+ const scoped=await sessionPage({power:{...powerState(8,1),suspendSerial:9},holdStatusReceipt:true,status:{...statusSession(steamSession()),packOwned:true,configuredMatchesBackend:false}});
+ await scoped.mode('桌面Steam运行中');
+ await scoped.page.waitForFunction(()=>typeof window.__sessionProbe.releaseStatusReceipt==='function'&&window.__powerVisibility().powerGeneration===8);
+ await scoped.page.evaluate(()=>{
+  const p=window.__sessionProbe;
+  p.deliver({event:'power.resumed',data:{generation:8,readbackScope:{suspendSerial:10,notificationSequence:9}}});
+ });
+ await scoped.release('StatusReceipt');await scoped.advance();
+ assert.equal(await scoped.page.evaluate(()=>window.__powerVisibility().visible),true,'keep the cached presentation visible');
+ assert.deepEqual(await scoped.reads(),['Status'],'a late Status cannot repair while the new public scope still needs readback');
+ assert.equal(await scoped.page.evaluate(()=>window.__draft.getState().snapshot),null,'a late Status cannot fill the draft during public readback');
+ await scoped.page.evaluate(()=>window.dispatchEvent(new Event('ipc:steamAppearance.backendChanged')));
+ await scoped.advance();
+ assert.deepEqual(await scoped.reads(),['Status'],'backend notices cannot bypass the public scope fence');
+ // Recover via the original power.lifecycle retry; omit the final broadcast.
+ await scoped.page.evaluate(()=>{
+  const p=window.__sessionProbe;
+  p.power={...p.power,suspendSerial:10,observedNotificationSequence:9,publicationRevision:2};
+ });
+ await scoped.advance();await scoped.advance();await scoped.advance();
+ assert.deepEqual(await scoped.reads(),['Status','Status','Reconcile'],'the matching readback resumes one fresh Status and repair');
+ await scoped.snapshot();
+ cases.push('New public scope retires old theme work before Ready catch-up and resumes from readback alone');
+ await scoped.close();
  if(!process.env.YMCC_APPEARANCE_TEST_POWER_ONLY){
  const sections=await sessionPage();
  await sections.snapshot();await sections.mode('桌面Steam运行中');await sections.advance();

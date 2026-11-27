@@ -8,7 +8,8 @@ namespace ymcc::bootModeIdentity {
 // field log 2026-10-24). Use kernel-owned volatile-hive lifetime, not PID, wall
 // clock, uptime subtraction, logon or app lifetime, for this startup authority.
 struct Observation { std::string identity; DWORD error = ERROR_SUCCESS; bool created = false; };
-inline Observation observe(HKEY hive, const wchar_t* path, const wchar_t* mutexName) {
+inline Observation observe(HKEY hive, const wchar_t* path, const wchar_t* mutexName,
+    const wchar_t* durableParent = nullptr) {
     Observation result;
     HANDLE mutex = CreateMutexW(nullptr, FALSE, mutexName);
     if (!mutex) { result.error = GetLastError(); return result; }
@@ -17,9 +18,20 @@ inline Observation observe(HKEY hive, const wchar_t* path, const wchar_t* mutexN
         result.error = wait == WAIT_TIMEOUT ? ERROR_TIMEOUT : GetLastError();
         CloseHandle(mutex); return result;
     }
+    HKEY parent = nullptr;
+    LSTATUS status = ERROR_SUCCESS;
+    if (durableParent) {
+        // Reuse a legacy volatile parent in place; only missing ancestors are durable.
+        status = RegOpenKeyExW(hive, durableParent, 0, KEY_CREATE_SUB_KEY, &parent);
+        if (status == ERROR_FILE_NOT_FOUND)
+            status = RegCreateKeyExW(hive, durableParent, 0, nullptr, REG_OPTION_NON_VOLATILE,
+                KEY_CREATE_SUB_KEY, nullptr, &parent, nullptr);
+    }
     HKEY key = nullptr; DWORD disposition = 0;
-    auto status = RegCreateKeyExW(hive, path, 0, nullptr, REG_OPTION_VOLATILE,
-        KEY_QUERY_VALUE | KEY_SET_VALUE, nullptr, &key, &disposition);
+    if (status == ERROR_SUCCESS)
+        status = RegCreateKeyExW(parent ? parent : hive, path, 0, nullptr, REG_OPTION_VOLATILE,
+            KEY_QUERY_VALUE | KEY_SET_VALUE, nullptr, &key, &disposition);
+    if (parent) RegCloseKey(parent);
     if (status == ERROR_SUCCESS) {
         wchar_t value[40]{}; DWORD type = 0, bytes = sizeof(value);
         status = RegQueryValueExW(key, L"Session", nullptr, &type,
@@ -51,7 +63,7 @@ inline Observation current() {
     // YeManCC's native manifest requires administrator. This exact machine key
     // survives renderer/app restart and wake; Windows unloads it at full reboot.
     // An unreadable/malformed marker fails closed instead of guessing a boundary.
-    return observe(HKEY_LOCAL_MACHINE, L"SOFTWARE\\YeManCC\\Runtime\\BootSessionV2",
-        L"Global\\YeManCC-BootSessionV2");
+    return observe(HKEY_LOCAL_MACHINE, L"BootSessionV2", L"Global\\YeManCC-BootSessionV2",
+        L"SOFTWARE\\YeManCC\\Runtime");
 }
 }

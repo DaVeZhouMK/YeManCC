@@ -10,10 +10,15 @@ import { parseArgs } from './cli.mjs';
 import { getExtraAdapters } from './extra-adapters.mjs';
 import { runProcess, executeAdapter, validateAdapters, MAX_ARTIFACT_INPUTS } from './runner.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const parent = fs.realpathSync(os.tmpdir());
+const coreWorkspace = path.resolve(repo, '../../../Testing/YMCC/Workspace');
+const tempParent = fs.existsSync(coreWorkspace) ? coreWorkspace : os.tmpdir();
+const parent = fs.realpathSync(tempParent);
+assert.equal(path.resolve(tempParent).toLowerCase(), parent.toLowerCase());
 const temp = fs.mkdtempSync(path.join(parent, 'ymcc-candidate-options-'));
 process.on('exit', () => {
   const actual = fs.realpathSync(temp);
+  assert(!fs.lstatSync(temp).isSymbolicLink());
+  assert.equal(actual, temp);
   assert.equal(path.dirname(actual), parent);
   assert(path.basename(actual).startsWith('ymcc-candidate-options-'));
   fs.rmSync(actual, {recursive:true,force:true});
@@ -70,6 +75,63 @@ test('actual CLI plan persists both candidate argument lists and explicit identi
  assert(rows['lighting.signal-consumer'].args.includes(pin));
  assert(rows['fan.runtime-connection'].args.includes(options.runtimeRoot));
  assert.equal(result.results.length,0);assert.equal(plan.noTestsExecuted,true);
+});
+const parentExit='fan.parent-exit-contract';
+test('parent exit contract plans an explicit Host root and only its own payload artifacts', () => {
+ const payloadRoot=path.join(temp,'private fan Host');
+ fs.mkdirSync(payloadRoot);
+ const names=['YeManFanHost.exe','YeManFanHost.dll','YeManFanBackend.dll','YeManFanHost.deps.json','YeManFanHost.runtimeconfig.json','WinRT.Runtime.dll'];
+ for(const name of names)fs.writeFileSync(path.join(payloadRoot,name),'synthetic plan input');
+ const child=spawnSync(process.execPath,[path.join(repo,'tools/ymcc_sim/global/cli.mjs'),'--mode','plan','--profile','desktop',
+  '--test',parentExit,'--payload-root',payloadRoot,'--runtime-root',path.join(temp,'unrelated HC'),'--out-dir',path.join(temp,'parent-plan')],
+  {cwd:repo,encoding:'utf8',windowsHide:true,timeout:30000});
+ assert.equal(child.status,12,child.stderr);
+ const resultFile=child.stdout.match(/^RESULT (.+)$/m)?.[1].trim();assert(resultFile,child.stdout);
+ const plan=JSON.parse(fs.readFileSync(path.join(path.dirname(resultFile),'plan.json'),'utf8'));
+ assert.deepEqual(plan.adapters.map(row=>row.id),[parentExit]);
+ const [adapter]=plan.adapters;
+ assert.deepEqual(adapter.args,['-EvidenceDir','{outDir}/parent-exit','-HostPayloadRoot',payloadRoot]);
+ assert.deepEqual(adapter.artifactInputs,names.map(name=>path.join(payloadRoot,name)));
+ assert.equal(adapter.runnableHere,true);
+ assert.equal(adapter.blockedReason,undefined);
+ assert.equal(adapter.timeoutMs,120000);
+ assert.equal(plan.noTestsExecuted,true);
+});
+test('parent exit contract plan lists missing or non-file Host artifacts without starting a Host', () => {
+ const payloadRoot=path.join(temp,'incomplete fan plan');
+ fs.mkdirSync(payloadRoot);
+ fs.mkdirSync(path.join(payloadRoot,'YeManFanHost.exe'));
+ for(const name of ['YeManFanHost.dll','YeManFanHost.deps.json','YeManFanHost.runtimeconfig.json'])
+  fs.writeFileSync(path.join(payloadRoot,name),'synthetic plan input');
+ const child=spawnSync(process.execPath,[path.join(repo,'tools/ymcc_sim/global/cli.mjs'),'--mode','plan','--profile','desktop',
+  '--test',parentExit,'--payload-root',payloadRoot,'--out-dir',path.join(temp,'parent-plan-missing')],
+  {cwd:repo,encoding:'utf8',windowsHide:true,timeout:30000});
+ assert.equal(child.status,12,child.stderr);
+ const resultFile=child.stdout.match(/^RESULT (.+)$/m)?.[1].trim();assert(resultFile,child.stdout);
+ const plan=JSON.parse(fs.readFileSync(path.join(path.dirname(resultFile),'plan.json'),'utf8'));
+ assert.deepEqual(plan.adapters.map(row=>row.id),[parentExit]);
+ const [adapter]=plan.adapters;
+ assert.equal(adapter.runnableHere,false);
+ assert.equal(adapter.blockedReason,'EXPLICIT_CANDIDATE_ARTIFACT_MISSING');
+ assert.deepEqual(adapter.missingCandidateArtifacts,['YeManFanHost.exe','YeManFanBackend.dll'].map(name=>path.join(payloadRoot,name)));
+ assert.equal(plan.noTestsExecuted,true);
+ assert.deepEqual(JSON.parse(fs.readFileSync(resultFile,'utf8')).results,[]);
+});
+test('parent exit contract blocks absent or incomplete roots without starting a Host', async () => {
+ const [registered]=getExtraAdapters(repo,{selectedIds:[parentExit]}).filter(row=>row.id===parentExit);
+ assert(registered);
+ const [unconfigured]=configureCandidateAdapters([registered]);
+ const runDir=path.join(temp,'parent-absent');
+ const absent=await executeAdapter(unconfigured,{repoRoot:repo,runDir,env:{YEMAN_SIM_PAYLOAD_ROOT:'must-not-use'}});
+ assert.equal(absent.status,'BLOCKED');assert.equal(absent.reason,'EXPLICIT_CURRENT_HOST_PAYLOAD_REQUIRED');
+ assert(!fs.existsSync(path.join(absent.evidenceDir,'arguments.json')));
+ const payloadRoot=path.join(temp,'incomplete Host');fs.mkdirSync(payloadRoot);
+ const [configured]=configureCandidateAdapters([registered],{payloadRoot});
+ const missing=await executeAdapter(configured,{repoRoot:repo,runDir:path.join(temp,'parent-incomplete'),payloadRoot});
+ assert.equal(missing.status,'BLOCKED');assert.equal(missing.reason,'EXPLICIT_CANDIDATE_ARTIFACT_MISSING');
+ assert(!fs.existsSync(path.join(missing.evidenceDir,'arguments.json')));
+ const [templated]=configureCandidateAdapters([registered],{payloadRoot:path.join(temp,'{outDir}')});
+ assert.equal(templated.blockedReason,'INVALID_PARENT_EXIT_PAYLOAD_ROOT');
 });
 test('the actual child process receives spaces, dollar signs and shell syntax as literal arguments', async () => {
  const value='D:/candidate space/$() `literal` & no-shell';

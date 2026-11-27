@@ -10,6 +10,7 @@
 #include <wrl/client.h>
 #include <bit>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -253,7 +254,8 @@ inline void verifyVp9Surface(IMFSample* sample) {
 
 template<class Check>
 unsigned transcode(const wchar_t* input,const wchar_t* output,UINT adapterIndex,const Check& check,
-                   frameProbe::Cadence* webmPresentation=nullptr) {
+                   frameProbe::Cadence* webmPresentation=nullptr,
+                   const std::function<const wchar_t*()>& earlyOutput={}) {
     check();
     must(CoInitializeEx(nullptr,COINIT_MULTITHREADED),"initialize media apartment");
     struct Apartment{~Apartment(){CoUninitialize();}} apartment;
@@ -321,9 +323,13 @@ unsigned transcode(const wchar_t* input,const wchar_t* output,UINT adapterIndex,
         if(currentW!=w||currentH!=h||subtype!=MFVideoFormat_NV12)throw std::runtime_error("unexpected decoder change");
     };
     Vp9Timeline webmTimeline;
+    ComPtr<IMFSample> secondSample;
+    DWORD secondFlags=0;
+    LONGLONG secondPts=0;
     if(!output){
         if(!webmPresentation)throw std::invalid_argument("VP9 probe requires a result");
         auto sample=std::move(firstSample);
+        ComPtr<IMFSample> heldFirst;
         DWORD flags=firstFlags;LONGLONG pts=firstPts;
         frameProbe::Cadence observed;
         for(unsigned reads=0;reads<frameProbe::detail::sampleLimit;++reads){
@@ -335,13 +341,26 @@ unsigned transcode(const wchar_t* input,const wchar_t* output,UINT adapterIndex,
                 verifyVp9Surface(sample.Get());
                 webmTimeline.observe(pts);
                 observed=webmTimeline.finish(sample.Get());
-                if(observed.exceeds30()){*webmPresentation=observed;return 0;}
+                if(observed.exceeds30()){
+                    *webmPresentation=observed;
+                    // Reuse the decoder only on an early proof. Late proof
+                    // must not pin an unbounded queue of decoder surfaces.
+                    if(heldFirst&&observed.samples==2&&(output=earlyOutput())){
+                        firstSample=std::move(heldFirst);
+                        secondSample=std::move(sample);secondFlags=flags;secondPts=pts;
+                        break;
+                    }
+                    return 0;
+                }
+                if(earlyOutput&&observed.samples==1)heldFirst=sample;
+                else heldFirst.Reset();
             }
             if(flags&MF_SOURCE_READERF_ENDOFSTREAM){*webmPresentation=observed;return 0;}
             sample.Reset();
             must(reader->ReadSample(video,0,nullptr,&flags,&pts,&sample),"read VP9 presentation frame");
         }
-        throw std::runtime_error("media-vp9-probe-limit");
+        if(!output)throw std::runtime_error("media-vp9-probe-limit");
+        webmTimeline={};
     }
     std::optional<Scaler> scaler;
     if(w!=size.width||h!=size.height||rect.left||rect.top||rect.right!=static_cast<LONG>(w)||rect.bottom!=static_cast<LONG>(h))
@@ -405,6 +424,7 @@ unsigned transcode(const wchar_t* input,const wchar_t* output,UINT adapterIndex,
         ComPtr<IMFSample> inputSample=std::move(firstSample);
         DWORD flags=firstFlags;
         LONGLONG pts=firstPts;
+        if(!inputSample&&secondSample){inputSample=std::move(secondSample);flags=secondFlags;pts=secondPts;}
         if(!inputSample)must(reader->ReadSample(video,0,nullptr,&flags,&pts,&inputSample),"read decoded frame");
         if(flags&MF_SOURCE_READERF_ERROR)throw std::runtime_error("decoder error");
         if(flags&MF_SOURCE_READERF_STREAMTICK)throw std::runtime_error("media-hardware-source-discontinuity");

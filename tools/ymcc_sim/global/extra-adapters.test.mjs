@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import test from 'node:test';
 import {getExtraAdapters} from './extra-adapters.mjs';
+import {getSleepDirectoryResumeConsumerAdapters} from './sleep-directory-resume-consumer/adapter.mjs';
 import {assertReviewedRegistryRow} from './registry-maintenance/assert-lists.mjs';
 
 test('actual extra registry exposes the reviewed original TDP consumer exactly once',()=>{
@@ -124,7 +125,7 @@ test('fan Close refusal consumer binds actual public lifecycle and unchanged ori
  const pathDigest=(paths,normalize)=>createHash('sha256').update(JSON.stringify(paths.map(normalize).sort())).digest('hex');
  const slash=file=>file.replaceAll('\\','/');
  assert.equal(pathDigest(row.evidenceInputs,slash),'dd8ba9f94a9c297aa71a3003a82cd567b2a2f1d64905b5f15e98210baafa46a4','fan Close source closure changed');
- assert.equal(pathDigest(row.artifactInputs,file=>slash(file).toLowerCase()),'f957a6bcb178c3d6801a60da50dff460b2a5b7682e28fdc98b8810549c9e6c27','fan Close tool closure changed');
+ assert.equal(pathDigest(row.artifactInputs,file=>slash(file).toLowerCase()),'a683e723650c59ca8ab5b4fb6ab5c12f90791e6609dadac1b207232e123a1f00','fan Close tool closure changed');
  assert.equal(row.scope,'behavioral-mock');
 });
 
@@ -154,18 +155,25 @@ test('nonzero motor private-pipe consumer binds independent actual24/25 source f
 
 
 test('fan explicit OFF chain binds unchanged original TS and actual HTTP Host engine consumers once',()=>{
- const matches=getExtraAdapters().filter(row=>row.id==='fan.explicit-off-host-chain-consumer');assert.equal(matches.length,1);const row=matches[0];
+ const matches=getExtraAdapters(undefined,{selectedIds:['fan.explicit-off-host-chain-consumer']});assert.equal(matches.length,1);const row=matches[0];
  assert.equal(row.path,'tools/ymcc_sim/global/fan-explicit-off-host-chain-consumer/run.mjs');assert.deepEqual(row.resultFiles,['explicit-off/result.json','explicit-off/native-power-probe/result.json']);
  for(const source of ['tools/fan_explicit_off_host_chain_selftest.ts','tools/FanRepeatedSleepIntentSelfTest/Program.cs','src/bridge/fanHost.ts','src/bridge/fanApi.ts','FanLab/real-host/Program.cs','tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/execution-completion/index.mjs'])assert(row.evidenceInputs.includes(source),source);
- for(const source of ['tools/fan_sta_dispatch_binding_selftest.cs','tools/fan_hc_sta_thread_identity_selftest.cs','tools/fan_cold_start_manual_continuation_selftest.ts','tools/ymcc_sim/global/fan-explicit-off-host-chain-consumer/PayloadBindingProbe.cs','tools/ymcc_sim/global/fan-explicit-off-host-chain-consumer/host-supplemental-probe.mjs'])assert(row.evidenceInputs.includes(source),source);assert.equal(row.evidenceInputs.length,143);assert.equal(row.artifactInputs.length,548);assert.equal(row.scope,'behavioral-mock');
+ for(const source of ['tools/fan_sta_dispatch_binding_selftest.cs','tools/fan_hc_sta_thread_identity_selftest.cs','tools/fan_cold_start_manual_continuation_selftest.ts','tools/ymcc_sim/global/fan-explicit-off-host-chain-consumer/PayloadBindingProbe.cs','tools/ymcc_sim/global/fan-explicit-off-host-chain-consumer/host-supplemental-probe.mjs','PowerControl/settings-baseline.json','FanLab/real-host/FanRemotePowerContext.cs','tools/FanRepeatedSleepIntentSelfTest/RemotePowerScopeCases.cs'])assert(row.evidenceInputs.includes(source),source);
+ const infrastructure=new Set(['tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/execution-completion/index.mjs']);
+ assert.equal(row.evidenceInputs.filter(source=>!infrastructure.has(source)).length,170);
+ assert.equal(new Set(row.evidenceInputs).size,172);assert.equal(row.evidenceInputs.length,172);assert.equal(row.artifactInputs.length,548);assert.equal(row.scope,'behavioral-mock');
 });
 
 
 test('directory resume consumer preserves original sixty cases and binds actual native70 plus live26 consumers once',()=>{
- const matches=getExtraAdapters().filter(row=>row.id==='sleep.directory-resume-consumer');assert.equal(matches.length,1);const row=matches[0];
- assert.equal(row.path,'tools/ymcc_sim/global/sleep-directory-resume-consumer/run.mjs');assert.deepEqual(row.resultFiles,['directory-resume/result.json']);
- for(const source of ['native/main.cpp','deps/json/json.hpp','tools/ymcc_sim/global/sleep-directory-resume-consumer/fixture.cpp.in','tools/ymcc_sim/global/sleep-directory-resume-consumer/spec.json','tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h','tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/execution-completion/index.mjs'])assert(row.evidenceInputs.includes(source),source);
- for(const source of ['tools/ymcc_sim/global/sleep-directory-resume-consumer/live-rpc-main.cpp.in','tools/ymcc_sim/global/sleep-directory-resume-consumer/live-bridge-driver.mjs','src/bridge/gameproc.ts','src/components/GameQuickActions.vue'])assert(row.evidenceInputs.includes(source),source);assert.equal(row.evidenceInputs.length,34);assert.equal(row.artifactInputs.length,575);assert.equal(row.scope,'behavioral-mock');
+ const id='sleep.directory-resume-consumer';
+ const matches=getExtraAdapters(undefined,{selectedIds:[id]});assert.equal(matches.length,1);const row=matches[0];
+ const [registered]=getSleepDirectoryResumeConsumerAdapters();
+ assert.equal(row.id,id);assert.equal(row.path,'tools/ymcc_sim/global/sleep-directory-resume-consumer/run.mjs');assert.deepEqual(row.resultFiles,['directory-resume/result.json']);
+ assert.deepEqual(row.evidenceInputs,[...new Set([...registered.evidenceInputs,'tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/execution-completion/index.mjs'])]);
+ assert.deepEqual(row.artifactInputs,registered.artifactInputs);
+ for(const source of ['native/main.cpp','native/game_resume_receipts.h','deps/json/json.hpp','tools/ymcc_sim/global/sleep-directory-resume-consumer/fixture.cpp.in','tools/ymcc_sim/global/sleep-directory-resume-consumer/spec.json','tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h','tools/ymcc_sim/global/sleep-directory-resume-consumer/live-rpc-main.cpp.in','tools/ymcc_sim/global/sleep-directory-resume-consumer/live-bridge-driver.mjs','src/bridge/ipc.ts','src/bridge/gameproc.ts','src/components/GameQuickActions.vue'])assert(row.evidenceInputs.includes(source),source);
+ assert.equal(row.scope,'behavioral-mock');
 });
 
 

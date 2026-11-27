@@ -84,7 +84,9 @@ static Json sample(const Session& s, const char* mode = "bigpicture", const char
         {"observedAccount", 101}, {"deckyAccountWatchAvailable", true}};
 }
 static Json sessionJson(const Session& s) {
-    return {{"root", std::string(s.root.begin(), s.root.end())}, {"pid", s.pid},
+    std::string root; // This fixture only constructs ASCII session paths.
+    for (const wchar_t ch : s.root) root.push_back(static_cast<char>(ch));
+    return {{"root", root}, {"pid", s.pid},
         {"account", s.account}, {"birth", std::to_string(s.created)}};
 }
 class Event {
@@ -312,7 +314,7 @@ public:
         c.check("source-event-raii-accounting", d.created == d.closed + retainedEvents &&
             d.createFailed == 0 && d.signalFailed == 0 && d.closeFailed == 0 &&
             d.workerWaitFailed == expectedWorkerWaitFailures &&
-            d.lastError == (expectedWorkerWaitFailures ? ERROR_INVALID_HANDLE : ERROR_SUCCESS),
+            d.lastError == static_cast<DWORD>(expectedWorkerWaitFailures ? ERROR_INVALID_HANDLE : ERROR_SUCCESS),
             diagnosticsJson(d));
 #else
         (void)retainedEvents;
@@ -451,6 +453,7 @@ static void supersededModeRead(Case& c, const std::string& kind) {
     const bool health = kind == "health", retired = kind == "retired", off = kind == "off";
     const bool connectionFirst = kind == "connection";
     const bool parked = kind == "parked";
+    const bool waitingForBigPicture = kind == "waiting-bigpicture";
     Json receipts = Json::array();
     bool receivedAtParkedState = false;
     std::atomic<bool> enabled{true};
@@ -465,8 +468,9 @@ static void supersededModeRead(Case& c, const std::string& kind) {
         config.deckyReadSuperseded = [&](const Session& session, const steamui::ModeReadSuperseded& read) {
             // A callback under the observer mutex would block on this read.
             const auto snapshot = h.observer.snapshot(session);
-            const auto detail = parked ? snapshot.value("reason", "shared-mode-pending") : "shared-mode-pending";
-            if (!deckydiag::shouldLogSupersededModeRead(enabled, 0, "steam-ui-state-pending", detail)) return;
+            const auto detail = waitingForBigPicture ? "desktop" : parked ? snapshot.value("reason", "shared-mode-pending") : "shared-mode-pending";
+            if (!deckydiag::shouldLogSupersededModeRead(enabled, 0,
+                waitingForBigPicture ? "steam-bigpicture-required" : "steam-ui-state-pending", detail)) return;
             receivedAtParkedState |= detail == "shared-mode-events-unsettled";
             receipts.push_back(deckydiag::record("steam-mode-read-superseded",
                 deckydiag::supersededModeReadFields(session.pid, session.created, read)));
@@ -539,6 +543,11 @@ static void supersededModeRead(Case& c, const std::string& kind) {
         !deckydiag::shouldLogSupersededModeRead(false, 0, "steam-ui-state-pending", "shared-mode-events-unsettled") &&
         !deckydiag::shouldLogSupersededModeRead(true, 1, "steam-ui-state-pending", "shared-mode-events-unsettled") &&
         !deckydiag::shouldLogSupersededModeRead(true, 0, "steam-ui-state-pending", "live-busy"));
+    if (waitingForBigPicture) c.check("waiting-bigpicture-diagnostic-requires-exact-desktop-refusal-and-no-loader",
+        !deckydiag::shouldLogSupersededModeRead(false, 0, "steam-bigpicture-required", "desktop") &&
+        !deckydiag::shouldLogSupersededModeRead(true, 1, "steam-bigpicture-required", "desktop") &&
+        !deckydiag::shouldLogSupersededModeRead(true, 0, "steam-bigpicture-required", "unknown") &&
+        !deckydiag::shouldLogSupersededModeRead(true, 0, "steam-ui-state-pending", "desktop"));
     c.check("diagnostic-rejects-unlisted-fields-and-values", deckydiag::record("steam-mode-read-superseded",
         {{"hintCause", "private"}, {"hintCount", -1}, {"steamBirth", "bad"}, {"account", h.session.account},
          {"retryParked", "true"}}).size()==1);
@@ -561,6 +570,171 @@ static int __cdecl readPassivePower(sleeppower::SharedPowerV1* out, std::uint32_
     if (!out || size != sizeof(*out)) return 0;
     *out = passivePower(passiveGeneration.load());
     return 1;
+}
+static std::atomic<unsigned long long> qamPeerRevision{1};
+static void qamCloseHealthRead(Case& c) {
+    constexpr DWORD debounce=600;
+    for (const auto* variant : {"fresh", "opening", "stale", "new-peer", "new-power", "backend-down"}) {
+        const std::string_view kind=variant;
+        passiveGeneration=1; qamPeerRevision=1;
+        const auto session=syntheticSession();
+        std::atomic<unsigned> calls{0};
+        steamui::ModeObserver observer;
+        steamui::ModeObserverConfig config;
+        config.debounceMs=debounce; config.minimumGapMs=debounce; config.failureGapMs=debounce;
+        config.admissionPowerReader=readPassivePower;
+        config.readDeckyPeerRevision=[] { return qamPeerRevision.load(); };
+        config.readOwned=[&](const Session& s,const auto&) {
+            ++calls;
+            auto value=sample(s);
+            value["deckyBackendConnected"]=kind!="backend-down";
+            value["deckyHooksInstalled"]=true;
+            value["deckyClientConnected"]=true;
+            value["deckyClientVerified"]=true;
+            value["deckyClientChecking"]=false;
+            return value;
+        };
+        if (!c.check("starts-original-shared-reader", observer.initialize(std::move(config)), {{"variant",variant}})) return;
+        observer.setDemand(steamui::ModeConsumer::Decky,true);
+        observer.observeSteam(session);
+        ULONGLONG observation=0;
+        auto published=[&](std::uint64_t target) {
+            const auto end=GetTickCount64()+waitLimit;
+            do {
+                std::uint64_t sequence=0;
+                observer.snapshot(session,nullptr,nullptr,&sequence,&observation);
+                if(sequence==target)return true;
+                Sleep(2);
+            } while(GetTickCount64()<end);
+            return false;
+        };
+        if (!c.check("first-health-publication", published(1), {{"variant",variant}})) return;
+        if (kind=="stale") {
+            const auto now=GetTickCount64();
+            if (now-observation<debounce) Sleep(static_cast<DWORD>(debounce-(now-observation)+1));
+        }
+        if (kind=="new-peer") ++qamPeerRevision;
+        if (kind=="new-power") ++passiveGeneration;
+        steamui::ConnectionRefreshQueue queue;
+        const bool admitted=observer.requestConnectionRefresh(session,std::source_location::current(),&queue,false,kind!="opening");
+        std::uint64_t publication=0;
+        observer.snapshot(session,nullptr,nullptr,&publication);
+        const bool retainsPublication=publication==1;
+        const bool expectedReuse=kind=="fresh";
+        c.check("cache-retained-only-for-fresh-confirmed-close", admitted&&queue.reusedHealthy==expectedReuse&&
+            retainsPublication==expectedReuse, {{"variant",variant},{"reused",queue.reusedHealthy}});
+        if (!expectedReuse)
+            c.check("normal-shared-read-still-runs", published(2)&&calls==2, {{"variant",variant},{"calls",calls.load()}});
+        else {
+            Sleep(debounce+30);
+            c.check("healthy-close-does-not-dispatch-redundant-read", calls==1);
+        }
+        observer.shutdown();
+        const auto counts=observer.sourceEventDiagnostics();
+        c.check("returns-observer-events", counts.created==counts.closed&&!counts.closeFailed, {{"variant",variant}});
+    }
+}
+static void rebuildRefreshRead(Case& c, std::string_view variant) {
+    const auto session = syntheticSession();
+    passiveGeneration = 1;
+    const auto power = passivePower(1);
+    constexpr DWORD gap = 1500, debounce = 40;
+    steamui::ModeObserver observer;
+    std::atomic<unsigned> calls{0};
+    std::atomic<DWORD> firstRetry{INFINITE}, secondRetry{INFINITE};
+    std::atomic<unsigned> hintCount{0};
+    std::atomic<bool> hintsAccepted{true};
+    steamui::ModeObserverConfig config;
+    config.minimumGapMs = gap;
+    config.debounceMs = debounce;
+    config.admissionPowerReader = readPassivePower;
+    config.deckyReadSuperseded = [&](const Session&, const steamui::ModeReadSuperseded& read) {
+        if (calls == 8) {
+            firstRetry = read.nextReadMs;
+            hintCount = static_cast<unsigned>(read.hintCount);
+            if (variant == "rebuild-off") observer.setDemand(steamui::ModeConsumer::Decky, false);
+            if (variant == "rebuild-power") passiveGeneration = 2;
+        } else if (calls == 9) secondRetry = read.nextReadMs;
+    };
+    config.readOwned = [&](const Session& s, const steamui::ModeReadCurrent& current) {
+        const auto n = ++calls;
+        if (!current()) return Json{{"known", false}, {"reason", "shared-mode-read-cancelled"}};
+        if (variant != "rebuild" && (n == 8 || (n == 9 && variant == "rebuild-window"))) {
+            if (!observer.requestWindowRefresh(s)) hintsAccepted = false;
+            if (variant == "rebuild-storm" && !observer.requestWindowRefresh(s)) hintsAccepted = false;
+            return variant == "rebuild-io-failure" ? sample(s, "unknown") : sample(s, "bigpicture", "discarded:1");
+        }
+        return sample(s, "bigpicture", n < 8 ? "doc-a:1" : "doc-b:1");
+    };
+    auto awaitPublication = [&](std::uint64_t n) {
+        const auto end = GetTickCount64() + waitLimit + gap;
+        do {
+            std::uint64_t publication = 0;
+            observer.snapshot(session, nullptr, nullptr, &publication);
+            if (publication == n) return true;
+            Sleep(2);
+        } while (GetTickCount64() < end);
+        return false;
+    };
+    if (!c.check("original-mode-observer-started", observer.initialize(std::move(config)))) return;
+    observer.setDemand(steamui::ModeConsumer::Decky, true);
+    observer.setDemand(steamui::ModeConsumer::Css, true);
+    observer.observeSteam(session);
+    if (!c.check("first-read-completed", awaitPublication(1))) return;
+    // Spend the original finite Steam-startup credit before measuring the steady gap.
+    for (unsigned n = 2; n <= 6; ++n)
+        if (!c.check("consume-original-startup-credit", observer.requestRefresh(session, false) && awaitPublication(n), {{"read", n}})) return;
+
+    const auto ordinaryStart = GetTickCount64();
+    if (!c.check("ordinary-invalidating-refresh-completed", observer.requestRefresh(session) && awaitPublication(7))) return;
+    const auto ordinaryMs = GetTickCount64() - ordinaryStart;
+    auto lease = observer.observedSource(session);
+    auto foreign = session;
+    ++foreign.account;
+    c.check("foreign-account-and-stale-ready-rejected-without-invalidation",
+        !observer.requestDeckyRebuildRefresh(foreign, power, "doc-a:1") &&
+        !observer.requestDeckyRebuildRefresh(session, passivePower(2), "doc-a:1") && lease.current() && calls == 7);
+    const auto rebuildStart = GetTickCount64();
+    const bool accepted = observer.requestDeckyRebuildRefresh(session, power, "doc-a:1");
+    const bool revoked = !lease.current();
+    const bool completed = awaitPublication(8);
+    const auto rebuildMs = GetTickCount64() - rebuildStart;
+    c.check("confirmed-rebuild-keeps-fresh-read-and-source-revocation", accepted && revoked && completed &&
+        observer.snapshot(session).value("modeEpoch", std::string{}) == "doc-b:1");
+    if (variant != "rebuild") {
+        const bool repeated = variant == "rebuild-window";
+        const bool single = variant == "rebuild-single";
+        const bool storm = variant == "rebuild-storm";
+        const bool ioFailure = variant == "rebuild-io-failure";
+        c.check("only-verified-single-window-overlap-borrows-follow-up", hintsAccepted &&
+            firstRetry == (ioFailure ? INFINITE : storm ? gap : debounce) &&
+            hintCount == (ioFailure ? 0u : storm ? 2u : 1u),
+            {{"variant", variant}, {"firstRetryMs", firstRetry.load()}, {"hints", hintCount.load()}});
+        c.check("only-single-current-overlap-publishes-at-fast-deadline", completed &&
+            (single ? rebuildMs < gap / 2 : rebuildMs >= gap - 150) &&
+            secondRetry == (repeated ? gap : INFINITE) && calls == (repeated ? 10u : 9u),
+            {{"variant", variant}, {"elapsedMs", rebuildMs}, {"secondRetryMs", secondRetry.load()}, {"readCalls", calls.load()}});
+        lease = {};
+        observer.shutdown();
+        const auto counts = observer.sourceEventDiagnostics();
+        c.check("observer-returned-owned-source-events", counts.created == counts.closed && !counts.closeFailed);
+        return;
+    }
+    c.check("rebuild-advances-only-one-existing-read-without-changing-gap", ordinaryMs >= gap - 150 &&
+        rebuildMs >= debounce - 15 && rebuildMs < gap / 2 && calls == 8,
+        {{"ordinaryMs", ordinaryMs}, {"rebuildMs", rebuildMs}, {"readCalls", calls.load()}});
+
+    const auto mismatchStart = GetTickCount64();
+    const bool mismatchCompleted = observer.requestDeckyRebuildRefresh(session, power, "doc-a:1") && awaitPublication(9);
+    const auto mismatchMs = GetTickCount64() - mismatchStart;
+    c.check("older-document-does-not-expedite", mismatchCompleted && mismatchMs >= gap - 150 && calls == 9,
+        {{"mismatchMs", mismatchMs}});
+    observer.setDemand(steamui::ModeConsumer::Decky, false);
+    c.check("Decky-off-cannot-borrow-CSS-slot", !observer.requestDeckyRebuildRefresh(session, power, "doc-b:1") && calls == 9);
+    lease = {};
+    observer.shutdown();
+    const auto counts = observer.sourceEventDiagnostics();
+    c.check("observer-returned-owned-source-events", counts.created == counts.closed && !counts.closeFailed);
 }
 static void passiveCachePower(Case& c) {
     std::atomic<unsigned> settlements{0};
@@ -648,7 +822,10 @@ int main(int argc, char** argv) {
 #else
     const bool superseded = argc==4 && selection=="--mode-source-health-overlap" && std::string(argv[2])=="--case" &&
         (std::string(argv[3])=="window" || std::string(argv[3])=="connection" || std::string(argv[3])=="health" ||
-         std::string(argv[3])=="retired" || std::string(argv[3])=="off" || std::string(argv[3])=="parked");
+         std::string(argv[3])=="retired" || std::string(argv[3])=="off" || std::string(argv[3])=="parked" ||
+         std::string(argv[3])=="waiting-bigpicture" || std::string(argv[3])=="rebuild" || std::string(argv[3])=="qam-close" ||
+         std::string(argv[3])=="rebuild-window" || std::string(argv[3])=="rebuild-single" || std::string(argv[3])=="rebuild-storm" ||
+         std::string(argv[3])=="rebuild-io-failure" || std::string(argv[3])=="rebuild-off" || std::string(argv[3])=="rebuild-power");
     validSelection = superseded || (validSelection && (selection == "--mode-source-only" || selection == "--mode-source-ignore-current-control" || selection == "--mode-source-local-contention" || selection == "--mode-source-local-contention-control" || selection == "--public-cache-power"));
 #endif
     report["metadata"]["selectionValid"] = validSelection;
@@ -701,7 +878,11 @@ int main(int argc, char** argv) {
         else run("native-producer-cache-return-owner",[&](Case& c){producerCacheChecks(c,std::string(argv[3])=="producer-cache-control");});
     } else if (selection == "--mode-source-health-overlap") {
         report["metadata"]["parameter"] = argv[3];
-        run("in-flight-health-overlap-one-follow-up", [&](Case& c) { supersededModeRead(c, argv[3]); });
+        run("in-flight-health-overlap-one-follow-up", [&](Case& c) {
+            if (std::string_view(argv[3]).starts_with("rebuild")) rebuildRefreshRead(c, argv[3]);
+            else if (std::string_view(argv[3]) == "qam-close") qamCloseHealthRead(c);
+            else supersededModeRead(c, argv[3]);
+        });
     } else if (selection == "--mode-source-local-contention" || selection == "--mode-source-local-contention-control") {
 #include "fixtures/steam_mode_read/local_contention.inc"
     } else if (selection == "--mode-source-ignore-current-control") {

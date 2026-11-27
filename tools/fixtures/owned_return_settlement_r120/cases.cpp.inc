@@ -15,6 +15,8 @@ static void reset() {
     g_hostEpoch=16;g_msiDinputReturnDebtEpisode=17;g_inputHostVirtualIntentRevision=18;g_inputHostVirtualIntentWriters=0;
     g_msiOwnedReturnMatchedEpisode=0;g_msiOwnedReturnMatchedPower=0;g_msiOwnedReturnMatchedTopology=0;
     g_msiOwnedReturnSeenTopology=0;g_msiOwnedReturnSeenPower=0;g_msiOwnedReturnSeenSourceEvent=0;g_msiOwnedReturnObserveAfter=0;
+    g_sharedPowerSuspendSerial=0;g_msiOwnedReturnSeenSuspendSerial=0;g_msiOwnedReturnMatchPower={};
+    g_msiOwnedReturnOffHandoffPending=false;g_msiOwnedReturnOffRequalification={};g_msiOwnedReturnOffEndpoint.publish({});
     g_msiDinputReturnOwed=true;g_msiDinputReturnDebtPendingLogTick=0;g_msiCrashLoaded=true;g_msiCrashStoreInvalid=false;
     g_msiCrashRecord={};g_msiCrashRecord.boardKey="MICRO-STAR INTERNATIONAL CO., LTD.|MS-1T91|Claw|handheld";
     g_msiCrashRecord.ownerPid=42;g_msiCrashRecord.ownerCreationTime="1234";g_msiCrashRecord.transactionId="r120-settlement-owned";

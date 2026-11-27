@@ -25,6 +25,7 @@ class Scope final:public Permit {
 public:
     static std::shared_ptr<Scope> capture()noexcept{try{const auto* a=nativeAccess.load();SharedPowerV1 p;if(!a||!capturePower(a->reader,p))return {};auto n=a->mirrors->observe(a->reader,p);if(!n||n.cancelled()||!powerCurrent(a->reader,p))return {};return std::shared_ptr<Scope>(new Scope(a->reader,p,std::move(n)));}catch(...){return {};}}
     HANDLE event()const noexcept override{return registration_.event();}
+    const SharedPowerV1& capturedPower()const noexcept{return power_;}
     bool current()noexcept override{if(retired_.load()||registration_.cancelled())return false;if(powerCurrent(reader_,power_)&&!registration_.cancelled())return true;retired_=true;registration_.cancel();return false;}
 };
 inline bool requestKey(const std::string& value,remote::Key128& output)noexcept{output={};if(value.size()!=32)return false;auto* bytes=reinterpret_cast<unsigned char*>(&output);for(unsigned i=0;i<16;++i){unsigned byte=0;for(unsigned k=0;k<2;++k){const auto c=value[2*i+k];const int n=c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:-1;if(n<0)return false;byte=(byte<<4)|unsigned(n);}bytes[i]=static_cast<unsigned char>(byte);}return remote::nonzeroKey(output);}

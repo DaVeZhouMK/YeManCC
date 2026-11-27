@@ -12,6 +12,7 @@
 #include <vector>
 #include "json.hpp"
 #include "log_frequency_policy.h"
+#include "log_snapshot_state.h"
 #include "log_jsonl_boundary.h"
 #include "monitor_notice_log.h"
 #include "tdp_static_observation.h"
@@ -47,12 +48,16 @@ static ULONGLONG fixtureTick=1000;
 namespace ymcc::logging {
 static unsigned frontendBoundaryOpens=0;
 [[maybe_unused]] static bool countedFrontendBoundaryOpen(std::ofstream& out,const fspath::path& path){++frontendBoundaryOpens;return openJsonLineAppend(out,path);}
+[[maybe_unused]] static bool countedFrontendBoundaryAppend(const fspath::path& path,std::string_view line){++frontendBoundaryOpens;return appendJsonLine(path,line);}
 }
 // ACTUAL_ROTATE
 // ACTUAL_BOUNDED
 #define GetTickCount64() fixtureTick
 #define openJsonLineAppend countedFrontendBoundaryOpen
+#define appendJsonLine countedFrontendBoundaryAppend
+// ACTUAL_TRACE_HELPERS
 // ACTUAL_TRACE
+#undef appendJsonLine
 // ACTUAL_ERROR
 // ACTUAL_WEBVIEW
 #undef openJsonLineAppend
@@ -64,8 +69,11 @@ static void seed(const wchar_t* name,const std::string& data){
     out.write(data.data(),data.size());out.close();if(!out)throw std::runtime_error("private seed failed");
 }
 static std::string bytes(const wchar_t* name){std::ifstream in(fspath::path(fixtureRoot)/name,std::ios::binary);return {std::istreambuf_iterator<char>(in),{}};}
-static std::vector<json> rows(const wchar_t* name){std::vector<json> result;std::ifstream in(fspath::path(fixtureRoot)/name,std::ios::binary);
-    for(std::string line;std::getline(in,line);){auto value=json::parse(line,nullptr,false);if(value.is_object())result.push_back(value);}return result;}
+static std::vector<json> rows(const wchar_t* name,bool restore=true){std::vector<json> result;std::ifstream in(fspath::path(fixtureRoot)/name,std::ios::binary);
+    for(std::string line;std::getline(in,line);){auto value=json::parse(line,nullptr,false);if(!value.is_object())continue;
+        if(restore&&value.value("frontendTraceFromMessageV1",false)&&!value.contains("trace"))
+            value["trace"]=json::parse(value.at("message").get_ref<const std::string&>());
+        result.push_back(std::move(value));}return result;}
 static HANDLE denyTail(const wchar_t* name){const auto path=fspath::path(fixtureRoot)/name;HANDLE h=CreateFileW(path.c_str(),GENERIC_WRITE,FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
     if(h==INVALID_HANDLE_VALUE)throw std::runtime_error("private write-only handle failed");return h;}
 static bool giveBack(HANDLE h){return CloseHandle(h)!=FALSE;}
@@ -230,16 +238,42 @@ static void execGuardCases(const wchar_t* inputPath){
     check("actual compiled export guide explains original short-circuit versus later rereads",ymcc::logexport::aiReadingGuide().contains("frontendExecutionGuard"));
 }
 
+static void tracePayloadCases(){
+    const auto* low=L"frontend-trace.log";const auto* detail=L"frontend-trace-detail.log";
+    const auto submit=[](const std::string& msg){return appendFrontendTrace({{"where","gamepad-admission"},{"message",msg}});};
+    const std::string msg=R"json({"z":true, "stage":"owner-result","epoch":42,"note":"\u4e2d\n","powerReady":false,"a":null})json";
+    const bool first=submit(msg);const auto raw=rows(low,false);
+    check("low keeps exact message and omits only the duplicate trace",first&&raw.size()==1&&raw[0].at("message")==msg&&
+        raw[0].value("frontendTraceFromMessageV1",false)&&!raw[0].contains("trace")&&raw[0].at("lane")=="event");
+    const auto restored=rows(low);
+    check("restored trace equals the original Native parse",restored.size()==1&&restored[0].at("trace")==json::parse(msg));
+    g_domainLogEnabled[1]=true;const bool repeated=submit(msg);const auto detailed=rows(detail,false);
+    check("detail keeps both original fields",repeated&&detailed.size()==1&&detailed[0].at("message")==msg&&
+        detailed[0].at("trace")==json::parse(msg)&&!detailed[0].contains("frontendTraceFromMessageV1"));
+    auto nested=json::parse(msg);nested["note"]={{"id",1}};
+    auto fractional=json::parse(msg);fractional["epoch"]=42.0;
+    auto big=json::parse(msg);big["epoch"]=9007199254740992ULL;
+    const std::vector<std::string> fallbacks={msg.substr(0,msg.size()-1)+",\"note\":\"duplicate\"}",
+        nested.dump(),fractional.dump(),big.dump(),msg+std::string(8192,' '),std::string(" ")+msg};
+    bool writes=true;for(const auto& item:fallbacks){++g_powerGeneration;writes=submit(item)&&writes;}
+    const auto compatible=rows(low,false);bool fallbackHonest=writes&&compatible.size()==fallbacks.size()+1;
+    for(size_t i=1;i<compatible.size();++i)fallbackHonest=fallbackHonest&&compatible[i].contains("trace")&&
+        !compatible[i].contains("frontendTraceFromMessageV1");
+    check("duplicate keys, nested, fractional, unsafe, truncated and unrecognized lexical forms keep trace",fallbackHonest);
+    check("layout changes create no diagnostic fault",g_frontendDiagnosticsFailures==0);
+}
+
 int wmain(int argc,wchar_t** argv){
     if(argc!=3&&argc!=4)return 2;const std::wstring selection=argv[2];
     if((argc==4&&selection!=L"exec-guard")||(selection==L"exec-guard"&&argc!=4))return 2;
-    if(selection!=L"trace"&&selection!=L"error"&&selection!=L"webview"&&selection!=L"budgets"&&selection!=L"trace-control"&&selection!=L"error-control"&&selection!=L"webview-control"&&selection!=L"identity-known"&&selection!=L"identity-unknown"&&selection!=L"identity-control"&&selection!=L"owner-phase"&&selection!=L"owner-phase-control"&&selection!=L"exec-guard")return 2;
+    if(selection!=L"trace"&&selection!=L"error"&&selection!=L"webview"&&selection!=L"budgets"&&selection!=L"trace-control"&&selection!=L"error-control"&&selection!=L"webview-control"&&selection!=L"identity-known"&&selection!=L"identity-unknown"&&selection!=L"identity-control"&&selection!=L"owner-phase"&&selection!=L"owner-phase-control"&&selection!=L"exec-guard"&&selection!=L"trace-payload")return 2;
     fixtureRoot=argv[1];if(fspath::exists(fixtureRoot))return 2;fspath::create_directories(fixtureRoot);
     if(selection==L"trace"||selection==L"trace-control")traceCases(selection==L"trace-control");
     if(selection==L"error"||selection==L"error-control")errorCases(selection==L"error-control");
     if(selection==L"webview"||selection==L"webview-control")webviewCases(selection==L"webview-control");
     if(selection==L"budgets")budgetCases();
     if(selection==L"exec-guard")execGuardCases(argv[3]);
+    if(selection==L"trace-payload")tracePayloadCases();
     if(selection==L"owner-phase"||selection==L"owner-phase-control")ownerPhaseCases(selection==L"owner-phase-control");
     if(selection==L"identity-known"||selection==L"identity-unknown"||selection==L"identity-control")identityCases(selection);
     unsigned failures=0;for(const auto& value:checks)failures+=!value["pass"].get<bool>();

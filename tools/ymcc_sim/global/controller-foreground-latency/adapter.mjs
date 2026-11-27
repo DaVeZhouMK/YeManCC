@@ -1,9 +1,9 @@
 import {fileURLToPath} from 'node:url';
-export function getControllerForegroundLatencyAdapters(){
+export function getControllerForegroundLatencyAdapters({win5ReturnExit2=false}={}){
     const mode=process.env.YMCC_NATIVE_FOREGROUND_MODE??'latency';
     if(!['latency','power-order','helper-exit-query'].includes(mode))throw Error('INVALID_NATIVE_FOREGROUND_MODE:'+mode);
     const powerOrder=mode==='power-order',helperQuery=mode==='helper-exit-query';
-    const shieldMode=process.env.YMCC_FOREGROUND_SHIELD_MODE??'default';
+    const shieldMode=win5ReturnExit2?'prehost-writer':process.env.YMCC_FOREGROUND_SHIELD_MODE??'default';
     if(!['default','native-visibility','handoff-cycle','prehost-writer','empty-tail'].includes(shieldMode))throw Error('INVALID_FOREGROUND_SHIELD_MODE:'+shieldMode);
     const coldOnly=shieldMode==='empty-tail';
     const visibilityOnly=shieldMode==='native-visibility';
@@ -14,7 +14,8 @@ export function getControllerForegroundLatencyAdapters(){
         kind:'node',path:'tools/native_foreground_latency_selftest.mjs',args:['--output','{outDir}/foreground-latency',...(powerOrder?['--power-order']:helperQuery?['--case','helper-exit-query']:[])],
         timeoutMs:240000,profiles:['desktop','full'],scope:'behavioral-mock',
         resultFiles:['foreground-latency/result.json'],evidenceInputs:[
-            ...((powerOrder||helperQuery)?[]:['native/main.cpp']),'native/msi_native_foreground_isolation_runtime.h',
+            ...(helperQuery?[]:['native/main.cpp']),'native/msi_native_foreground_isolation_runtime.h',
+            ...(powerOrder?['native/sleep_power_state.h']:[]),
             'tools/native_foreground_latency_selftest.mjs','tools/fixtures/native_foreground_snapshot/fixture.cpp',
             'tools/fixtures/native_foreground_snapshot/helper-exit-query.cpp.in',
             'tools/fixtures/hc_reviewed_calibration/toolchain.mjs',
@@ -23,9 +24,9 @@ export function getControllerForegroundLatencyAdapters(){
             powerOrder?'tools/ymcc_sim/global/controller-foreground-latency/win5-power-field.json':'tools/ymcc_sim/global/controller-foreground-latency/field-record.json',
             'tools/ymcc_sim/global/controller-foreground-latency/README.md',
         ],artifactInputs:[fileURLToPath(new URL('../../../../deps/json/json.hpp',import.meta.url))],
-        boundary:helperQuery?'Original poll and source-exact immediate query,reset and receipt fields;inert process/writer ports;not full Cycle or resource acceptance.':powerOrder?'Actual PowerEvent/TryRelease/UiEvent consumers with controlled shared facts, recorded notification order and original gate counterexamples. No full maintenance, downstream writer, real sleep or device proof.':'Source-exact production consumers in Release/Checked plus the original split-query and blocking-wait failures. CLI, process launch, wait, PnP and device IO are inert. No product Main, driver, registry, Steam or sleep operation; physical continuity remains unverified.'},
+        boundary:helperQuery?'Original poll and source-exact immediate query,reset and receipt fields;inert process/writer ports;not full Cycle or resource acceptance.':powerOrder?'Actual power consumers and lifecycle queue handoff with controlled shared facts, recorded notification order and gate counterexamples. No full maintenance, downstream writer, real sleep or device proof.':'Source-exact production consumers in Release/Checked plus the original split-query and blocking-wait failures. CLI, process launch, wait, PnP and device IO are inert. No product Main, driver, registry, Steam or sleep operation; physical continuity remains unverified.'},
         {id:'controller.foreground-shield-field',domain:'controller',title:'ROG family native-OFF root isolation, preserved HID-leaf quarantine, shared-node dedup and MSI journal continuation',
-        kind:'node',path:'tools/shield_foreground_field_selftest.mjs',args:['--output','{outDir}/foreground-field',...(coldOnly?['--cold-visibility','empty-tail']:preHostOnly?['--prehost-writer']:handoffOnly?['--handoff-cycle']:visibilityOnly?['--native-visibility']:[])],
+        kind:'node',path:'tools/shield_foreground_field_selftest.mjs',args:['--output','{outDir}/foreground-field',...(coldOnly?['--cold-visibility','empty-tail']:preHostOnly?[win5ReturnExit2?'--win5-return-exit2':'--prehost-writer']:handoffOnly?['--handoff-cycle']:visibilityOnly?['--native-visibility']:[])],
         timeoutMs:720000,profiles:['desktop','full'],scope:'behavioral-mock',resultFiles:['foreground-field/result.json'],
         lifecycleComponent:{featureId:'controller.virtual-input',parentAdapterId:'controller.signal-evidence',
             persistence:'persistent',role:'foreground-visibility-component',
@@ -60,5 +61,5 @@ export function getControllerForegroundLatencyAdapters(){
             'tools/ymcc_sim/global/controller-foreground-latency/shield-field-record.json',
             'tools/ymcc_sim/global/controller-foreground-latency/README.md'],
         artifactInputs:[fileURLToPath(new URL('../../../../deps/json/json.hpp',import.meta.url))],
-        boundary:preHostOnly?'Explicit unoptimized production-TU pre-Host writer selections through original Priority probes; one compile and sequential exact cases with individual atomic Jobs. Original release/helper/cold/handoff groups and old-source semantic control are not executed by this scope. No complete BUS, Host or physical acceptance.':'Actual full native TU and actual helper consumer with inert device/driver/process/registry boundaries. Original USB-only and lost-journal failures plus shared-node duplicate-refresh mutation must fail. Existing lifetime/OFF/power/identity cases retained; this component does not establish full persistent or physical acceptance.'}];
+        boundary:win5ReturnExit2?'One Win5 pre-Host exit-2 case on the unoptimized production TU, using the original Priority probes and atomic Job. Default nine not executed; no Host, physical or full lifecycle acceptance.':preHostOnly?'Explicit unoptimized production-TU pre-Host writer selections through original Priority probes; one compile and sequential exact cases with individual atomic Jobs. Original release/helper/cold/handoff groups and old-source semantic control are not executed by this scope. No complete BUS, Host or physical acceptance.':'Actual full native TU and actual helper consumer with inert device/driver/process/registry boundaries. Original USB-only and lost-journal failures plus shared-node duplicate-refresh mutation must fail. Existing lifetime/OFF/power/identity cases retained; this component does not establish full persistent or physical acceptance.'}];
 }

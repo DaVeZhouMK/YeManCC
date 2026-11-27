@@ -24,6 +24,7 @@
 #include "sleep_steam_settle.h"
 #include "sleep_steam_input_context.h"
 #include "steam_native_record_identity.h"
+#include "recovery_resume_commit.h"
 @@ROUTE_INCLUDES@@
 using json=nlohmann::json;using DWORD=std::uint32_t;using ULONGLONG=unsigned long long;
 using U64=std::uint64_t;
@@ -178,7 +179,8 @@ unsigned closeEpisodeCalls=0,armProducerCalls=0,captureProducerCalls=0,captureRe
 U64 producerGeneration=0;
 namespace SleepSteamRecovery {void closeSuspendEpisode(){++closeEpisodeCalls;}void captureSuspend(U64 g,const std::shared_ptr<void>&,U64){++captureProducerCalls;producerGeneration=g;}}
 namespace SleepRecoveryAuto {void arm(U64 g){++armProducerCalls;producerGeneration=g;}void captureReady(U64 g){++captureReadyCalls;producerGeneration=g;}void powerReady(U64){}}
-std::atomic<U64> g_resumeReadyGeneration{7},g_lastPowerResumeCommitTick{0},g_lastPowerResumeCommitGeneration{0};
+std::atomic<U64> g_resumeReadyGeneration{7},g_lastPowerResumeCommitTick{0};
+ymcc::sleeppower::RecoveryResumeCommit g_recoveryResumeCommit;
 std::atomic<bool> g_inputReady{true};
 bool sgShouldKeepInputDuringStandby(){return false;}
 void openHardwareWriteGate(){++gateOpenCalls;}
@@ -550,6 +552,7 @@ int main(){
 #include "steam_original_recovery_wake_watch.h"
 #include "steam_original_recovery_dual_route.h"
 #include "sleep_wake_admission.h"
+#include "steam_command_availability.h"
 using U64=std::uint64_t;
 using json=nlohmann::json;using ULONGLONG=unsigned long long;using DWORD=unsigned long;
 enum class PowerLifecycle {Ready,Resuming,Suspending,Suspended};
@@ -562,15 +565,16 @@ static bool sleepSteamRecoveryAllows(unsigned long long g,unsigned long long e){
 static bool sgSleepRetryActive(){return fixtureRetrying;}
 static bool sharedSleepWakeClassified(unsigned long long g){return fixtureClassified&&g==fixtureGeneration;}
 static ULONGLONG sgNowFileTime(){return fixtureNow;}
-static ULONGLONG GetTickCount64(){return fixtureTick;}
+static ULONGLONG fixtureGetTickCount64(){return fixtureTick;}
+#define GetTickCount64 fixtureGetTickCount64
 static ULONGLONG currentPowerGeneration(){return fixtureGeneration;}
 static bool sgModernStandbyRepairSupported(){return true;}
 static void sgNotifyWork(){}
 static void sgRecordFact(const char*,const json&){}
 static void steamOriginalRecoveryWake(unsigned long long);
 static void steamOriginalRecoveryPowerReady(unsigned long long);
-static unsigned queued=0;
-static bool poolSubmit(std::function<void()>){++queued;return true;}
+static unsigned fixtureQueued=0;
+static bool poolSubmit(std::function<void()>){++fixtureQueued;return true;}
 namespace SleepSteamRecovery {
 struct Signal {bool value=true;bool current()const{return value;}};
 struct Request {ULONGLONG serial=9,rulesEpoch=1;bool revoked=false;std::shared_ptr<Signal> cancellation=std::make_shared<Signal>();};
@@ -628,14 +632,17 @@ namespace SteamOriginalRecovery {
 
 std::shared_ptr<const ymcc::steamsession::IdentitySnapshot> ObserverPort::identitySnapshot()const{return {};}
 
-using HANDLE=void*;static constexpr DWORD MAXDWORD=UINT32_MAX;
 static std::atomic<bool> g_sleepRecoveryAutoEnabled{true};static std::atomic<U64> g_gameRulesEpoch{1};
 static bool malformedGameId=false;
 static unsigned engineCalls=0,privateReads=0,nonWakePortCalls=0,eventSignals=0;static std::vector<json> requests,guards,published;
 static std::map<std::wstring,json> saved;static std::function<void()> onPrivateRead;
 static std::function<json(const json&)> engineReply;
-static bool ProcessIdToSessionId(DWORD p,DWORD* out){*out=1;return p!=0;}static DWORD GetCurrentProcessId(){return 54321;}
-static bool SetEvent(void*){++eventSignals;return true;}
+static bool fixtureProcessIdToSessionId(DWORD p,DWORD* out){*out=1;return p!=0;}
+static DWORD fixtureGetCurrentProcessId(){return 54321;}
+static bool fixtureSetEvent(HANDLE){++eventSignals;return true;}
+#define ProcessIdToSessionId fixtureProcessIdToSessionId
+#define GetCurrentProcessId fixtureGetCurrentProcessId
+#define SetEvent fixtureSetEvent
 static std::string W2U(const std::wstring& s){std::string out;for(wchar_t c:s)out.push_back(static_cast<char>(c));return out;}static std::wstring U2W(const std::string& s){return {s.begin(),s.end()};}
 static std::wstring yemancc_data_dir(){return L"fixture-data";}static std::string nativeLifecycleTimestamp(){return "2026-11-16T00:00:00Z";}
 static const std::wstring MONITOR_GAME_TARGET_JSON=L"fixture-target";
@@ -656,7 +663,7 @@ class ReadScope{bool revoked_=false;public:bool current()const noexcept{return !
 static std::shared_ptr<ymcc::steamnative::ReadScope> nativeSteamNativeReadScope(const SleepSteamRecovery::Session&,ymcc::steamnative::ReadPurpose){return std::make_shared<ymcc::steamnative::ReadScope>();}
 namespace ymcc::steamgamefacts {
 class RequestCancellation{bool value_=true;public:static std::shared_ptr<RequestCancellation> create(){return std::make_shared<RequestCancellation>();}bool current()const{return value_;}void cancel(){value_=false;}};
-struct ProcessGroupLease {struct Graph{size_t count=0;};Graph graph()const{return {};}bool processCurrent()const{return false;}};
+class ProcessGroupLease {public:struct Graph{size_t count=0;};Graph graph()const{return {};}bool processCurrent()const{return false;}};
 struct TrackerCompletionWitness{explicit operator bool()const{return false;}};struct TrackerCompletionHint{};struct TrackerCompletionSubscription{void cancel(){}};
 enum class TrackerGroupCapturePolicy{Capture};
 }
@@ -685,14 +692,22 @@ std::shared_ptr<const ymcc::steamgamefacts::StartupHandoffEvidence> = {},const s
 std::shared_ptr<const ymcc::steamgamefacts::HistoricalStartupHandoffEvidence> = {},const std::function<bool()>& = {});
 namespace SteamOriginalRecovery {
 using Trigger=ymcc::steamOriginal::Trigger;using RecoveryRoute=ymcc::steamOriginal::RecoveryRoute;using Identity=ymcc::steamOriginal::Identity;using Scope=ymcc::steamOriginal::Scope;
-struct StartupFreshRequest;struct StartupFreshWait;
+struct StartupFreshRequest;struct StartupFreshWait;struct StartupCommandWait;struct Control;
 @@PW_R_Pending@@
 @@PW_R_StartupFreshRequest@@
 @@PW_R_StartupFreshPhase@@
 @@PW_R_StartupFreshWait@@
+@@PW_R_StartupCommandSignal@@
+@@PW_R_StartupCommandPhase@@
+@@PW_R_StartupCommandWait@@
+@@PW_R_CommandRetirement@@
 @@PW_R_GroupRequestTarget@@
 @@PW_R_ActiveGroupRequest@@
+@@PW_R_RunningLossNotice@@
 @@PW_R_Control@@
+@@PW_R_notifyStartupCommand@@
+@@PW_R_retireStartupCommandLocked@@
+@@PW_R_StartupCommandRunReturn@@
 @@PW_R_cancelGroupRequestLocked@@
 @@PW_R_GroupRequestRegistration@@
 static std::shared_ptr<Control> callbackControl;static std::shared_ptr<Control> current(){return callbackControl;}
@@ -717,7 +732,13 @@ static void armStartupFreshCompletion(const std::shared_ptr<Control>&,const std:
 @@PW_R_retainedRouteTerminal@@
 @@PW_R_recordRouteTerminal@@
 @@PW_R_enqueue@@
+@@PW_R_startupCommandCurrent@@
+@@PW_R_currentStartupContinuation@@
+@@PW_R_prepareStartupCommand@@
+@@PW_R_runningLossCurrent@@
 @@PW_R_runRoute@@
+@@PW_R_retireRunningLossLocked@@
+@@PW_R_RunningLossRunReturn@@
 @@PW_R_runOne@@
 }
 static json steamOriginalRecoveryEngineHandle(const json& request,const std::function<bool()>& current,const std::function<void(const json&)>&,const std::function<bool()>& observation,std::uintptr_t,std::uintptr_t,std::uintptr_t,std::shared_ptr<ymcc::steamnative::ReadScope>,std::shared_ptr<ymcc::steamgamefacts::ProcessGroupLease>,std::shared_ptr<ymcc::steamgamefacts::RequestCancellation>,
@@ -734,10 +755,10 @@ using SleepRecoveryAuto::arm;using SleepRecoveryAuto::tick;using SleepRecoveryAu
 static void require(bool yes,const char* why){++parentChecks;if(!yes)throw std::runtime_error(why);}
 static void test(const char* name,const std::function<void()>& fn){if(parentCase=="boundaries"&&std::string(name)=="retry-before-runtime-dispatch-keeps-original-wake-admission")return;if(!parentCase.empty()&&parentCase!="boundaries"&&parentCase!=name)return;auto n=parentChecks;try{fn();rows.push_back({{"name",name},{"pass",true},{"checks",parentChecks-n}});}catch(const std::exception& e){++failed;rows.push_back({{"name",name},{"pass",false},{"reason",e.what()},{"checks",parentChecks-n}});}}
 static const json config={{"enabled",true},{"targetMode","generic"}};
-static std::shared_ptr<SteamOriginalRecovery::Control> setupParent(bool retry=true){fixtureAllowed=fixtureClassified=true;fixtureRetrying=retry;g_exitRequested=false;g_sleepRecoveryAutoEnabled=true;g_gameRulesEpoch=1;g_sleepRecoveryAutoConfigEpoch=1;fixtureGeneration=7;fixtureTick=1000;fixtureNow=134392908258301446ULL;g_powerLifecycle=PowerLifecycle::Ready;g_sleepRecoveryAutoPending=false;g_steamSettingsObserver.current=true;SleepSteamRecovery::captured={};SleepSteamRecovery::live={};SleepRecoveryAuto::state={};queued=0;malformedGameId=false;engineCalls=privateReads=nonWakePortCalls=eventSignals=0;requests.clear();guards.clear();published.clear();saved.clear();onPrivateRead={};engineReply={};SteamOriginalRecovery::callbackControl={};ymcc::sleeppower::nativeWakeFacts.resetLocked();ymcc::sleeppower::nativeWakeFacts.kernel(7,107,0,5,fixtureNow,fixtureNow);arm(7);auto c=std::make_shared<SteamOriginalRecovery::Control>();c->startupPending=false;c->enabled=true;c->latestPower=7;SteamOriginalRecovery::callbackControl=c;return c;}
+static std::shared_ptr<SteamOriginalRecovery::Control> setupParent(bool retry=true){fixtureAllowed=fixtureClassified=true;fixtureRetrying=retry;g_exitRequested=false;g_sleepRecoveryAutoEnabled=true;g_gameRulesEpoch=1;g_sleepRecoveryAutoConfigEpoch=1;fixtureGeneration=7;fixtureTick=1000;fixtureNow=134392908258301446ULL;g_powerLifecycle=PowerLifecycle::Ready;g_sleepRecoveryAutoPending=false;g_steamSettingsObserver.current=true;SleepSteamRecovery::captured={};SleepSteamRecovery::live={};SleepRecoveryAuto::state={};fixtureQueued=0;malformedGameId=false;engineCalls=privateReads=nonWakePortCalls=eventSignals=0;requests.clear();guards.clear();published.clear();saved.clear();onPrivateRead={};engineReply={};SteamOriginalRecovery::callbackControl={};ymcc::sleeppower::nativeWakeFacts.resetLocked();ymcc::sleeppower::nativeWakeFacts.kernel(7,107,0,5,fixtureNow,fixtureNow);arm(7);auto c=std::make_shared<SteamOriginalRecovery::Control>();c->mutationAvailability=std::make_shared<ymcc::steamcommand::AvailabilityEvent>();if(!c->mutationAvailability->open())throw std::runtime_error("command-availability-open-failed");c->startupPending=false;c->enabled=true;c->latestPower=7;SteamOriginalRecovery::callbackControl=c;return c;}
 static void drain(const std::shared_ptr<SteamOriginalRecovery::Control>& c){require(!c->pending.empty(),"actual-wake-not-enqueued");const auto event=c->pending.front();c->pending.pop_front();SteamOriginalRecovery::runOne(c,event,config);}
 static void finalWake(){tick();fixtureTick=4000;fixtureNow=134392908514042653ULL;ymcc::sleeppower::nativeWakeFacts.kernel(7,506,1,-1,fixtureNow,fixtureNow);fixtureNow=134392908524461397ULL;fixtureRetrying=false;ymcc::sleeppower::nativeWakeFacts.interactive(7,7,fixtureTick,fixtureTick,fixtureNow);ymcc::sleeppower::nativeWakeFacts.kernel(7,507,1,-1,fixtureNow,fixtureNow);ymcc::sleeppower::nativeWakeFacts.ready(7);captureReady(7);}
-int main(int argc,char** argv){if(argc>1)parentCase=argv[1];test("retry-before-runtime-dispatch-keeps-original-wake-admission",[]{auto c=setupParent();steamOriginalRecoveryWake(7);drain(c);require(engineCalls==0,"early-retry-consumed-runtime-wake-dispatch");finalWake();steamOriginalRecoveryPowerReady(7);drain(c);require(engineCalls==2,"current-final-wake-cannot-enter-both-original-routes");require(nonWakePortCalls==0,"non-wake-port-used-for-wake");for(const auto& x:guards)require(x["current"]==true,"current-final-engine-guard-refused");steamOriginalRecoveryWake(7);drain(c);require(engineCalls==2,"duplicate-wake-refunded-original-route-budget");});
+int main(int argc,char** argv){ymcc::steamcommand::Coordinator commands;ymcc::steamcommand::provider.store(&commands);if(argc>1)parentCase=argv[1];test("retry-before-runtime-dispatch-keeps-original-wake-admission",[]{auto c=setupParent();steamOriginalRecoveryWake(7);drain(c);require(engineCalls==0,"early-retry-consumed-runtime-wake-dispatch");finalWake();steamOriginalRecoveryPowerReady(7);drain(c);require(engineCalls==2,"current-final-wake-cannot-enter-both-original-routes");require(nonWakePortCalls==0,"non-wake-port-used-for-wake");for(const auto& x:guards)require(x["current"]==true,"current-final-engine-guard-refused");steamOriginalRecoveryWake(7);drain(c);require(engineCalls==2,"duplicate-wake-refunded-original-route-budget");});
 
  test("private-read-retry-before-reservation-keeps-wake",[]{auto c=setupParent(false);onPrivateRead=[]{fixtureRetrying=true;};SteamOriginalRecovery::runRoute(c,{SteamOriginalRecovery::Trigger::Wake,7,1},config,ymcc::steamOriginal::RecoveryRoute::SemiStatic,true);require(engineCalls==0,"private-read-retry-consumed-runtime-wake");fixtureRetrying=false;onPrivateRead={};SteamOriginalRecovery::runRoute(c,{SteamOriginalRecovery::Trigger::Wake,7,2},config,ymcc::steamOriginal::RecoveryRoute::SemiStatic,true);require(engineCalls==1&&guards.back()["current"]==true,"retry-refusal-consumed-semi-static-budget");});
  test("classification-not-ready-preserves-original-route",[]{auto c=setupParent(false);fixtureClassified=false;SteamOriginalRecovery::runRoute(c,{SteamOriginalRecovery::Trigger::Wake,7,1},config,ymcc::steamOriginal::RecoveryRoute::SemiStatic,true);require(engineCalls==0,"unclassified-wake-dispatched");fixtureClassified=true;steamOriginalRecoveryWake(7);drain(c);require(engineCalls==2,"classification-refusal-consumed-wake");});
@@ -746,6 +767,8 @@ int main(int argc,char** argv){if(argc>1)parentCase=argv[1];test("retry-before-r
  test("unknown-consumed-receipt-never-refunds-event",[]{auto c=setupParent(false);engineReply=[](const json&){return json{{"status","blocked"},{"consumed",true},{"reason","unknown-after-dispatch"}};};steamOriginalRecoveryWake(7);drain(c);const auto count=engineCalls;require(count==2,"initial-route-observation-not-complete");require(requests[0]["recoveryAllowed"]==true&&requests[1]["recoveryAllowed"]==false,"uncertain-first-route-granted-second-publisher");steamOriginalRecoveryWake(7);drain(c);c->admission.invalidate();c->legacyAdmission.invalidate();steamOriginalRecoveryWake(7);drain(c);require(engineCalls==count,"unknown-consumed-wake-refunded");});
  test("expired-original-proof-never-dispatches",[]{auto c=setupParent(false);fixtureTick+=60001;fixtureNow+=60001ULL*10000ULL;steamOriginalRecoveryWake(7);drain(c);require(engineCalls==0,"expired-original-wake-dispatched");});
  test("invalid-type2-lowbits-refuse-before-reservation",[]{auto c=setupParent(false);malformedGameId=true;steamOriginalRecoveryWake(7);drain(c);require(engineCalls==0,"actual-gameid-validator-bypassed");});
+ SteamOriginalRecovery::callbackControl.reset();
+ ymcc::steamcommand::provider.store(nullptr);
  if(rows.empty())return 64;
 std::cout<<"PUBLIC_RUNTIME_PARENT "<<json{{"tests",rows.size()},{"checks",parentChecks},{"failed",failed},{"cases",rows},{"actualRunOne",true},{"actualRunRoute",true},{"actualQueueEntryPoints",true},{"engineIsBoundaryPort",true},{"nativeOsActions",0}}.dump()<<"\n";return failed?3:0;}
 

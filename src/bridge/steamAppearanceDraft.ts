@@ -203,7 +203,7 @@ export function createAppearanceDraft(deps: Dependencies) {
     if (locked || failed || !pending() || !Number.isFinite(dueAt)) return;
     timer = deps.later(() => { timer = null; void kick(); }, Math.max(0, dueAt - deps.now()));
   }
-  async function read(current?: () => boolean, reconciliation?: { current(): boolean; recheck(): void; beforeStatusDispatch?(): void }, allowReplacement = true): Promise<Readonly<AppearanceSnapshot> | undefined> {
+  async function read(current?: () => boolean, reconciliation?: { current(): boolean; recheck(): void; beforeStatusDispatch?(): void; retired?: Promise<undefined> }, allowReplacement = true): Promise<Readonly<AppearanceSnapshot> | undefined> {
     if (current?.() === false) return;
     const reconcileCurrent = reconciliation?.current ?? current;
     if (saving || locked || pending()) { readRequested = true; return; }
@@ -219,8 +219,10 @@ export function createAppearanceDraft(deps: Dependencies) {
     readTask = (async (): Promise<ReadResult> => {
       try {
         // A user edit can supersede Status while it is still resolving its inputs.
-        const value = await deps.read(() => stillReading() && current?.() !== false, reconciliation?.beforeStatusDispatch);
-        if (!stillReading() || current?.() === false) return retiredRead;
+        const status = deps.read(() => stillReading() && current?.() !== false, reconciliation?.beforeStatusDispatch);
+        // Release only the retired Status wait; dispatched repairs retain the write owner below.
+        const value = await (reconciliation?.retired ? Promise.race([status, reconciliation.retired]) : status);
+        if (!value || !stillReading() || current?.() === false) return retiredRead;
         receive(value);
         if (pending()) return; // Restored or newly entered user intent wins.
         failed = false; phase = 'idle'; message = '';

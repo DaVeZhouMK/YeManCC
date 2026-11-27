@@ -278,7 +278,7 @@
       const deckyAccountWatchAvailable=accountWatch?.version===1&&!!observedAccount&&accountWatch.read(observedAccount);
       // Reviewed official v3.3.1 fields. Unknown versions remain UNKNOWN;
       // installed hooks are only a structural check, never visual acceptance.
-      let deckyBackendConnected,deckyBackendState,deckyHooksInstalled,deckyClientConnected,deckyClientVerified,deckyClientChecking,deckyClientState;
+      let deckyBackendConnected,deckyBackendState,deckyHooksInstalled,deckyClientConnected,deckyClientVerified,deckyClientChecking,deckyClientState,deckyQamPanelState;
       try {
         if(window===window.top&&window.location.origin==='https://steamloopback.host'&&
            window.DeckyPluginLoader?.deckyState?.publicState?.()?.versionInfo?.current==='v3.3.1'){
@@ -304,9 +304,15 @@
             else if(frontend.active!==true)deckyClientState='frontend-inactive';
             else{const state=frontend.connectionState;if(['disposed','native-run-missing','binding-run-missing','run-mismatch','socket-missing','socket-connecting','socket-closing','socket-closed','socket-unavailable','transport-unconfirmed','opening-reply-missing','connected','module-dismounted','frontend-absent','frontend-inactive','read-failed'].includes(state))deckyClientState=state;}
           }catch{deckyClientState='read-failed';}
+          // Optional commit evidence. Missing/hidden and old frontends cannot
+          // prove a failed mount, and this value never changes hook health.
+          try{
+            const state=mode==='bigpicture'&&frontend?.active===true?frontend.qamPanelState:undefined;
+            if(state==='unobserved'||state==='committed'||state==='native-ready-commit')deckyQamPanelState=state;
+          }catch{}
         }
       }catch{} // Never emit credentials, router URL, source objects or exception text.
-      return { ok: true, ...(typeof deckyBackendConnected==='boolean'?{deckyBackendConnected}:{}), ...(typeof deckyBackendState==='string'?{deckyBackendState}:{}), ...(typeof deckyHooksInstalled==='boolean'?{deckyHooksInstalled}:{}), ...(typeof deckyClientConnected==='boolean'?{deckyClientConnected}:{}), ...(typeof deckyClientChecking==='boolean'?{deckyClientChecking}:{}), ...(typeof deckyClientVerified==='boolean'?{deckyClientVerified}:{}), ...(typeof deckyClientState==='string'?{deckyClientState}:{}), ...(observedAccount?{observedAccount}:{}), deckyAccountWatchAvailable, mode, rawMode: Number.isInteger(raw) ? raw : null, modeEpoch: watch.active ? watch.id + ':' + watch.entries : '', ...(deckyUpdateResidue?{deckyUpdateResidue}:{}), ...(deckyEmptyFrontend?{deckyEmptyFrontend}:{}), ...(typeof deckyFrontendLoaded === 'boolean'?{deckyFrontendLoaded}:{}), mutated: false, via: 'live' };
+      return { ok: true, ...(typeof deckyBackendConnected==='boolean'?{deckyBackendConnected}:{}), ...(typeof deckyBackendState==='string'?{deckyBackendState}:{}), ...(typeof deckyHooksInstalled==='boolean'?{deckyHooksInstalled}:{}), ...(typeof deckyClientConnected==='boolean'?{deckyClientConnected}:{}), ...(typeof deckyClientChecking==='boolean'?{deckyClientChecking}:{}), ...(typeof deckyClientVerified==='boolean'?{deckyClientVerified}:{}), ...(typeof deckyClientState==='string'?{deckyClientState}:{}), ...(deckyQamPanelState?{deckyQamPanelState}:{}), ...(observedAccount?{observedAccount}:{}), deckyAccountWatchAvailable, mode, rawMode: Number.isInteger(raw) ? raw : null, modeEpoch: watch.active ? watch.id + ':' + watch.entries : '', ...(deckyUpdateResidue?{deckyUpdateResidue}:{}), ...(deckyEmptyFrontend?{deckyEmptyFrontend}:{}), ...(typeof deckyFrontendLoaded === 'boolean'?{deckyFrontendLoaded}:{}), mutated: false, via: 'live' };
     }
     // Steam sleep captures bind the account only through this fixed read.
     // Native code pins the verified Steam PID/birth/root and never uses this to
@@ -1953,6 +1959,7 @@
         // already be retired; a new/duplicate host never inherits this write.
         try{
         if(release&&api.SetOverlayState===entry.wrapper&&entry.lastState!==null&&entry.lastState!==0&&cacheCurrent()&&
+           game.registrationUncontested()&&
            window.settingsStore?.m_CMInterface?.steamid?.GetAccountID?.()===proof.account&&
            window.SteamUIStore?.WindowStore?.GetInstanceForPID?.(proof.hostPid)===w){
           try{original.call(api,entry.registered,0);}catch{}
@@ -2008,7 +2015,7 @@
 
     // The native caller pins the elected foreground game, Steam, and this exact
     // overlay host until the request ends. IDs alone never authorize routing.
-    const menuGameReceiver = async (handler, proof, trace) => {
+    const menuGameReceiver = async (handler, proof, trace, restoreMissing = false) => {
       const uint32 = v => Number.isInteger(v) && v > 0 && v <= 0xffffffff;
       const decimal = v => typeof v === 'string' && /^[1-9][0-9]{0,19}$/.test(v) && BigInt(v) <= 0xffffffffffffffffn;
       if (!proof || proof.version !== 1 ||
@@ -2027,6 +2034,11 @@
       const ui=window.SteamUIStore,windows=ui?.WindowStore,apps=window.appStore?.m_mapApps;
       const account=window.settingsStore?.m_CMInterface?.steamid;
       const a=apps?.get?.(appid),b=apps?.get?.(appid|0),overview=a||b;
+      // The registered browser ID may be a base app ID. Do not mirror menu
+      // state to it if Steam is also running that app independently.
+      const registrationUncontested=()=>!base||exact||short||(
+        window.SteamUIStore===ui&&Array.isArray(ui?.m_runningAppIDs)&&
+        !ui.m_runningAppIDs.some(id=>Number.isInteger(id)&&(id>>>0)===proof.registeredAppid));
       // Record only the first failed, already-evaluated preflight predicate.
       // Later ownership checks use the same reads without changing action stage.
       let contextFailure=null;
@@ -2044,7 +2056,8 @@
         ((((overview.app_type&0x40000000)!==0)===shortcut)||rejectedContext('menu-game-app-kind',diagnose)) &&
         ([1,4].includes(overview?.local_per_client_data?.display_status)||rejectedContext('menu-game-display-status',diagnose)) &&
         (Array.isArray(ui?.m_runningAppIDs)||rejectedContext('menu-game-running-list',diagnose)) &&
-        (ui.m_runningAppIDs.some(id=>Number.isInteger(id)&&(id>>>0)===appid)||rejectedContext('menu-game-running-app',diagnose));
+         (ui.m_runningAppIDs.some(id=>Number.isInteger(id)&&(id>>>0)===appid)||rejectedContext('menu-game-running-app',diagnose)) &&
+         (registrationUncontested()||rejectedContext('menu-game-registered-app-running',diagnose));
       if(!accountCurrent(true)||!overviewCurrent(true)||(a&&b&&a!==b)){
         stage=contextFailure||'menu-game-original-alias';fail('steam-menu-game-context-changed');
       }
@@ -2055,14 +2068,47 @@
       const row=same[0];
       if(row.unPID!==proof.hostPid || row.nBrowserID!==proof.browserId || row.appID!==proof.registeredAppid || row.eBrowserType!==0 || row.eUIMode!==4)
         fail('steam-menu-game-registration-changed');
-      const w=windows?.GetInstanceForPID?.(proof.hostPid),p=w?.params,info=p?.browserInfo;
-      const current=()=>window.SteamUIStore===ui && ui.WindowStore===windows && accountCurrent() && overviewCurrent() &&
+      const ownersCurrent=()=>window.SteamUIStore===ui && ui.WindowStore===windows && accountCurrent() && overviewCurrent();
+      let w=windows?.GetInstanceForPID?.(proof.hostPid);
+      if(w==null&&restoreMissing){
+        // Steam can retain a native overlay registration and its cached row
+        // without a WindowStore receiver. Use only the original per-browser
+        // creation handler, never the global overlay or JS-context rebuild.
+        const store=window.overlayStore, cache=store?.m_mapBrowserInfo, create=windows?.OnOverlayBrowserCreated;
+        const main=windows?.GamepadUIMainWindowInstance;
+        // Valve's constructor uses the live main mode, not the overlay cache's mode.
+        if(ui.MainInstanceUIMode!==4||store?.m_eUIMode!==4||store.m_bVRMode!==false||!main||main.IsAnyVRWindow?.()!==false||
+           windows.BHasVRMainWindow?.()!==false||ui.GetShowingLockScreen?.()!==false||typeof create!=='function'||
+           !Number.isInteger(cache?.size)||cache.size<1||cache.size>16||typeof cache.values!=='function'||
+           rows.filter(r=>r?.unPID===proof.hostPid).length!==1||
+           ![row.nScreenWidth,row.nScreenHeight].every(x=>Number.isInteger(x)&&x>0&&x<=32768)||
+           !Number.isFinite(row.flDisplayScale)||row.flDisplayScale<=0||row.flDisplayScale>8)
+          fail('steam-menu-game-overlay-repair-unavailable');
+        const cached=Array.from(cache.values()).filter(r=>r?.m_unPID===proof.hostPid);
+        const matches=r=>r?.m_unPID===proof.hostPid&&r.m_nBrowserID===proof.browserId&&
+          r.m_unAppID===proof.registeredAppid&&r.m_gameID===proof.registeredGameid64&&r.m_eBrowserType===0&&r.m_eUIMode===4;
+        if(cached.length!==1||!matches(cached[0])||!ownersCurrent()||window.overlayStore!==store||
+           store.m_mapBrowserInfo!==cache||store.m_eUIMode!==4||store.m_bVRMode!==false||
+           windows.GamepadUIMainWindowInstance!==main||windows.OnOverlayBrowserCreated!==create||
+           ui.GetShowingLockScreen?.()!==false||windows.GetInstanceForPID(proof.hostPid)!=null||ui.MainInstanceUIMode!==4)
+          fail('steam-menu-game-overlay-repair-context-changed');
+        const data={m_unPID:row.unPID,m_nBrowserID:row.nBrowserID,m_unAppID:row.appID,
+          m_gameID:row.gameID,m_eBrowserType:row.eBrowserType,m_eUIMode:row.eUIMode};
+        stage='menu-game-overlay-create';mutated=true;
+        const created=create.call(windows,data,row.nScreenWidth,row.nScreenHeight,row.flDisplayScale);
+        if(created!==undefined)fail('steam-menu-game-overlay-repair-uncertain');
+        w=windows.GetInstanceForPID(proof.hostPid);
+        if(!w)fail('steam-menu-game-overlay-repair-unconfirmed');
+        trace.overlayRepair='created-missing-receiver';
+      }
+      const p=w?.params,info=p?.browserInfo;
+      const current=()=>ownersCurrent() &&
         windows.GetInstanceForPID(proof.hostPid)===w && w?.IsGamepadUIOverlayWindow?.()===true && !w.IsAnyVRWindow?.() && !ui.GetShowingLockScreen?.() &&
         w.params===p && p.appid===proof.registeredAppid && p.gameid===proof.registeredGameid64 && p.browserInfo===info &&
         info?.m_unPID===proof.hostPid && info.m_nBrowserID===proof.browserId && info.m_unAppID===proof.registeredAppid && info.m_gameID===proof.registeredGameid64;
       if(!current()||typeof w[handler]!=='function')fail('steam-menu-game-window-changed');
       trace.version=3;trace.lookup='proven-game-overlay-selected';trace.identity=exact?'exact-gameid-confirmed':'native-registration-alias';
-      const receiver={window:w,source:'steam-proven-game-overlay',game:{current,appid,registeredAppid:proof.registeredAppid,registered:proof.registeredGameid64,logical:proof.gameid64}};
+      const receiver={window:w,source:'steam-proven-game-overlay',game:{current,registrationUncontested,appid,registeredAppid:proof.registeredAppid,registered:proof.registeredGameid64,logical:proof.gameid64}};
       receiver.game.entry=installMenuGameAlias(receiver,proof);
       return receiver;
     };
@@ -3040,19 +3086,31 @@
     // Passive receiver bookkeeping only. Native owns the click-only 750ms
     // deadlines; this bridge never sleeps, starts a timer or sends a second toggle
     // from an asynchronous JS callback. A lost receiver edge is not permission.
-    const qamFollowup = (w, phase, ticket) => {
+    const qamFollowup = (w, phase, ticket, game=null) => {
       const s=window.SteamUIStore, m=w?.MenuStore, now=Date.now();
       const result=(status,terminal=true,extra={})=>({status,terminal,...extra});
       const read=()=>{try{const v=m?.GetOpenSideMenu?.();return [0,1,2].includes(v)?v:null;}catch{return null;}};
       if(!w||!m||typeof w.OnQuickAccessButtonPressed!=='function')return result('receiver-unavailable');
       let state=window.__ymccQamFollowup;
-      if(state?.version!==2||state.store!==s){
+      if(state?.version!==3||state.store!==s){
         state?.dispose?.();
-        state={version:2,store:s,entries:[],ticket:null};
-        state.dispose=()=>{for(const e of state.entries)try{if(e.window.OnQuickAccessButtonPressed===e.wrapper){if(e.own)Object.defineProperty(e.window,'OnQuickAccessButtonPressed',e.own);else delete e.window.OnQuickAccessButtonPressed;}}catch{}state.entries=[];state.ticket=null;};
+        state={version:3,store:s,entries:[],ticket:null,gameGesture:null};
+        state.dispose=()=>{for(const e of state.entries)try{if(e.window.OnQuickAccessButtonPressed===e.wrapper){if(e.own)Object.defineProperty(e.window,'OnQuickAccessButtonPressed',e.own);else delete e.window.OnQuickAccessButtonPressed;}}catch{}state.entries=[];state.ticket=null;state.gameGesture=null;};
         window.__ymccQamFollowup=state;
       }
+      const validTicket=()=>ticket&&typeof ticket.id==='string'&&ticket.id.length<=96&&Number.isSafeInteger(ticket.startedAt)&&
+        ticket.startedAt<=now&&now-ticket.startedAt<3000;
+      const gameKey=game?JSON.stringify(['account','appid','gameid64','gamePid','gameCreated','steamPid','steamCreated',
+        'hostPid','hostCreated','browserId','registeredAppid','registeredGameid64'].map(k=>request.menuGame[k])):null;
+      const gesture=state.gameGesture;
       let entry=state.entries.find(e=>e.window===w&&e.menu===m);
+      if(phase!=='prepare'){
+        if(!validTicket())return result('expired');
+        // Only the original game's registration, receiver, and button edge can retry.
+        if(game&&(!gesture||gesture.id!==ticket.id||gesture.startedAt!==ticket.startedAt||
+                  gesture.key!==gameKey||!entry||gesture.entry!==entry))return result('context-changed');
+        if(!game&&gesture?.id===ticket.id)return result('context-changed');
+      }
       if(!entry){
         // At most the current main/overlay contexts; restore an evicted wrapper.
         if(state.entries.length===2){const e=state.entries.shift();try{if(e.window.OnQuickAccessButtonPressed===e.wrapper){if(e.own)Object.defineProperty(e.window,'OnQuickAccessButtonPressed',e.own);else delete e.window.OnQuickAccessButtonPressed;}}catch{}}
@@ -3077,12 +3135,14 @@
         if(w.OnQuickAccessButtonPressed!==entry.wrapper)return result('receiver-not-writable');
         state.entries.push(entry);
       }
-      if(phase==='prepare')return result('receiver-prepared');
-      if(!ticket||typeof ticket.id!=='string'||ticket.id.length>96||!Number.isSafeInteger(ticket.startedAt)||
-          ticket.startedAt>now||now-ticket.startedAt>=3000)return result('expired');
+      if(phase==='prepare'){
+        if(game&&validTicket()&&game.current())
+          state.gameGesture={id:ticket.id,startedAt:ticket.startedAt,key:gameKey,entry,serial:entry.serial+1};
+        return result('receiver-prepared');
+      }
       checkAccount();
       if(window.SteamUIStore!==s||s.GetShowingLockScreen?.()||w.IsAnyVRWindow?.()||
-          menuReceiver('OnQuickAccessButtonPressed').window!==w||w.MenuStore!==m||
+          !(game?game.current():menuReceiver('OnQuickAccessButtonPressed').window===w)||w.MenuStore!==m||
           w.OnQuickAccessButtonPressed!==entry.wrapper)return result('context-changed');
       // An evaluation already sent before cancellation may return late. It
       // cannot replace a newer ticket, even when callbacks share a millisecond.
@@ -3095,7 +3155,11 @@
       if(!t.event){
         // Retain two receiver edges. A delayed first observation must detect
         // a later physical/user press rather than adopt it as the original.
-        if(entry.previous?.at>=ticket.startedAt)t.event=entry.previous;
+        if(game){
+          if(entry.serial<gesture.serial)return result('waiting-receiver',false,{menu:read()});
+          if(entry.event?.serial!==gesture.serial)return result('newer-user-input');
+          t.event=entry.event;
+        }else if(entry.previous?.at>=ticket.startedAt)t.event=entry.previous;
         else if(entry.event?.at>=ticket.startedAt)t.event=entry.event;
         else return result('waiting-receiver',false,{menu:read()});
       }
@@ -3126,8 +3190,8 @@
       checkAccount();const after=read();
       return result(after===2?'menu-open':'supplement-sent',after===2||t.attempts===3,{menu:after,attempts:t.attempts,supplementSent:true});
     };
-    const passiveQamFollowup=(w,phase,ticket)=>{
-      try{return qamFollowup(w,phase,ticket);}catch{return {status:'recorder-unavailable',terminal:true};}
+    const passiveQamFollowup=(w,phase,ticket,game)=>{
+      try{return qamFollowup(w,phase,ticket,game);}catch{return {status:'recorder-unavailable',terminal:true};}
     };
     // Second evaluation of the SAME explicit QAM action. Native retains its
     // original power/process/host admission. This branch sends no second key,
@@ -3178,7 +3242,7 @@
       const w=receiver.window;
       const phase=request.operation.slice('menu.qam.'.length);
       stage='qam-followup';
-      const recovery=qamFollowup(w,phase,request.qamFollowup);
+      const recovery=qamFollowup(w,phase,request.qamFollowup,receiver.game);
       mutated=recovery.supplementSent===true;
       const menuGameState=phase==='prepare'?null:syncMenuGameState(receiver);
       if(menuGameState)recovery.menuGameState=menuGameState;
@@ -3191,7 +3255,8 @@
       // GLOBAL functional-key semantics. Steam, not an OS HWND/PID chosen by
       // YMCC, supplies its own routing context. Never focus or activate a window.
       const handler = request.menu === 'main' ? 'OnHomeButtonPressed' : 'OnQuickAccessButtonPressed';
-      const routeTrace={}, receiver=request.menuGame?await menuGameReceiver(handler,request.menuGame,routeTrace):menuReceiver(handler,routeTrace), w=receiver.window;
+      const routeTrace={}, receiver=request.menuGame?await menuGameReceiver(handler,request.menuGame,routeTrace,
+        request.operation==='menu.button'&&request.menu==='quick-access'):menuReceiver(handler,routeTrace), w=receiver.window;
       const m = w?.MenuStore;
       menuTarget = { source: receiver.source,
         windowType: Number.isInteger(w?.WindowType) ? w.WindowType : null, isGameOverlay: !!w?.IsOverlayWindow?.(),
@@ -3302,12 +3367,14 @@
       }
       if(request.operation==='menu.button'&&request.menu==='quick-access')returnMenuGameToRunning(receiver,menuTarget);
       prepareMenuGameInputContext(receiver,menuTarget);
-      if(request.menu==='quick-access'&&request.qamFollowup)passiveQamFollowup(w,'prepare',null);
+      if(request.operation==='menu.button'&&request.menu==='quick-access'&&request.qamFollowup)
+        passiveQamFollowup(w,'prepare',request.qamFollowup,receiver.game);
       let compositionBrowserBefore={known:false,browser:null};
       if(receiver.game){try{
         const browser=w.BrowserWindow,client=browser?.SteamClient,api=client?.Window,set=api?.SetComposition;
         compositionBrowserBefore={known:browser==null||!!client&&!!api&&typeof set==='function',browser,client,api,set};
       }catch{}}
+      if(receiver.game&&!receiver.game.current())fail('steam-menu-game-window-changed');
       stage = 'button'; mutated = true;
       // These are Steam's actual Guide/QAM key receivers, including its own
       // debounce, suppression and navigation behavior. Do not set menu flags.
@@ -3326,8 +3393,9 @@
       const expected = before === menu ? 0 : menu, confirmed = known && after === expected;
       projectMenuGameInputTrace(receiver,menuTarget,'after',confirmed&&after===menu);
       menuTarget.runtimeAccepted = confirmed;
-      const qamRecovery=request.menu==='quick-access'&&request.qamFollowup?passiveQamFollowup(w,'observe',request.qamFollowup):undefined;
-      return { ok: true, before, menu: after, menuTarget, keyDelivered: true, ...(qamRecovery?{qamRecovery}:{}),
+      const qamRecovery=request.menu==='quick-access'&&request.qamFollowup?passiveQamFollowup(w,'observe',request.qamFollowup,receiver.game):undefined;
+      return { ok: true, before, menu: after, menuTarget, keyDelivered: true,
+        ...(routeTrace.overlayRepair?{mutated:true}:{}), ...(qamRecovery?{qamRecovery}:{}),
         menuStateChanged: known ? before !== after : null, runtimeAccepted: confirmed,
         response: !known ? 'key-delivered-menu-state-unknown' : confirmed ? 'menu-state-confirmed' :
           before !== after ? 'key-delivered-other-menu-response' : 'key-delivered-no-menu-state-change', via: 'live' };

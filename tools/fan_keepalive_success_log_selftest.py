@@ -9,6 +9,15 @@ def extract(text,signature):
         end+=1
     return text[start:end]
 
+def extract_disarm(text):
+    receipt='static bool fanLeaseKeepaliveReceiptCurrentLocked('
+    disarm='static void fanLeaseKeepaliveDisarm(const char* reason, const std::string* expectedLease'
+    if receipt not in text:return extract(text,disarm+') {')
+    expires='static void fanLeaseKeepaliveExpireRendererGrace('
+    helpers=['static bool fanLeaseKeepaliveClearLocked()','static void fanLeaseKeepaliveLogDisarm(']
+    signatures=[receipt,*(helpers if expires in text else []),disarm+',',*([expires] if expires in text else [])]
+    return '#define FIXTURE_BOUND_RECEIPT 1\n'+'\n'.join(extract(text,sig) for sig in signatures)
+
 def main():
     parser=argparse.ArgumentParser(description='Exact Fan keepalive tick with real JSON and inert transport/clock/log boundaries; no hardware or CPU timing')
     parser.add_argument('--native',required=True,type=Path);parser.add_argument('--output',required=True,type=Path);parser.add_argument('--mode',choices=['eager','guarded'],required=True);args=parser.parse_args()
@@ -16,8 +25,10 @@ def main():
     if out.exists():raise RuntimeError('Output must be new; existing evidence will not be cleared')
     out.mkdir(parents=True);raw=source.read_bytes();text=raw.decode('utf-8-sig')
     original=extract(text,'static void fanLeaseKeepaliveTick() {')
+    disarm=extract_disarm(text)
+    (out/'DisarmExtract.inc').write_bytes(disarm.encode('utf-8'))
     patterns=[(r'json detail = (\{\s*\{"status", static_cast<int>\(status\)\},\s*\{"leasePresent", true\},\s*\{"source", "native.ready"\}\s*\});','CountSuccessDetail'),
-              (r'json detail = (\{\s*\{"status", static_cast<int>\(status\)\},\s*\{"errorCode", errorCode\},\s*\{"rejected", rejected\}\s*\});','CountFailureDetail')]
+              (r'json detail = (\{\s*\{"status", static_cast<int>\(status\)\},\s*\{"errorCode", errorCode\},\s*\{"rejected", rejected\}(?:,\s*\{"missLogSelection", selection\},\s*\{"requestLeaseSequence", logLeaseSequence\},\s*\{"requestFanPowerGeneration", requestPower\})?\s*\});','CountFailureDetail')]
     metered=original;replacements=[]
     for pattern,counter in patterns:
         matches=list(re.finditer(pattern,metered));assert len(matches)==1,counter+' payload shape drift; review fixture'
@@ -37,18 +48,25 @@ def main():
     with (out/'compile.log').open('w',encoding='utf-8') as log:compiled=subprocess.run(['cmd.exe','/d','/c',str(compile_cmd)],cwd=out,stdout=log,stderr=subprocess.STDOUT)
     if compiled.returncode:print((out/'compile.log').read_text(encoding='utf-8',errors='replace'));return compiled.returncode
     cases=['steady','transitions','auth401','auth403','rejected409','stale-owner','off-after-post','early-gates','throttle-and-inflight','renderer-grace','payload-failure-before-exchange','transient-miss-throttle','busy-admission','busy-auth-refused','busy-lifecycle-refused','busy-off-inflight','busy-new-owner-inflight','busy-sleep-boundary','busy-renderer-grace','post-exception-retry','post-allocation-exception','lease-copy-exception','throw-after-owner-change','throw-after-off','reentrant-post-exception'];results=[]
+    cases.extend(['miss-outcome-scope','miss-after-recovery','miss-detail-exception-on-rejection'])
+    cases.extend(['withdrawn-success','withdrawn-rejection','republished-success','new-power-success',
+                  'same-id-rearm-success','same-id-rearm-rejection','withdrawn-before-disarm'])
+    cases.extend(['renderer-expiry-same-lease','renderer-expiry-new-lease','renderer-expiry-second-reload',
+                  'renderer-expiry-suspend','renderer-expiry-off'])
     for case in cases:
         run=subprocess.run([str(out/'fixture.exe'),case,args.mode],capture_output=True,text=True,encoding='utf-8')
         (out/(case+'.log')).write_text(run.stdout+run.stderr,encoding='utf-8')
         if run.returncode not in (0,1):raise RuntimeError('fixture execution failed: '+run.stdout+run.stderr)
         value=json.loads(run.stdout);assert value['ok']==(run.returncode==0);results.append(value);print(('PASS 'if value['ok']else'FAIL ')+case+' success-detail-materializations='+str(value['successDetailsConstructed']))
     # Bind the tested region even if another task edited an unrelated part of main.cpp.
-    assert extract(source.read_bytes().decode('utf-8-sig'),'static void fanLeaseKeepaliveTick() {')==original,'tick changed during checks'
+    current=source.read_bytes().decode('utf-8-sig')
+    assert extract(current,'static void fanLeaseKeepaliveTick() {')==original,'tick changed during checks'
+    assert extract_disarm(current)==disarm,'retirement changed during checks'
     worker=extract(text,'static void fanLeaseKeepaliveThreadProc() {');ensure=extract(text,'static void fanLeaseKeepaliveEnsureThread() {')
     usages=[m.start() for m in re.finditer(r'\bfanLeaseKeepaliveTick\b',text)];assert len(usages)==2 and 'fanLeaseKeepaliveTick();' in worker,'single-worker call-site assumption changed'
     assert 'std::lock_guard<std::mutex> lock(g_fanLeaseKeepaliveMx);' in ensure and 'g_fanLeaseKeepaliveThread.joinable()' in ensure
     sha=lambda b:hashlib.sha256(b).hexdigest()
-    result={'ok':all(x['ok']for x in results),'compiled':True,'cases':len(results),'checks':sum(r['checks'] for r in results),'mode':args.mode,'sourceSha256AtExtraction':sha(raw),'tickSha256':sha(original.encode()),'meteredSha256':sha(metered.encode()),'fixtureSha256':sha(fixture.read_bytes()),'responseHeaderSha256':sha((project/'native/fan_response_contract.h').read_bytes()),'singleProductionTickCaller':True,'workerSha256':sha(worker.encode()),'threadCreationSha256':sha(ensure.encode()),'scope':'exact production tick body and real nlohmann JSON/receipt header; payload initializers and lease copy have reversible count/fault wrappers; clock/transport/log/power are deterministic boundaries; sequential worker scenarios; no native transport, Host, HC, devices or CPU timing','hardwareCalls':0,'cpuBenchmark':False,'results':results}
+    result={'ok':all(x['ok']for x in results),'compiled':True,'cases':len(results),'checks':sum(r['checks'] for r in results),'mode':args.mode,'sourceSha256AtExtraction':sha(raw),'tickSha256':sha(original.encode()),'retirementExtractSha256':sha(disarm.encode()),'meteredSha256':sha(metered.encode()),'fixtureSha256':sha(fixture_copy.read_bytes()),'responseHeaderSha256':sha((project/'native/fan_response_contract.h').read_bytes()),'singleProductionTickCaller':True,'workerSha256':sha(worker.encode()),'threadCreationSha256':sha(ensure.encode()),'scope':'actual production tick/retirement and real JSON/receipt header; reversible payload/lease-copy fault wrappers; deterministic clock/transport/log/power; no native transport, Host, HC, devices or CPU timing','hardwareCalls':0,'cpuBenchmark':False,'results':results}
     (out/'result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8');print(json.dumps({k:result[k] for k in ['ok','cases','checks','mode','tickSha256','singleProductionTickCaller']}));return 0 if result['ok']else 1
 
 if __name__=='__main__':

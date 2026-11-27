@@ -6,6 +6,10 @@ export function isGyroPresetKey(value: unknown): value is GyroPresetKey {
   return typeof value === 'string' && (GYRO_PRESET_KEYS as readonly string[]).includes(value);
 }
 
+export function isSteamControlledGyro(motion: { activePreset?: unknown; preset?: unknown }): boolean {
+  return (isGyroPresetKey(motion.activePreset) ? motion.activePreset : motion.preset) === 'steam';
+}
+
 /**
  * 预设「定义字段」：与 GyroMotionView.applyPreset 的无记忆分支同一口径——
  * 用户没在陀螺仪页调过该预设时，就按这几项展开，其余参数沿用当前全局值。
@@ -14,7 +18,7 @@ export function isGyroPresetKey(value: unknown): value is GyroPresetKey {
 const GYRO_PRESET_DEFINING_FIELDS: Record<GyroPresetKey, Record<string, unknown>> = {
   fps: { motionMode: 'off', motionTrigger: 'LT', outputStick: 'right', outputAxis: 'xy', motionInput: 'local-space', aimingSightsTrigger: '', gyroWeight: 1.3 },
   racing: { motionMode: 'on', motionTrigger: '', outputStick: 'left', outputAxis: 'x', motionInput: 'joystick-steering' },
-  steam: { motionMode: 'on', motionTrigger: '', motionInput: 'local-space' },
+  steam: { motionMode: 'off', motionTrigger: null, motionInput: 'local-space' },
   custom: { motionMode: 'on', motionTrigger: '' },
 };
 
@@ -36,6 +40,11 @@ export function gyroMotionParamsForPreset(kind: GyroPresetKey, presets: unknown)
   delete params.gyroMode; // legacy 死字段：陀螺仪页落盘时同样剔除。
   params.motionMode = uiMode === 'suppress' ? 'on' : uiMode;
   params.motionTrigger = uiMode === 'on' ? null : (trigger || 'LT');
+  if (kind === 'steam') {
+    params.motionMode = 'off';
+    params.motionTrigger = null;
+    params.aimingSightsTrigger = null;
+  }
   return params;
 }
 
@@ -56,6 +65,7 @@ export function gyroMotionForEnable(value: unknown): Record<string, unknown> {
   const trigger = typeof motion.motionTrigger === 'string' ? motion.motionTrigger.trim() : '';
   const configured = motion.motionMode === 'on' ||
     (['off', 'toggle'].includes(String(motion.motionMode)) && trigger !== '');
-  const params = hasStored || !configured ? gyroMotionParamsForPreset(kind, presets) : {};
+  let params = hasStored || !configured ? gyroMotionParamsForPreset(kind, presets) : {};
+  if (kind === 'steam') params = gyroMotionParamsForPreset(kind, { steam: { ...motion, ...params } });
   return { ...motion, ...params, preset: kind, activePreset: kind, enabled: true, outputMode: 'virtual-stick' };
 }

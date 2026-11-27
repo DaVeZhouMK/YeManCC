@@ -4,6 +4,7 @@
 #include <cctype>
 #include <iostream>
 #include <mutex>
+#include <functional>
 #include <sstream>
 #include <stdexcept>
 #include "json.hpp"
@@ -35,13 +36,16 @@ static bool sgReadSleepTarget(SgSleepTarget& target) {
  if(!memoryLeaseOwned)return false;
  target.markerOwned=true;target.powerGeneration=77;return true;
 }
-static SgResumeResult sgResumeSleepTargetUnlocked(unsigned long long generation, bool secondArgument) {
+enum class SgDirectoryResumePurpose { ExitCleanup };
+static SgResumeResult sgResumeSleepTargetUnlocked(unsigned long long generation, bool secondArgument,
+ unsigned long long wakeGeneration, const std::function<bool()>& cancelled, std::string* retained, SgDirectoryResumePurpose purpose) {
+ if(wakeGeneration || cancelled || retained || purpose!=SgDirectoryResumePurpose::ExitCleanup)
+  throw std::runtime_error("unexpected memory exit cleanup scope");
  memoryLeaseResumeCalls.push_back({{"generation",generation},{"secondArgument",secondArgument}});
  if(!memoryLeaseOwned || generation!=77 || secondArgument)
   throw std::runtime_error("unexpected memory existing-lease helper arguments");
  memoryLeaseOwned=false;++memoryLeaseReturned;return {1};
 }
-enum class SgDirectoryResumePurpose { ExitCleanup };
 static SgResumeResult sgResumeTrackedAllUnlocked(SgDirectoryResumePurpose purpose) { if(purpose!=SgDirectoryResumePurpose::ExitCleanup) throw std::runtime_error("unexpected resume purpose"); businessFacts.push_back({{"kind","memory-empty-resume"}}); return {}; }
 static void sgCancelWakeGameRecoveryUnlocked(const char* reason) { ++cancelCalls; businessFacts.push_back({{"kind","memory-wake-cancel"},{"reason",reason}}); }
 // EXACT_CURRENT_FULL_DEFINITIONS

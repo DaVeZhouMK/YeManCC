@@ -1,16 +1,17 @@
 // Portable exact semantic oracle. It grants no runtime/source/public approval by itself.
 import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';
-import {observeCurrentOrderedReport,terminal26RuntimeExpected} from './r3-current105-ordered-observation.mjs';
+import {observeCurrentOrderedReport,terminal26RuntimeExpected,terminal29RuntimeExpected,terminal29PsSuspendReport} from './r3-current105-ordered-observation.mjs';
 import {verifyReviewedDisposeBranches} from './r3-reviewed-contract.mjs';
 import {verifyOwnershipReturn} from './r3-current-ownership.mjs';
+import {verifySharedInputPowerOwners} from '../../../fixtures/input_coordinator_lifecycle/public_power_ownership.mjs';
 const root=import.meta.dirname,hash=bytes=>createHash('sha256').update(bytes).digest('hex'),fileHash=file=>hash(fs.readFileSync(file)),read=file=>JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
 const need=(value,code)=>{if(!value)throw Error('CURRENT_EXACT_'+code);};const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b),key=p=>path.resolve(p).toLowerCase();
 const contractFile=root+'/r3-current105-expectations.json';const CONTRACT_SHA256='43f5de340a6ab0abc5fe1362fecbb27745daab7e0d32ef329d89e9107f858b78';need(fileHash(contractFile)===CONTRACT_SHA256,'CONTRACT_CHANGED');const contract=read(contractFile);
 export function currentRoles(){return Object.keys(contract.expectations);}
-export function currentExpected(role,options={}){const id=options.managedInputContract;need(id===undefined||['current105-exact21-v1','current105-terminal22-v1','current105-terminal23-sd-decoder-v1','current105-terminal26-sdk-lifetime-compact-v1'].includes(id),'UNKNOWN_MANAGED_CONTRACT');const e=id==='current105-terminal26-sdk-lifetime-compact-v1'?terminal26RuntimeExpected(role):contract.expectations[role];need(e,'UNKNOWN_ROLE');return structuredClone(e);}
+export function currentExpected(role,options={}){const id=options.managedInputContract;need(id===undefined||['current105-exact21-v1','current105-terminal22-v1','current105-terminal23-sd-decoder-v1','current105-terminal26-sdk-lifetime-compact-v1','current105-terminal29-shared-input-power-v1'].includes(id),'UNKNOWN_MANAGED_CONTRACT');const e=id==='current105-terminal29-shared-input-power-v1'?terminal29RuntimeExpected(role,options):id==='current105-terminal26-sdk-lifetime-compact-v1'?terminal26RuntimeExpected(role):contract.expectations[role];need(e,'UNKNOWN_ROLE');return structuredClone(e);}
 export function normalizedCurrentTrace(report){const counts=new Map();return report.assertionTrace.map((row,index)=>{need(row.checkIndex===index+1,'CHECK_INDEX_CHANGED');const k=JSON.stringify([row.case,row.nameOccurrence,row.assertion]),assertionOccurrence=(counts.get(k)??0)+1;counts.set(k,assertionOccurrence);return {...row,assertionOccurrence,id:JSON.stringify([row.case,row.nameOccurrence,row.assertion,assertionOccurrence])};});}
 export function verifyCurrentSemantics(role,report,options={}){
- const expected=currentExpected(role,options);need(report&&report.forbiddenIo===0&&report.fullTranslationUnit===true&&report.normalProductMainExecuted===false&&report.realDeviceIo===false&&!report.exception,'OFFLINE_COMPLETED_REPORT_REQUIRED');
+ const expected=currentExpected(role,{...options,psSuspendScope:terminal29PsSuspendReport(report,options)});need(report&&report.forbiddenIo===0&&report.fullTranslationUnit===true&&report.normalProductMainExecuted===false&&report.realDeviceIo===false&&!report.exception,'OFFLINE_COMPLETED_REPORT_REQUIRED');
  const observation=observeCurrentOrderedReport(report,options);need(new Set(report.cases.map(row=>row.name)).size===expected.uniqueNames,'SOURCE_UNIQUE_CASE_NAMES_REQUIRED');need(report.status===expected.expectedStatus,'EXPECTED_ORIGINAL_STATUS_REQUIRED');need(report.checks===expected.checks&&report.cases.length===expected.cases,'COMPLETE_CURRENT_CHECK_AND_CASE_COUNTS_REQUIRED');
  const trace=normalizedCurrentTrace(report),shape=trace.map(row=>[row.sourceOrdinal,row.nameOccurrence,row.case,row.assertion,row.assertionOccurrence]);need(hash(JSON.stringify(shape))===expected.traceIdentitySha256,'EXACT_COMPLETE_ASSERTION_OCCURRENCES_REQUIRED');
  const expectedFailed=new Set(expected.exactFailures.map(row=>row.id));need(expectedFailed.size===expected.exactFailures.length,'DUPLICATE_EXPECTATION');
@@ -51,5 +52,6 @@ export function verifyCurrentChildren(role,report,managed,nativePid,{hashFile=fi
   }
   ledger.push({pid:c.processId,parentPid:c.parentPid,exitCode:c.nativeObservedExitCode,finalCleanupOk:c.finalCleanupOk,actualStartupAndFinalBindingsVerified:true});
  }
- return {status:'ALL_CURRENT_OWNED_CHILD_BINDINGS_AND_ASSEMBLIES_VERIFIED',children:ledger,ownedChildren:children.size,receiptOccurrences:collected.length,bindingHashReads,loadedHashReads,allSourceOriginalAndSnapshotGroupsVerified:true};
+ const publicPowerOwnership=managedInputContract==='current105-terminal29-shared-input-power-v1'?verifySharedInputPowerOwners(report,{nativePid,children:[...children.values()]}):null;
+ return {status:'ALL_CURRENT_OWNED_CHILD_BINDINGS_AND_ASSEMBLIES_VERIFIED',children:ledger,ownedChildren:children.size,receiptOccurrences:collected.length,bindingHashReads,loadedHashReads,allSourceOriginalAndSnapshotGroupsVerified:true,...(publicPowerOwnership?{publicPowerOwnership}:{})};
 }

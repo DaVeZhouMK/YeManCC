@@ -31,6 +31,7 @@ struct ContinuationTicket {RequestTicket owner;unsigned slot=0;explicit operator
 struct ObserveCounters {
     unsigned probes=0,loggedProbes=0,unreachableProbes=0;
     std::uint64_t lastLogTick=0;
+    unsigned detailedProbeLogs=0;
 };
 // Retention only. Concrete held process belongs to the original Native owner;
 // the ledger neither calls it nor treats it as power/SDK/resource proof.
@@ -247,6 +248,7 @@ public:
         if(!owns(ticket))return false;
         auto& saved=business_->observations;
         if(value.probes<saved.probes||value.loggedProbes<saved.loggedProbes||value.lastLogTick<saved.lastLogTick||
+           value.detailedProbeLogs<saved.detailedProbeLogs||
            (value.unreachableProbes<saved.unreachableProbes&&!(confirmedReachable&&value.unreachableProbes==0)))return false;
         saved=value;return true;
     }

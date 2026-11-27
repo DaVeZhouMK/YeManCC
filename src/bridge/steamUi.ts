@@ -3,7 +3,7 @@ import { steamRunning } from './yeman';
 export type SteamUiMode = 'desktop' | 'bigpicture' | 'unknown' | 'stopped';
 export interface SteamUiState { known: boolean; running: boolean; mode: SteamUiMode; pid: number; birth: string; reason: string; observedAccount?: number; modeEpoch?: string; }
 interface Dependencies { invoke<T>(cmd: string, args: object, options: { timeoutMs: number; signal?: AbortSignal }): Promise<T>; running(): Promise<boolean>; }
-type SteamUiReadOptions = ({ automatic?: true } | { publishedOnly: true }) & { signal?: AbortSignal };
+type SteamUiReadOptions = ({ automatic?: true; shareNotification?: true } | { publishedOnly: true }) & { signal?: AbortSignal };
 export function validSteamUiState(value: any): value is SteamUiState {
   return !!value && typeof value.known === 'boolean' && typeof value.running === 'boolean'
     && ['desktop','bigpicture','unknown','stopped'].includes(value.mode)
@@ -76,21 +76,42 @@ export function createSteamUi(deps: Dependencies) {
   };
 }
 const service = createSteamUi({ invoke, running: steamRunning });
-const notificationReads = new WeakMap<Event, Promise<SteamUiState>>();
+const notificationReads = new WeakMap<Event, { promise: Promise<SteamUiState>; cancellation: AbortController; readers: number }>();
 let activeNotification: Event | undefined;
 export const steamUi = {
   ...service,
   async read(options?: SteamUiReadOptions): Promise<SteamUiState> {
     // Share only within the synchronous subscribers of this exact dispatch.
     // A later notification, timer, or action confirmation reads independently.
-    if (!options || 'publishedOnly' in options || !options.automatic || options.signal || !activeNotification) return service.read(options);
+    if (!options || 'publishedOnly' in options || !options.automatic || !activeNotification ||
+        (options.signal && !options.shareNotification)) return service.read(options);
     const notification = activeNotification;
+    const signal = options.signal;
+    if (signal?.aborted) throw new Error('IPC request retired: steam.uiState');
     let pending = notificationReads.get(notification);
     if (!pending) {
-      pending = service.read(options);
+      const cancellation = new AbortController();
+      pending = { promise: service.read({ automatic: true, signal: cancellation.signal }), cancellation, readers: 0 };
       notificationReads.set(notification, pending);
     }
-    return { ...await pending };
+    pending.readers++;
+    let abort: (() => void) | undefined;
+    try {
+      if (!signal) return { ...await pending.promise };
+      const stopped = new Promise<never>((_, reject) => {
+        abort = () => reject(new Error('IPC request retired: steam.uiState'));
+        if (signal.aborted) abort();
+        else signal.addEventListener('abort', abort, { once: true });
+      });
+      return { ...await Promise.race([pending.promise, stopped]) };
+    } finally {
+      if (abort) signal?.removeEventListener('abort', abort);
+      // One retiring consumer cannot cancel another observer's shared read.
+      if (--pending.readers === 0 && signal?.aborted && notificationReads.get(notification) === pending) {
+        notificationReads.delete(notification);
+        pending.cancellation.abort();
+      }
+    }
   },
   subscribe(handler: (published?: SteamUiState) => void, options?: { publishedMediaState: true }): () => void {
     return on<{mediaStateV1?: unknown}>('steam.uiStateChanged', (data, notification) => {

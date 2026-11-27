@@ -2,11 +2,13 @@
 #pragma once
 #include <array>
 #include <limits>
+#include <map>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include "json.hpp"
 #include "custom_steam_library_paths.h"
 
@@ -132,6 +134,102 @@ inline Json recover(const Json& primary, const Json& backup, bool isLibrary) {
     }
     return normalize(std::move(merged),isLibrary);
 }
+// Fill unset static slots in a split record. Do not promote an alias's IDs
+// or launch settings, or guess between multiple artwork-bearing aliases.
+template<class ToWide, class ToUtf8>
+Json projectLegacyArtworkSlots(Json document, ToWide toWide, ToUtf8 toUtf8) {
+    if (!document.is_object()) return document;
+    const auto items = document.find("items");
+    if (items == document.end() || !items->is_object()) return document;
+    constexpr auto slots = std::array{"cover", "long", "wallpaper"};
+    const auto protection = [](const Json& record, const char* slot) -> const Json* {
+        const auto policies = record.find("artworkProtection");
+        if (policies == record.end() || !policies->is_object()) return nullptr;
+        const auto value = policies->find(slot);
+        return value == policies->end() ? nullptr : &*value;
+    };
+    std::map<std::string, const Json*> aliases;
+    for (const auto& [spelling, record] : items->items()) {
+        if (!record.is_object()) continue;
+        bool hasArtwork = false;
+        for (const auto* slot : slots) hasArtwork |= record.contains(slot) || protection(record, slot) != nullptr;
+        if (!hasArtwork) continue;
+        auto path = fs::path(toWide(spelling));
+        if (!path.is_absolute()) continue;
+        auto folded = path.make_preferred().native();
+        if (!folded.empty()) CharLowerBuffW(folded.data(), static_cast<DWORD>(folded.size()));
+        auto key = toUtf8(folded);
+        if (spelling == key || !items->contains(key)) continue;
+        const auto [donor, inserted] = aliases.try_emplace(std::move(key), &record);
+        if (!inserted) donor->second = nullptr;
+    }
+    for (const auto& [key, donor] : aliases) {
+        auto& saved = (*items)[key];
+        if (!donor || !saved.is_object()) continue;
+        for (const auto* slot : slots) {
+            const bool wallpaper = std::string_view(slot) == "wallpaper";
+            if (saved.contains(slot) || protection(saved, slot) || (wallpaper && saved.contains("wallpaperSourceRevision"))) continue;
+            const auto policy = protection(*donor, slot);
+            const auto asset = donor->find(slot);
+            if (asset != donor->end() && asset->is_object() && (!policy || *policy != "deleted")) saved[slot] = *asset;
+            if (policy && (*policy == "manual" || *policy == "deleted")) {
+                auto& policies = saved["artworkProtection"];
+                if (!policies.is_object()) policies = Json::object();
+                policies[slot] = *policy;
+            }
+            if (wallpaper && (saved.contains(slot) || protection(saved, slot)) && donor->contains("wallpaperSourceRevision"))
+                saved["wallpaperSourceRevision"] = (*donor)["wallpaperSourceRevision"];
+        }
+    }
+    return document;
+}
+inline const char* staticArtworkSlot(std::string_view type) {
+    return type == "tall" ? "cover" : type == "long" ? "long" : type == "hero" ? "wallpaper" : nullptr;
+}
+
+inline bool manualArtworkRecoveryMatchesSelection(const Json& row, const Json& manual, std::string_view type,
+                                                  bool projectedPreview = false) {
+    const auto* slot = staticArtworkSlot(type);
+    if (!slot || !row.is_object() || !manual.is_object()) return false;
+    const auto provider = row.find("provider"), previewOnly = row.find("previewOnlyManualFallback");
+    const auto receipt = row.find("manualRecovery"), selected = manual.find(slot);
+    if (provider == row.end() || *provider != "manual-override" || (previewOnly != row.end() && *previewOnly == true) ||
+        receipt == row.end() || !receipt->is_object() || selected == manual.end() || !selected->is_object()) return false;
+    const auto policy = manual.find("artworkProtection");
+    if (policy != manual.end() && policy->is_object()) {
+        const auto value = policy->find(slot);
+        if (value != policy->end() && *value == "deleted") return false;
+    }
+    for (const auto* name : {"file", "portableFile"}) {
+        const auto path = receipt->find(name), configured = selected->find(name);
+        if (path == receipt->end() || !text(*path) || path->get_ref<const std::string&>().empty() ||
+            configured == selected->end() || *configured != *path) return false;
+        if (!projectedPreview && std::string_view(name) == "file") {
+            const auto original = row.find("file");
+            if (original == row.end() || *original != *path) return false;
+        }
+    }
+    const auto version = receipt->find("updatedAt"), current = selected->find("updatedAt");
+    return version == receipt->end() ? current == selected->end() : current != selected->end() && *version == *current;
+}
+
+inline bool hasManualArtworkPreviewSource(const Json& manual, const std::string& type) {
+    const auto* slot = staticArtworkSlot(type);
+    if (!slot || !manual.is_object()) return false;
+    const auto policy = manual.find("artworkProtection");
+    if (policy != manual.end() && policy->is_object()) {
+        const auto value = policy->find(slot);
+        if (value != policy->end() && *value == "deleted") return false;
+    }
+    const auto source = manual.find(slot);
+    if (source == manual.end() || !source->is_object()) return false;
+    for (const auto* field : {"portableFile", "file"}) {
+        const auto path = source->find(field);
+        if (path != source->end() && path->is_string() && !path->get_ref<const std::string&>().empty()) return true;
+    }
+    return false;
+}
+
 inline Json delta(const Json& current, const Json& baseline, const Json& submitted) {
     if (baseline == submitted) return current;
     if (baseline.is_object() && submitted.is_object() && current.is_object()) {

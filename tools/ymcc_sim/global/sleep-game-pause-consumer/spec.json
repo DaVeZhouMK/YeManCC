@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "originalScript": {
     "path": "tools/sleep_game_pause_selftest.py",
-    "sha256": "e53e7010bf5a19530f28fa40e1889c89082c60cee33cdebdcc1625a3ec11d17b",
+    "sha256": "5d5e99a714b54664c67ef6468e00587d1dde3e5da544435bcf889d8510ece005",
     "priorReviewedSha256": "f6d27eda0fbdd13504fad37b010b853e9d8e3b4eabc3926d7a6a1fbc67ae7b46",
     "priorReviewedEventContractSha256": "79cca43d2a39f455fea9635321a8a5738d235f531cfa414225eb14b729620808"
   },
@@ -113,12 +113,13 @@
     "native/sleep_timeout_native.inc",
     "native/sleep_kernel_cycle.h",
     "tools/sleep-steam-export-guard.ps1",
-    "tools/sleep_steam_only_selftest.py"
+    "tools/sleep_steam_only_selftest.py",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-maintenance-public-delivery.json"
   ],
   "privateFault": {
     "path": "native/main.cpp",
-    "before": "nativeProcessCreatedFromHandle(process) == target.processCreated &&",
-    "after": "(nativeProcessCreatedFromHandle(process) == target.processCreated || true) &&",
+    "before": "            nativeProcessCreatedFromHandle(process) == target.processCreated &&\r\n            markerCurrent() &&",
+    "after": "            (nativeProcessCreatedFromHandle(process) == target.processCreated || true) &&\r\n            markerCurrent() &&",
     "expectedAssertion": "swapped.count==0&&resumeCalls==0",
     "scope": "Private exact main opened-handle PID birth admission made always true while its original static source substring remains present. Must compile/start and fail the original PID-reuse race assertion."
   },
@@ -192,11 +193,11 @@
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
-      "sha256": "b82c1b62fa2ed9bfea3ae5e7170d921ea9d3c626c6db759df94a6805113f6192"
+      "sha256": "7bf29e5ebb68f01a385757982b0b63b7be2f422d023108c853d9dab25dd2cd37"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
-      "sha256": "15d5bc0ebb5b0e6791a5822abf7eeed131b7724444835a8662189b73bd67c476"
+      "sha256": "bfd5a530a9080c46dadb490388588746557e10fe55defb4f9b51dbd18af65f4d"
     },
     {
       "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/sitecustomize.py",
@@ -678,10 +679,14 @@
   },
   "observerContextCompatibilityReview": {
     "manifest": "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context-current.json",
-    "sha256": "0263bb3bd398c969564588d3580439f7f36041f83804d31eb48b528278603a0e"
+    "sha256": "8c1c8e804ce0485b915645cfd0dc686f4bbd19540b547173aa09c5b5249fe762"
   },
   "sourceSuccessorCompatibilityReview": {
     "manifest": "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-maintenance-source-successor.json",
     "sha256": "fa1d70309e12dab3ceb441c1ecce3678b82ac68310161ed479fe980dfb2d20d0"
+  },
+  "publicDeliveryCompatibilityReview": {
+    "manifest": "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-maintenance-public-delivery.json",
+    "sha256": "cc001149d64007f91d50ecbea92cd0036fc05faaf9f515caa148da2391025ec0"
   }
 }

@@ -74,6 +74,8 @@ inline Json diagnostic(const steamsession::Session& session,const Json& mode) {
     if(object&&backendState!=mode.end()&&backendState->is_string()&&deckyfrontend::backendState(backendState->get_ref<const std::string&>()))result["deckyBackendState"]=*backendState;
     const auto clientState=mode.find("deckyClientState");
     if(object&&clientState!=mode.end()&&clientState->is_string()&&deckyfrontend::clientState(clientState->get_ref<const std::string&>()))result["deckyClientState"]=*clientState;
+    const auto qamPanelState=mode.find("deckyQamPanelState");
+    if(identity&&ui=="bigpicture"&&qamPanelState!=mode.end()&&qamPanelState->is_string()&&deckyfrontend::qamPanelState(qamPanelState->get_ref<const std::string&>()))result["deckyQamPanelState"]=*qamPanelState;
     // Describe only an already-returned busy result; no retry or action authority.
     const auto busyReason=mode.find("reason");
     if(object&&busyReason!=mode.end()&&busyReason->is_string()&&busyReason->get_ref<const std::string&>()=="live-busy"){

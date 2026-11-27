@@ -113,7 +113,8 @@ export function hasSafeSourceFanRelease(remote: FanState, expectedGeneration?: n
   if (!hasRetiredSourceFanResources(remote, expectedGeneration) || remote.unknownState !== false) return false;
   if (remote.hardwareWritesObserved === false) return true;
   const claim = remote.recoveryClaimEvidence as Record<string, unknown>;
-  return remote.sourceFanAutomaticReturned === true
-    && claim.oemReleaseActionKind === 'proven-by-source-auto-register-and-terminal-close'
-    && claim.oemReleaseActionClass === 'release-action-proven';
+  return claim.oemReleaseActionClass === 'release-action-proven'
+    && (remote.sourceFanAutomaticReturned === true
+      ? claim.oemReleaseActionKind === 'proven-by-source-auto-register-and-terminal-close'
+      : claim.oemReleaseActionKind === 'proven-by-source-duty-zero-commands-and-terminal-close');
 }

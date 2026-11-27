@@ -10,17 +10,31 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <utility>
 #include <vector>
 #include "sensor_thread_mailbox.h"
 #include "sleep_power_dispatch.h"
 #include "input_host_shared_power.h"
 using json=nlohmann::json;
-static constexpr bool hasRepair=@@REPAIR_DEFINED@@;
+#define FIXTURE_REPAIR_AVAILABLE @@REPAIR_DEFINED@@
+static constexpr bool hasRepair=FIXTURE_REPAIR_AVAILABLE;
 static constexpr bool hasLiveCommand=@@LIVE_COMMAND@@;
 @@POWER_ENUM@@
 @@MESSAGES@@
 @@GLOBALS@@
 @@SENSOR_ACTIVE_POWER@@
+static std::function<void()> afterRecoveryRequestClear; // Window thread only.
+template<class T> struct FixtureRecoveryRequestCell {
+ std::atomic<T> cell;
+ T load(std::memory_order order=std::memory_order_seq_cst) const noexcept{return cell.load(order);}
+ void store(T value,std::memory_order order=std::memory_order_seq_cst) noexcept{cell.store(std::move(value),order);}
+ bool compare_exchange_strong(T& expected,T desired,std::memory_order order){
+  const bool clearing=!desired;
+  const bool replaced=cell.compare_exchange_strong(expected,std::move(desired),order);
+  if(replaced&&clearing){auto next=std::exchange(afterRecoveryRequestClear,{});if(next)next();}
+  return replaced;
+ }
+};
 @@RECOVERY_GLOBALS@@
 static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
 static ymcc::sleeppower::RevocationMirrors g_sharedPowerRevocations;
@@ -192,6 +206,14 @@ static int __cdecl readSharedSystemPower(ymcc::sleeppower::SharedPowerV1* output
 }
 static void fixtureCompletePublicNotification(ULONG type){
  const auto receipt=g_sleepPowerDispatch.window(type,GetTickCount64());g_sleepPowerDispatch.complete(receipt,GetTickCount64());
+ for(unsigned i=0;i<4&&g_sleepPowerDispatch.hasPending();++i){
+  const auto pending=g_sleepPowerDispatch.pendingReplay();
+  if(!pending)throw std::runtime_error("active delivery crossed sensor notification setup");
+  const auto delivered=g_sleepPowerDispatch.forwarded(pending.sequence,pending.type,GetTickCount64());
+  if(!delivered)throw std::runtime_error("retained sensor notification cannot be delivered");
+  g_sleepPowerDispatch.complete(delivered,GetTickCount64());
+ }
+ if(g_sleepPowerDispatch.hasPending()||g_sleepPowerDispatch.pendingSuspend())throw std::runtime_error("unfinished sensor notification setup");
 }
 static auto fixtureSensorPublicScope(){
  return ymcc::inputHost::sharedPower::Scope::create(&readSharedSystemPower,g_sharedPowerRevocations,true,ymcc::inputHost::sharedPower::Use::Lifecycle);
@@ -233,6 +255,7 @@ static void fixtureActualInitPower(){
 @@RECOVER@@
 @@ARM@@
 static void sleepPowerRedeliverCommitted(HWND){++independentProjection;}
+@@OWNER_EVENT_REPLAY@@
 static LRESULT CALLBACK windowProc(HWND h,UINT m,WPARAM w,LPARAM l){
  @@WINDOW_INGRESS@@
  if(m==kSharedPowerStateMessage){@@SHARED_RECOVER@@return 0;}
@@ -261,6 +284,14 @@ template<class F>static bool postReason(F post,SensorThreadRequest request,unsig
 static unsigned assertions=0;
 static void check(bool ok,const char* message){++assertions;if(!ok)throw std::runtime_error(message);}
 static void tick(){SendMessageW(g_hwnd,WM_TIMER,kSleepPowerRedeliveryTimer,0);}
+// WM_TIMER also drives business recovery; some cases assert transport alone.
+static void repairOriginalSignal(){
+#if FIXTURE_REPAIR_AVAILABLE
+ inputCaptureSensorThreadRetryPowerWake(g_hwnd);
+#else
+ tick();
+#endif
+}
 static void release(){::SetEvent(pumpRelease);}
 static void start(){check(inputCaptureSensorThreadEnsure(),"actual Ensure accepted");check(::WaitForSingleObject(pumpEntered,2500)==WAIT_OBJECT_0,"actual STA entered terminal gate");}
 static unsigned resourcesReturned=0;
@@ -310,7 +341,17 @@ int main(int argc,char** argv){
  cases.emplace_back("repeat-wake-failure-keeps-ticket",[]{start();failedSignals=2;inputCaptureResumeSensorsForPower();const auto ticket=debt();tick();check(debt()==ticket&&ticket!=nullptr,"retry keeps identical queue ticket");check(queuedCount()==1&&g_sleepPowerRedeliveryArmed,"retry re-arms existing timer without submit");release();tick();until([]{return completedCount()==1;});check(signalAttempts==3&&resumeCalls==1,"only original wake event retried");});
  cases.emplace_back("later-signal-covers-fifo",[]{start();failedSignals=1;check(inputCaptureSensorThreadPostPower(SensorThreadRequest::Resume),"first admission accepted");check(inputCaptureSensorThreadPostPower(SensorThreadRequest::Suspended),"second admission accepted");check(!debt(),"one later successful signal covers older FIFO work");release();until([]{return completedCount()==2;});tick();check(signalAttempts==2,"no obsolete wake retry");std::lock_guard<std::mutex> lock(logMx);check(completed[0]["request"]==static_cast<UINT32>(SensorThreadRequest::Resume)&&completed[1]["request"]==static_cast<UINT32>(SensorThreadRequest::Suspended),"real FIFO completion order preserved");});
  cases.emplace_back("completed-ticket-does-not-replay",[]{start();failedSignals=1;inputCaptureResumeSensorsForPower();const auto ticket=debt();actualSetEvent(g_sensorThreadWake);release();until([&]{return inspect(g_sensorThreadMailbox,ticket)==ymcc::sensors::ThreadMailbox::Result::Completed;});const auto before=signalAttempts.load();tick();check(!debt()&&signalAttempts==before,"terminal completion releases only transport progress");check(resumeCalls==1,"terminal command not replayed");});
- cases.emplace_back("failed-command-remains-failed",[]{start();failedSignals=1;throwResume=true;inputCaptureResumeSensorsForPower();const auto ticket=debt();actualSetEvent(g_sensorThreadWake);release();until([&]{return inspect(g_sensorThreadMailbox,ticket)==ymcc::sensors::ThreadMailbox::Result::Failed;});tick();check(!debt()&&signalAttempts==1,"failed command never converted to transport retry");check(g_sensorThreadMailbox.acceptsWork(),"command failure does not close healthy STA");check(inputCaptureSensorThreadPostPower(SensorThreadRequest::Resume),"fresh explicit command accepted");until([]{return completedCount()==2;});check(resumeCalls==2&&subscribed==1,"fresh explicit command self heals");});
+ cases.emplace_back("failed-command-remains-failed",[]{
+  start();failedSignals=1;throwResume=true;inputCaptureResumeSensorsForPower();
+  const auto ticket=debt();actualSetEvent(g_sensorThreadWake);release();awaitFailed(ticket);
+  repairOriginalSignal();
+  check(!debt()&&signalAttempts==1,"failed command never converted to transport retry");
+  check(g_sensorThreadMailbox.acceptsWork(),"command failure does not close healthy STA");
+  check(inputCaptureSensorThreadPostPower(SensorThreadRequest::Resume),"fresh explicit command accepted");
+  until([]{return completedCount()==2;});
+  check(resumeCalls==2&&subscribed==1,"fresh explicit command self heals");
+  check(inspect(g_sensorThreadMailbox,ticket)==ymcc::sensors::ThreadMailbox::Result::Failed,"original ticket remains terminal after explicit recovery");
+ });
  cases.emplace_back("admission-refusal-reasons",[]{
   const char* reason="previous";
   check(!postReason(&inputCaptureSensorThreadPostPower,SensorThreadRequest::Suspended,0,nullptr,&reason)&&
@@ -353,12 +394,24 @@ int main(int argc,char** argv){
   actualSetEvent(g_sensorThreadWake); // Complete the fixture-owned Shutdown submission transport.
   check(::WaitForSingleObject(g_sensorThread,2500)==WAIT_OBJECT_0,"owned STA naturally completes the controlled original Shutdown");
  });
- cases.emplace_back("pump-exit-settles-accepted-work",[]{start();failedSignals=1;inputCaptureResumeSensorsForPower();const auto ticket=debt();failPump=true;release();check(::WaitForSingleObject(g_sensorThread,2500)==WAIT_OBJECT_0,"actual failed pump returns thread");check(inspect(g_sensorThreadMailbox,ticket)==ymcc::sensors::ThreadMailbox::Result::Exited,"unstarted request has actual Exited fact");const auto oldThread=g_sensorThread;tick();check(!debt()&&g_sensorThread==oldThread&&signalAttempts==1,"retry does not revive exited owner");check(inputCaptureSensorThreadEnsure(),"Ensure alone reaps exited owner and opens new STA");inputCaptureResumeSensorsForPower(true);until([]{return completedCount()==1;});check(resumeCalls==1&&subscribed==1,"new explicit current Resume heals after pump exit");});
- cases.emplace_back("com-init-exit-settles-accepted-work",[]{failCom=true;start();failedSignals=1;inputCaptureResumeSensorsForPower();const auto ticket=debt();release();check(::WaitForSingleObject(g_sensorThread,2500)==WAIT_OBJECT_0,"failed initialization returns actual thread");check(inspect(g_sensorThreadMailbox,ticket)==ymcc::sensors::ThreadMailbox::Result::Exited,"queued request after early failure is Exited");tick();check(!debt()&&comInitializations==0,"no invented COM completion");check(inputCaptureSensorThreadEnsure(),"explicit Ensure reopens after actual exit");inputCaptureResumeSensorsForPower(true);until([]{return completedCount()==1;});check(subscribed==1,"fresh explicit Resume after early initialization exit");});
+ cases.emplace_back("pump-exit-settles-accepted-work",[]{start();failedSignals=1;inputCaptureResumeSensorsForPower();const auto ticket=debt();failPump=true;release();check(::WaitForSingleObject(g_sensorThread,2500)==WAIT_OBJECT_0,"actual failed pump returns thread");check(inspect(g_sensorThreadMailbox,ticket)==ymcc::sensors::ThreadMailbox::Result::Exited,"unstarted request has actual Exited fact");const auto oldThread=g_sensorThread;repairOriginalSignal();check(!debt()&&g_sensorThread==oldThread&&signalAttempts==1,"retry does not revive exited owner");check(inputCaptureSensorThreadEnsure(),"Ensure alone reaps exited owner and opens new STA");inputCaptureResumeSensorsForPower(true);until([]{return completedCount()==1;});check(resumeCalls==1&&subscribed==1,"new explicit current Resume heals after pump exit");});
+ cases.emplace_back("com-init-exit-settles-accepted-work",[]{failCom=true;start();failedSignals=1;inputCaptureResumeSensorsForPower();const auto ticket=debt();release();check(::WaitForSingleObject(g_sensorThread,2500)==WAIT_OBJECT_0,"failed initialization returns actual thread");check(inspect(g_sensorThreadMailbox,ticket)==ymcc::sensors::ThreadMailbox::Result::Exited,"queued request after early failure is Exited");repairOriginalSignal();check(!debt()&&comInitializations==0,"no invented COM completion");check(inputCaptureSensorThreadEnsure(),"explicit Ensure reopens after actual exit");inputCaptureResumeSensorsForPower(true);until([]{return completedCount()==1;});check(subscribed==1,"fresh explicit Resume after early initialization exit");});
  cases.emplace_back("unknown-wait-retains-owner",[]{start();failedSignals=1;inputCaptureResumeSensorsForPower();const auto ticket=debt();const auto thread=g_sensorThread,wake=g_sensorThreadWake;failThreadWait=true;tick();check(debt()==ticket&&g_sensorThread==thread&&g_sensorThreadWake==wake&&signalAttempts==1,"unknown wait never replaces or signals borrowed owner");check(!inputCaptureSensorThreadEnsure(),"actual Ensure rejects unknown wait");failThreadWait=false;release();check(inputCaptureSensorThreadPostPower(SensorThreadRequest::Resubscribe),"fresh signal can deliver existing FIFO");until([]{return completedCount()>=1&&resumeCalls>=2;});check(!debt()&&subscribed==1,"later valid owner signal clears transport debt");});
  cases.emplace_back("diagnostic-failure-preserves-admission",[]{start();throwQueuedLog=true;inputCaptureResumeSensorsForPower();check(!g_inputCaptureSensorsSuspended&&queuedCount()==1,"throwing diagnostic cannot reject accepted work");check(loggerUnlocked==1,"diagnostics execute outside lifetime mutex");check(arms==0,"healthy transport never arms repair timer");release();until([]{return completedCount()==1;});check(resumeCalls==1,"diagnostic failure does not duplicate command");});
  cases.emplace_back("power-blocks-then-new-resume",[]{start();g_powerLifecycle=PowerLifecycle::Suspended;inputCaptureResumeSensorsForPower();g_powerLifecycle=PowerLifecycle::Ready;g_idleSessionDisplayState=0;inputCaptureResumeSensorsForPower();check(queuedCount()==0&&g_inputCaptureSensorsSuspended,"actual power/display predicates reject stale Resume");g_idleSessionDisplayState=1;inputCaptureResumeSensorsForPower();release();until([]{return completedCount()==1;});check(queuedCount()==1&&subscribed==1,"new admitted current Resume continues");});
- cases.emplace_back("suspend-truncates-queued-resume",[]{start();failedSignals=1;inputCaptureResumeSensorsForPower();inputCaptureSuspendSensorsForPower();release();until([]{return completedCount()==2;});check(subscribed==0&&g_inputCaptureSensorsSuspended,"later suspend prevents stale queued Resume from subscribing");check(resumeCalls==1&&!debt(),"FIFO retains one Resume and later pause");});
+ cases.emplace_back("suspend-truncates-queued-resume",[]{
+  start();failedSignals=1;inputCaptureResumeSensorsForPower();const auto ticket=debt();
+  inputCaptureSuspendSensorsForPower();release();until([]{return completedCount()==2;});
+  check(subscribed==0&&g_inputCaptureSensorsSuspended,"later suspend prevents stale queued Resume from subscribing");
+  if constexpr(hasLiveCommand){
+   check(inspect(g_sensorThreadMailbox,ticket)==ymcc::sensors::ThreadMailbox::Result::Failed&&resumeCalls==0,
+     "revoked Resume finishes without entering the provider");
+   std::lock_guard<std::mutex> lock(logMx);
+   check(completed[0]["request"]==static_cast<UINT32>(SensorThreadRequest::Resume)&&
+         completed[1]["request"]==static_cast<UINT32>(SensorThreadRequest::Suspended)&&
+         completed[1]["commandSucceeded"]==true&&!debt(),"FIFO settles its revoked Resume before a successful pause");
+  }else check(resumeCalls==1&&!debt(),"FIFO retains one Resume and later pause");
+ });
  cases.emplace_back("inspect-is-read-only-and-owned",[]{using M=ymcc::sensors::ThreadMailbox;M a,b;a.open();b.open();const auto t=a.submit(SensorThreadRequest::Resume);for(unsigned i=0;i<1001;++i)check(inspect(a,t)==M::Result::Pending,"inspect observes Pending");check(a.acceptsWork(),"read-only inspect cannot quarantine admission");check(inspect(b,t)==M::Result::Unavailable,"foreign ticket rejected");const auto active=a.take();a.complete(active,false);check(inspect(a,t)==M::Result::Failed,"inspect keeps actual Failed");const auto pending=a.submit(SensorThreadRequest::Resume);a.close();check(inspect(a,pending)==M::Result::Exited,"inspect keeps actual Exited");});
  cases.emplace_back("real-sta-message-dispatch",[]{start();check(staWindow!=nullptr&&staThreadId!=GetCurrentThreadId(),"actual apartment has own message window/thread");check(PostMessageW(staWindow,WM_APP+1,0,0)!=FALSE,"actual message queued on STA window");inputCaptureResumeSensorsForPower();release();until([]{return staMessages==1&&completedCount()==1;});check(comInitializations==1&&comReturns==0,"actual STA remains owned until Shutdown");});
  cases.emplace_back("notification-order-retains-current-resume",[]{start();g_sleepPowerDispatch.callback(PBT_APMQUERYSUSPEND,1,[](const auto&){return false;});g_powerLifecycle=PowerLifecycle::Resuming;inputCaptureResumeSensorsForPower(true);check(queuedCount()==0&&g_inputCaptureSensorsSuspended,"pending ingress blocks forced Resume before UI delivery");g_sleepPowerDispatch.callback(PBT_APMRESUMEAUTOMATIC,2,[](const auto&){return true;});const auto current=g_sleepPowerDispatch.forwarded(2,PBT_APMRESUMEAUTOMATIC);g_sleepPowerDispatch.complete(current,3);check(!g_sleepPowerDispatch.forwarded(1,PBT_APMQUERYSUSPEND),"late old suspend receipt cannot displace current delivery");inputCaptureResumeSensorsForPower(true);release();until([]{return completedCount()==1;});check(queuedCount()==1&&resumeCalls==1&&subscribed==1,"current Resuming admission continues after out-of-order notification");check(arms==0,"successful transport creates no health timer");});
@@ -441,6 +494,7 @@ int main(int argc,char** argv){
   release();fixtureActualInitPower();
   check(g_inputCaptureSensorsSuspended&&subscribed==0&&resumeCalls==0,"pending public notification blocks actual cold Start and follow-up Resume");
   fixtureCompletePublicNotification(PBT_APMRESUMEAUTOMATIC);
+  check(!g_sleepPowerDispatch.pendingSuspend()&&!g_sleepPowerDispatch.hasPending(),"ordered Suspend and Resume finish before the next public scope");
  });
  cases.emplace_back("public-same-generation-suspend-serial-retires-queued-resume",[]{
   start();failedSignals=1;inputCaptureResumeSensorsForPower();const auto ticket=debt();const auto old=g_sensorActivePower.load();
@@ -527,6 +581,67 @@ int main(int argc,char** argv){
   until([]{return completedCount()==1;});
   check(g_inputCaptureReady&&subscribed==1&&resumeCalls==1,"original post-init Resume catches the Ready delivered before optional initialization completed");
   check(threadsCreated==1&&!g_inputCaptureSensorsSuspended,"catch-up uses the original STA and current public scope");
+ });
+ cases.emplace_back("public-new-suspend-boundary-renews-one-sensor-attempt",[]{
+  const auto generation=fixturePower.load();
+  failCom=true;start();inputCaptureResumeSensorsForPower();release();
+  check(::WaitForSingleObject(g_sensorThread,2500)==WAIT_OBJECT_0,"first rejected STA returns");
+  failCom=true;SendMessageW(g_hwnd,kSharedPowerStateMessage,0,0);
+  check(::WaitForSingleObject(g_sensorThread,2500)==WAIT_OBJECT_0,"same-boundary replacement also returns");
+  ++fixturePublicPublication;SendMessageW(g_hwnd,kSharedPowerStateMessage,0,0);
+  check(threadsCreated==2&&recoveryPending()==0,"publication alone does not refund a spent attempt");
+
+  g_powerLifecycle=PowerLifecycle::Suspended;++fixturePublicSuspendSerial;g_sharedPowerRevocations.revoke();
+  inputCaptureResumeSensorsForPower();
+  check(threadsCreated==2,"new suspend boundary does not admit sensor work while suspended");
+  g_powerLifecycle=PowerLifecycle::Ready;inputCaptureResumeSensorsForPower();
+  until([]{return completedCount()==1&&subscribed==1;});
+  const auto old=g_sensorThread;
+  failPump=true;actualSetEvent(g_sensorThreadWake);
+  check(::WaitForSingleObject(old,2500)==WAIT_OBJECT_0&&recoveryPending()!=0,"current STA returns and publishes its own failure");
+  SendMessageW(g_hwnd,kSharedPowerStateMessage,0,0);
+  check(fixturePower==generation&&threadsCreated==4,"new suspend boundary receives its own bounded replacement in the same generation");
+  pumpGuiUntil([]{return completedCount()==2&&subscribed==1;});
+  check(comInitializations==2&&recoveryPending()==0,"replacement completes and clears the public recovery request");
+ });
+ cases.emplace_back("public-owner-event-delivers-refused-sensor-recovery-post",[]{
+  check(g_sleepPowerDispatch.openReceiptWake(),"original coordinator event opens");
+  struct CloseReceiptWake {~CloseReceiptWake(){g_sleepPowerDispatch.closeReceiptWake();}} close;
+  const auto wake=g_sleepPowerDispatch.receiptWakeHandle();
+  start();inputCaptureResumeSensorsForPower();failRecoveryPost=true;failPump=true;release();
+  check(::WaitForSingleObject(g_sensorThread,2500)==WAIT_OBJECT_0&&!failRecoveryPost&&recoveryPending()!=0,
+      "failed window post retains its recovery request after the STA returns");
+  check(!g_sharedPowerProjectionPending&&!g_sleepPowerDispatch.hasPending()&&!g_sleepPowerRedeliveryArmed,
+      "sensor receipt is the only outstanding work");
+  check(::WaitForSingleObject(wake,0)==WAIT_OBJECT_0,"refused sensor post wakes the original coordinator event");
+  sleepPowerReplayWindowDelivery(g_hwnd);
+  until([]{return completedCount()==1&&subscribed==1;});
+  check(recoveryPending()==0&&resumeCalls==1&&threadsCreated==2,"original owner replays and retires exactly one sensor recovery");
+  check(::WaitForSingleObject(wake,0)==WAIT_TIMEOUT&&independentProjection==0,
+      "sensor fallback returns the event to idle without sending unrelated power work");
+ });
+ cases.emplace_back("public-retiring-old-sensor-request-preserves-new-same-owner",[]{
+  check(g_sleepPowerDispatch.openReceiptWake(),"original coordinator event opens");
+  struct CloseReceiptWake {~CloseReceiptWake(){g_sleepPowerDispatch.closeReceiptWake();}} close;
+  const auto wake=g_sleepPowerDispatch.receiptWakeHandle();
+  start();failedSignals=1;throwResume=true;inputCaptureResumeSensorsForPower();
+  const auto ticket=debt();actualSetEvent(g_sensorThreadWake);release();awaitFailed(ticket);
+  const auto serial=ownerSerial();const auto originalThread=g_sensorThread;
+  ++fixturePublicSuspendSerial;g_sharedPowerRevocations.revoke();
+  bool interleaved=false;
+  afterRecoveryRequestClear=[&]{
+   failRecoveryPost=true;failPump=true;actualSetEvent(g_sensorThreadWake);
+   interleaved=::WaitForSingleObject(originalThread,1500)==WAIT_OBJECT_0&&!failRecoveryPost&&ownerSerial()==serial;
+  };
+  SendMessageW(g_hwnd,kSharedPowerStateMessage,0,0);
+  afterRecoveryRequestClear={};
+  check(interleaved,"same STA publishes its exit request while old pointer retirement is in progress");
+  check(recoveryPending()!=0,"retiring the stale request must not clear the same STA's new pending request");
+  check(::WaitForSingleObject(wake,0)==WAIT_OBJECT_0,"the current request remains deliverable through the shared event");
+  sleepPowerReplayWindowDelivery(g_hwnd);
+  until([]{return completedCount()==2&&subscribed==1;});
+  check(threadsCreated==2&&recoveryPending()==0&&inspect(g_sensorThreadMailbox,ticket)==ymcc::sensors::ThreadMailbox::Result::Failed,
+      "replacement settles once and preserves the old failed ticket");
  });
  if(argc>2){DestroyWindow(g_hwnd);return 2;}const std::string argument=argc==2?argv[1]:"";const bool suffix=argument.starts_with("from:");const auto selected=suffix?argument.substr(5):argument;if(argc==2&&std::none_of(cases.begin(),cases.end(),[&](const auto& c){return c.first==selected;})){DestroyWindow(g_hwnd);return 2;}
  json names=json::array(),failures=json::array();bool suffixReached=false;for(const auto& c:cases){if(c.first==selected)suffixReached=true;if(argc==2&&!(suffix?suffixReached:c.first==selected))continue;try{WorkerScope worker;c.second();names.push_back(c.first);}catch(const std::exception& e){names.push_back(c.first);failures.push_back({{"case",c.first},{"message",e.what()}});break;}}

@@ -51,19 +51,28 @@ def need(ok, message):
 
 
 TOOL_INPUTS = 'tools/ymcc_sim/global/controller-signal-evidence/tool-inputs.json'
+TOOL_ADAPTER = 'tools/ymcc_sim/global/controller-signal-evidence/adapter.mjs'
+TOOL_PROFILE = 'tools/ymcc_sim/global/controller-host-exit/tool-profile.json'
 TOOL_PROBE = 'tools/ymcc_sim/global/controller-signal-evidence/tool-probe.cpp'
 
 
 def primary_tools():
-    extra = json.loads((ROOT/TOOL_INPUTS).read_text(encoding='utf-8-sig'))
-    authority_bytes = (ROOT/extra['nativeAuthority']).read_bytes()
-    need(sha(authority_bytes) == extra['nativeAuthoritySha256'], 'SENSOR_NATIVE_TOOL_DECLARATION_CHANGED')
-    authority = json.loads(authority_bytes)
-    native = authority['native']
-    primary = {**extra['primary'], 'python': extra['python'], 'compiler': native['compiler'],
-               'linker': native['linker'], 'dumpbin': native['dumpbin'],
-               'commandProcessor': native['commandProcessor'], 'vcvars': str(VCVARS)}
-    pins = {str(Path(row['path']).resolve()).lower(): row['sha256'] for row in [*authority['files'], *extra['files']]}
+    supplement = (ROOT/TOOL_INPUTS).read_bytes()
+    profile = json.loads((ROOT/TOOL_PROFILE).read_bytes())
+    need(sha(supplement) == profile['supplementSha256'], 'SENSOR_TOOL_SUPPLEMENT_CHANGED')
+    extra = json.loads(supplement)
+    node = Path(extra['primary']['node'])
+    node_pin = next(row['sha256'] for row in extra['files'] if row['path'] == str(node))
+    need(node.is_absolute() and node.resolve() == node and sha(node.read_bytes()) == node_pin, 'SENSOR_PRIMARY_TOOL_IDENTITY:node')
+    env = {key: value for key, value in os.environ.items() if not key.upper().startswith('NODE_')}
+    call = f"import {{toolInputs}} from './{TOOL_ADAPTER}'; console.log(JSON.stringify(toolInputs()));"
+    tool_probe = subprocess.run([str(node), '--input-type=module', '--eval', call], cwd=ROOT, env=env,
+                                capture_output=True, timeout=30, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    need(tool_probe.returncode == 0, 'SENSOR_CURRENT_TOOL_PROFILE: '+tool_probe.stderr.decode('utf-8', errors='replace'))
+    authority = json.loads(tool_probe.stdout)
+    primary = authority['primary']
+    need(Path(primary['vcvars']) == VCVARS, 'SENSOR_VCVARS_IDENTITY')
+    pins = {str(Path(row['path']).resolve()).lower(): row['sha256'] for row in authority['files']}
     observed = []
     for role, name in primary.items():
         path = Path(name)
@@ -241,9 +250,13 @@ def main():
             if re.search(r'g_(?:msiSensorApi|hcWindowsSensorApi)Provider\.(?:start|stop|running|stopped)\(|sensorapi_inventory::Census::', line):
                 consumers.append({'line': number, 'source': line.strip()})
         result['mainConsumers'] = {'execution': 'source-only callsite inventory; main.cpp not built/executed', 'calls': consumers}
+        for source in (TOOL_INPUTS, TOOL_ADAPTER, TOOL_PROFILE, TOOL_PROFILE.replace('.json', '.mjs'),
+                       TOOL_ADAPTER.replace('adapter.mjs', 'owner-receipts.mjs'),
+                       TOOL_ADAPTER.replace('adapter.mjs', 'consumer-schema.json'),
+                       json.loads((ROOT/TOOL_INPUTS).read_bytes())['nativeAuthority']):
+            freeze(source)
         primary, observed, authority = primary_tools()
         result['primaryToolsBefore'] = observed
-        freeze(TOOL_INPUTS); freeze(json.loads((ROOT/TOOL_INPUTS).read_text())['nativeAuthority'])
         compiler, env = compiler_environment(run)
         code, text, _ = execute([primary['git'], 'rev-parse', 'HEAD'], ROOT, env, run/'git-head.log', 10)
         need(code == 0 and re.fullmatch(r'[a-f0-9]{40,64}', text.strip()), 'SENSOR_GIT_HEAD_PROBE_FAILED')

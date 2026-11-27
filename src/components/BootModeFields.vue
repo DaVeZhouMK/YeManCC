@@ -11,7 +11,7 @@ import { cloneBootValue, type BootConfig, type BootModeModule, type BootDeviceCa
 import { STEAM_APPEARANCE_THEMES } from '@/bridge/steamAppearance';
 import { switchMonitorHudTemplate } from '@/bridge/monitorHudModel';
 import { screenTouchpadProfile } from '@/bridge/screenTouchpads';
-import { gyroMotionParamsForPreset, isGyroPresetKey } from '@/bridge/gyroPresetModel';
+import { gyroMotionParamsForPreset, isGyroPresetKey, isSteamControlledGyro } from '@/bridge/gyroPresetModel';
 const props = defineProps<{
     module: BootModeModule;
     value: BootConfig;
@@ -27,9 +27,15 @@ const emit = defineEmits<{
     (event: 'change', value: BootConfig): void;
     (event: 'shared-apps'): void;
 }>();
-const data = computed<any>(() => props.module === 'performance'
-    ? { ...props.value, controls: normalizeContinuousControls(props.value.controls) }
-    : props.module === 'gyro' ? { ...props.value, motion: { ...(props.value.motion as Record<string, unknown> || {}) } } : props.value);
+const data = computed<any>(() => {
+    if (props.module === 'performance') return { ...props.value, controls: normalizeContinuousControls(props.value.controls) };
+    if (props.module !== 'gyro') return props.value;
+    const motion = { ...(props.value.motion as Record<string, unknown> || {}) };
+    const preset = isGyroPresetKey(motion.activePreset) ? motion.activePreset : motion.preset;
+    if (isGyroPresetKey(preset)) Object.assign(motion, { preset, activePreset: preset });
+    if (isSteamControlledGyro(motion)) Object.assign(motion, gyroMotionParamsForPreset('steam', { steam: motion }));
+    return { ...props.value, motion };
+});
 const side = computed(() => powerSide.value);
 const powerSide = ref<'ac' | 'dc'>('ac');
 const performanceManual = computed(() => props.module === 'performance' && data.value.controls?.[side.value]?.mode === 'manual');
@@ -55,7 +61,8 @@ const t = (label: string, path: string): Field => ({ label, path, type: 'toggle'
 function gyroUiMode(motion: any): string { return motion?.motionMode === 'on' && motion?.motionTrigger ? 'suppress' : String(motion?.motionMode || 'on'); }
 function gyroParams(motion: any): Record<string, unknown> {
     const params = cloneBootValue(motion);
-    for (const key of ['enabled', 'virtualPadLink', 'preset', 'presets']) delete params[key];
+    for (const key of ['enabled', 'virtualPadLink', 'preset', 'activePreset', 'presets']) delete params[key];
+    if (isSteamControlledGyro(motion)) return gyroMotionParamsForPreset('steam', { steam: params });
     params.motionMode = gyroUiMode(motion);
     params.motionTrigger = motion.motionTrigger || '';
     return params;
@@ -80,7 +87,7 @@ function set(path: string, value: unknown) {
         if (path === 'motion.preset' && isGyroPresetKey(value)) {
             const presets = { ...before.presets };
             if (isGyroPresetKey(before.preset)) presets[before.preset] = gyroParams(before);
-            next.motion = { ...motion, ...gyroMotionParamsForPreset(value, presets), preset: value, presets };
+            next.motion = { ...motion, ...gyroMotionParamsForPreset(value, presets), preset: value, activePreset: value, presets };
         } else {
             if (path === 'motion.motionMode') {
                 motion.motionMode = value === 'suppress' ? 'on' : value;
@@ -90,6 +97,7 @@ function set(path: string, value: unknown) {
             if (path !== 'motion.enabled' && path !== 'motion.virtualPadLink' && isGyroPresetKey(motion.preset))
                 motion.presets = { ...motion.presets, [motion.preset]: gyroParams(motion) };
         }
+        if (isSteamControlledGyro(next.motion)) Object.assign(next.motion, gyroMotionParamsForPreset('steam', { steam: next.motion }));
     }
     if (props.module === 'gyro' && ((path === 'motion.enabled' && value === true) || (path === 'motion.preset' && isGyroPresetKey(value)))) {
         next.motion.enabled = true;
@@ -124,8 +132,10 @@ const fields = computed<Field[]>(() => {
     if (props.module === 'gyro') {
         const steering = data.value.motion?.motionInput === 'joystick-steering';
         const triggers = [{ value: '', label: '未设置' }, ...options(['LT', 'RT', 'LB', 'RB'])];
-        return [t('开启陀螺仪', 'motion.enabled'), t('虚拟手柄联动', 'motion.virtualPadLink'),
-            s('使用预设', 'motion.preset', [{ value: 'fps', label: 'FPS 射击' }, { value: 'racing', label: '赛车' }, { value: 'custom', label: '自定义' }, { value: 'steam', label: 'Steam' }]),
+        const common = [t('开启陀螺仪', 'motion.enabled'), t('虚拟手柄联动', 'motion.virtualPadLink'),
+            s('使用预设', 'motion.preset', [{ value: 'fps', label: 'FPS 射击' }, { value: 'racing', label: '赛车' }, { value: 'custom', label: '自定义' }, { value: 'steam', label: 'Steam' }])];
+        if (isSteamControlledGyro(data.value.motion)) return common;
+        return [...common,
             s('输入方式', 'motion.motionInput', [{ value: 'local-space', label: '本地空间' }, { value: 'joystick-steering', label: '方向盘倾斜' }, { value: 'player-space', label: '玩家空间' }, { value: 'world-space', label: '世界空间' }]),
             s('触发方式', 'motion.motionMode', [{ value: 'on', label: '常开' }, { value: 'off', label: '按住触发' }, { value: 'suppress', label: '按住抑制' }, { value: 'toggle', label: '切换' }]),
             { ...s('触发键', 'motion.motionTrigger', triggers.filter(item => item.value !== '')), disabled: gyroUiMode(data.value.motion) === 'on' },
@@ -212,6 +222,7 @@ onBeforeUnmount(() => {
   </div>
   </template>
  </div>
+ <p v-if="module==='gyro'&&isSteamControlledGyro(data.motion)" class="boot-field-note">触发与输出交由 Steam 设置，本地映射已关闭。</p>
  <p v-if="module==='display'&&data.brightness==null" class="boot-field-note">当前亮度尚未读取；调整目标值后才会写入草稿。</p>
  <template v-if="module==='softwareLaunch'"><div class="boot-app-list"><Toggle v-for="app in apps" :key="app.path" :model-value="Array.isArray(data.paths)&&data.paths.includes(app.path)" :label="app.name" :disabled="disabled" @update:model-value="toggleApp(app.path)"/></div><button class="boot-action" :disabled="disabled" @click="emit('shared-apps')">管理全局快捷应用</button></template>
  </div>

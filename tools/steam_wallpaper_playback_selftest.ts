@@ -1,12 +1,19 @@
 import {strict as assert} from 'node:assert';
 import {WallpaperPlayers} from '../decky-plugin/src/wallpaperPlayers';
 import {WallpaperForeground} from '../decky-plugin/src/wallpaperForeground';
-import {randomGameMediaRange,applyGameMediaRange,DEFAULT_GAME_MEDIA_PLAYBACK} from '../src/bridge/gameMediaPlayback';
+import {randomGameMediaRange,applyGameMediaRange,effectiveGameMediaRange,DEFAULT_GAME_MEDIA_PLAYBACK} from '../src/bridge/gameMediaPlayback';
 let checks=0;const check=(ok:any,label:string)=>{checks++;assert.ok(ok,label)};
 const a=randomGameMediaRange(120,DEFAULT_GAME_MEDIA_PLAYBACK,()=>0),b=randomGameMediaRange(120,DEFAULT_GAME_MEDIA_PLAYBACK,()=>.5),c=randomGameMediaRange(120,DEFAULT_GAME_MEDIA_PLAYBACK,()=>1);
 check(a.start===8&&a.end===120&&a.initialStart===8,'whole video after intro is the playable loop');check(b.initialStart===63.5,'random start spans whole video rather than the first30sec');check(c.initialStart===119,'latest point is near actual end, not duration minus30sec');
 for(const duration of [5,20,38,39,60,120,327.233333])for(const start of [0,8,15])for(const length of [30,60])for(const seed of [0,.1,.5,.9,1]){const range=randomGameMediaRange(duration,{start,end:start+length},()=>seed);check(range.initialStart>=range.start&&range.initialStart<range.end,'initial frame remains inside full playable media');check(range.end===duration,'segment setting never caps Steam playback');if(duration>start+1)check(range.start===start&&range.initialStart>=start,'intro is excluded both initially and on loop');}
 check(randomGameMediaRange(0,DEFAULT_GAME_MEDIA_PLAYBACK).end===0,'unknown duration does not seek invalid media');check(randomGameMediaRange(120,DEFAULT_GAME_MEDIA_PLAYBACK,()=>NaN).initialStart===8,'invalid random falls back after intro');
+const fromStart={...DEFAULT_GAME_MEDIA_PLAYBACK,startMode:'from-start'} as const;
+const beginning=randomGameMediaRange(120,fromStart,()=>{throw Error('from-start must not sample random');});
+check(beginning.start===0&&beginning.initialStart===0&&beginning.end===120,'Steam from-start starts at zero and loops the whole clip');
+const limited=effectiveGameMediaRange(120,fromStart);
+check(limited.start===0&&limited.end===30,'YMCC retains the configured segment length from zero');
+const explicitRandom=randomGameMediaRange(120,{...fromStart,startMode:'random'},()=>.5);
+check(explicitRandom.start===b.start&&explicitRandom.end===b.end&&explicitRandom.initialStart===b.initialStart,'restoring random restores the saved intro and remains equivalent to legacy');
 const chosen=randomGameMediaRange(120,DEFAULT_GAME_MEDIA_PLAYBACK,()=>.5);const video:any={readyState:2,duration:120,currentTime:120};applyGameMediaRange(video,chosen);check(video.currentTime===8,'whole-video loop returns after intro');video.currentTime=110;applyGameMediaRange(video,chosen);check(video.currentTime===110,'video can play beyond first30sec without rewinding');
 // Execute the production player with inert media nodes. The Edge regression
 // separately exercises real decoding and the Surface foreground event chain.
@@ -57,7 +64,7 @@ const flush=async()=>{for(let i=0;i<8;i++)await Promise.resolve();};
 // These inert nodes do not rerun that probe or establish the original error cause.
 const tmntIncident={key:'steam-1361510',pid:80708,executable:'TMNT.exe',assetId:'3b507d102803210fd2601475605a7275',bindingRevision:6,bytes:23996804,firstError:'UNKNOWN',metadata:{width:1280,height:720,duration:77},probePositions:[8,38.5,75],frame:{contextSeq:6,appId:'1361510',entry:{assetId:'3b507d102803210fd2601475605a7275',revision:'3b507d102803210fd2601475605a7275',bindingRevision:6,kind:'video',url:'http://127.0.0.1:13140/asset/3b507d102803210fd2601475605a7275.mp4?token='+'a'.repeat(64),playback:{start:8,end:38,fit:'cover'}}}};
 type PlayMode='normal'|'pending'|'reject'|'abort'|'throw';
-function faultFixture(mode:PlayMode='normal',selectedFrame:any=frame,metadata={duration:120,width:1920,height:1080},composition?:Pick<NonNullable<ConstructorParameters<typeof WallpaperPlayers>[2]>,'observeComposition'|'composited'>,acceptFailure?:(value:typeof frame)=>boolean){
+function faultFixture(mode:PlayMode='normal',selectedFrame:any=frame,metadata={duration:120,width:1920,height:1080},composition?:Pick<NonNullable<ConstructorParameters<typeof WallpaperPlayers>[2]>,'observeComposition'|'composited'|'presented'|'recovering'>,acceptFailure?:(value:typeof frame)=>boolean){
  let clock=1000,id=0,admit=true,focus=true,playCount=0,playMode=mode;const timers=new Map<number,{run:()=>void;due:number;delay:number}>(),media:any[]=[],failed:any[]=[],temporaryFailures:boolean[]=[];
  const doc:any={visibilityState:'visible',hasFocus:()=>focus,defaultView:null,createElement:()=>{
   const handlers=new Map<string,Array<()=>void>>(),attrs=new Map<string,string>();
@@ -278,6 +285,55 @@ await fault('cold-generated-read-failure-requests-original-without-reopening',as
    f.show();if(edge==='hidden')f.doc.visibilityState='hidden';else if(edge==='blur')f.setFocus(false);else f.setAllowed(false);
    const n=f.error(4);check(!n.src&&n.paused&&f.failed.length===0&&f.timers.size===0,'cold read failure cannot request the original after '+edge);
   }finally{f.pool.stop();}
+ }
+});
+await fault('win5-baseball-slow-generated-start-requests-one-temporary-original',async()=>{
+ const generated={...frame,appId:'4128400',entry:{...frame.entry,assetId:'generated',reducedPlayback:true,recoverOriginal:true}};
+ const original={...frame,appId:generated.appId,entry:{...frame.entry,assetId:'original',url:'http://fixture/original.mp4'}};
+ for(const phase of ['metadata','seek','frame'] as const){
+  const recovery:any[]=[],f=faultFixture('normal',generated,undefined,{recovering:(_frame,detail)=>recovery.push(detail)});
+  try{
+   f.show();const old=f.media[0];
+   if(phase!=='metadata'){await f.advance(140);old.seeking=true;old.readyState=1;old.fire('loadedmetadata');}
+   if(phase==='frame'){await f.advance(140);old.seeking=false;old.fire('seeked');}
+   await f.advance(899-(phase==='metadata'?0:phase==='seek'?140:280));
+   check(!!old.src&&f.failed.length===0&&f.timers.size===1,'cold watchdog waits until the deadline: '+phase);
+   await f.advance(1);
+   check(!old.src&&old.paused&&f.created()===1&&f.timers.size===0&&f.temporaryFailures.length===1&&f.temporaryFailures[0],'slow derivative retires before the one temporary handoff: '+phase);
+   check(recovery[0]?.reason==='derivative-startup-timeout'&&recovery[0]?.prepareMs===900&&recovery[0]?.metadataMs===(phase==='metadata'?null:140)&&recovery[0]?.seekedMs===(phase==='frame'?280:null),'one bounded receipt identifies the last completed stage: '+phase);
+   check(recovery[0]?.seekTargetS===(phase==='metadata'?null:Math.round(old.currentTime*1000)/1000),'a sampled target is logged only after metadata: '+phase);
+   old.readyState=2;old.fire('canplay');old.fire('seeked');f.show();
+   check(f.plays()===0&&f.created()===1&&f.failed.length===1,'late old readiness and the same frame cannot reopen a retired derivative');
+   f.pool.show(f.container,original);const next=f.ready();await flush();
+   check(next.src===original.entry.url&&!next.paused&&f.media.filter(n=>!!n.src).length===1,'original opens in the same selection with one source');
+  }finally{f.pool.stop();}
+ }
+});
+await fault('ready-derivative-wins-at-deadline-and-keeps-normal-progress-watch',async()=>{
+ const generated={...frame,entry:{...frame.entry,reducedPlayback:true,recoverOriginal:true}};
+ for(const queued of [false,true]){
+  const timings:any[]=[],f=faultFixture('normal',generated,undefined,{presented:(_frame,detail)=>timings.push(detail)});
+  try{
+   f.show();const n=f.media[0];await f.advance(175);n.readyState=1;n.fire('loadedmetadata');n.seeking=true;
+   await f.advance(724);n.seeking=false;n.readyState=2;if(!queued)n.fire('seeked');await f.advance(1);
+   check(f.failed.length===0&&f.created()===1&&f.plays()===1&&!n.paused&&f.timers.size===1,'already prepared variant is not replaced');
+   check(timings[0]?.prepareMs===(queued?900:899)&&timings[0]?.metadataMs===175&&timings[0]?.seekedMs===(queued?null:899),'ready receipt is measured from the same decoder');
+   check(timings[0]?.seekTargetS===Math.round(n.currentTime*1000)/1000,'first ready receipt identifies the exact sampled seek');
+   check([...f.timers.values()][0].delay===15000,'the short startup timer does not survive reveal');
+  }finally{f.pool.stop();}
+ }
+});
+await fault('cold-deadline-cannot-fallback-offscreen-or-on-legacy-host',async()=>{
+ const generated={...frame,entry:{...frame.entry,reducedPlayback:true,recoverOriginal:true}};
+ for(const edge of ['hidden','blur','off','switch'] as const){
+  const f=faultFixture('normal',generated);try{
+   f.show();const old=f.media[0];await f.advance(875);
+   if(edge==='hidden')f.doc.visibilityState='hidden';else if(edge==='blur')f.setFocus(false);else if(edge==='off')f.setAllowed(false);else f.show(2,'new');
+   await f.advance(25);check(!old.src&&f.failed.length===0,'retired selection never asks for the original: '+edge);
+  }finally{f.pool.stop();}
+ }
+ for(const entry of [frame.entry,{...frame.entry,reducedPlayback:true}]){
+  const f=faultFixture('normal',{...frame,entry});try{f.show();await f.advance(900);check(f.failed.length===0&&[...f.timers.values()][0].delay===15000,'original and legacy hosts keep their existing startup watch');}finally{f.pool.stop();}
  }
 });
 await fault('warm-generated-seek-hang-requests-one-temporary-original',async()=>{

@@ -1,4 +1,3 @@
-import asset from './fanHostInstallerAsset.json';
 export interface FanInstallerRepairPort {
   exists(path: string): Promise<boolean>;
   readTextFile(path: string): Promise<string>;
@@ -19,6 +18,7 @@ export async function ensureFanHostInstaller(directory: string, port: FanInstall
     throw new Error('FAN_INSTALLER_MANIFEST_INVALID');
   const expected = entries[0].sha256.toLowerCase();
   if (!(await port.exists(installer))) {
+    const { default: asset } = await import('./fanHostInstallerAsset.json');
     const actual = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(asset.content))))
       .map(b => b.toString(16).padStart(2, '0')).join('');
     if (asset.sha256 !== expected || actual !== expected) throw new Error('FAN_INSTALLER_REPAIR_VERSION_MISMATCH');

@@ -30,7 +30,7 @@ const mocks = {
   'settingsRepository.ts': `export const getSettingsGeneration=()=>globalThis.fx.generation;`,
   'gamedetect.ts': `export const cleanGameTitle=s=>s.trim();export const detectedGameName=g=>g?.title||g?.name||'';`,
   'gamePolicyTarget.ts': `const f=globalThis.fx;export const getPolicyGame=()=>f.game;export const subscribePolicyGameStatus=cb=>{f.gameListeners.add(cb);f.gameListener=game=>{f.game=game;for(const listener of [...f.gameListeners])listener(game)};return()=>{f.gameListeners.delete(cb);if(!f.gameListeners.size)f.gameListener=null}};`,
-  'uiSettings.ts': `export const getUiSetting=()=>globalThis.fx.enabled;export const loadUiSettings=async()=>{if(globalThis.fx.settingsError)throw Error('settings denied')};`,
+  'uiSettings.ts': `export const getUiSetting=()=>globalThis.fx.enabled;export const uiSettingsLoaded=()=>false;export const loadUiSettings=async()=>{if(globalThis.fx.settingsError)throw Error('settings denied')};`,
 };
 const bundle = await build({
  stdin:{contents:`export * as trainer from './src/bridge/gameTrainer';export * as auto from './src/bridge/gameTrainerAuto';`,resolveDir:root,loader:'ts'},

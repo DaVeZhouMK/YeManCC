@@ -93,7 +93,7 @@ try {
  $build=Get-Content -LiteralPath (Join-Path $EvidenceDir 'build-result.json') -Raw -Encoding UTF8 | ConvertFrom-Json
  $nav=Get-Content -LiteralPath (Join-Path $EvidenceDir 'navigation-gate.json') -Raw -Encoding UTF8 | ConvertFrom-Json
  if($build.pass -ne $true -or $nav.pass -ne $true -or $nav.inputsUnchanged -ne $true){throw 'UI_RECEIPT_INCOMPLETE'}
- $virtualClickExpected=if($replayVirtualStart){2}else{6}
+ $virtualClickExpected=if($replayVirtualStart){2}else{8}
  if($scopeEffective -eq 'virtual-click-start' -and ($nav.scope -cne $scopeEffective -or $nav.actionCases -ne $virtualClickExpected -or $nav.states -ne 0 -or $nav.fullUiAccepted -ne $false)){throw 'UI_VIRTUAL_CLICK_START_SCOPE_MISMATCH'}
  if($replayVirtualStart -and $nav.nativeReplay.sha256 -cne $VirtualStartNativeReceiptSha256){throw 'UI_VIRTUAL_START_REPLAY_NOT_CONSUMED'}
  foreach($property in $build.sourceHashes.PSObject.Properties){$sourceHashes[$property.Name]=$property.Value}

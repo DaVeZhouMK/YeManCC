@@ -108,6 +108,8 @@ node tools/ymcc_sim/global/decky-persistent-lifecycle/run.mjs --evidence-dir D:/
 
 `owned-run.mjs` 校验原三项完整 case 身份、原失败、源码冻结成员与哈希、真实编译依赖图、工具声明、自然返回、生成镜像及运行前后源码/工具身份。补充 SDK/MSVC 输入只精确登记于 `owned-tools.json`；原 NoIO 工具门不变。原始 `typed-runtime-result.json` 和 `RESULT.json` 原样保留；公开聚合只可在全部原断言通过且身份完整时 PASS，不能把 owner 资源零、部分 case 或重复诊断成功提升为整体通过。
 
+需要定向复测“致命关闭期间仍有在途绑定结果”时，在原 `decky_binding_runtime_selftest.mjs` 的独占输出目录后传 `native.typed-healing-off --healing-off=fatal-held`，沿原有拥有进程守卫执行。只运行这一项，不增加默认或发布覆盖。省略这个变体参数仍按原路径；只传 `--healing-off`、错值、错场景或混入额外参数均在编译前拒绝。通过仅证明实际 Runtime 对受控 fatal 原因的关闭与晚到结果隔离，不证明 fatal 事件生成、主窗口分发或设置持久化。编译器工具回收与业务进程退出分列。
+
 首次实际当前源码执行为三项中 1 PASS、2 FAIL：所有 owner 资源已归零，但两个场景的进程总句柄计数增加。独立重复诊断在同一进程保留原断言执行四轮共 12 项，首次仍有两个失败，后三轮九项通过；这只能定位首次初始化成本，尚未证明新增句柄归属，不能放宽计数或清除失败。原始与诊断证据保留在核心层 `Evidence/DeckyRuntimeResume-20261023`。本组件未验证安装版、实际 Steam/Loader、真实睡眠、现场恢复、功耗或整包发布。
 
 后续生产原自测已增至五项：原三项加上正式 Ready 重绑和 retained binding-only 重绑。补充门按五项精确注册顺序和原返回/异常 ID 校验；原三项历史失败不改。全局长证据路径曾令原 LoaderTemporaryRun 的实际 Win32 临时路径达到280字符，原自测因此保留 startup FAIL。现在原自测仍原样执行于项目核心 Workspace/DR/<唯一8字符>，原始产物和回执留在该实存拥有目录，公开 result 记录绝对路径、哈希、参数与来源。此举不改变生产路径/断言/预算，不恢复旧D根目录，不把缺产物当通过。

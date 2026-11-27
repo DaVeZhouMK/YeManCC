@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import {createRequire} from 'node:module';
 import {beginRadialHostTools,radialHostInputPlugin,completeRadialHostCompile,verifyRadialHostTools} from './ymcc_sim/global/radial-host-tool-scope/index.mjs';
 const root=path.resolve(import.meta.dirname,'..'),require=createRequire(path.join(root,'package.json'));
-const sleepArgs=process.argv.slice(3),allowedBoundaryNames=['pending-active','pending-summon','held-power','held-settings','held-checkpoint','held-create','missing-ready','duplicate-ready'];
+const fanReadbackNames=['fan-readback-sequence','fan-readback-coalesced','fan-readback-suspending'];
+const inputReadNames=['held-input-preparation','held-input-global-read','held-input-saved-read','held-input-saved-read-same-wheel','settling-input-cas'];
+const settingsActionReadNames=['held-action-settings','held-tdp-final-settings','held-action-shared-settings'];
+const utilityAndPerfReadNames=['held-monitor-preflight','held-monitor-after-save','held-steam-preflight','held-steam-after-submit','held-performance-capability','held-performance-snapshot','held-tdp-capability'];
+const sleepArgs=process.argv.slice(3),allowedBoundaryNames=['pending-active','pending-summon','held-power','held-settings','summon-readback-first','summon-readback-held-power','held-checkpoint','held-create','missing-ready','duplicate-ready','held-fan-power',...fanReadbackNames,'held-action-power','action-readback-first','held-input-power','held-utility-power','settling-performance',...inputReadNames,...settingsActionReadNames,...utilityAndPerfReadNames];
 if(sleepArgs.some(arg=>arg!=='--exercise-development'&&arg!=='--sleep-lifecycle-only'&&!arg.startsWith('--sleep-boundary='))||sleepArgs.filter(arg=>arg==='--sleep-lifecycle-only').length>1||sleepArgs.filter(arg=>arg.startsWith('--sleep-boundary=')).length>1||sleepArgs.some(arg=>arg.startsWith('--sleep-boundary=')&&(!sleepArgs.includes('--sleep-lifecycle-only')||!allowedBoundaryNames.includes(arg.slice('--sleep-boundary='.length)))))throw Error('Unknown or unsupported exact radial sleep selection');
 let toolScope;try{toolScope=beginRadialHostTools(root,process.argv[2]);}catch(error){const report={pass:false,status:'BLOCKED',reason:'RADIAL_HOST_TOOL_AUTHORITY_UNAVAILABLE',error:error.message,checks:0,hardwareWrites:0,installedApplicationMutated:false};if(process.argv[2])fs.writeFileSync(process.argv[2],JSON.stringify(report,null,2));console.error(JSON.stringify(report));process.exit(7);}
 const {build}=require(toolScope.authority.compilerEntry);
@@ -31,23 +35,23 @@ state.utility={revision:0,monitor:{ymccTemplate:'A',enabled:false,output:'ymcc',
 state.input={revision:0,raw:{revision:1,applyStatus:'saved-pending',outputTarget:{persona:'disabled',buttonMappingEnabled:false,gyroEnabled:false},gyroMotion:{enabled:false,preset:'fps',virtualPadLink:true}},calls:[]};
 state.fan={preset:'balanced',active:false,ready:false,hasIntent:false,intent:0,cancel:0,display:null,source:{featureEnabled:true,preset:'balanced',nodes:[{tempC:40,dutyPercent:30}],presetCurves:{soft:[{tempC:40,dutyPercent:20}],balanced:[{tempC:40,dutyPercent:30}],aggressive:[{tempC:40,dutyPercent:50}]}},calls:[],revision:0};
 const modules={
- 'radial-utilities-host':`import {createRadialUtilityActions} from '@/radial/utilityActions';import {normalizeMonitorOutput,switchMonitorHudTemplate} from '@/bridge/monitorHudModel';const s=globalThis.__radialHostFixture,f=s.utility;export const createLocalRadialUtilityActions=alive=>{const a=createRadialUtilityActions({alive,power:async()=>({generation:s.power,phase:s.ready?'ready':'suspending',inputReady:s.ready}),now:()=>1000,nextRevision:()=>String(++f.revision),monitor:{read:async()=>normalizeMonitorOutput(f.monitor),busy:()=>false,save:async(template,revision,admit)=>{if(!admit(normalizeMonitorOutput(f.monitor)))throw Error('SOURCE_CHANGED');f.monitor=switchMonitorHudTemplate(normalizeMonitorOutput(f.monitor),template,revision);f.calls.push('template:'+template)}},steam:{read:async()=>structuredClone(f.steam),launchPending:()=>f.launchPending,launch:async admit=>{if(!admit())throw Error('CANCELED');f.calls.push('launch');f.launchPending=true;},switchMode:async state=>{f.calls.push('bigpicture:'+state.pid);f.steam.mode='bigpicture'},shutdown:async state=>{f.calls.push('stop:'+state.pid)}}});return {...a,observe:()=>()=>{}}};`,
- 'radial-input-host':`import {createRadialInputActions} from '@/radial/inputActions';import {globalMirrorRead} from '@/bridge/deckyGlobalActions';const s=globalThis.__radialHostFixture,f=s.input;export const createLocalRadialInputActions=alive=>{const readGlobal=async()=>globalMirrorRead({},f.raw,null);const actions=createRadialInputActions({read:async()=>({scope:'global',global:await readGlobal(),policy:null,locked:false,busy:false}),
- global:{allowed:alive,game:()=>null,locked:()=>false,targetPolicy:()=>null,side:()=>null,read:readGlobal,power:async()=>({generation:s.power,phase:s.ready?'ready':'suspending',hardwareWritesAllowed:s.ready}),acquire:()=>()=>{},cas:async(revision,patch,admit)=>{if(revision!==f.raw.revision||admit&&!admit())return {ok:false,value:f.raw};for(const [key,value]of Object.entries(patch))f.raw[key]={...f.raw[key],...value};f.raw.revision++;f.calls.push(patch);return {ok:true,value:f.raw}},closeJoyxoff:async()=>true,clearShortcut:async()=>true},
+ 'radial-utilities-host':`import {createRadialUtilityActions} from '@/radial/utilityActions';import {powerLifecycle} from '@/bridge/api';import {normalizeMonitorOutput,switchMonitorHudTemplate} from '@/bridge/monitorHudModel';const s=globalThis.__radialHostFixture,f=s.utility;const read=async(kind,value)=>{const held=f[kind];if(held&&held.skip--===0){f[kind]=null;held.entered=true;await held.promise;}return value};export const createLocalRadialUtilityActions=alive=>{const a=createRadialUtilityActions({alive,power:signal=>powerLifecycle.get(undefined,signal),now:()=>1000,nextRevision:()=>String(++f.revision),monitor:{read:()=>read('monitorRead',normalizeMonitorOutput(f.monitor)),busy:()=>false,save:async(template,revision,admit)=>{if(!admit(normalizeMonitorOutput(f.monitor)))throw Error('SOURCE_CHANGED');f.monitor=switchMonitorHudTemplate(normalizeMonitorOutput(f.monitor),template,revision);f.calls.push('template:'+template)}},steam:{read:()=>read('steamRead',structuredClone(f.steam)),launchPending:()=>f.launchPending,launch:async admit=>{if(!admit())throw Error('CANCELED');f.calls.push('launch');f.launchPending=true;},switchMode:async state=>{f.calls.push('bigpicture:'+state.pid);f.steam.mode='bigpicture'},shutdown:async state=>{f.calls.push('stop:'+state.pid)}}});return {...a,observe:()=>()=>{}}};`,
+ 'radial-input-host':`import {createRadialInputActions} from '@/radial/inputActions';import {powerLifecycle} from '@/bridge/api';import {globalMirrorRead} from '@/bridge/deckyGlobalActions';import {tryAcquireQuickAction,isQuickActionBusy} from '@/bridge/quickActionLock';const s=globalThis.__radialHostFixture,f=s.input;f.busy=isQuickActionBusy;export const createLocalRadialInputActions=alive=>{const readGlobal=async()=>{const value=globalMirrorRead({},f.raw,null),read=f.readHold;if(read&&read.skip--===0){f.readHold=null;read.entered=true;await read.promise;}return value};const actions=createRadialInputActions({read:async()=>({scope:'global',global:await readGlobal(),policy:null,locked:false,busy:isQuickActionBusy()}),
+ global:{allowed:alive,game:()=>null,locked:()=>false,targetPolicy:()=>null,side:()=>null,read:readGlobal,power:context=>context.readPower?context.readPower(signal=>powerLifecycle.get(undefined,signal)):powerLifecycle.get(),acquire:tryAcquireQuickAction,cas:async(revision,patch,admit)=>{if(revision!==f.raw.revision||admit&&!admit())return {ok:false,value:f.raw};for(const [key,value]of Object.entries(patch))f.raw[key]={...f.raw[key],...value};f.raw.revision++;f.calls.push(patch);const cas=f.casHold;if(cas){f.casHold=null;cas.entered=true;await cas.promise;}return {ok:true,value:f.raw}},closeJoyxoff:async()=>true,clearShortcut:async()=>true},
  game:{featureAllowed:alive,game:()=>null},nextRevision:()=>String(++f.revision)});return {...actions,observe:()=>()=>{}}};`,
  'radial-fan-host':`import {createRadialFanActions} from '@/radial/fanActions';const s=globalThis.__radialHostFixture,f=s.fan;export const createLocalRadialFanActions=alive=>createRadialFanActions({
   owner:{get state(){return f.ready?'ready':'idle'},get controlReady(){return f.ready},get hasControlIntent(){return f.hasIntent},get controlIntentRevision(){return f.intent},get controlCancellationRevision(){return f.cancel},recoveryActive:false,
     stagePendingControlCurve(){f.intent++},async start(){f.calls.push('start');f.hasIntent=true;return {allowed:true,writeReady:true}},async apply(){f.calls.push('apply');f.ready=f.active=true;return {}},async applyPreset(preset){f.calls.push('preset:'+preset);f.ready=f.active=true;return {}},async disable(){f.calls.push('disable');f.cancel++;f.intent++;f.hasIntent=f.ready=f.active=false;return {}}},
   enabled:()=>f.active,currentPreset:()=>f.preset,read:async()=>structuredClone(f.source),curves:(source,preset)=>source.presetCurves[preset],save:async(preset,expected)=>{if(JSON.stringify(expected)!==JSON.stringify(f.source))throw Error('SOURCE_CHANGED');f.preset=preset;f.source={...f.source,preset,nodes:structuredClone(f.source.presetCurves[preset])};f.calls.push('save:'+preset)},
-  updateActive:()=>{},updateDuty:()=>{},power:async()=>({generation:s.power}),featureAllowed:alive,uiBusy:()=>false,currentDisplay:()=>f.display,display:value=>f.display=value,nextRevision:()=>String(++f.revision)});`,
+  updateActive:()=>{},updateDuty:()=>{},power:async signal=>{const held=f.powerRead;if(held){f.powerRead=null;held.entered=true;held.signal=signal;await held.promise;}return s.nativePower()},featureAllowed:alive,uiBusy:()=>false,currentDisplay:()=>f.display,display:value=>f.display=value,nextRevision:()=>String(++f.revision)});`,
  '@/bridge/deckyFanDisplay':`export const onFanMirrorDisplay=()=>()=>{};export const onFanMirrorUiGate=()=>()=>{};`,
  '@/bridge/ipc':`const s=globalThis.__radialHostFixture;export const isNativeRuntime=true;export function on(k,cb){if(!s.handlers.has(k))s.handlers.set(k,new Set());s.handlers.get(k).add(cb);return()=>s.handlers.get(k).delete(cb)}export const invoke=(cmd,a={},options={})=>s.invoke(cmd,a,options);`,
- '@/bridge/api':`const s=globalThis.__radialHostFixture;export const powerLifecycle={get:async()=>{const held=s.powerRead;if(held){s.powerRead=null;held.entered=true;return held.promise;}return s.nativePower();}};export const shell={execute:async(...a)=>{s.windows.push(a);return true},open:async(...a)=>{s.windows.push(a);return true},taskView:async()=>{s.windows.push('taskView');return true}};export const windowApi={show:async()=>{s.windows.push('ymcc');return true}};`,
+ '@/bridge/api':`const s=globalThis.__radialHostFixture;export const powerLifecycle={get:async(_timeout,signal)=>{const held=s.powerRead;if(held&&!(held.skip>0&&held.skip--)){s.powerRead=null;held.entered=true;held.signal=signal;return held.promise;}return s.nativePower();}};export const shell={execute:async(...a)=>{s.windows.push(a);return true},open:async(...a)=>{s.windows.push(a);return true},taskView:async()=>{s.windows.push('taskView');return true}};export const windowApi={show:async()=>{s.windows.push('ymcc');return true}};`,
  'radial-preference-repository':`const s=globalThis.__radialHostFixture;export const getSettingsGeneration=()=>s.generation;export const assertSettingsGeneration=value=>{if(value!==s.generation)throw Error('settings generation changed')};export const readSettingsSection=async key=>structuredClone(s.sections[key]);export const saveSettingsSection=async(key,patch,generation=s.generation)=>{assertSettingsGeneration(generation);s.sections[key]={...s.sections[key],...structuredClone(patch)}};`,
  '@/bridge/settingsRepository':`export const getSettingsGeneration=()=>globalThis.__radialHostFixture.generation;`,
- '@/bridge/yeman':`export const getTdpExecutionCapability=async()=>({ready:globalThis.__radialHostFixture.capable,minPL1:5,maxPL1:30});`,
- '@/bridge/performanceSchedule':`const s=globalThis.__radialHostFixture;export const getContinuousPerformanceSnapshot=async()=>s.snapshot();export const updateContinuousPerformanceControls=async(identity,patch,admit)=>{if(admit&&!admit())throw Error('fixture scheduler admission refused');s.writes.push({identity,patch});s.bank=s.patch(s.bank,patch,'ac');s.bankRevision++;return {...s.snapshot(),tdpWriteReceipt:{requested:s.bank.tdp,accepted:s.ack?s.bank.tdp:null,ok:s.ack,proof:s.ack?'write-ack':'unconfirmed'}};};`,
- 'radial-settings':`export const loadRadialSettings=async()=>{const s=globalThis.__radialHostFixture,held=s.settingsRead;if(held){s.settingsRead=null;held.entered=true;await held.promise;}return structuredClone(s.model);};`,
+ '@/bridge/yeman':`const s=globalThis.__radialHostFixture;export const getTdpExecutionCapability=async()=>{const value={ready:s.capable,minPL1:5,maxPL1:30},held=s.capabilityRead;if(held){s.capabilityRead=null;held.entered=true;await held.promise;}return value};`,
+ '@/bridge/performanceSchedule':`const s=globalThis.__radialHostFixture;export const getContinuousPerformanceSnapshot=async()=>{const value=s.snapshot(),held=s.performanceRead;if(held){s.performanceRead=null;held.entered=true;await held.promise;}return value};export const updateContinuousPerformanceControls=async(identity,patch,admit)=>{if(admit&&!admit())throw Error('fixture scheduler admission refused');s.writes.push({identity,patch});s.bank=s.patch(s.bank,patch,'ac');s.bankRevision++;const held=s.performanceAck;if(held){held.entered=true;await held.promise;}return {...s.snapshot(),tdpWriteReceipt:{requested:s.bank.tdp,accepted:s.ack?s.bank.tdp:null,ok:s.ack,proof:s.ack?'write-ack':'unconfirmed'}};};`,
+ 'radial-settings':`export const loadRadialSettings=async()=>{const s=globalThis.__radialHostFixture,held=s.settingsRead;if(held&&!(held.skip>0&&held.skip--)){if(!held.shared)s.settingsRead=null;held.entered=true;held.reads=(held.reads??0)+1;const value=await held.promise;if(value?.pages)return value;}return structuredClone(s.model);};`,
 };
 const compiled=await build({stdin:{contents:`export {getSharedPowerLifecycle,getSharedPowerLifecycleDiagnostics} from './src/bridge/powerLifecycleState';export {startRadialHost} from './src/radial/host';export {defaultRadialSettings} from './src/radial/model';export {isRadialTestingEnabled} from './src/radial/testingState';export {RADIAL_USER_AVAILABLE} from './src/radial/availability';export {setRadialTestingPreference,syncRadialTestingPreference} from './src/radial/testing';export {loadUiSettings,getUiSetting} from './src/bridge/uiSettings';export {defaultContinuousBank,patchContinuousBank} from './src/bridge/performanceControls';`,resolveDir:root,loader:'ts'},bundle:true,write:false,metafile:true,platform:'node',format:'cjs',alias:{'@':path.join(root,'src')},plugins:[radialHostInputPlugin(toolScope),{name:'radial-memory-contract',setup(b){b.onResolve({filter:/.*/},a=>{const owner=a.importer.replaceAll('\\','/').endsWith('/radial/host.ts');const key=a.importer.replaceAll('\\','/').endsWith('/bridge/powerLifecycleState.ts')&&a.path==='./ipc'?'@/bridge/ipc':a.importer.replaceAll('\\','/').endsWith('/bridge/uiSettings.ts')&&a.path==='./settingsRepository'?'radial-preference-repository':owner&&a.path==='./settings'?'radial-settings':owner&&a.path==='./fanHost'?'radial-fan-host':owner&&a.path==='./inputHost'?'radial-input-host':owner&&a.path==='./utilitiesHost'?'radial-utilities-host':a.path;if(key in modules)return{path:key,namespace:'fixture'};});b.onLoad({filter:/.*/,namespace:'fixture'},a=>({contents:modules[a.path],loader:'ts'}));}}]});
 completeRadialHostCompile(toolScope,compiled,Object.keys(modules));
@@ -131,7 +135,7 @@ phase='original-host-business-scenarios';
 
 let request=0;
 async function intent(itemId,extra={}){const before=state.results.length,id='request-'+(++request),now=Date.now();const body={requestId:id,itemId,revision:state.model.revision,issuedAt:now,expiresAt:now+5000,...extra};emit('radial.intent',{...owner,intent:body});await until(()=>state.results.length>before);return {outcome:state.results.at(-1).result,body};}
-const sleepBoundaryNames=['pending-active','pending-summon','held-power','held-settings','held-checkpoint','held-create','missing-ready','duplicate-ready'];
+const sleepBoundaryNames=allowedBoundaryNames;
 const sleepResults=[];
 async function sleepFlush(){for(let n=0;n<180;n++)await Promise.resolve();await new Promise(resolve=>originalSetTimeout(resolve,2));}
 async function exerciseSleepBoundaries(){
@@ -144,11 +148,12 @@ async function exerciseSleepBoundaries(){
  const closeCurrent=async current=>{emit('radial.closed',current);await sleepFlush();assert.equal(heartbeatTimers.size,0);};
  const isClosed=current=>state.closed.some(row=>row.wheelId===current.wheelId&&row.nonce===current.nonce);
  let requestId=0;
- const sendIntent=(current,itemId)=>{const now=Date.now();emit('radial.intent',{...current,intent:{requestId:'sleep-'+(++requestId),itemId,revision:state.model.revision,issuedAt:now,expiresAt:now+4000}});};
+ const sendIntent=(current,itemId,extra={})=>{const now=Date.now(),id='sleep-'+(++requestId);emit('radial.intent',{...current,intent:{requestId:id,itemId,revision:state.model.revision,issuedAt:now,expiresAt:now+4000,...extra}});return id;};
  for(const name of selected){
   phase='sleep-'+name;let held=null,heldFrame,refuseFrame;
   const invoke=state.invoke;
   try{
+   if(name.startsWith('held-steam-'))state.utility.steam.mode='desktop';
    ready();host=startRadialHost({push:async route=>state.windows.push(route)});await sleepFlush();
    if(name==='duplicate-ready'){
     state.invoke=(cmd,args,...rest)=>{
@@ -173,6 +178,27 @@ async function exerciseSleepBoundaries(){
     emit('radial.summon-request',{source:'settings'});await until(()=>held.entered);
     pending();ready();held.resolve(captured);await sleepFlush();
     assert.equal(state.created.length,createdBefore,'retired pending summon read must not create a wheel after same-generation recovery');
+   }else if(name==='summon-readback-first'||name==='summon-readback-held-power'){
+    await closeCurrent(current);held=deferred();const heldPower=name==='summon-readback-held-power';
+    if(heldPower)state.powerRead=held;else state.settingsRead=held;
+    const old=state.nativePower();
+    emit('radial.summon-request',{source:'settings'});await until(()=>held.entered);
+    emit('radial.summon-request',{source:'settings',powerSuspendSerial:old.suspendSerial+2});await sleepFlush();
+    assert.equal(getSharedPowerLifecycle().suspendSerial,old.suspendSerial,'a newer hint without a matching Native receipt cannot advance shared power');
+    if(heldPower)assert.equal(held.signal?.aborted,false,'the unconfirmed hint cannot retire the older power read');
+    emit('radial.summon-request',{source:'settings'});await sleepFlush();
+    assert.equal(state.created.length,createdBefore,'a same-period duplicate cannot bypass the old preflight');
+    state.suspendSerial++;state.publicationRevision++;
+    const next=state.nativePower();
+    emit('radial.summon-request',{source:'settings'});await sleepFlush();
+    assert.equal(state.created.length,createdBefore+1,'the new period summon must use Native readback while the previous preflight is held');
+    assert.equal(getSharedPowerLifecycle().suspendSerial,next.suspendSerial,'the readback must advance the one shared source');
+    if(heldPower)assert.equal(held.signal?.aborted,true,'confirmed new Ready releases the obsolete power IPC wait');
+    const fresh=state.created.at(-1),owner={wheelId:fresh.receipt.id,nonce:fresh.receipt.nonce};
+    assert.equal(fresh.args.powerSuspendSerial,next.suspendSerial);assert.equal(heartbeatTimers.size,1);
+    held.resolve(old);emit('power.lifecycleChanged',old);emit('radial.summon-request',{source:'settings',powerSuspendSerial:old.suspendSerial});await sleepFlush();
+    assert.equal(state.created.length,createdBefore+1);assert.equal(isClosed(owner),false,'late old work must not touch the current wheel');
+    await closeCurrent(owner);
    }else if(name==='held-checkpoint'){
     held=deferred();state.settingsRead=held;sendIntent(current,'settings');await until(()=>held.entered);
     pending();ready();held.resolve();await sleepFlush();
@@ -184,6 +210,198 @@ async function exerciseSleepBoundaries(){
     const late=state.created.at(-1).receipt;pending();ready();held.resolve();await sleepFlush();state.delay=null;
     assert.equal(isClosed({wheelId:late.id,nonce:late.nonce}),true,'late created wheel must return its exact native receipt');
     assert.equal(heartbeatTimers.size,0,'retired create must not acquire a heartbeat');
+   }else if(['held-action-power','action-readback-first','held-input-power','held-utility-power','settling-performance'].includes(name)){
+    const getResult=id=>state.results.find(r=>r.result.requestId===id)?.result;
+    const frames=()=>state.calls.filter(c=>c.cmd==='radial.frame'&&c.args.wheelId===current.wheelId).map(c=>c.args.frame).reverse();
+    const input=name==='held-input-power',utility=name==='held-utility-power',settling=name==='settling-performance';
+    const source=()=>input?frames().find(frame=>frame.input.available)?.input:utility?frames().find(frame=>frame.utilities['monitor.templates'].available)?.utilities['monitor.templates']:frames().find(frame=>frame.performance.enabled)?.performance;
+    await until(source);
+    const writes=input?state.input.calls:utility?state.utility.calls:state.writes,before=writes.length;
+    const template=state.utility.monitor.ymccTemplate==='A'?'B':'A';
+    const apply=()=>input?sendIntent(current,'virtualPad',{inputField:'padPersona',inputValue:'elite',inputRevision:source().sourceRevision}):utility?sendIntent(current,'utility-monitor',{utilityChoice:template,utilityRevision:source().sourceRevision}):sendIntent(current,'pages',{control:'tdp',value:18,controlRevision:source().sourceRevision});
+    const prior=state.nativePower();held=deferred();
+    if(settling){state.ack=true;state.performanceAck=held;}else{held.skip=input||utility?1:0;state.powerRead=held;}
+    const old=apply();await until(()=>held.entered||getResult(old));assert(held.entered,'expected to reach held checkpoint or settlement: '+getResult(old)?.message);
+    emit('power.lifecycleChanged',{...prior,publicationRevision:prior.publicationRevision+1});await sleepFlush();
+    assert.equal(getResult(old),undefined,'publication metadata alone leaves the old action read in flight');
+    const broadcast=name!=='action-readback-first';
+    state.publicationRevision++;
+    const next=publish({},broadcast);
+    if(!broadcast)held.resolve(next);
+    await sleepFlush();
+    assert.equal(getResult(old)?.ok,settling?undefined:false,'only an already-dispatched action can remain pending across this edge');
+    assert.equal(writes.length,before+(settling?1:0),'a superseded action must not reach its write owner');
+    assert.equal(isClosed(current),false,'sequence alone keeps the wheel open');
+    assert.equal(getSharedPowerLifecycle().observedNotificationSequence,next.observedNotificationSequence,'ordered readback and broadcast use the same shared authority');
+    if(settling){held.resolve();await until(()=>getResult(old));assert.equal(getResult(old).proof,'write-ack','already dispatched action keeps its owner receipt');}
+    else{
+     state.ack=true;
+     const successor=apply();await until(()=>getResult(successor));
+     assert.equal(getResult(successor).ok,true);
+     assert.equal(held.signal?.aborted,true);
+    }
+    held.resolve(prior);emit('power.lifecycleChanged',prior);await sleepFlush();
+    assert.equal(writes.length,before+1,'old reply and old notice do not replay the action');
+    await closeCurrent(current);
+    // This case has one explicitly admitted successor, unlike the sleep cases below.
+    current=await summon('settings');
+    const beforePage=state.windows.length;sendIntent(current,'settings');await until(()=>state.windows.length>=beforePage+2);
+    assert.equal(isClosed(current),true);
+    sleepResults.push({name,passed:true,sameGeneration:state.power,newExplicitSummon:true,retiredWrites:0,successorWrites:settling?0:1,settledWrites:settling?1:0});checks++;
+    continue;
+   }else if(utilityAndPerfReadNames.includes(name)){
+    const getResult=id=>state.results.find(r=>r.result.requestId===id)?.result;
+    const frame=()=>state.calls.findLast(c=>c.cmd==='radial.frame'&&c.args.wheelId===current.wheelId&&c.args.frame.tdp.available&&
+     c.args.frame.utilities['monitor.templates'].available&&c.args.frame.utilities['steam.controls'].available)?.args.frame;
+    await until(frame);await sleepFlush();
+    const before=state.utility.calls.length,writes=state.writes.length,prior=state.nativePower();
+    const monitor=name.startsWith('held-monitor-'),steam=name.startsWith('held-steam-'),utility=monitor||steam;
+    const post=name==='held-monitor-after-save'||name==='held-steam-after-submit';
+    const oldTemplate=state.utility.monitor.ymccTemplate,newTemplate=oldTemplate==='A'?'B':'A';
+    const selectUtility=(group,choice)=>sendIntent(current,group==='monitor.templates'?'utility-monitor':'utility-steam',
+     {utilityChoice:choice,utilityRevision:frame().utilities[group].sourceRevision});
+    const legacy=name==='held-tdp-capability';
+    const selectPerf=value=>legacy?sendIntent(current,'tdp',{value}):sendIntent(current,'pages',
+     {control:'tdp',value,controlRevision:frame().performance.sourceRevision});
+    held=deferred();held.skip=post?1:0;
+    if(utility)state.utility[monitor?'monitorRead':'steamRead']=held;
+    else state[name==='held-performance-snapshot'?'performanceRead':'capabilityRead']=held;
+    state.ack=true;
+    const old=monitor?selectUtility('monitor.templates',newTemplate):steam?selectUtility('steam.controls','bigpicture'):selectPerf(16);
+    await until(()=>held.entered||getResult(old));assert(held.entered,'expected to reach the selected real action read');
+    assert.equal(state.utility.calls.length,before+(post?1:0));assert.equal(state.writes.length,writes);
+    const next=publish();await sleepFlush();
+    assert.equal(getResult(old)?.ok,false,'retired utility or performance read must release the wheel before its return');
+    assert.equal(isClosed(current),false);
+    if(post){const group=monitor?'monitor.templates':'steam.controls',selected=monitor?newTemplate:'bigpicture';
+     assert.equal(frame().utilities[group].selected,selected,'current wheel must observe the submitted operation without replay');}
+    const successor=monitor?selectUtility('monitor.templates',post?oldTemplate:newTemplate):steam?selectUtility('steam.controls','stop'):selectPerf(18);
+    await until(()=>getResult(successor));assert.equal(getResult(successor).ok,true,getResult(successor).message);
+    held.resolve();emit('power.lifecycleChanged',prior);await sleepFlush();
+    const expectedCalls=monitor?(post?['template:'+newTemplate,'template:'+oldTemplate]:['template:'+newTemplate]):steam?(post?['bigpicture:123','stop:123']:['stop:123']):[];
+    assert.deepEqual(state.utility.calls.slice(before),expectedCalls);
+    assert.deepEqual(state.writes.slice(writes).map(row=>row.patch.tdp),utility?[]:[18]);
+    assert.equal(getSharedPowerLifecycle().observedNotificationSequence,next.observedNotificationSequence);
+    await closeCurrent(current);
+    sleepResults.push({name,passed:true,originalSubmissions:post?1:0,successorSubmissions:1});checks++;
+    continue;
+   }else if(settingsActionReadNames.includes(name)){
+    const getResult=id=>state.results.find(r=>r.result.requestId===id)?.result;
+    const frame=()=>state.calls.findLast(c=>c.cmd==='radial.frame'&&c.args.wheelId===current.wheelId&&c.args.frame.tdp.available);
+    await until(frame);await sleepFlush();
+    const prior=state.nativePower(),oldSettings=structuredClone(state.model),writes=state.writes.length;
+    const shared=name==='held-action-shared-settings';
+    held=deferred();held.shared=shared;held.skip=name==='held-tdp-final-settings'?1:0;state.settingsRead=held;
+    state.ack=true;
+    const old=sendIntent(current,'tdp',{value:16});await until(()=>held.entered||getResult(old));
+    assert.equal(held.entered,true,'fixture must reach the selected settings checkpoint');
+    emit('power.lifecycleChanged',{...prior,publicationRevision:prior.publicationRevision+1});await sleepFlush();
+    assert.equal(getResult(old),undefined,'publication revision alone does not revoke an action');
+    state.publicationRevision++;const next=publish();await sleepFlush();
+    assert.equal(getResult(old)?.ok,false,'retired settings preflight must release the open wheel before its read returns');
+    assert.equal(state.writes.length,writes);
+    assert.equal(isClosed(current),false,'a new sequence alone retains the wheel');
+    const successor=sendIntent(current,'tdp',{value:18});
+    if(shared){
+     await until(()=>held.reads===2||getResult(successor));assert.equal(held.reads,2,'new action may join the repository read under its own epoch');
+     assert.equal(getResult(successor),undefined);assert.equal(state.writes.length,writes,'joining a read cannot substitute for current settings');
+     state.settingsRead=null;held.resolve();
+    }
+    await until(()=>getResult(successor));assert.equal(getResult(successor).ok,true);
+    assert.deepEqual(state.writes.slice(writes).map(row=>row.patch.tdp),[18]);
+    held.resolve(oldSettings);emit('power.lifecycleChanged',prior);await sleepFlush();
+    assert.equal(state.writes.length,writes+1);assert.equal(isClosed(current),false);
+    assert.equal(getSharedPowerLifecycle().observedNotificationSequence,next.observedNotificationSequence);
+    await closeCurrent(current);
+    sleepResults.push({name,passed:true,retiredWrites:0,successorWrites:1,sharedSettingsRead:shared});checks++;
+    continue;
+   }else if(inputReadNames.includes(name)){
+    const getResult=id=>state.results.find(r=>r.result.requestId===id)?.result;
+    const source=()=>state.calls.findLast(c=>c.cmd==='radial.frame'&&c.args.wheelId===current.wheelId&&c.args.frame.input?.available)?.args.frame.input;
+    const apply=value=>sendIntent(current,'virtualPad',{inputField:'padPersona',inputValue:value,inputRevision:source().sourceRevision});
+    await until(source);await sleepFlush();
+    const before=state.input.calls.length,oldValue=state.input.raw.outputTarget.persona==='elite'?'dualsense-edge':'elite';
+    const newValue=oldValue==='elite'?'dualsense-edge':'elite';
+    const cas=name==='settling-input-cas',sameWheelSave=name==='held-input-saved-read-same-wheel';
+    const alreadySaved=cas||name==='held-input-saved-read'||sameWheelSave;
+    const sequenceOnly=name==='held-input-global-read'||sameWheelSave;
+    held=deferred();
+    if(cas)state.input.casHold=held;
+    else {held.skip=alreadySaved?2:inputReadNames.indexOf(name);state.input.readHold=held;}
+    const old=apply(oldValue);await until(()=>held.entered||getResult(old));assert(held.entered,'fixture must hold the selected actual input stage');
+    assert.equal(state.input.calls.length,before+(alreadySaved?1:0));
+    const prior=state.nativePower();const next=publish(sequenceOnly?{}:{suspendSerial:prior.suspendSerial+1});await sleepFlush();
+    assert.equal(isClosed(current),!sequenceOnly);
+    if(cas){
+     assert.equal(state.input.busy(),true,'an already submitted input CAS keeps the original lock');
+     assert.equal(getResult(old),undefined);held.resolve();await sleepFlush();
+     assert.equal(state.input.busy(),false,'the original CAS terminal must release its lock');
+    }
+    if(!sequenceOnly){current=await summon('settings');await until(source);}
+    if(sameWheelSave)assert.equal(source().controls.find(control=>control.key==='padPersona').value,oldValue,
+     'the still-open wheel must show the durable save before its retired refresh returns');
+    const successor=apply(newValue);await until(()=>getResult(successor));
+    assert.equal(getResult(successor).ok,true,'successor input must save while the retired read is still held: '+getResult(successor).message);
+    assert.equal(state.input.busy(),false);
+    held.resolve();emit('power.lifecycleChanged',prior);await sleepFlush();
+    assert.equal(getSharedPowerLifecycle().observedNotificationSequence,next.observedNotificationSequence);
+    assert.equal(state.input.raw.outputTarget.persona,newValue);
+    assert.deepEqual(state.input.calls.slice(before).map(patch=>patch.outputTarget.persona),alreadySaved?[oldValue,newValue]:[newValue]);
+    assert.equal(getResult(old)?.ok,sequenceOnly?false:undefined,'old read cannot publish a success to the successor');
+    await closeCurrent(current);
+    sleepResults.push({name,passed:true,retiredRead:!cas,preexistingSaves:alreadySaved?1:0,successorSaves:1});checks++;
+    continue;
+   }else if(name==='held-fan-power'||fanReadbackNames.includes(name)){
+    const fanFrame=wheel=>[...state.calls].reverse().filter(c=>c.args.wheelId===wheel.wheelId).map(c=>c.args.result?.fan??c.args.frame?.fan).find(fan=>fan?.available);
+    const startFan=(wheel,choice)=>sendIntent(wheel,'fanControls',{fanChoice:choice,fanRevision:fanFrame(wheel).sourceRevision});
+    const getResult=id=>state.results.find(r=>r.result.requestId===id)?.result;
+    await until(()=>fanFrame(current));
+    if(fanReadbackNames.includes(name)){
+     const prior=state.nativePower(),before=state.fan.calls.length;
+     held=deferred();state.fan.powerRead=held;
+     const old=startFan(current,'soft');await until(()=>held.entered||getResult(old));
+     assert(held.entered,'fan-specific read must be reached after the common action checkpoint');
+     const changesSerial=name!=='fan-readback-sequence',suspending=name==='fan-readback-suspending';
+     const missed=publish({...changesSerial&&{suspendSerial:prior.suspendSerial+1},
+       ...suspending&&{ready:false,hardwareWritesAllowed:false,notificationPending:true}},false);
+     assert.equal(getSharedPowerLifecycle().observedNotificationSequence,prior.observedNotificationSequence);
+     held.resolve();await sleepFlush();
+     assert(!state.fan.calls.slice(before).some(call=>call==='start'||call==='apply'||call.startsWith('preset:')||call.startsWith('save:')),
+       'the old fan choice must not save a curve or ask the fan owner to start/apply after missed ingress');
+     assert.equal(getSharedPowerLifecycle().observedNotificationSequence,missed.observedNotificationSequence);
+     assert.equal(getSharedPowerLifecycle().suspendSerial,missed.suspendSerial);
+     assert.equal(getSharedPowerLifecycle().hardwareWritesAllowed,missed.hardwareWritesAllowed);
+     assert.equal(held.signal?.aborted,true);
+     assert.equal(isClosed(current),changesSerial);
+     if(!changesSerial)assert.equal(getResult(old)?.ok,false);
+     emit('power.lifecycleChanged',prior);await sleepFlush();
+     assert.equal(getSharedPowerLifecycle().observedNotificationSequence,missed.observedNotificationSequence);
+     if(suspending){ready();await sleepFlush();}
+     if(changesSerial){current=await summon('settings');await until(()=>fanFrame(current));}
+     const successor=startFan(current,'aggressive');await until(()=>getResult(successor));
+     assert.equal(getResult(successor).ok,true);
+     assert.deepEqual(state.fan.calls.slice(before).filter(call=>call.startsWith('save:')),['save:aggressive']);
+     await closeCurrent(current);
+     sleepResults.push({name,passed:true,oldFanSubmissions:0,successorFanSaves:1,oldReadRetired:true});checks++;
+     continue;
+    }
+    for(const boundary of ['sequence','suspend']){
+     if(boundary==='suspend'){await closeCurrent(current);current=await summon('settings');await until(()=>fanFrame(current));}
+     held=deferred();state.fan.powerRead=held;const before=state.fan.calls.length;
+     const old=startFan(current,'soft');await until(()=>held.entered||getResult(old));
+     assert(held.entered,'fan power read was not reached ('+boundary+'): '+getResult(old)?.message);
+     const prior=state.nativePower();emit('power.lifecycleChanged',{...prior,publicationRevision:prior.publicationRevision+1});await sleepFlush();
+     assert.equal(getResult(old),undefined,'publication metadata alone leaves the old read in flight');
+     state.publicationRevision++;
+     publish(boundary==='suspend'?{suspendSerial:state.suspendSerial+1}:{});await sleepFlush();
+     if(boundary==='suspend'){assert(isClosed(current));current=await summon('settings');await until(()=>fanFrame(current));}
+     else assert.equal(isClosed(current),false,'sequence alone must keep the current wheel open');
+     const after=startFan(current,'aggressive');await sleepFlush();
+     assert(state.fan.calls.slice(before).includes('save:aggressive'),'successor must save before the old power read returns ('+boundary+')');
+     await until(()=>getResult(after));assert.equal(getResult(after).ok,true);assert.equal(held.signal?.aborted,true);
+     held.resolve();await sleepFlush();assert(!state.fan.calls.slice(before).includes('save:soft'),'late read must not save the retired preset');
+    }
+    await closeCurrent(current);
    }else if(name==='missing-ready'){
     pending();await sleepFlush();ready(false);
     assert.equal(powerRetryTimers.size,1,'one shared timer owns lost Ready observation');
@@ -215,7 +433,9 @@ async function exerciseSleepBoundaries(){
    sleepResults.push({name,passed:true,sameGeneration:state.power,newExplicitSummon:true,oldPerformanceWrites:state.writes.length-writesBefore});checks++;
   }finally{
    state.invoke=invoke;refuseFrame?.(Error('fixture returned old frame'));
-   held?.resolve(state.nativePower());state.powerRead=state.settingsRead=state.delay=null;host.stop();await sleepFlush();
+   state.input.readHold=state.input.casHold=null;
+   state.utility.monitorRead=state.utility.steamRead=state.capabilityRead=state.performanceRead=null;
+   held?.resolve(state.nativePower());state.powerRead=state.settingsRead=state.delay=state.fan.powerRead=state.performanceAck=null;host.stop();await sleepFlush();
    assert.equal(heartbeatTimers.size,0);assert.equal(powerRetryTimers.size,0);assert.equal(getSharedPowerLifecycleDiagnostics().subscriberCount,0);
   }
  }

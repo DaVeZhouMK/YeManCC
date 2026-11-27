@@ -21,6 +21,8 @@ assert.match(app,/stopUiVisibility = onUiVisibilityChange\(\(\{ visible \}\) => 
 assert.match(app,/stopUiVisibility\?\.\(\)/);
 const rootTag=app.match(/<div class="app-stage"[^>]*>/)?.[0];
 assert.ok(rootTag?.includes(':data-ui-visible="uiVisible"'));
+assert.ok(rootTag.includes(':data-ui-foreground="decorativeWindowForeground"'));
+assert.match(app,/function onBackgroundWindowActivation[^\n]+\n[^\n]+\.detail\?\.active;\s*if \(typeof active !== 'boolean'\) return;\s*decorativeWindowForeground\.value = active;/);
 const {descriptor}=parse(app,{filename:appPath});
 const scope='data-v-ui-animation-test';
 const css=[];
@@ -37,16 +39,22 @@ const fixture=`<script setup lang="ts">
 import {ref,onMounted,onUnmounted,nextTick} from 'vue';
 import {isUiVisible,onUiVisibilityChange,startUiPowerReconciliation} from './src/bridge/uiLifecycle';
 const uiVisible=ref(isUiVisible());
+const decorativeWindowForeground=ref(null);
+const onActivation=event=>{
+ const active=event.detail?.active;
+ if(typeof active==='boolean')decorativeWindowForeground.value=active;
+};
 const scalerStyle={width:'720px',height:'420px',zoom:1,position:'static'};
 let stopUiVisibility: (()=>void)|null=null;
 window.__listenerUpdates=0;
-onMounted(()=>{stopUiVisibility=onUiVisibilityChange(({visible})=>{uiVisible.value=visible;window.__listenerUpdates++;});powerReader=startUiPowerReconciliation();});
-onUnmounted(()=>{stopUiVisibility?.();stopUiVisibility=null;});
+onMounted(()=>{stopUiVisibility=onUiVisibilityChange(({visible})=>{uiVisible.value=visible;window.__listenerUpdates++;});powerReader=startUiPowerReconciliation();window.addEventListener('ipc:window.activationChanged',onActivation);});
+onUnmounted(()=>{stopUiVisibility?.();stopUiVisibility=null;window.removeEventListener('ipc:window.activationChanged',onActivation);});
 let powerReader=null;
 window.__fixture={flush:nextTick};
 onUnmounted(()=>powerReader?.stop());
 </script><template>${rootTag}
  <span class="nav-icon"><svg class="spinning" width="24" height="24"><path d="M2 2L20 20"/></svg></span>
+ <span class="music-disc spinning"><span class="cd-shape"></span></span>
  <div class="pseudo-test rule-row creating"></div>
 </div></template>`;
 const {descriptor:fixtureDescriptor}=parse(fixture,{filename:'ui-fixture.vue'});
@@ -79,13 +87,28 @@ try{
  browser=await chromium.launch({headless:true,executablePath:process.env.CPU_BROWSER_EXE || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});
  const page=await browser.newPage();page.on('pageerror',e=>errors.push(String(e)));
  await page.goto(`http://127.0.0.1:${server.address().port}/`);await page.waitForFunction(()=>window.__fixture);await page.waitForTimeout(100);
- const read=()=>page.evaluate(()=>({documentVisible:document.visibilityState==='visible',visible:document.querySelector('.app-stage').dataset.uiVisible,icon:getComputedStyle(document.querySelector('.spinning')).animationPlayState,pseudo:getComputedStyle(document.querySelector('.pseudo-test'),'::before').animationPlayState,times:document.querySelector('.app-stage').getAnimations({subtree:true}).map(a=>Number(a.currentTime)),updates:window.__listenerUpdates}));
+ const read=()=>page.evaluate(()=>({documentVisible:document.visibilityState==='visible',visible:document.querySelector('.app-stage').dataset.uiVisible,icon:getComputedStyle(document.querySelector('.nav-icon .spinning')).animationPlayState,disc:getComputedStyle(document.querySelector('.cd-shape')).animationPlayState,pseudo:getComputedStyle(document.querySelector('.pseudo-test'),'::before').animationPlayState,iconTime:Number(document.querySelector('.nav-icon .spinning').getAnimations()[0].currentTime),discTime:Number(document.querySelector('.cd-shape').getAnimations()[0].currentTime),times:document.querySelector('.app-stage').getAnimations({subtree:true}).map(a=>Number(a.currentTime)),updates:window.__listenerUpdates}));
  const send=async(name)=>{await page.evaluate(async(name)=>{window.dispatchEvent(new CustomEvent(name));await window.__fixture.flush();},name);await page.waitForTimeout(30);};
  const power=(phase,generation,publish=true)=>page.evaluate(async(args)=>{window.__setPower(...args);await window.__fixture.flush();},[phase,generation,publish]);
  let state=await read();assert.equal(state.visible,'true');assert.equal(state.icon,'running');assert.equal(state.pseudo,'running');assert.ok(state.times.length>=2);checks.push('initial-visible-animation-running');
+ const activate=active=>page.evaluate(async active=>{window.__nativeEvent('window.activationChanged',{active});await window.__fixture.flush();},active);
+ assert.equal(state.disc,'running');
+ await activate(false);await page.waitForTimeout(50);state=await read();
+ assert.equal(state.visible,'true');assert.equal(state.icon,'running','a visible sidebar fan must not depend on window focus');assert.equal(state.disc,'paused');assert.equal(state.pseudo,'running');
+ await page.waitForTimeout(180);const inactive=await read();
+ assert.ok(inactive.iconTime>state.iconTime+50);assert.ok(Math.abs(inactive.discTime-state.discTime)<1);
+ await activate(true);await page.waitForTimeout(110);state=await read();
+ assert.equal(state.icon,'running');assert.equal(state.disc,'running');assert.ok(state.iconTime>inactive.iconTime+50);assert.ok(state.discTime>inactive.discTime+50);
+ checks.push('visible-fan-keeps-spinning-and-disc-still-pauses-on-focus-loss');
  await send('ipc:window.hidden');state=await read();assert.equal(state.documentVisible,true);assert.equal(state.visible,'false');assert.equal(state.icon,'paused');assert.equal(state.pseudo,'paused');
  const paused=state.times;await page.waitForTimeout(300);const stopped=await read();assert.equal(stopped.times.length,paused.length);for(let i=0;i<paused.length;i++)assert.ok(Math.abs(stopped.times[i]-paused[i])<1,'hidden animation clock must stop');checks.push('native-hidden-pauses-svg-and-pseudo-with-document-still-visible');
  await send('ipc:window.shown');await page.waitForTimeout(120);state=await read();assert.equal(state.icon,'running');for(let i=0;i<paused.length;i++)assert.ok(state.times[i]>paused[i]+50,'resume must continue old clock, not restart');checks.push('native-shown-resumes-original-phase');
+ await activate(false);await send('ipc:window.hidden');state=await read();assert.equal(state.icon,'paused');
+ const hiddenFanTime=state.iconTime;
+ await send('ipc:window.summoned');await page.waitForTimeout(110);state=await read();
+ assert.equal(state.visible,'true');assert.equal(state.icon,'running');assert.ok(state.iconTime>hiddenFanTime+50);assert.equal(state.disc,'paused');
+ checks.push('non-activating-summon-restores-visible-fan-without-focus-event');
+ await activate(true);
  for(const [off,on] of [['ipc:window.minimized','ipc:window.restored'],['ipc:window.hidden','ipc:window.maximized'],['ipc:window.hidden','ipc:window.summoned']]){await send(off);assert.equal((await read()).icon,'paused');await send(on);assert.equal((await read()).icon,'running');checks.push(off+'->'+on);}
  await power('suspending',2);assert.equal((await read()).icon,'paused');await send('ipc:window.shown');assert.equal((await read()).icon,'paused');await power('resuming',2);assert.equal((await read()).icon,'paused');await power('ready',2);assert.equal((await read()).icon,'running');checks.push('power-not-ready-cannot-resume-from-window-shown');
  await page.evaluate(async()=>{Object.defineProperty(document,'visibilityState',{configurable:true,get:()=>window.__docVisibility});window.__docVisibility='hidden';document.dispatchEvent(new Event('visibilitychange'));await window.__fixture.flush();});assert.equal((await read()).icon,'paused');

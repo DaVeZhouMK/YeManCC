@@ -1,5 +1,5 @@
 import test from'node:test';import assert from'node:assert/strict';
-import{parseFinalStages,FINAL_STAGE_MAX_BYTES}from'./r3-terminal22-stage-receipts.mjs';
+import{parseFinalStages,parseChildStages,FINAL_STAGE_MAX_BYTES}from'./r3-terminal22-stage-receipts.mjs';
 const names=['body-start','body-return','report-built','report-write-start','serialize-start','serialize-end','report-write-end','main-return'];
 const rows=()=>names.map((stage,i)=>({schemaVersion:1,stage,pid:42,tid:7,tickMs:100+i*20,qpc:String(100000+i*20000),qpcFrequency:'1000000',bytes:stage==='serialize-end'?34000:0,lost:0}));
 const text=r=>r.map(r=>JSON.stringify(r)).join('\n')+'\n';
@@ -20,6 +20,21 @@ test('partial JSON and forged full-count summary stay UNKNOWN',()=>{assert.equal
 test('bounded input rejects oversize evidence',()=>assert.equal(parseFinalStages(' '.repeat(FINAL_STAGE_MAX_BYTES+1),42).status,'UNKNOWN'));
 test('CRLF is parsed without changing measured phases',()=>assert.equal(parseFinalStages(text(rows()).replaceAll('\n','\r\n'),42).phases.serializationMs,20));
 test('no markers remains UNKNOWN',()=>assert.equal(parseFinalStages('',42).status,'UNKNOWN'));
+const child=()=>['launch','exit-wait','receipt-parse','observer-close'].map((stage,i)=>({schemaVersion:1,stage,parentPid:42,pid:43,birth:'134400000000000000',start:String(1000+100*i),end:String(1050+100*i),frequency:'1000',wait:i===1?258:0}));
+test('child spans retain actual timeout and do not authorize acceptance',()=>{
+ const r=parseChildStages(text(child()),42);assert.equal(r.status,'OBSERVED_CHILD_PHASES');
+ assert.deepEqual(r.children[0].stages.map(x=>x.ms),[50,50,50,50]);
+ assert.equal(r.children[0].stages[1].wait,258);assert.equal(r.acceptanceGranted,false);
+});
+test('a partial tail leaves only the exact completed process prefix',()=>{
+ const r=parseChildStages(text(child().slice(0,2))+'{"stag',42);assert.equal(r.tailComplete,false);
+ assert.deepEqual(r.children[0].stages.map(x=>x.stage),['launch','exit-wait']);
+});
+test('child stages cannot migrate across identities or skip the original wait',()=>{
+ const rows=child();rows[1].birth='134400000000000001';assert.equal(parseChildStages(text(rows),42).status,'UNKNOWN');
+ assert.equal(parseChildStages(text(child().filter(r=>r.stage!=='exit-wait')),42).status,'UNKNOWN');
+ assert.equal(parseChildStages(text(child()),99).status,'UNKNOWN');
+});
 
 
 import ledgerFs from 'node:fs';

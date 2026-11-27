@@ -5,6 +5,7 @@ import {verifySavedExecutionCompletion,completionProofMatchesContract,completion
  * Absolute nested fixture hashes may resolve only inside that run's own case.
  */
 import fs from 'node:fs';
+import {createHash} from 'node:crypto';
 import {isSleepEngineDllCase,auditSleepEngineDllPayload} from './consumer/sleep-engine/dll-payload-audit.mjs';
 import path from 'node:path';
 import {sourcePath,sha256File,checkStructuredEvidence,evaluateResult,MAX_ARTIFACT_INPUTS,artifactInputLimit} from './runner.mjs';
@@ -36,36 +37,62 @@ function registeredArtifactMismatch(executed,declared,code,limit=MAX_ARTIFACT_IN
  }:null;
 }
 export const RECEIPT_AUDIT_LIMITS=Object.freeze({maxFiles:128,maxSingleBytes:32*1024*1024,maxTotalBytes:512*1024*1024});
+const MAX_SHARED_ARTIFACT_OBSERVATIONS=8192;
+const fileIdentity=stat=>[stat.dev,stat.ino,stat.size,stat.mtimeNs,stat.ctimeNs,stat.birthtimeNs].join(':');
+function candidateArtifactReader(){
+ const seen=new Map(),metrics={hashed:0,reused:0};
+ return {metrics,read(file){
+  const before=fs.statSync(file,{bigint:true});
+  if(!before.isFile())throw Error('CANDIDATE_ARTIFACT_NOT_FILE');
+  const stamp=fileIdentity(before),previous=seen.get(file);
+  if(before.ino!==0n&&previous?.stamp===stamp){metrics.reused++;return previous.sha256;}
+  seen.delete(file);
+  const sha256=sha256File(file);
+  metrics.hashed++;
+  const after=fs.statSync(file,{bigint:true});
+  if(!after.isFile()||fileIdentity(after)!==stamp)throw Error('CANDIDATE_ARTIFACT_CHANGED_DURING_AUDIT');
+  if(before.ino!==0n&&seen.size<MAX_SHARED_ARTIFACT_OBSERVATIONS)seen.set(file,{stamp,sha256});
+  return sha256;
+ }};
+}
 function read(file,budget){
- const size=fs.statSync(file).size;
+ const before=fs.statSync(file,{bigint:true});
+ if(!before.isFile())throw Error('RECEIPT_NOT_FILE');
+ const size=Number(before.size);
  if(size>RECEIPT_AUDIT_LIMITS.maxSingleBytes)throw Error('RECEIPT_SIZE_LIMIT');
  if(budget.used+size>budget.limit)throw Error('RECEIPT_TOTAL_SIZE_LIMIT');
  const bytes=fs.readFileSync(file);
  if(bytes.length>RECEIPT_AUDIT_LIMITS.maxSingleBytes)throw Error('RECEIPT_SIZE_LIMIT');
  if(budget.used+bytes.length>budget.limit)throw Error('RECEIPT_TOTAL_SIZE_LIMIT');
  budget.used+=bytes.length;
- return JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/,''));
+ const after=fs.statSync(file,{bigint:true,throwIfNoEntry:false});
+ if(!after?.isFile()||bytes.length!==size||fileIdentity(after)!==fileIdentity(before))throw Error('RUN_RECEIPT_CHANGED_DURING_READ');
+ return {value:JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/,'')),sha256:createHash('sha256').update(bytes).digest('hex')};
 }
 export function auditReceipts(receiptFiles,{repoRoot,maxTotalReceiptBytes=RECEIPT_AUDIT_LIMITS.maxTotalBytes}={}){
+ // Same-call observations only. Compare the actual hash to each receipt's own pin.
+ const candidateArtifacts=candidateArtifactReader();
  const report={schemaVersion:1,kind:'ymcc-current-receipt-audit',generatedAt:new Date().toISOString(),status:'BLOCKED',mode:'read-only-no-execution',
-  sourceRuns:[],cases:[],diagnostics:[],fullProductAcceptance:false,physicalHardwareAcceptance:false,binaryCompatibilityReexecuted:false,executedTests:0};
+  sourceRuns:[],cases:[],diagnostics:[],fullProductAcceptance:false,physicalHardwareAcceptance:false,binaryCompatibilityReexecuted:false,executedTests:0,
+  candidateArtifactAudit:candidateArtifacts.metrics};
  report.readLimits={maxFiles:RECEIPT_AUDIT_LIMITS.maxFiles,maxSingleBytes:RECEIPT_AUDIT_LIMITS.maxSingleBytes,maxTotalBytes:maxTotalReceiptBytes};
  report.receiptBytesRead=0;
  if(!Array.isArray(receiptFiles)||!receiptFiles.length||receiptFiles.length>RECEIPT_AUDIT_LIMITS.maxFiles){report.diagnostics.push({code:'RECEIPT_LIST_REQUIRED_MAX_128'});return report;}
  if(!Number.isSafeInteger(maxTotalReceiptBytes)||maxTotalReceiptBytes<1||maxTotalReceiptBytes>RECEIPT_AUDIT_LIMITS.maxTotalBytes){report.diagnostics.push({code:'RECEIPT_TOTAL_SIZE_LIMIT_INVALID'});return report;}
  const budget={used:0,limit:maxTotalReceiptBytes},latest=new Map();
  for(const locator of receiptFiles){
-  let file,value;
-  try{file=path.resolve(locator);value=read(file,budget);report.receiptBytesRead=budget.used;
+  let file,value,sha256;
+  try{file=path.resolve(locator);({value,sha256}=read(file,budget));report.receiptBytesRead=budget.used;
    if(!value||value.tool!=='ymcc_sim-global'||value.schemaVersion!==1||!['run','log-check'].includes(value.mode)||!Array.isArray(value.results)||!value.results.length)throw Error();
    const ids=new Set();
    for(const item of value.results){if(!validId(item?.id)||ids.has(item.id))throw Error();ids.add(item.id);}
   }catch(error){
    report.receiptBytesRead=budget.used;
    if(error?.message==='RECEIPT_TOTAL_SIZE_LIMIT'){report.diagnostics.push({code:'RECEIPT_TOTAL_SIZE_LIMIT',file:typeof locator==='string'?locator:null,maxBytes:budget.limit,bytesRead:budget.used});return report;}
-   report.diagnostics.push({code:'RUN_RECEIPT_INVALID',file:typeof locator==='string'?locator:null});continue;
+   const code=error?.message==='RUN_RECEIPT_CHANGED_DURING_READ'?'RUN_RECEIPT_CHANGED_DURING_READ':'RUN_RECEIPT_INVALID';
+   report.diagnostics.push({code,file:typeof locator==='string'?locator:null});continue;
   }
-  report.sourceRuns.push({file,sha256:sha256File(file),runId:value.runId,order:report.sourceRuns.length+1,originalVerdict:value.verdict});
+  report.sourceRuns.push({file,sha256,runId:value.runId,order:report.sourceRuns.length+1,originalVerdict:value.verdict});
   for(const item of value.results)latest.set(item.id,{item,root:path.dirname(file),runId:value.runId,hostPayload:value.hostPayload,candidateInputs:value.candidateInputs,executionRepoRoot:value.repoRoot});
  }
  for(const {item,root,runId,hostPayload,candidateInputs,executionRepoRoot}of latest.values()){
@@ -87,7 +114,7 @@ export function auditReceipts(receiptFiles,{repoRoot,maxTotalReceiptBytes=RECEIP
     if(!Array.isArray(item.candidateArtifacts)||item.candidateArtifacts.length>artifactInputLimit(item)){row.diagnostics.push({code:'CANDIDATE_ARTIFACT_SCHEMA_INVALID'});continue;}
     for(const binary of item.candidateArtifacts){
       if(!binary||typeof binary.path!=='string'||!path.isAbsolute(binary.path)||/[\0\r\n]/.test(binary.path)||!/^[a-f0-9]{64}$/i.test(binary.sha256??'')){row.sourceMismatches.push({role:'explicit-candidate-artifact',path:binary?.path??null,expected:binary?.sha256??null,actual:null});continue;}
-      let actual=null;try{actual=sha256File(binary.path);}catch{}
+      let actual=null;try{actual=candidateArtifacts.read(binary.path);}catch{}
       if(actual!==binary.sha256.toLowerCase())row.sourceMismatches.push({path:binary.path,role:'explicit-candidate-artifact',expected:binary.sha256,actual});
     }
   }
@@ -163,20 +190,24 @@ export function auditRegisteredScope(report, adapters, {profile='full', domains=
  if(unknown.length)throw Error('UNKNOWN_SELECTION:'+unknown.join(','));
  const selected=adapters.filter(row=>row.profiles.includes(profile)&&(!domains.length||domains.includes(row.domain))&&(!tests.length||tests.includes(row.id)));
  const current=new Map();for(const row of report.cases){if(!validId(row?.id)||current.has(row.id))throw Error('REGISTERED_AUDIT_CASE_SCHEMA_INVALID');current.set(row.id,row);}
- const selectedMap=new Map(selected.map(row=>[row.id,row]));
+  const selectedMap=new Map(selected.map(row=>[row.id,row]));
+  const prerequisiteUnavailable='REGISTERED_PREREQUISITE_UNAVAILABLE';
  const cases=report.cases.map(row=>{
   const adapter=selectedMap.get(row.id);if(!adapter||row.status!=='PASS')return row;
   const differences=[];
-  if(adapter.blockedReason)differences.push({code:'REGISTERED_PREREQUISITE_UNAVAILABLE',reason:adapter.blockedReason});
+   if(adapter.blockedReason)differences.push({code:prerequisiteUnavailable,reason:adapter.blockedReason});
   if(adapter.kind==='typescript') {
     if(!row.execution?.bundledToolProof?.toolAuthorityVerified)differences.push({code:'REGISTERED_BUNDLED_AUTHORITY_NOT_EXECUTED'});
     for(const required of BUNDLED_AUTHORITY_SOURCES)if(!row.execution?.sourceInputs?.includes(required))differences.push({code:'REGISTERED_BUNDLED_IMPLEMENTATION_NOT_EXECUTED',path:required});
 
 
   }
-  // Verified automatic TS tools and entry/map are not explicit registration members.
-  const artifactMismatch=registeredArtifactMismatch(adapter.kind==='typescript'?row.execution?.explicitAdapterArtifacts:row.execution?.candidateArtifacts,adapter.artifactInputs,adapter.kind==='typescript'?'REGISTERED_EXPLICIT_ARTIFACTS_CHANGED':'REGISTERED_ARTIFACTS_CHANGED',Math.min(artifactInputLimit(adapter),artifactInputLimit({id:row.id,...row.execution})));
-  if(artifactMismatch)differences.push(artifactMismatch);
+   // A blocked factory can return only its base artifacts. Compare membership
+   // only after registration is available; still check independent contracts.
+   if(!adapter.blockedReason){
+    const artifactMismatch=registeredArtifactMismatch(adapter.kind==='typescript'?row.execution?.explicitAdapterArtifacts:row.execution?.candidateArtifacts,adapter.artifactInputs,adapter.kind==='typescript'?'REGISTERED_EXPLICIT_ARTIFACTS_CHANGED':'REGISTERED_ARTIFACTS_CHANGED',Math.min(artifactInputLimit(adapter),artifactInputLimit({id:row.id,...row.execution})));
+    if(artifactMismatch)differences.push(artifactMismatch);
+   }
    if(adapter.completionContract!==undefined&&!completionProofMatchesContract(row.execution?.completionProof,adapter.completionContract))differences.push({code:'REGISTERED_COMPLETION_CONTRACT_NOT_EXECUTED',expected:completionContractFingerprint(adapter.completionContract),executed:row.execution?.completionProof?.contractFingerprint??null});
   if(row.execution?.source!==adapter.path)differences.push({code:'REGISTERED_ENTRY_CHANGED',expected:adapter.path,executed:row.execution?.source??null});
   if(row.execution?.scope!==adapter.scope)differences.push({code:'REGISTERED_SCOPE_CHANGED',expected:adapter.scope,executed:row.execution?.scope??null});
@@ -189,6 +220,7 @@ export function auditRegisteredScope(report, adapters, {profile='full', domains=
  current.clear();for(const row of cases)current.set(row.id,row);
  const missing=selected.filter(row=>!current.has(row.id)).map(row=>({id:row.id,domain:row.domain,path:row.path??null,status:'NOT_RUN',reason:'NO_EXECUTION_RECEIPT_FOR_CURRENT_REGISTERED_TEST'}));
  const notPassed=selected.filter(row=>current.has(row.id)&&current.get(row.id).status!=='PASS').map(row=>({id:row.id,status:current.get(row.id).status}));
+  const prerequisites=selected.filter(row=>row.blockedReason).map(row=>({id:row.id,reason:row.blockedReason}));
  const complete=selected.length>0&&!missing.length&&!notPassed.length;
  let status=report.status;
  if(!selected.length)status=report.status==='FAIL'?'FAIL':'BLOCKED';
@@ -198,9 +230,9 @@ export function auditRegisteredScope(report, adapters, {profile='full', domains=
  if(!selected.length)diagnostics.push({code:'EMPTY_REGISTERED_SELECTION'});
  return {...report,status,diagnostics,cases,
   registeredScope:{profile,domains:[...new Set(domains)],tests:[...new Set(tests)],selectedCount:selected.length,
-   ids:selected.map(row=>row.id),missing,notPassed,complete,
+    ids:selected.map(row=>row.id),missing,notPassed,complete,...(prerequisites.length?{prerequisites}:{}),
    meaning:'Only current registered tests in the explicit profile/selection. No tests execute during this audit. Passing this scope does not prove complete product or physical behavior.'},
   summary:{...priorSummary,currentPass:cases.filter(row=>row.status==='PASS').length,stale:cases.filter(row=>row.status.startsWith('STALE')).length,registeredSelected:selected.length,registeredMissing:missing.length,registeredNotPassed:notPassed.length},
-  needsRerun:[...new Set([...priorNeeds,...cases.filter(row=>row.status==='STALE_REGISTRATION').map(row=>row.id),...missing.map(row=>row.id)])],
+   needsRerun:[...new Set([...priorNeeds,...cases.filter(row=>row.status==='STALE_REGISTRATION'&&row.registrationMismatches?.some(item=>item.code!==prerequisiteUnavailable)).map(row=>row.id),...missing.map(row=>row.id)])],
   selectionMeaning:'Supplied receipts remain latest in caller order; current registry selection is also checked for missing or nonpassing execution evidence.'};
 }

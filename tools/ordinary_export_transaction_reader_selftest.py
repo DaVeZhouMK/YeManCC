@@ -987,6 +987,34 @@ class OrdinaryExportTransactionTests(unittest.TestCase):
   foreign=dict(short,exportOperation=self.operation(birth='134394066260992256'),writerProcessCreation100ns='134394066260992256')
   self.assertEqual(comparisons([],[(None,[foreign])])[1]['state'],'no-comparable-terminal')
 
+ def test_checkpoint_wall_join_share_requires_consistent_full_operation_timing(self):
+  available,snapshot=self.checkpoint_wall_fixture()
+  available['windowsSleepScheduling']=dict(schema=1,scope='export-wall-intervals;may-overlap',mode='overlapped-task',
+                  reportAdapterMs=10000,remainingStateMs=203,overlapMs=203,joinMs=9797)
+  current,row=self.carrying_availability()
+  row.update(attempts=1,exportElapsedMs=12000,archiveElapsedMs=1700,
+             phaseElapsedMs=dict(available['exportPhaseTiming']['elapsedMs']))
+  carry=current['priorOrdinaryExportTerminal']['terminal']
+  carry.update(attempts=1,exportElapsedMs=12000,archiveElapsedMs=1700,phaseElapsedMs=row['phaseElapsedMs'])
+  def comparison(rows, carried=None):
+   batches=[(available,[]),(None,rows)]
+   if carried is not None:batches.append((carried,[]))
+   cross,_=self.cross_view(batches,snapshots={0:snapshot})
+   return cross['receipts'][0]['completedWallLowerBoundComparison']
+  key='windowsReportJoinShareOfNativeExport'
+  result=comparison([row],current)[key]
+  self.assertEqual((result['joinMs'],result['nativeExportMs'],result['remainingNativeWallMs']),(9797,12000,2203))
+  self.assertEqual(result['agreeingSources'],['native-terminal','preceding-terminal-carry'])
+  self.assertEqual(comparison([],current)[key]['agreeingSources'],['preceding-terminal-carry'])
+  self.assertNotIn(key,comparison([]))
+  self.assertNotIn(key,comparison([row,row],current))
+  for phases in ({k:v for k,v in row['phaseElapsedMs'].items() if k!='windowsReportAndRemainingState'},
+                 dict(row['phaseElapsedMs'],windowsReportAndRemainingState=9999)):
+   self.assertNotIn(key,comparison([dict(row,phaseElapsedMs=phases)]))
+  disagreement=copy.deepcopy(current)
+  disagreement['priorOrdinaryExportTerminal']['terminal']['exportElapsedMs']=12100
+  self.assertNotIn(key,comparison([row],disagreement))
+
  def test_checkpoint_wall_retry_total_includes_delay_once_and_requires_same_checkpoint_summary(self):
   available,snapshot=self.checkpoint_wall_fixture(attempt=2)
   first=snapshot['archiveAttemptTiming']['attempts'][0]

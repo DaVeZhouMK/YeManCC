@@ -8,14 +8,17 @@ public sealed class PinnedFanDescriptor
     internal PinnedFanDescriptor(string modelClass,string deviceId,string file,string sha,PinnedFanTransportKind transport,
         ushort control,ushort duty,byte on,byte maximum,ushort statusPort,ushort dataPort,ushort? temperature,string[] manufacturers,string[] products,
         string sourceCommit="f2e58468d9917189d4be7ccfc242385ce2c3035b",
-        string sourceRepository="Valkirie/HandheldCompanion",bool manufacturerContains=false)
+        string sourceRepository="Valkirie/HandheldCompanion",bool manufacturerContains=false,ushort? secondaryDutyRegister=null)
     { ModelClass=modelClass; DeviceId=deviceId; SourceFile=file; SourceSha256=sha; Transport=transport;
       ControlRegister=control; DutyRegister=duty; ControlOn=on; Maximum=maximum; StatusPort=statusPort; DataPort=dataPort;
       SourceCommit=sourceCommit; SourceRepository=sourceRepository; ManufacturerContains=manufacturerContains;
-      TemperatureRegister=temperature; Manufacturers=Array.AsReadOnly(manufacturers); Products=Array.AsReadOnly(products); }
+      TemperatureRegister=temperature; SecondaryDutyRegister=secondaryDutyRegister;
+      Manufacturers=Array.AsReadOnly(manufacturers); Products=Array.AsReadOnly(products); }
     public string ModelClass {get;} public string DeviceId {get;} public string SourceFile {get;} public string SourceSha256 {get;}
     public string SourceCommit {get;} public string SourceRepository {get;} public bool ManufacturerContains {get;}
     public PinnedFanTransportKind Transport {get;} public ushort ControlRegister {get;} public ushort DutyRegister {get;}
+    // A dual-duty route has no mode register. Zero on each duty register returns that channel to firmware.
+    public ushort? SecondaryDutyRegister {get;}
     public byte ControlOn {get;} public byte ControlOff => 0; public byte Minimum => 0; public byte Maximum {get;}
     public ushort StatusPort {get;} public ushort DataPort {get;} public ushort? TemperatureRegister {get;}
     public IReadOnlyList<string> Manufacturers {get;} public IReadOnlyList<string> Products {get;}
@@ -37,6 +40,11 @@ public static partial class FanCapabilityCatalog
         new("HandheldCompanion.Devices.OneXPlayerX2","ymcc.device.OneXPlayerX2","HandheldCompanion/Devices/OneXPlayer/OneXPlayerX2.cs","41cf648a9d9247c2e1a5da29bed748f0aed0a8407202a690b0b866ae2d5c369b",PinnedFanTransportKind.WmiBankedEc,0x44a,0x44b,0x1,184,0x4e,0x4f,0x470,new[]{"ONE-NETBOOK TECHNOLOGY CO., LTD.","ONE-NETBOOK"},new[]{"ONEXPLAYER X2"}),
         new("HandheldCompanion.Devices.OneXPlayerX2MiniPro","ymcc.device.OneXPlayerX2MiniPro","HandheldCompanion/Devices/OneXPlayer/OneXPlayerX2MiniPro.cs","7f06350daeb1d1c7157ae21f1dc231637394008256b3fc4c22c747109e2c7b67",PinnedFanTransportKind.SuperIo16,0x44a,0x44b,0x1,255,0x4e,0x4f,0x470,new[]{"ONE-NETBOOK TECHNOLOGY CO., LTD.","ONE-NETBOOK"},new[]{"ONEXPLAYER X2Mini PRO"}),
         new("YeManCC.SourceDevices.OneXPlayerSuperX","ymcc.device.OneXPlayerSuperX","capabilities/upstream/xmax-6d728795/SuperXFan.source-facts.json","2d1a55bafb6a1cd906758d92cb1a05877a38a70143ee9fdb7c6e2b89b091c027",PinnedFanTransportKind.WmiUmaEc16,0x44a,0x44b,0x1,255,0,0,null,new[]{"ONE-NETBOOK"},new[]{"ONEXPLAYER SUPER X"},"6d728795511c2f9f683d1757e72481236de9b23a","the-reengineers/XmaX",true),
+        // YMCC-owned port, pinned to GPDTool v1.67 service disassembly; no HC device factory alias.
+        new("YeManCC.SourceDevices.GPDWinMax3","ymcc.device.GPDWinMax3","GPDToolService.exe",
+            "6461ba3e3f3f23564cbbf92376e11f376808792afd1ee38806761f4108cf5bb3",PinnedFanTransportKind.SuperIo16,
+            0,0x047b,0,244,0x4e,0x4f,null,new[]{"GPD"},new[]{"G1638-01"},
+            "6461ba3e3f3f23564cbbf92376e11f376808792afd1ee38806761f4108cf5bb3","GPD/GPDTool-v1.67",secondaryDutyRegister:0x047a),
     };
     public static IReadOnlyList<PinnedFanDescriptor> PinnedSourceDeclarations {get;} = Array.AsReadOnly(pinnedSourceRows);
     public static PinnedFanDescriptor? FindPinnedFanSource(string? modelClass)
@@ -46,6 +54,13 @@ public static partial class FanCapabilityCatalog
         if(manufacturer is null||product is null)return null;
         var normalizedManufacturer=manufacturer.ToUpperInvariant();
         foreach(var row in pinnedSourceRows){bool matched=false;foreach(var value in row.Manufacturers)if(row.ManufacturerContains?manufacturer.Contains(value,StringComparison.Ordinal):value==normalizedManufacturer){matched=true;break;}
+            if(row.SecondaryDutyRegister.HasValue)
+            {
+                // Match the native GPD chassis catalog's DMI normalization.
+                if(string.Equals(manufacturer.Trim(),row.Manufacturers[0],StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(product.Trim(),row.Products[0],StringComparison.OrdinalIgnoreCase))return row;
+                continue;
+            }
             if(!matched)continue;foreach(var value in row.Products)if(value==product)return row;}
         return null;
     }

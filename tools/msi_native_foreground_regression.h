@@ -822,7 +822,8 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression(bool mutationP
         const std::string selected=preHostWriterCase;
         const std::vector<std::string> allowed={"terminal-owner","off","unknown","enable-debt",
             "wrong-attempt","cross-power","successor-owner","live","prior-leaf-failed"};
-        if(std::find(allowed.begin(),allowed.end(),selected)==allowed.end())
+        const bool win5ReturnExit2=selected=="win5-return-exit2";
+        if(!win5ReturnExit2 && std::find(allowed.begin(),allowed.end(),selected)==allowed.end())
             throw std::runtime_error("unknown GPD preHost writer selection");
         auto need=[&](bool ok,const char* name){check(name,ok);if(!ok)throw std::runtime_error(name);};
         // The central executor must put the documented invalid module manifest
@@ -844,6 +845,120 @@ static std::pair<unsigned,unsigned> msiNativeForegroundRegression(bool mutationP
         runtime::state={};
         {std::lock_guard queueLock(g_inputHostLifecycleWorkMx);g_inputHostLifecycleWorkQueue.clear();}
         g_inputHostLifecycleWorkRequested=false;
+        if(win5ReturnExit2){
+            namespace queued=ymcc::inputHost::queuedPlayerStart;
+            // Use the original visibility IO ports to park the return at a HID
+            // refresh; attach the tracked child at that one pending IO boundary.
+            enter();
+            auto& lease=g_msiNativeForegroundLease;
+            need(lease.active&&lease.cycleAccepted&&!g_msiNativeForegroundCyclePending,
+                "Win5 prehost original native isolation initially settles");
+            const auto power=currentPowerGeneration();
+            gameRefreshResult=1;
+            {
+                std::lock_guard host(g_inputHostMx);
+                std::lock_guard lock(g_msiNativeForegroundMx);
+                need(!msiNativeForegroundRestoreLocked("win5-fixture")&&lease.configurationReturned&&
+                    lease.cycleForRestore&&lease.syntheticCycle&&g_msiNativeForegroundCyclePending&&
+                    lease.helperGameTarget==familyHid&&lease.helperExitCode==STILL_ACTIVE,
+                    "Win5 prehost configuration returns but original HID refresh remains pending");
+            }
+            const auto ownerPath=nativeRefreshWriterRecordPath();
+            auto writer=std::make_unique<ymcc::nativeRefreshWriter::LaunchScope>(ownerPath,
+                "windows-machine-guid:private-gpd-prehost",familyRoot,familyHid,std::vector<std::string>{W2U(location)});
+            auto capture=std::make_unique<ymcc::input::OneShotHelperDiagnostic>();
+            need(writer->ready()&&capture->prepare(g_yemanccDataDir)&&
+                capture->prepareTrackedLaunch(writer->job(),writer->jobName(),{writer->inheritedLease()})&&writer->reserve(),
+                "Win5 prehost pending return uses tracked writer and real diagnostic spool");
+            const auto attempt=writer->attempt()->attemptId;
+            wchar_t self[32768]{};
+            need(GetModuleFileNameW(nullptr,self,32768)!=0,
+                "Win5 prehost inert return helper uses current regression image");
+            std::wstring command=L"\""+std::wstring(self)+L"\" --gpd-return-inert-leaf-exit2";
+            PROCESS_INFORMATION child{};
+            need(CreateProcessW(self,command.data(),nullptr,nullptr,TRUE,CREATE_SUSPENDED|CREATE_NO_WINDOW|
+                writer->job().flags(),nullptr,nullptr,writer->job().startup(),&child)!=FALSE,
+                "Win5 prehost same image inert helper starts suspended in tracked Job");
+            GpdPreHostChildCleanup childCleanup(child.hProcess,child.hThread,writer->jobName(),2);
+            BOOL inJob=FALSE;
+            need(childCleanup.observer&&childCleanup.job&&IsProcessInJob(child.hProcess,childCleanup.job,&inJob)&&inJob&&
+                writer->creationReturned(child.hProcess),"Win5 prehost exact pending helper is bound before resume");
+            capture->started();lease.helperDiagnosticCapture=std::move(capture);
+            lease.cycleProcess=child.hProcess;lease.nativeRefreshWriter=std::move(writer);lease.syntheticCycle=false;
+            childCleanup.transferred=true;
+            const auto hidCount=gameRefreshes.size(),xusbCount=xusbRefreshes.size();
+            std::vector<queued::Work> periods;
+            std::vector<std::string> wires;
+            for(const char* persona:{"steamdeck","dualsense-edge","elite"}){
+                g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona=persona;
+                g_inputHostRecoveryIntent.configure({{"outputTarget",{{"persona",persona},{"buttonMappingEnabled",true},
+                    {"gyroEnabled",false}}},{"gyroMotion",{{"enabled",false}}}},"private-gpd-prehost",true,true,persona);
+                const auto started=inputHostStartProtectionNow();
+                const auto admitted=g_virtualStartProtection.admit(persona,started);
+                const auto wire=queued::bind("initial-target-admission");
+                queued::Work work;
+                need(admitted.accepted&&admitted.created&&queued::decode(wire,work)&&work.bound&&
+                    work.request==admitted.requestId&&work.power==power&&work.deadline==started+30000,
+                    "Win5 prehost each persona keeps its original request and thirty second deadline");
+                const bool deferred=!msiNativeForegroundBeforeVirtualWork(wire);
+                if(deferred)inputHostRuntimeRecoveryObserveNativeWait(work);
+                need(deferred&&lease.active&&lease.configurationReturned&&lease.retiredNativeWriterAttempt.empty()&&
+                    lease.cycleProcess==child.hProcess&&lease.nativeRefreshWriter&&lease.nativeRefreshWriter->attempt()->attemptId==attempt&&
+                    !g_inputHostProcess&&!g_inputHostEpoch,
+                    "Win5 prehost exact pending refresh defers persona before any replacement Host");
+                if(periods.size()==2){
+                    need(childCleanup.complete(),"Win5 prehost inert helper exits two and owned Job reaches zero");
+                    msiNativeForegroundMaintenance();
+                    msiNativeForegroundHandleWork();
+                    need(lease.active&&lease.configurationReturned&&lease.refreshFailed&&!lease.cycleAccepted&&
+                        lease.helperExitCode==2&&lease.helperDiagnostic.value("state",std::string{})=="record-missing"&&
+                        lease.helperDiagnostic.value("stdoutBytes",-1)==0&&!lease.helperDiagnostic.value("hardwareSuccessProven",true)&&
+                        !lease.helperDiagnosticCapture&&!lease.cycleProcess&&!lease.nativeRefreshWriter&&
+                        !g_msiNativeForegroundCyclePending&&lease.retiredNativeWriterAttempt==attempt,
+                        "Win5 prehost exit two with empty diagnostic retains unverified return despite exact writer retirement");
+                    need(!msiNativeForegroundBeforeVirtualWork(wire)&&!g_inputHostProcess&&!g_inputHostEpoch&&
+                        !runtime::state.recoveryRequestId&&gameRefreshes.size()==hidCount&&xusbRefreshes.size()==xusbCount,
+                        "Win5 prehost terminal helper failure grants no same edge replacement or recovery ticket");
+                }
+                g_gpdPreHostFixtureTick=work.deadline-1;
+                need(!queued::stale(work)&&g_virtualStartProtection.view(inputHostStartProtectionNow()).locked,
+                    "Win5 prehost original work is still admitted just before expiry");
+                g_gpdPreHostFixtureTick=work.deadline;
+                const auto view=g_virtualStartProtection.view(inputHostStartProtectionNow());
+                const char* stale=queued::stale(work);
+                need(view.phase=="expired"&&!view.locked&&view.requestId==work.request&&stale&&
+                    std::string_view(stale)=="original-player-period-finished"&&queued::bind("initial-target-admission").empty()&&
+                    !g_inputHostProcess&&!g_inputHostEpoch,
+                    "Win5 prehost expired ticket refuses both bound retry and policy downgrade");
+                periods.push_back(work);wires.push_back(wire);
+                ++g_gpdPreHostFixtureTick;
+            }
+            // The first new edge consumes the failed series, not a fresh IO
+            // result. Only a later event may offer new return evidence.
+            gameRefreshResult=familyXusbResult=0;
+            msiNativeForegroundUiEvent(true);
+            msiNativeForegroundHandleWork();
+            need(lease.active&&lease.refreshFailed&&!lease.refreshSeriesActive&&!lease.cycleAccepted&&virtualJobs.empty()&&
+                gameRefreshes.size()==hidCount&&xusbRefreshes.size()==xusbCount,
+                "Win5 prehost first new edge retires failed series without reporting return");
+            msiNativeForegroundUiEvent(true);
+            msiNativeForegroundHandleWork();
+            need(!lease.active&&virtualJobs==wires&&gameRefreshes.size()==hidCount+1&&xusbRefreshes.size()==xusbCount+1&&
+                hidden==std::vector<std::wstring>{L"HID\\FOREIGN-PREHIDDEN\\OTHER-PORT"},
+                "Win5 prehost fresh observed return clears only the exact owner and preserves bound wires");
+            need(std::all_of(periods.begin(),periods.end(),[](const auto& work){return queued::stale(work)!=nullptr;})&&
+                queued::bind("initial-target-admission").empty()&&!g_inputHostProcess&&!g_inputHostEpoch,
+                "Win5 prehost proven return cannot revive any original player ticket");
+            {
+                auto returned=ymcc::nativeRefreshWriter::Session::open(ownerPath,"windows-machine-guid:private-gpd-prehost");
+                need(returned.ready()&&childCleanup.releaseObservers(),
+                    "Win5 prehost exact Session and process observers are released");
+            }
+            std::cout<<"GPD_PREHOST_TERMINAL_OWNER selection="<<selected<<" checks="<<cases<<" failures="<<failures
+                <<" simulatedClock=true actualRuntimeHeader=true actualWriterRetirement=true firstRequestBusCoverage=false hardwareIo=false\n";
+            g_gpdPreHostFixtureTick=0;
+            return {cases,failures};
+        }
         // First HID leaf is acknowledged by the original IO seam. The final
         // exact XUSB leaf waits in a REAL LaunchScope, not a fake NativeLease.
         gameRefreshResult=0;familyXusbResult=1;enter();

@@ -62,7 +62,13 @@ static bool oemVendorTaskImport(const std::wstring& name) {
     tasks.emplace(name,port.importedTask);++taskMutations;++taskImports;port.imported=true;
     return true;
 }
-static bool oemVendorProcessesStop(const std::vector<std::wstring>& names,unsigned long long epoch){++processCalls;if(processFail)return false;for(const auto& n:names)if(oemVendorStackIntentCurrent(epoch)&&std::find(processes.begin(),processes.end(),n)!=processes.end())stoppedProcesses.push_back(n);return true;}
+static bool oemVendorProcessesStop(const std::vector<std::wstring>& names,unsigned long long epoch,OemVendorWakeReadback* wake){
+ ++processCalls;
+ if(wake)wake->noProcessMatches=!processFail&&!names.empty()&&std::none_of(names.begin(),names.end(),[](const auto& n){return std::find(processes.begin(),processes.end(),n)!=processes.end();});
+ if(processFail)return false;
+ for(const auto& n:names)if(oemVendorStackIntentCurrent(epoch)&&std::find(processes.begin(),processes.end(),n)!=processes.end())stoppedProcesses.push_back(n);
+ return true;
+}
 #endif
 static int cases=0,failed=0;
 static void check(bool ok,const char* text){++cases;std::cout<<(ok?"PASS ":"FAIL ")<<text<<"\n";if(!ok)++failed;}

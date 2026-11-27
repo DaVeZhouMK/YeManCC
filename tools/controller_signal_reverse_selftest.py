@@ -22,6 +22,66 @@ def counts(samples=1, meaningful=0, small=0):
     return {"samples": samples, "rawActiveFrames": meaningful + small, "meaningfulFrames": meaningful, "smallAnalogOnlyFrames": small}
 
 class ReverseSignalTests(unittest.TestCase):
+    def test_common_frame_copies_keep_ack_and_window_independent(self):
+        from ai_log_reader import common_frame_copies_projection, iter_ai_records
+        original = frame()
+        original['snapshotReason'] = 'state-change'
+        original['source']['readCompletedTick'] = original['source']['readStartedTick']
+        encoded = copy.deepcopy(original)
+        encoded['frameCopiesV1'] = 3
+        del encoded['source']['readCompletedTick']
+        del encoded['frameProof']['hostReceipt']['sampleSequence']
+        expected = frame_check(original)
+        self.assertTrue(expected['localAckBound'] and expected['currentReadCallWindow'])
+        self.assertEqual(frame_check(encoded), expected)
+        projection = common_frame_copies_projection(encoded)
+        self.assertEqual(projection['restoredFields'], {'source': {'readCompletedTick': 1000},
+            'frameProof': {'hostReceipt': {'sampleSequence': 7}}})
+
+        for field, values in (('frameCopiesV1', (True, 0, 4, 3.0)), ('formatVersion', (None, True, 3)),
+                              ('snapshotReason', (None, 'legacy'))):
+            for value in values:
+                invalid = {**encoded, field: value}
+                self.assertEqual(common_frame_copies_projection(invalid), {'state': 'invalid-envelope'})
+                self.assertFalse(frame_check(invalid)['localAckBound'])
+                self.assertFalse(frame_check(invalid)['currentReadCallWindow'])
+        for value in (True, '1000', 1000.0, -1, 2**64, None):
+            invalid = {**encoded, 'source': {**encoded['source'], 'readStartedTick': value}}
+            self.assertEqual(common_frame_copies_projection(invalid), {'state': 'invalid-copy-source'})
+            self.assertFalse(frame_check(invalid)['localAckBound'])
+        for value in (1000, 1001, None):
+            conflict = {**encoded, 'source': {**encoded['source'], 'readCompletedTick': value}}
+            self.assertEqual(common_frame_copies_projection(conflict), {'state': 'conflicting-inline-fields'})
+            self.assertFalse(frame_check(conflict)['localAckBound'])
+        self.assertNotIn('readCompletedTick', encoded['source'])
+        self.assertNotIn('sampleSequence', encoded['frameProof']['hostReceipt'])
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / 'frame.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                for member in ('native-lifecycle.log', 'native-detail.log.1', 'nested/native-detail.log'):
+                    archive.writestr(member, json.dumps(encoded) + '\n')
+            projections = [r for r in iter_ai_records(path) if 'commonFrameCopies' in r]
+            self.assertEqual(len(projections), 2)
+            for item in projections:
+                self.assertEqual(item['value'], encoded)
+                self.assertEqual(item['commonFrameCopies'], projection)
+
+    def test_ambiguous_compact_frame_does_not_establish_ack(self):
+        from controller_signal_reverse_audit import read_archive
+        row = frame()
+        row.update(snapshotReason='periodic', frameCopiesV1=2)
+        del row['frameProof']['hostReceipt']['sampleSequence']
+        wire = json.dumps(row)
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / 'frame.zip'
+            with zipfile.ZipFile(path, 'w') as archive:
+                archive.writestr('native-detail.log', wire + '\n' + '{"frameCopiesV1":3,' + wire[1:] + '\n')
+            records, _, coverage = read_archive(path)
+        self.assertEqual(coverage['malformedRows'], 1)
+        self.assertEqual(len(records), 1)
+        self.assertTrue(frame_check(records[0]['data'])['localAckBound'])
+
     def test_foreground_observation_is_bound_to_its_native_row(self):
         row = {"event": "input-native-signal-window", "pid": 100, "writerProcessCreation100ns": "134394800080357544",
                "foregroundObservation": {"schemaVersion": 1, "pid": 200, "threadId": 300, "windowBefore": 21,
@@ -169,26 +229,106 @@ class ReverseSignalTests(unittest.TestCase):
         self.assertNotIn("meaningful-content-locally-acknowledged", result["tags"])
 
     def test_weak_rear_metadata_stays_partial(self):
-        link = {"event": "msi-backkey-frame-link", "pid": 100, "powerGeneration": 2, "epoch": 3, "frameSequence": 7,
-                "sourceGeneration": 4, "source": "msi-dinput", "frameBackButtons": 1, "submitOutcome": "accepted"}
-        result = analyze_records([rec(frame()), rec(link, 2)])
+        result = analyze_records([rec(self.rear_ack()), rec(self.rear_link(), 2)])
         item = result["rearFrameCandidates"][0]
         self.assertEqual(item["join"], "unique-partial-native-frame-key")
+        self.assertEqual(item["candidateReceipt"]["nativeWriter"], item["nativeWriter"])
         self.assertFalse(item["fullSourceToHostBindingProven"])
+        self.assertFalse(item["encodedBytesVerified"])
+        self.assertFalse(item["steamConsumptionProven"])
+
+    @staticmethod
+    def rear_ack(**overrides):
+        return {**frame(), "writerProcessCreation100ns": "134394800080357544", **overrides}
+
+    @staticmethod
+    def rear_link(**overrides):
+        return {"event": "msi-backkey-frame-link", "pid": 100, "writerProcessCreation100ns": "134394800080357544",
+                "powerGeneration": 2, "epoch": 3, "frameSequence": 7, "sourceGeneration": 4,
+                "source": "msi-dinput", "frameBackButtons": 1, "submitOutcome": "accepted", **overrides}
+
+    def test_reused_pid_cannot_supply_rear_ack(self):
+        other = self.rear_ack(writerProcessCreation100ns="134394800080357545")
+        result = analyze_records([rec(other), rec(self.rear_link(), 2)])
+        item = result["rearFrameCandidates"][0]
+        self.assertEqual(item["candidateHostReceipts"], 0)
+        self.assertEqual(item["otherWriterLifetimeAckRows"], 1)
+        self.assertEqual(item["join"], "same-frame-key-other-writer-lifetime")
+        self.assertNotIn("candidateReceipt", item)
+        self.assertTrue(result["proof"]["sameFrameAckObserved"])
+
+    def test_legacy_or_invalid_birth_cannot_supply_rear_ack(self):
+        for side in ("ack", "link", "both"):
+            for birth in (None, "0", "18446744073709551616", 134394800080357544, "absent"):
+                with self.subTest(side=side, birth=birth):
+                    ack, link = self.rear_ack(), self.rear_link()
+                    for name, entry in (("ack", ack), ("link", link)):
+                        if side in (name, "both"):
+                            if birth == "absent":
+                                entry.pop("writerProcessCreation100ns")
+                            else:
+                                entry["writerProcessCreation100ns"] = birth
+                    item = analyze_records([rec(ack), rec(link, 2)])["rearFrameCandidates"][0]
+                    self.assertEqual(item["join"], "same-frame-key-writer-identity-unresolved")
+                    self.assertEqual(item["writerUnresolvedAckRows"], 1)
+                    self.assertEqual(item["candidateHostReceipts"], 0)
+                    self.assertNotIn("candidateReceipt", item)
+
+    def test_other_lifetime_and_old_ack_do_not_make_current_candidate_ambiguous(self):
+        one, other, legacy = self.rear_ack(), self.rear_ack(writerProcessCreation100ns="123"), frame()
+        other["frameProof"]["hostReceipt"]["hostInstanceId"] = "host-B"
+        legacy["frameProof"]["hostReceipt"]["hostInstanceId"] = "host-C"
+        item = analyze_records([rec(other), rec(legacy, 2), rec(one, 3), rec(self.rear_link(), 4)])["rearFrameCandidates"][0]
+        self.assertEqual(item["join"], "unique-partial-native-frame-key")
+        self.assertEqual(item["candidateReceipt"]["line"], 3)
+        self.assertEqual(item["otherWriterLifetimeAckRows"], 1)
+        self.assertEqual(item["writerUnresolvedAckRows"], 1)
+
+    def test_conflicting_rear_writer_or_power_scopes_cannot_join(self):
+        for overrides in ({"writerPid": 101}, {"writerPid": True}, {"linkPowerGeneration": 1},
+                          {"linkPowerGeneration": None}, {"linkPowerGeneration": True}):
+            with self.subTest(overrides=overrides):
+                item = analyze_records([rec(self.rear_ack()), rec(self.rear_link(**overrides), 2)])["rearFrameCandidates"][0]
+                self.assertEqual(item["join"], "invalid-native-frame-key")
+                self.assertEqual(item["candidateHostReceipts"], 0)
+                self.assertNotIn("candidateReceipt", item)
+
+    def test_native_ack_invalid_power_field_does_not_abort_audit(self):
+        result = analyze_records([rec(self.rear_ack(powerGeneration=[])), rec(self.rear_link(), 2)])
+        self.assertEqual(result["rearFrameCandidates"][0]["candidateHostReceipts"], 0)
+        self.assertEqual(result["summary"]["frameEvidenceRows"], 1)
 
     def test_two_host_tuples_with_same_partial_key_are_ambiguous(self):
-        one = frame(); two = copy.deepcopy(one); two["frameProof"]["hostReceipt"]["hostInstanceId"] = "host-B"
-        link = {"event": "msi-backkey-frame-link", "pid": 100, "powerGeneration": 2, "epoch": 3,
-                "frameSequence": 7, "source": "msi-dinput", "frameBackButtons": 1}
+        one = self.rear_ack(); two = copy.deepcopy(one); two["frameProof"]["hostReceipt"]["hostInstanceId"] = "host-B"
+        link = self.rear_link()
         result = analyze_records([rec(one), rec(two, 2), rec(link, 3)])
         self.assertEqual(result["rearFrameCandidates"][0]["join"], "ambiguous")
 
     def test_other_family_frame_cannot_bind_msi_rear_link(self):
-        row = frame(); row["source"]["inputSource"] = "xinput"
-        link = {"event": "msi-backkey-frame-link", "pid": 100, "powerGeneration": 2, "epoch": 3,
-                "frameSequence": 7, "source": "msi-dinput", "frameBackButtons": 1}
+        row = self.rear_ack(); row["source"]["inputSource"] = "xinput"
+        link = self.rear_link()
         result = analyze_records([rec(row), rec(link, 2)])
         self.assertEqual(result["rearFrameCandidates"][0]["candidateHostReceipts"], 0)
+
+    def test_rear_ack_in_native_rotation_and_duplicate_name_keep_physical_location(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "export.zip"
+            with zipfile.ZipFile(path, "w") as bundle:
+                bundle.writestr("native-lifecycle.1.log", json.dumps(self.rear_ack(pid=20)))
+                with self.assertWarnsRegex(UserWarning, "Duplicate name"):
+                    bundle.writestr("native-lifecycle.1.log", "invalid\n" + json.dumps(self.rear_ack()))
+                bundle.writestr("native-detail.previous.log", json.dumps(self.rear_link(linkPowerGeneration=2)))
+                bundle.writestr("native-lifecycle.log.previous", json.dumps(self.rear_link()))
+                bundle.writestr("native-lifecycle.3.log.pending", json.dumps(self.rear_link()))
+            result = audit_archive(path)
+        self.assertEqual(result["summary"]["frameEvidenceRows"], 2)
+        self.assertEqual(result["coverage"]["malformedRows"], 1)
+        self.assertEqual(len(result["rearFrameCandidates"]), 2)
+        for item in result["rearFrameCandidates"]:
+            receipt = item["candidateReceipt"]
+            self.assertEqual(receipt["file"], "native-lifecycle.1.log")
+            self.assertEqual(receipt["archiveEntryOccurrence"], 1)
+            self.assertEqual(receipt["line"], 2)
 
     def archive(self, files):
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)

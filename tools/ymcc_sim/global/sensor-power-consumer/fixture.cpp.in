@@ -36,8 +36,8 @@ static std::atomic<std::shared_ptr<ymcc::inputHost::sharedPower::Scope>> g_senso
 static ymcc::sleeppower::RevocationMirrors g_sharedPowerRevocations;
 static std::atomic<std::uint64_t> g_captureGeneration{7};
 struct SensorThreadOwnerStart {unsigned long long serial=0,capture=0;};
-struct SensorThreadRecoveryRequest {unsigned long long serial=0,capture=0,power=0,sequence=0;ULONGLONG deadline=0;ymcc::sensors::ThreadMailbox::Handle ticket;std::shared_ptr<ymcc::inputHost::sharedPower::Scope> publicPower;};
-static std::atomic<unsigned long long> g_sensorThreadOwnerSerial{0},g_sensorThreadRecoveryPendingSerial{0};
+struct SensorThreadRecoveryRequest {unsigned long long id=0,serial=0,capture=0,power=0,sequence=0;ULONGLONG deadline=0;ymcc::sensors::ThreadMailbox::Handle ticket;std::shared_ptr<ymcc::inputHost::sharedPower::Scope> publicPower;};
+static std::atomic<unsigned long long> g_sensorThreadOwnerSerial{0},g_sensorThreadRecoveryIdCounter{0},g_sensorThreadRecoveryPendingId{0};
 static std::atomic<std::shared_ptr<const SensorThreadRecoveryRequest>> g_sensorThreadRecoveryRequest;
 static std::atomic<bool> g_inputReady{true},g_exitRequested{false},g_externalPriorityVirtualSuspended{false},g_sleepRecoveryOutputWanted{true};
 static std::atomic<UINT64> fixtureHostEpoch{41},fixturePowerGeneration{7},fixtureClock{0};
@@ -149,7 +149,8 @@ enum class GyroCalibStage{None,Sampling};
 static std::atomic<bool> g_gyroCalibRequested{false};
 static std::atomic<GyroCalibStage> g_gyroCalibStageAtomic{GyroCalibStage::None};
 // Only pointer presence is consumed by the exact Busy helper.
-static std::shared_ptr<int> g_windowsDefaultSelectedRoute,g_windowsPrivateConsumerProjection;
+static std::shared_ptr<int> g_windowsDefaultSelectedRoute;
+static std::atomic<std::shared_ptr<int>> g_windowsPrivateConsumerProjection;
 static UINT64 g_gyroJudgeArmTick=0,g_gyroJudgeDetectionStartTick=0,g_gyroJudgeSegStartTick=0,g_gyroJudgeSegAccum=0,g_gyroJudgeLastPumpSeq=0,g_gyroJudgeFirstFrameTick=0,g_gyroJudgeLastProgressTick=0,g_gyroJudgePeakSegmentSamples=0,g_gyroJudgeConsumedHighMotionEpisode=0,g_gyroJudgeConsumedAccelMotionEpisode=0;
 using FixtureInventoryTicket=ymcc::sensors::inventory::Ticket;
 static FixtureInventoryTicket inputCaptureWindowsInventoryTicket(){return {ymcc::windows_motion::retain(g_inputCaptureSink,g_inputCaptureSink->activeBindingGeneration.load()),currentPowerGeneration()};}
@@ -194,6 +195,15 @@ static void powerCases(){
  g_idleSessionDisplayState=0;g_powerLifecycle=PowerLifecycle::Resuming;
  suspendResumeSubscriptionCallback(nullptr,PBT_APMRESUMEAUTOMATIC,nullptr);
  check("generic OS resume clears callback fence without handheld force",!g_sensorSuspendCallbackActive);
+ // Deliver the receipts that the real callback retained before a GUI existed.
+ for(const ULONG type:{ULONG(PBT_APMSUSPEND),ULONG(PBT_APMRESUMEAUTOMATIC)}){
+  const auto pending=g_sleepPowerDispatch.pendingReplay();
+  if(!pending||pending.type!=type)throw std::runtime_error("missing ordered sensor power receipt");
+  const auto delivered=g_sleepPowerDispatch.forwarded(pending.sequence,pending.type,GetTickCount64());
+  if(!delivered)throw std::runtime_error("sensor power receipt refused");
+  g_sleepPowerDispatch.complete(delivered,GetTickCount64());
+ }
+ if(g_sleepPowerDispatch.hasPending()||g_sleepPowerDispatch.pendingSuspend())throw std::runtime_error("sensor power receipts did not settle");
  inputCaptureResumeSensorsForPower();
  check("automatic resume while display OFF stays paused",g_inputCaptureSensorsSuspended&&countLog("gyro-power-command-queued")==0);
  const auto keep=fixtureKeepalive.load(),poll=fixturePolls.load();
@@ -243,7 +253,7 @@ static json fixtureInput(unsigned revision=1){return {{"outputTarget",{{"revisio
 static void clearFixtureLogs(){std::lock_guard<std::mutex> lock(fixtureLogMx);fixtureLogs.clear();}
 static void resetBusy(){g_gyroJudgeState=GyroJudgeState::Idle;g_sensorWakePollActive=false;g_gyroCalibRequested=false;
  g_gyroCalibStageAtomic=GyroCalibStage::None;fixtureSelectionWork=false;g_windowsSourceProbeBusy=false;
- std::atomic_store(&g_windowsDefaultSelectedRoute,std::shared_ptr<int>{});std::atomic_store(&g_windowsPrivateConsumerProjection,std::shared_ptr<int>{});}
+ std::atomic_store(&g_windowsDefaultSelectedRoute,std::shared_ptr<int>{});g_windowsPrivateConsumerProjection.store(std::shared_ptr<int>{});}
 static void cachePair(UINT64 receipt,UINT64 sequence=431){const auto sink=g_inputCaptureSink;std::lock_guard<std::mutex> lock(sink->mx);
  sink->gyroOk=sink->accelOk=true;sink->gyroBindingGeneration=sink->accelBindingGeneration=sink->activeBindingGeneration.load();
  sink->gyroReceiptTick=sink->accelReceiptTick=receipt;sink->gyroSequence=sink->accelSequence=sequence;
@@ -424,7 +434,7 @@ static void virtualCases(const std::string& selected){
    if(cause==2)g_gyroCalibRequested=true;if(cause==3)g_gyroCalibStageAtomic=GyroCalibStage::Sampling;
    if(cause==4)fixtureSelectionWork=true;if(cause==5)g_windowsSourceProbeBusy=true;
    if(cause==6)std::atomic_store(&g_windowsDefaultSelectedRoute,std::make_shared<int>(1));
-   if(cause==7)std::atomic_store(&g_windowsPrivateConsumerProjection,std::make_shared<int>(1));
+   if(cause==7)g_windowsPrivateConsumerProjection.store(std::make_shared<int>(1));
    fixtureClock=100750;inputCaptureVirtualGyroWakeStep();const auto label=std::string("virtual link yields to existing source operation ")+std::to_string(cause);
    check(label.c_str(),noResubscribe()&&countPhase("existing-source-operation-active")==1&&g_virtualGyroWake.waitMs(fixtureSensorTick(),INFINITE)==INFINITE);
   }

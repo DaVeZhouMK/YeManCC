@@ -9,6 +9,8 @@
 namespace ymcc::earlystart {
 struct State {
     bool known=false, installed=false; DWORD startType=0, status=0, error=0;
+    DWORD serviceType=0;
+    std::wstring binaryPath;
 };
 struct Result {
     State state; bool ok=false, changed=false; std::string reason;
@@ -62,7 +64,10 @@ public:
         if(!needed||needed>65536){state.error=GetLastError();return state;}
         std::vector<BYTE> storage(needed);auto config=reinterpret_cast<QUERY_SERVICE_CONFIGW*>(storage.data());
         if(!QueryServiceConfigW(service.value,config,needed,&needed)){state.error=GetLastError();return state;}
-        state.known=true;state.startType=config->dwStartType;state.status=status.dwCurrentState;state.error=lastError_;return state;
+        state.known=true;state.startType=config->dwStartType;state.status=status.dwCurrentState;state.error=lastError_;
+        state.serviceType=config->dwServiceType;
+        if(config->lpBinaryPathName)state.binaryPath=config->lpBinaryPathName;
+        return state;
     }
     bool enableAutomatic() {
         ServiceHandle manager(OpenSCManagerW(nullptr,nullptr,SC_MANAGER_CONNECT));
@@ -87,5 +92,6 @@ inline nlohmann::json asJson(const State& state) {
     return {{"known",state.known},{"installed",state.installed},{"automatic",state.known&&state.startType==SERVICE_AUTO_START},{"running",state.known&&state.status==SERVICE_RUNNING},{"startType",state.startType},{"state",state.status},{"win32Error",state.error}};
 }
 inline nlohmann::json read(){WindowsPorts ports;return asJson(ports.read());}
-inline nlohmann::json repair(){WindowsPorts ports;const auto result=ensure(ports);auto json=asJson(result.state);json["ok"]=result.ok;json["changed"]=result.changed;json["reason"]=result.reason;return json;}
+template<class Ports> nlohmann::json repairWith(Ports& ports){const auto result=ensure(ports);auto json=asJson(result.state);json["ok"]=result.ok;json["changed"]=result.changed;json["reason"]=result.reason;return json;}
+inline nlohmann::json repair(){WindowsPorts ports;return repairWith(ports);}
 }

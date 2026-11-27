@@ -37,12 +37,12 @@ class ColdAdapter implements FanApiAdapter {
  async shutdown():Promise<void>{this.calls.push('shutdown');}
 }
 let checks=0;const failures:string[]=[];const check=(name:string,ok:boolean)=>{checks++;if(!ok)failures.push(name);console.log((ok?'PASS ':'FAIL ')+name);};
-async function make(adapter:FanApiAdapter,g=2,initializeReady=true){let current=native(g);let starts=0,stops=0;const lifecycle=new FanHostLifecycle({enabled:true,adapter,
+async function make(adapter:FanApiAdapter,g=2,initializeReady=true){let current=native(g);let nextRead:(()=>void)|undefined;let starts=0,stops=0;const lifecycle=new FanHostLifecycle({enabled:true,adapter,
  launcher:{async start(){starts++;return {pid:30000+starts,executable:'fixture.exe'};},async stop(){stops++;}},
- readNativeActivity:async()=>null,readNativePowerState:async()=>({...current}),heartbeatIntervalMs:60000,resumeWaitDeadlineMs:500,
+ readNativeActivity:async()=>null,readNativePowerState:async()=>{const captured={...current};const afterCapture=nextRead;nextRead=undefined;afterCapture?.();return captured;},heartbeatIntervalMs:60000,resumeWaitDeadlineMs:500,
  requestManualWake:async generation=>({ok:current.phase==='ready',generation,phase:current.phase})});
  if(initializeReady){lifecycle.setPowerGeneration(g);lifecycle.observePowerBoundary('resume-ready',g);}
- return {lifecycle,setNative:(v:PowerLifecycleState)=>{current=v;},starts:()=>starts,stops:()=>stops};}
+ return {lifecycle,setNative:(v:PowerLifecycleState)=>{current=v;},onNextRead:(callback:()=>void)=>{nextRead=callback;},starts:()=>starts,stops:()=>stops};}
 async function run(){
  for(const family of ['HandheldCompanion.Devices.MSI.ClawCG3EM','HandheldCompanion.Devices.MSI.ClawA2VM','HandheldCompanion.Devices.ROGAlly','HandheldCompanion.Devices.GPD.GPDWin5']){
   const a=new ColdAdapter(family),fx=await make(a);let error='';
@@ -126,7 +126,7 @@ async function run(){
   }finally{await fx.lifecycle.close().catch(()=>{});}}
  // Win4 original Open can fail after the base device opened. Use the Host's
  // post-cleanup snapshot shape, which has no wake receipt of its own.
- for (const followup of ['ready', 'suspending', 'unconfirmed-close', 'old-generation', 'adjacent-model'] as const) {
+ for (const followup of ['ready', 'suspending', 'unconfirmed-close', 'old-generation', 'adjacent-model', 'revoked-ready-read'] as const) {
   const a=new ColdAdapter('HandheldCompanion.Devices.GPDWin4'),fx=await make(a);
   const open=a.open.bind(a);
   let allowOpen=false;
@@ -147,6 +147,12 @@ async function run(){
    allowOpen=true;
    if(followup==='adjacent-model')a.overrides.factoryType='HandheldCompanion.Devices.GPDWin4_2023';
    fx.setNative(native(2,followup==='suspending'?'suspending':'ready'));
+   let capturedReady=false;
+   if(followup==='revoked-ready-read')fx.onNextRead(()=>{
+    capturedReady=true;
+    fx.setNative(native(2,'suspending'));
+    fx.lifecycle.observePowerBoundary('suspending',2);
+   });
    if (followup==='ready') {
     const result=await fx.lifecycle.apply(curve).catch(()=>null);
     check('new manual Win4 apply reaches exactly one fresh Open/Events/acquire/enable',result?.state==='Ready'
@@ -155,6 +161,8 @@ async function run(){
    } else {
     await fx.lifecycle.apply(curve).catch(()=>{});
     check(followup+' cannot reuse the failed-open cleanup to open or write',!a.calls.includes('open')&&!a.calls.includes('enable'));
+    if(followup==='revoked-ready-read')check('a public suspend before the captured Ready reply returns blocks all hardware submissions',
+     capturedReady&&!a.calls.some(c=>['open','open-events','acquire','enable','resume'].includes(c)));
    }
   } finally {await fx.lifecycle.close().catch(()=>{});}
  }

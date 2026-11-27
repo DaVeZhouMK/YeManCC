@@ -62,12 +62,19 @@ int main() {
  ymcc::fan_resume::RequestOwner handoff;
  const auto previous=handoff.offer(75,s4,100,1,9,4,true);
  const auto previousBinding=attach(handoff,previous);
- handoff.offer(75,s0,101,1,9,4,true);
- const auto successor=handoff.finishRequest(previous,102,false);
+ check(handoff.checkpoint(previous,{26,2,0,119,12}),"checkpoint-records-both-observation-quotas");
+ check(!handoff.checkpoint(previous,{27,2,0,120,11}),"checkpoint-refuses-detail-quota-regression");
+ handoff.offer(75,s0,120,1,9,4,true);
+ const auto successor=handoff.finishRequest(previous,121,false);
  check(successor&&successor.request==previous.request&&!previousBinding.expired(),"same-request-public-handoff-keeps-exact-host-binding");
+ {
+  const auto continued=handoff.snapshot(successor);
+  check(continued&&continued->observations.loggedProbes==2&&continued->observations.detailedProbeLogs==12&&
+        continued->observations.lastLogTick==119,"handoff-retains-independent-observation-quotas");
+ }
  handoff.close();
  check(!previousBinding.expired(),"exit-does-not-discard-an-active-original-binding-before-return");
- check(!handoff.finishRequest(successor,103,false)&&previousBinding.expired(),"return-after-exit-drops-binding-and-starts-no-successor");
+ check(!handoff.finishRequest(successor,122,false)&&previousBinding.expired(),"return-after-exit-drops-binding-and-starts-no-successor");
  ymcc::fan_resume::RequestOwner parked;
  const auto parkedRun=parked.offer(75,s4,100,1,9,4,true);
  const auto parkedBinding=attach(parked,parkedRun);

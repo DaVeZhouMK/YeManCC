@@ -68,10 +68,16 @@ int wmain(int argc,wchar_t** argv){try{
  fixtureBound=true;fixtureLoaded=false;newSession();inputCaptureReviewedCalibrationRestoreOnce(recipeA);rows=readRecoveryRows(root);check(rows.size()==3&&lastEvent(root,"gyro-calibration-awaiting-current-recipe"),"new-current-source-session-retains-its-storage-wait");
  const auto stableLoads=fixtureLoads,stableOffsets=fixtureOffsets;for(unsigned i=0;i<50000;++i)inputCaptureReviewedCalibrationRestoreOnce(recipeA);
  check(readRecoveryRows(root).size()==3&&fixtureLoads==stableLoads&&fixtureOffsets==stableOffsets,"50000-original-same-recipe-session-revisits-quiet");
+ check(rows.at(0).at("restoreContext")==json{{"schema",1},{"recheckReason","first-recipe"},
+     {"sessionStartSteadyTicks",std::to_string(std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::seconds(1)).count())},
+     {"bindingGeneration","1"},{"choiceGeneration",nullptr},{"sourceScope","capture-owner-observation"}},"original-first-recipe-receipt-has-exact-context");
+ check(!rows.at(1).contains("restoreContext")&&rows.at(2).at("restoreContext").at("recheckReason")=="fusion-session-changed",
+     "source-wait-does-not-borrow-load-context-and-new-session-is-visible");
  fixtureLoaded=true;newSession();inputCaptureReviewedCalibrationRestoreOnce(recipeA);rows=readRecoveryRows(root);
  check(rows.size()==4&&lastEvent(root,"gyro-calibration-restored")&&rows.back()["loaded"]==true&&rows.back()["weight"]==12&&g_autoCalibTrusted.load()&&g_autoCalibFinished.load(),"existing-positive-recipe-restore-stays-resident-with-original-flags");
  fixtureRecipe=&recipeB;fixtureKey="owned-key-B";fixtureLoaded=false;inputCaptureReviewedCalibrationRestoreOnce(recipeB);rows=readRecoveryRows(root);
  check(rows.size()==5&&lastEvent(root,"gyro-calibration-awaiting-current-recipe")&&rows.back()["matrixId"]=="matrix-B","recipe-and-key-transition-retains-original-new-attempt");
+ check(rows.at(4).at("restoreContext").at("recheckReason")=="recipe-or-device-changed","recipe-change-remains-a-distinct-recheck-reason");
  t_windowsProcessingStamp=&fixtureStamp;fixtureStamp.activeBinding=std::shared_ptr<const std::atomic<std::uint64_t>>(g_inputCaptureSink,&g_inputCaptureSink->activeBindingGeneration);fixtureStamp.bindingGeneration=1;
  g_inputCaptureSink->activeBindingGeneration=2;inputCaptureReviewedCalibrationRestoreOnce(recipeB);rows=readRecoveryRows(root);
  check(rows.size()==6&&lastEvent(root,"gyro-calibration-awaiting-current-source"),"actual-frame-current-guard-retains-retired-binding-result");
@@ -83,7 +89,12 @@ int wmain(int argc,wchar_t** argv){try{
  check(count(Failure::eventWrite)==oldFail+1&&readRecoveryRows(root).size()==8&&g_reviewedCalibrationContext.owner.storageKey==fixtureKey,"log-write-failure-counted-without-repeating-calibration-business");
  const auto noRetryLoads=fixtureLoads;inputCaptureReviewedCalibrationRestoreOnce(recipeB);check(readRecoveryRows(root).size()==8&&fixtureLoads==noRetryLoads,"same-session-after-log-failure-keeps-original-no-retry-contract");
  fixtureBound=false;inputCaptureReviewedCalibrationRestoreOnce(recipeB);check(readRecoveryRows(root).size()==9&&lastEvent(root,"gyro-calibration-awaiting-current-source"),"next-real-source-transition-remains-visible-after-file-failure");
- appendNativeLifecycleLog("gyro-calibration-awaiting-current-source-future",{{"sourceCurrent",false}});appendNativeLifecycleLog("gyro-calibration-awaiting-current-recipe-future",{{"loaded",false}});check(readRecoveryRows(root).size()==9,"registry-uses-exact-two-names-without-prefix-permission");
+ fixtureBound=true;fixtureStamp.choiceBinding=std::make_shared<std::atomic<std::uint64_t>>(7);fixtureStamp.choiceGeneration=7;
+ inputCaptureReviewedCalibrationRestoreOnce(recipeB);rows=readRecoveryRows(root);
+ const auto& rebound=rows.back().at("restoreContext");
+ check(rows.size()==10&&rebound.at("sourceScope")=="scoped-frame"&&rebound.at("recheckReason")=="calibration-owner-changed"&&
+     rebound.at("bindingGeneration")=="1"&&rebound.at("choiceGeneration")=="7","same-session-owner-loss-and-scoped-frame-generations-are-visible");
+ appendNativeLifecycleLog("gyro-calibration-awaiting-current-source-future",{{"sourceCurrent",false}});appendNativeLifecycleLog("gyro-calibration-awaiting-current-recipe-future",{{"loaded",false}});check(readRecoveryRows(root).size()==10,"registry-uses-exact-two-names-without-prefix-permission");
  const json high={{"reason","buttons-change"}};const auto writes=g_nativeLifecycleFrameWrites;ymcc::testing::allocationFault::failAfter(0);for(unsigned i=0;i<50000;++i)appendNativeLifecycleLog("system-xinput-readback",high);const auto arm=ymcc::testing::allocationFault::countdown.load();ymcc::testing::allocationFault::failAfter(-1);check(arm==0&&writes==g_nativeLifecycleFrameWrites,"unrelated-50000-prebuilt-high-frequency-samples-off-no-allocation-or-write");
 #endif
  closeStreams();GetProcessHandleCount(GetCurrentProcess(),&after);check(before==after,"owned-log-handles-returned");unsigned failed=0;for(const auto& row:checks)failed+=!row["pass"].get<bool>();std::cout<<json{{"checks",checks},{"failures",failed},{"handlesBefore",before},{"handlesAfter",after},{"completeOriginalFunctions",4},{"actualMotionStampGuard",true},{"deviceCalls",0},{"storageLoadPortIsMemory",true}}.dump(2)<<'\n';return failed?2:0;

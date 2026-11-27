@@ -23,6 +23,8 @@ const visibleRoutes = computed(() => residentNavigationRoutes(ROUTES, false, rad
 
 const railRoot=ref<HTMLElement|null>(null),railItems=ref<HTMLElement|null>(null);
 let railObserver:ResizeObserver|undefined,railFrame=0,railMounted=false;
+let forceRailFit=false;
+let fittedRailSize:{width:number;height:number;dpr:number}|undefined;
 function setRailDensity(level:number,iconScale=1):void {
   const rail=railRoot.value;if(!rail)return;
   rail.dataset.navDensity=String(level);
@@ -54,11 +56,18 @@ function balanceRailPadding(level:number):void {
 }
 function fitRail():void {
   if(!railMounted||!railRoot.value?.isConnected)return;
-  // Start from the original spacing every time so a taller sidebar expands.
-  // Remove whitespace in stages before reducing any icon. Labels stay legible.
-  for(let level=0;level<=4;level++){
-    setRailDensity(level);
-    if(railContentFits()){balanceRailPadding(level);return;}
+  // Each step removes space. Search the default density with the rest to
+  // avoid laying out a roomy sidebar before fitting a compact window.
+  let first=0,last=4,density=5,applied=0;
+  while(first<=last){
+    applied=Math.floor((first+last)/2);
+    setRailDensity(applied);
+    if(railContentFits()){density=applied;last=applied-1;}else first=applied+1;
+  }
+  if(density<=4){
+    if(applied!==density)setRailDensity(density);
+    balanceRailPadding(density);
+    return;
   }
   // Only the final stage scales icons; choose the largest fitting 5% step.
   // This bounded work runs on layout/count changes, never on a polling timer.
@@ -69,16 +78,34 @@ function fitRail():void {
   }
   setRailDensity(4,best/20);
 }
-function queueRailFit():void {
-  if(!railMounted||railFrame)return;
-  railFrame=requestAnimationFrame(()=>{railFrame=0;fitRail();});
+function updateRailFit(force:boolean):void {
+  const rail=railRoot.value;
+  if(!railMounted||!rail?.isConnected)return;
+  const dpr=window.devicePixelRatio;
+  if(!force&&fittedRailSize?.dpr===dpr){
+    const {width,height}=rail.getBoundingClientRect();
+    if(width===fittedRailSize.width&&height===fittedRailSize.height)return;
+  }
+  fitRail();
+  const {width,height}=rail.getBoundingClientRect();
+  fittedRailSize={width,height,dpr};
 }
-watch(()=>visibleRoutes.value.length,queueRailFit,{flush:'post'});
+function queueRailFit(force=false):void {
+  if(!railMounted)return;
+  forceRailFit||=force;
+  if(railFrame)return;
+  railFrame=requestAnimationFrame(()=>{
+    railFrame=0;
+    const requested=forceRailFit;forceRailFit=false;
+    updateRailFit(requested);
+  });
+}
+watch(()=>visibleRoutes.value.length,()=>queueRailFit(true),{flush:'post'});
 onMounted(()=>{
-  railMounted=true;fitRail();
-  railObserver=new ResizeObserver(queueRailFit);
+  railMounted=true;updateRailFit(true);
+  railObserver=new ResizeObserver(()=>queueRailFit());
   railObserver.observe(railRoot.value!,{box:'border-box'});
-  void document.fonts.ready.then(queueRailFit);
+  if(document.fonts.status==='loading')void document.fonts.ready.then(()=>queueRailFit(true));
 });
 onBeforeUnmount(()=>{
   railMounted=false;railObserver?.disconnect();

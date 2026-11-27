@@ -52,18 +52,71 @@ export function originalLifecycleRuntimeLabels(mutation=null){
  assert(matching.length>0,'KNOWN_ORIGINAL_LIFECYCLE_MUTATION_REQUIRED');
  return matching.map(currentLifecycleModeLabel);
 }
+export const TERMINAL29_LIFECYCLE_RUNTIME_POLICY='owned-lifecycle-child-v1';
+const originalRuntimeEntry='if(argc!=3&&argc!=4&&argc!=5)return 2;const std::wstring mode=argv[2];std::wstring selectedCase;';
+export const terminal29LifecycleRuntimeEntry='if(argc!=3||!fixturePrivateRuntimeRootAllowed(argv[1],true,argv[2]))return 2;const auto fixtureRuntimeRoot=normalizeWindowsPathForCompare(argv[1]);if(normalizeWindowsPathForCompare(POWER_CONTROL_DIR)!=fixtureRuntimeRoot||normalizeWindowsPathForCompare(YM_SETTINGS_FILE)!=fixtureRuntimeRoot+L"\\\\yeman-settings.json"||normalizeWindowsPathForCompare(YM_SETTINGS_BACKUP_FILE)!=fixtureRuntimeRoot+L"\\\\yeman-settings.json.bak")return 2;const std::wstring mode=argv[2];std::wstring selectedCase;';
+function runtimeOwnership(canonical){
+ const base=path.resolve(import.meta.dirname,'../../../../../../Testing/YMCC/Evidence'),relative=path.relative(base,canonical);
+ const workspaceBase=path.resolve(base,'../Workspace'),workspaceRelative=path.relative(workspaceBase,canonical),parts=workspaceRelative.split(path.sep);
+ return {
+  evidenceOwned:relative&&!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep),
+  workspaceOwned:workspaceRelative&&!path.isAbsolute(workspaceRelative)&&workspaceRelative!=='..'&&!workspaceRelative.startsWith('..'+path.sep)&&
+   parts.length>=4&&parts[1].toLowerCase()==='build'&&parts[2].toLowerCase()==='validation',
+ };
+}
+export function terminal29LifecycleRuntimeLayout(runtimeRoot,mutation){
+ assert(typeof runtimeRoot==='string'&&path.isAbsolute(runtimeRoot)&&!/[\0\r\n]/.test(runtimeRoot)&&
+  runtimeRoot===path.resolve(runtimeRoot)&&path.basename(runtimeRoot)==='qualification-runtime','EXACT29_RUNTIME_OWNER_REQUIRED');
+ assert(runtimeOwnership(runtimeRoot).workspaceOwned,'EXACT29_CORE_WORKSPACE_RUNTIME_REQUIRED');
+ const modes=currentLifecycleModePlan().filter(row=>row.mutation===mutation);
+ assert(modes.length>0,'EXACT29_LIFECYCLE_POLARITY_REQUIRED');
+ return {policy:TERMINAL29_LIFECYCLE_RUNTIME_POLICY,runtimeRoot,mutation,lifecycle:modes.map(row=>{
+  const label=currentLifecycleModeLabel(row);return {label,mode:row.mode,path:path.join(runtimeRoot,label)};
+ })};
+}
+export function terminal29LifecycleRuntimeDirectory(runtimeRoot,mutation,mode,nonce){
+ assert(typeof nonce==='string'&&/^[0-9a-f]{16}$/.test(nonce),'EXACT29_RUNTIME_NONCE_REQUIRED');
+ const rows=terminal29LifecycleRuntimeLayout(runtimeRoot,mutation).lifecycle.filter(row=>row.mode===mode);
+ assert.equal(rows.length,1,'EXACT29_LIFECYCLE_MODE_REQUIRED');
+ return path.join(rows[0].path,nonce);
+}
+function reusableLifecycleDefinition(canonical,mutation,old){
+ const {lifecycle}=terminal29LifecycleRuntimeLayout(canonical,mutation);
+ const matches=base=>lifecycle.map(row=>`(${base}==normalizeWindowsPathForCompare(L${JSON.stringify(row.path)}) && (!mode || std::wstring_view(mode)==L${JSON.stringify(row.mode)}))`).join(' ||\n             ');
+ return String.raw`
+static bool fixturePrivateRuntimeRootAllowed(const std::wstring& supplied,bool fresh,const wchar_t* mode=nullptr) {
+    try {
+        const std::filesystem::path raw(supplied);
+        if(!raw.is_absolute() || raw!=raw.lexically_normal())return false;
+        const auto root=normalizeWindowsPathForCompare(supplied);
+        const std::filesystem::path selected(root);
+        const auto parent=normalizeWindowsPathForCompare(selected.parent_path().wstring());
+        const auto leaf=raw.filename().wstring();
+        const bool nonce=leaf.size()==16 && std::all_of(leaf.begin(),leaf.end(),[](wchar_t ch){return (ch>=L'0'&&ch<=L'9')||(ch>=L'a'&&ch<=L'f');});
+        if(!(${matches('root')}) && !(nonce && (${matches('parent')})))return false;
+        for(auto cursor=selected;;cursor=cursor.parent_path()) {
+            const auto attributes=GetFileAttributesW(cursor.c_str());
+            if(attributes==INVALID_FILE_ATTRIBUTES || !(attributes&FILE_ATTRIBUTE_DIRECTORY) || (attributes&FILE_ATTRIBUTE_REPARSE_POINT))return false;
+            if(cursor.parent_path()==cursor)break;
+        }
+        if(fresh) {
+            std::error_code error;
+            if(!std::filesystem::is_empty(selected,error)||error)return false;
+        }
+        return true;
+    }catch(...){return false;}
+}
+`+privateSettingsMutexDefinition.replace(old,'!fixturePrivateRuntimeRootAllowed(g_yemanccDataDir,false)');
+}
 export function privateSettingsMutexDefinitionForRuntimeRoot(runtimeRoot,{managedInputContract,runtimeParameterLayout,runtimeReusePolicy,gpdPreHideBatchCount,lifecycleMutation}={}){
  assert(managedInputContract===undefined||['current105-exact21-v1','current105-terminal22-v1','current105-terminal23-sd-decoder-v1','current105-terminal26-sdk-lifetime-compact-v1'].includes(managedInputContract),'UNKNOWN_MUTEX_RUNTIME_CONTRACT');
  const finiteModes=managedInputContract==='current105-terminal26-sdk-lifetime-compact-v1';
  if(gpdPreHideBatchCount!==undefined)assert(Number.isInteger(gpdPreHideBatchCount)&&gpdPreHideBatchCount>=2&&gpdPreHideBatchCount<=16&&runtimeRoot!==undefined&&managedInputContract===undefined&&runtimeParameterLayout===undefined&&runtimeReusePolicy===undefined,'EXACT_GPD_PRE_HIDE_BATCH_ROOTS_REQUIRED');
- if(lifecycleMutation!==undefined)assert(runtimeRoot!==undefined&&[managedInputContract,runtimeParameterLayout,runtimeReusePolicy,gpdPreHideBatchCount].every(v=>v===undefined),'ORIGINAL_MODE_ROOT_OPTIONS_EXCLUSIVE');
+ if(lifecycleMutation!==undefined)assert(runtimeRoot!==undefined&&[managedInputContract,runtimeParameterLayout,gpdPreHideBatchCount].every(v=>v===undefined)&&(runtimeReusePolicy===undefined||runtimeReusePolicy===TERMINAL29_LIFECYCLE_RUNTIME_POLICY),'ORIGINAL_MODE_ROOT_OPTIONS_EXCLUSIVE');
+ if(runtimeReusePolicy===TERMINAL29_LIFECYCLE_RUNTIME_POLICY)assert(lifecycleMutation!==undefined,'EXACT29_EXPLICIT_LIFECYCLE_POLARITY_REQUIRED');
  if(runtimeRoot===undefined){assert(!finiteModes,'EXPLICIT26_RUNTIME_ROOT_REQUIRED');return privateSettingsMutexDefinition;}
  assert(typeof runtimeRoot==='string'&&path.isAbsolute(runtimeRoot)&&!/[\0\r\n]/.test(runtimeRoot),'ABSOLUTE_OWNED_RUNTIME_ROOT_REQUIRED');
- const canonical=path.resolve(runtimeRoot),base=path.resolve(import.meta.dirname,'../../../../../../Testing/YMCC/Evidence'),relative=path.relative(base,canonical);
- const workspaceBase=path.resolve(base,'../Workspace'),workspaceRelative=path.relative(workspaceBase,canonical),parts=workspaceRelative.split(path.sep);
- const evidenceOwned=relative&&!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep);
- const workspaceOwned=workspaceRelative&&!path.isAbsolute(workspaceRelative)&&workspaceRelative!=='..'&&!workspaceRelative.startsWith('..'+path.sep)&&
-  parts.length>=4&&parts[1].toLowerCase()==='build'&&parts[2].toLowerCase()==='validation';
+ const canonical=path.resolve(runtimeRoot),{evidenceOwned,workspaceOwned}=runtimeOwnership(canonical);
  assert(evidenceOwned||workspaceOwned,'RUNTIME_ROOT_OUTSIDE_CORE_EVIDENCE');
  const start=privateSettingsMutexDefinition.indexOf('(root.find(');
  const end=privateSettingsMutexDefinition.indexOf('))\n        throw',start);
@@ -71,8 +124,12 @@ export function privateSettingsMutexDefinitionForRuntimeRoot(runtimeRoot,{manage
  const old=privateSettingsMutexDefinition.slice(start,end+1);
  assert.equal(privateSettingsMutexDefinition.split(old).length,2,'EXACT_LEGACY_RUNTIME_ADMISSION_REQUIRED');
  if(lifecycleMutation!==undefined){
- const roots=[canonical,...originalLifecycleRuntimeLabels(lifecycleMutation).map(label=>path.join(canonical,label))];
- return privateSettingsMutexDefinition.replace(old,roots.map(root=>'root!=normalizeWindowsPathForCompare(L'+JSON.stringify(root)+')').join(' &&\n       '));
+  if(runtimeReusePolicy===TERMINAL29_LIFECYCLE_RUNTIME_POLICY){
+   assert.equal(runtimeRoot,canonical,'EXACT29_RUNTIME_OWNER_REQUIRED');
+   return reusableLifecycleDefinition(canonical,lifecycleMutation,old);
+  }
+  const roots=[canonical,...originalLifecycleRuntimeLabels(lifecycleMutation).map(label=>path.join(canonical,label))];
+  return privateSettingsMutexDefinition.replace(old,roots.map(root=>'root!=normalizeWindowsPathForCompare(L'+JSON.stringify(root)+')').join(' &&\n       '));
  }
  assert(runtimeParameterLayout===undefined||finiteModes,'PARAMETER_PATHS_REQUIRE_FINITE_EXPLICIT26');
  const paths=finiteModes?terminal26RuntimePaths(canonical,{runtimeParameterLayout,runtimeReusePolicy}):gpdPreHideBatchCount===undefined?[canonical]:Array.from({length:gpdPreHideBatchCount},(_,i)=>path.join(canonical,'b'+i));
@@ -139,8 +196,8 @@ export function isolateCurrentFixtureSettingsMutex(original,{runtimeRoot,moduleM
  // The existing source reader reconstructs only this exact, non-executable include stub.
  const runtimeBoundaryOnly=original==='#include "main.inert.cpp"\n';
  if(runtimeReusePolicy!==undefined&&!runtimeBoundaryOnly){
-  const entry='if(argc!=3&&argc!=4&&argc!=5)return 2;const std::wstring mode=argv[2];std::wstring selectedCase;';
-  const guarded='if(argc!=3&&argc!=4&&argc!=5)return 2;if(!fixturePrivateRuntimeRootAllowed(argv[1],true))return 2;const auto fixtureRuntimeRoot=normalizeWindowsPathForCompare(argv[1]);if(normalizeWindowsPathForCompare(POWER_CONTROL_DIR)!=fixtureRuntimeRoot||normalizeWindowsPathForCompare(YM_SETTINGS_FILE)!=fixtureRuntimeRoot+L"\\\\yeman-settings.json"||normalizeWindowsPathForCompare(YM_SETTINGS_BACKUP_FILE)!=fixtureRuntimeRoot+L"\\\\yeman-settings.json.bak")return 2;const std::wstring mode=argv[2];std::wstring selectedCase;';
+  const entry=originalRuntimeEntry;
+  const guarded=runtimeReusePolicy===TERMINAL29_LIFECYCLE_RUNTIME_POLICY?terminal29LifecycleRuntimeEntry:'if(argc!=3&&argc!=4&&argc!=5)return 2;if(!fixturePrivateRuntimeRootAllowed(argv[1],true))return 2;const auto fixtureRuntimeRoot=normalizeWindowsPathForCompare(argv[1]);if(normalizeWindowsPathForCompare(POWER_CONTROL_DIR)!=fixtureRuntimeRoot||normalizeWindowsPathForCompare(YM_SETTINGS_FILE)!=fixtureRuntimeRoot+L"\\\\yeman-settings.json"||normalizeWindowsPathForCompare(YM_SETTINGS_BACKUP_FILE)!=fixtureRuntimeRoot+L"\\\\yeman-settings.json.bak")return 2;const std::wstring mode=argv[2];std::wstring selectedCase;';
   assert.equal(text.split(entry).length,2,'EXACT_ORIGINAL_MAIN_ADMISSION_REQUIRED');
   text=text.replace(entry,guarded);edits.push({before:entry,after:guarded});
  }
@@ -148,5 +205,6 @@ export function isolateCurrentFixtureSettingsMutex(original,{runtimeRoot,moduleM
  assert.equal(inverse,original);
  return {text,originalSha256:sha(original),isolatedSha256:sha(text),wholeOriginalRestored:true,...(runtimeReusePolicy===undefined?{}:{runtimeEntryAdmissionEnforced:!runtimeBoundaryOnly,runtimeBoundaryOnly}),
   scope:'Only the generated private fixture CreateMutexW boundary. Original SettingsFileGuard/local mutex, INFINITE named wait, release and CloseHandle code remain. Directory identity names share the same real mutex only for the same admitted private settings directory. Installed product source is unchanged.',
-  productionMutexReached:false,...(lifecycleMutation!==undefined?{lifecycleMutation,originalLifecycleLabels:originalLifecycleRuntimeLabels(lifecycleMutation),exactOriginalModeRootsOnly:true}:{}),...(moduleMaintenance?{moduleMaintenanceNamespace:'same owned directory identity plus -ModuleMaintenance',moduleMaintenanceProductionNameReached:false}:{}),edits};
+  productionMutexReached:false,...(lifecycleMutation!==undefined?{lifecycleMutation,originalLifecycleLabels:originalLifecycleRuntimeLabels(lifecycleMutation),exactOriginalModeRootsOnly:runtimeReusePolicy===undefined}:{}),
+  ...(runtimeReusePolicy===TERMINAL29_LIFECYCLE_RUNTIME_POLICY?{lifecycleRuntimeLayout:terminal29LifecycleRuntimeLayout(runtimeRoot,lifecycleMutation)}:{}),...(moduleMaintenance?{moduleMaintenanceNamespace:'same owned directory identity plus -ModuleMaintenance',moduleMaintenanceProductionNameReached:false}:{}),edits};
 }

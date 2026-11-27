@@ -49,6 +49,7 @@ if($SteamGuardSuccessorReceipt){
   . (Join-Path $localDependencyRoot 'release-export-identity.ps1')
 }
 . (Join-Path $localProject 'native\decky_package_maintenance.ps1')
+. (Join-Path $localProject 'native\module_package_maintenance.ps1')
 . (Join-Path $localDependencyRoot 'fan-host-layout.ps1')
 . (Join-Path $localDependencyRoot 'local-fan-transition.ps1')
 . (Join-Path $localDependencyRoot 'settings-baseline-contract.ps1')
@@ -228,6 +229,52 @@ function Assert-LocalDeploymentPackageReadback($Entries,[string[]]$MutablePaths)
     if(!(Test-Path -LiteralPath $target -PathType Leaf) -or (Get-Item -LiteralPath $target).Length -ne $entry.bytes -or (Get-ExportFileHash $target) -cne $entry.sha256){throw ('LOCAL_DEPLOY_COMPLETE_PACKAGE_READBACK_FAILED: '+$entry.path)}
   }
 }
+function Complete-LocalDeploymentInputReceipt([string]$Root,[string]$Backup){
+  # The caller holds the module lease and has verified the entire installed package.
+  # Only adopt a receipt when the existing startup planner would have no files to retire.
+  try{
+    $pc=Resolve-YmccDeckyPath $Root 'PowerControl'
+    if(Get-ChildItem -LiteralPath $Root -Filter 'module-bootstrap-*' -Force | Select-Object -First 1){return @{status='DEFERRED_STAGE'}}
+    $manifestPath=Resolve-YmccDeckyPath $Root 'YeManCC/module-package.json'
+    $manifest=Read-YmccModuleJournalJson $manifestPath
+    Assert-YmccModuleManifest $manifest
+    if(!$manifest.PSObject.Properties['compatibility']){return @{status='DEFERRED_LEGACY_MANIFEST'}}
+    $relative='.ymcc-input-managed.json'
+    $receipt=Resolve-YmccDeckyPath $pc $relative
+    if(!(Test-YmccModuleJournalExists $receipt)){return @{status='DEFERRED_MISSING_RECEIPT'}}
+    $previous=Read-YmccModuleJournalJson $receipt
+    Assert-YmccModuleManifest $previous
+    if([IO.File]::GetAttributes($receipt) -band [IO.FileAttributes]::ReadOnly){return @{status='DEFERRED_READ_ONLY_RECEIPT'}}
+    $incoming=@{}
+    foreach($item in $manifest.files){
+      $incoming[$item.path]=$true
+      $file=Resolve-YmccDeckyPath $pc $item.path
+      if(![IO.File]::Exists($file) -or ([IO.FileInfo]$file).Length -ne $item.bytes -or (Get-YmccDeckyHash $file) -ine $item.sha256){return @{status='DEFERRED_PAYLOAD_MISMATCH'}}
+    }
+    foreach($name in @('feature-assets/virtual-gamepad','feature-assets/gyro-motion')){
+      $folder=Resolve-YmccDeckyPath $pc $name
+      foreach($file in (Get-ChildItem -LiteralPath $folder -Recurse -Force)){
+        if($file.Attributes -band [IO.FileAttributes]::ReparsePoint){return @{status='DEFERRED_REDIRECTED_PAYLOAD'}}
+        if($file.PSIsContainer){continue}
+        $path=$file.FullName.Substring($pc.Length+1).Replace('\','/')
+        if(!$incoming.ContainsKey($path) -and (Test-YmccModuleFile $path)){return @{status='DEFERRED_OBSOLETE_PAYLOAD'}}
+      }
+    }
+    $document=Merge-YmccModuleManifestAnnotations $manifest $previous
+    $bytes=[Text.Encoding]::UTF8.GetBytes(($document | ConvertTo-Json -Depth 64 -Compress))
+    if($bytes.Length -gt 4194304){return @{status='DEFERRED_RECEIPT_TOO_LARGE'}}
+    $hash=[Security.Cryptography.SHA256]::Create()
+    try{$after=([BitConverter]::ToString($hash.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}finally{$hash.Dispose()}
+    $before=Get-YmccDeckyHash $receipt
+    if($before -ceq $after){return @{status='ALREADY_CURRENT';sha256=$after}}
+  }catch{
+    return @{status='DEFERRED_VALIDATION';reason=$_.Exception.Message}
+  }
+  $entry=[pscustomobject]@{path=$relative;source=$null;before=$before;after=$after;remove=$false;bytes=$bytes}
+  $plan=[pscustomobject]@{source=$pc;target=$pc;manifest=$manifest;entries=@($entry)}
+  $null=Install-YmccModulePackage $plan (Join-Path $Backup 'InputReceipt')
+  return @{status='UPDATED';previousSha256=$before;sha256=$after}
+}
 $localMutex=$null;$localModuleLease=$null;$localStage=$null;$localBackup=$null;$localReceiptOwned=$false
 $localBefore=@();$localNew=$null;$localImmutableStarted=$false;$localCommitted=$false
 $localReceipt=[ordered]@{schemaVersion=1;owner='YMCC.DeveloperLocalDeployment';admission='EXPLICIT_LOCAL_VERIFIED_MAINLINE_PACKAGE';startedAtUtc=[DateTime]::UtcNow.ToString('o');status='VALIDATING';apply=[bool]$Apply;installRoot=$InstallRoot;workspaceRoot=$WorkspaceRoot;sourceRoot=$localProject;fullFixtureValidation='NOT_RUN';applicationsControlled=$false;deviceSettingsWritten=$false;publicUpdateVersionPolicyChanged=$false}
@@ -250,7 +297,7 @@ try{
   $localReceipt.buildId=$build.buildId;$localReceipt.sourceTreeSha256=$build.sourceTreeSha256
   $localReceipt.canonicalArchive=$proof;$localReceipt.priorInstalled=$priorInstalled
   if($CompletedLocalRepairReceipt){$localReceipt.completedLocalRepair=@{path=[IO.Path]::GetFullPath($CompletedLocalRepairReceipt);sha256=$CompletedLocalRepairSha256}}
-  $localReceipt.tools=@(foreach($relative in @('tools/deploy-local-mainline.ps1','tools/local-fan-transition.ps1','tools/deploy-installed.ps1','native/updater_hc_runtime.ps1','native/decky_package_maintenance.ps1')){$file=if($relative -in @('tools/deploy-local-mainline.ps1','tools/deploy-installed.ps1')){Join-Path $PSScriptRoot (Split-Path -Leaf $relative)}else{Join-Path $localProject $relative};@{path=$relative;fullPath=[IO.Path]::GetFullPath($file);bytes=(Get-Item -LiteralPath $file).Length;sha256=(Get-ExportFileHash $file)}})
+  $localReceipt.tools=@(foreach($relative in @('tools/deploy-local-mainline.ps1','tools/local-fan-transition.ps1','tools/deploy-installed.ps1','native/updater_hc_runtime.ps1','native/decky_package_maintenance.ps1','native/module_package_maintenance.ps1')){$file=if($relative -in @('tools/deploy-local-mainline.ps1','tools/deploy-installed.ps1')){Join-Path $PSScriptRoot (Split-Path -Leaf $relative)}else{Join-Path $localProject $relative};@{path=$relative;fullPath=[IO.Path]::GetFullPath($file);bytes=(Get-Item -LiteralPath $file).Length;sha256=(Get-ExportFileHash $file)}})
   $derivedPlan=Get-LocalDeploymentDerivedDeckyPlan -SourceDecky (Join-Path $WorkspaceRoot 'Release\PowerControl\decky') -LoaderLock (Join-Path $localProject 'decky-plugin\vendor\decky-loader.lock.json') -InstalledDecky (Join-Path $localInstallParent 'PowerControl\decky')
   $localAllIncoming=@($localNew.entries)
   foreach($entry in $derivedPlan.entries){
@@ -337,6 +384,7 @@ try{
     $file=Resolve-LocalDeploymentChild $localInstallParent $row.path
     if(!(Test-Path -LiteralPath $file -PathType Leaf) -or (Get-ExportFileHash $file) -cne $row.sha256){throw ('LOCAL_DEPLOY_UNKNOWN_OR_USER_FILE_CHANGED: '+$row.path)}
   }
+  $localReceipt.inputModuleReceipt=Complete-LocalDeploymentInputReceipt $localInstallParent $localBackup
   $localCommitted=$true;$localReceipt.status='COMMITTED_VERIFIED_MAINLINE_LOCAL_PACKAGE'
   $localReceipt.installedBuildId=$installed.buildId;$localReceipt.candidateCpuAcceptance=$false
 }catch{

@@ -16,17 +16,36 @@ static void runRequestSharedPowerCases(Checks& c){
   c.check(fake::duplicateClosesWhilePending==0,"no issuing duplicate/event closed while pending");
  });};
  run("pre-signalled-no-dispatch",[&]{
-  auto old=scope();c.check(bool(old),"create original public scope");InputHostRequestPowerScope outer(old);revoke();json reply;
+  auto old=scope();c.check(bool(old),"create original public scope");InputHostRequestPowerScope outer(old);
+  BorrowedCancellationOwner mirror;
+  auto link=old?old->linkCancellationEvent(mirror.event):nullptr;
+  c.check(link&&WaitForSingleObject(mirror.event,0)==WAIT_TIMEOUT,"linked borrowed event is not signalled during capture");
+  revoke();json reply;
+  c.check(WaitForSingleObject(mirror.event,0)==WAIT_OBJECT_0,"original public revocation signals the shared event object");
+  link.reset();
+  c.check(WaitForSingleObject(mirror.event,0)==WAIT_OBJECT_0,"closing the link duplicate leaves the borrowed event usable");
   const auto before=processRuntime().snapshot().admitted;
   const bool accepted=preparedRequest("HIDHIDE_HIDE",&reply,{{"deviceInstanceId","fixture-owned"}});
   c.check(!accepted&&reply.value("status","")=="power-context-retired","actual public request admission rejects pre-signalled scope");
   c.check(fake::connects+fake::writes+fake::reads==0&&commandSequence==0&&faultBranches==0&&processRuntime().snapshot().admitted==before,"no Connect, issue, sequence burn or transport fault");
+  c.check(fixtureOfferCalls==0,"retired scope does not enter the remote offer port");
  });
  for(const bool ready:{true,false})run(ready?"physical-forward-ready":"physical-forward-resuming",[&]{
   g_powerLifecycle=ready?PowerLifecycle::Ready:PowerLifecycle::Resuming;json reply;
   const bool accepted=preparedRequest("HIDHIDE_CLOAK",&reply,{{"cloak",true}});
   c.check(accepted==ready&&fake::writes==(ready?1u:0u),"payload-aware physical forward requires actual powerAdmitted Ready");
   c.check(faultBranches==0&&commandSequence==(ready?1u:0u),"derived hardware gate is admission, not a fabricated transport failure");
+ });
+ run("remote-offer-unavailable-no-dispatch",[&]{
+  for(const auto mode:{FixtureOffer::NoTransport,FixtureOffer::Rejected}){
+   fixtureOffer=mode;json reply;
+   c.check(!preparedRequest("HIDHIDE_CLOAK",&reply,{{"cloak",true}})&&
+    reply.value("status","")=="power-context-retired"&&
+    reply.value("detail","")=="authenticated-Host-power-offer-unavailable"&&
+    !reply.value("deviceWriteAttempted",true),"actual remote offer failure is not a dispatch or a Host ACK");
+  }
+  c.check(fixtureOfferCalls==1&&fake::connects==0&&fake::writes==0&&fake::reads==0&&
+   commandSequence==0&&faultBranches==0,"missing and rejecting remote port leave original transport untouched");
  });
  for(const auto payload:{json::object(),json{{"cloak","false"}},json{{"cloak",nullptr}}})run("cloak-invalid-"+payload.dump(),[&]{
   g_powerLifecycle=PowerLifecycle::Resuming;json reply;
@@ -40,9 +59,15 @@ static void runRequestSharedPowerCases(Checks& c){
  for(const auto& row:cleanup)run(std::string("cleanup/")+row.name,[&]{
   auto old=scope();InputHostRequestPowerScope outer(old,true);revoke();g_powerLifecycle=PowerLifecycle::Resuming;
   t_inputHostDeferredPhysicalHideWrite=reinterpret_cast<const InputHostDeferredPhysicalHide*>(std::uintptr_t(1));
+  g_inputHostFrameReplyBinding="fixture-old-binding";g_inputHostCompactFrameRequest=true;g_inputHostGameMotorBindingGeneration=1;
   json reply;const bool accepted=preparedRequest(row.command,&reply,row.cloakFalse?json{{"cloak",false}}:json::object());
   c.check(accepted&&fake::writes==1&&fake::reads==1&&commandSequence==1&&faultBranches==0,"actual admission/RAII/issue fragments preserve cleanup under stale outer forward scope");
   c.check(t_inputHostRequestPower==old&&t_inputHostRequestHardwareRequired,"actual request RAII restores predecessor scope and hardware role");
+  const bool retires=std::strcmp(row.command,"QUIESCE")==0||std::strcmp(row.command,"RELEASE_TARGET")==0||std::strcmp(row.command,"SHUTDOWN")==0;
+  c.check(fixtureOfferCalls==0&&fixtureForgottenTargets==(retires?1u:0u)&&
+   g_inputHostGameMotorBindingGeneration==(retires?0u:1u)&&
+   g_inputHostFrameReplyBinding.empty()==retires&&g_inputHostCompactFrameRequest!=retires,
+   "cleanup neither mints a remote offer nor revokes bindings for a non-retiring command");
   t_inputHostDeferredPhysicalHideWrite=nullptr;
  });
  for(const bool pending:{true,false})run(pending?"revoked-pending-connect-retirement":"revoked-terminal-connect-retirement",[&]{

@@ -7,6 +7,7 @@ $node='G:\YeManCC-Work\Environment\Toolchains\nodejs\node-v22.14.0-win-x64\node.
 if($LASTEXITCODE -ne 0){throw 'Production backend exit extraction failed'}
 $recipe=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'steam_cssloader_use_selftest.ps1') -Raw
 $recipe=$recipe.Substring($recipe.IndexOf('@"')+3);$recipe=$recipe.Substring(0,$recipe.IndexOf('"@'))
+$recipe=$recipe.Replace('$sharedFlags','').Replace('$consumerArguments','"'+$Out+'"')
 $recipe=$recipe.Replace('$root',$repo).Replace('$OutputDirectory',$Out).Replace('steam_cssloader_use_selftest.cpp','steam_cssloader_exit_selftest.cpp').Replace(' /I"'+$repo+'\native"',' /I"'+$Out+'" /I"'+$repo+'\native" /I"'+$repo+'\deps\json"')
 $cmd=Join-Path $Out 'compile.cmd';[IO.File]::WriteAllText($cmd,$recipe,[Text.Encoding]::ASCII)
 & $cmd 2>&1|Tee-Object -FilePath (Join-Path $Out 'result.log')
@@ -22,6 +23,7 @@ if($guard.Split(@($operand),[StringSplitOptions]::None).Count -ne 2){throw 'Uniq
 [IO.File]::WriteAllText((Join-Path $negativeInclude 'steam_cssloader_guard.h'),$guard.Replace($operand,'const bool scheduled = false;'),(New-Object Text.UTF8Encoding($false)))
 $negativeOut=Join-Path $Out 'negative-run';New-Item -ItemType Directory -Path $negativeOut -Force|Out-Null
 $negativeRecipe=$recipe.Replace(' /I"'+$Out+'"',' /I"'+$negativeInclude+'" /I"'+$Out+'"').Replace((Join-Path $Out 'use.obj'),(Join-Path $Out 'negative.obj')).Replace((Join-Path $Out 'use.exe'),(Join-Path $Out 'negative.exe'))
+$negativeRecipe=$negativeRecipe.Replace((Join-Path $Out 'use.dependencies.json'),(Join-Path $Out 'negative.dependencies.json'))
 $negativeRun='"'+(Join-Path $Out 'negative.exe')+'" "'+$Out+'"'
 if(!$negativeRecipe.Contains($negativeRun)){throw 'Negative compilation recipe boundary missing'}
 $negativeRecipe=$negativeRecipe.Replace($negativeRun,'REM negative executes separately under owned output')

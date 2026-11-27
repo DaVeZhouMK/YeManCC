@@ -4,7 +4,30 @@ The five existing lifecycle prerequisite polarities now point to independently c
 
 The original lifecycle adapter, run loop, five-polarity order, 56 startup-order assertions, 43/921 normal-return assertions, 18/328 tuple assertions, negative assertions and original90-second/45-second budgets remain unchanged. No product code is patched.
 
-Only this identity declaration and precompiled-fixtures.json change in this module. The separate pipe family retains its original exact25/2330 contract and concrete B46 compatibility failures; lifecycle evidence does not certify those pipe cases. B39/fixed24 artifacts and old failures remain untouched. Parent integration/public-entry/audit are separate.
+The B46 migration changed only the identity declaration and precompiled-fixtures.json in this module. The separate pipe family retains its original exact25/2330 contract and concrete B46 compatibility failures; lifecycle evidence does not certify those pipe cases. B39/fixed24 artifacts and old failures remain untouched. Parent integration/public-entry/audit are separate.
+
+## Explicit Terminal29 current-source route
+
+Set `YMCC_SIM_CURRENT29_LIFECYCLE_PREPARATIONS` to an absolute, owned Workspace
+declaration of kind `TERMINAL29_LIFECYCLE_COMPILED_INPUTS`. The original
+`controller.coordinator-lifecycle` adapter pins that declaration into the
+worker arguments. It requires the existing five roles, one shared current
+managed preparation, and each role's `/O2` native preparation produced with
+`--runtime-reuse-policy owned-lifecycle-child-v1`. A supplied but invalid
+declaration does not fall back to a historical build.
+
+The plan registers the declaration and entry artifacts, not a complete cache
+identity. Execution validates the actual build and tool inputs and checks the
+current primary against the capture before and after the original 16 modes.
+Native preparation for this current-source route also checks its existing
+whole-source proofs before compilation and on close. A stale capture records
+the source diff and cannot start a compiler; drift on close disqualifies the
+preparation without discarding the compiler outputs or failure receipt.
+Each mode gets a fresh child of its own compiled runtime directory; a previous
+run's output is left intact. The original 45-second mode and 90-second group
+limits, negative assertions and raw evidence remain. Frozen captures still
+use the explicit observer route and cannot sign current-source acceptance.
+This adds no default export, release gate, minimum case, or cache exemption.
 
 ## Optional source-bound runtime cases
 
@@ -244,6 +267,61 @@ actual Host epoch, run, PID/pipe PID, writer attempt and distinct recovery ticke
 Equivalent repeated current HELLO receipts remain valid. This is a check of the
 existing raw output; it does not add a producer, global ID or default gate.
 
+## Directed GPD settled first ON and terminal return
+
+`gpd-settled-first-on-full-cycle` selects the same original terminal table for
+OFF and `app-exit`. It starts from a replayed settled native handoff, not a
+live native writer. The original BUS dispatch must enqueue the same first ON
+once and carry its ticket, power generation and absolute deadline through the
+serialized queue to one SDK-free managed Host with no fallback. Both terminals
+must release that Host, its observer and private durable duties; delayed work
+must not reopen it. A current post-hide source must be observed; a retained
+pre-BUS slot is not a current topology scan.
+
+```powershell
+$run = 'G:/YeManCC-Work/Testing/YMCC/Run.ps1'
+$select = @('--coordinator-case', 'gpd-settled-first-on-full-cycle')
+& $run -Optimized -Tests controller.coordinator-lifecycle -Mode plan -ExtraArgs $select
+$inputs = $select + @('--coordinator-managed-dll', $fixtureDll, '--coordinator-dotnet', $dotnetExe)
+& $run -Optimized -Tests controller.coordinator-lifecycle -Mode run -Rerun -BudgetSeconds 420 -ExtraArgs $inputs
+```
+
+The run retains the original compile and scenario limits and requires both
+`p/RESULT.json` and `p/full-pipe-core/fixture-result.json`. It is not cached,
+is not a default or release prerequisite, and does not duplicate the actual
+native-writer variant. No normal app shutdown, real device visibility or game
+access is certified by this selection.
+
+## Directed Win5 Elite quarantine and explicit ON
+
+This is an opt-in case of `controller.coordinator-lifecycle`, not a new test ID
+or an additional default or release gate. It exercises the queued ON rejected
+while the old Elite target return is unconfirmed, the original deadline and
+failure verification, exact old-origin settlement, one new user ON, and exit
+cleanup. The original producer compiles once and runs only `full-pipe-core`.
+
+```powershell
+$run = 'G:\YeManCC-Work\Testing\YMCC\Run.ps1'
+$select = @('--coordinator-case', 'gpd-win5-elite-quarantine-then-on')
+& $run -Optimized -Tests controller.coordinator-lifecycle -Mode plan -ExtraArgs $select
+$inputs = $select + @('--coordinator-managed-dll', $fixtureDll, '--coordinator-dotnet', $dotnetExe)
+& $run -Optimized -Tests controller.coordinator-lifecycle -Mode run -Rerun -BudgetSeconds 420 -ExtraArgs $inputs
+```
+
+Supply an absolute SDK-free `Fixture.dll` and absolute `dotnet.exe`. The
+original producer verifies source, generated and runtime bindings. This route
+has no qualified cache, so use `-Rerun` for fresh execution. The original
+300-second compile and 90-second mode limits still apply inside the shared
+420-second outer budget. Keep both the exact selection receipt and raw pipe
+result. Planning and missing prerequisites do not count as a run.
+
+The selector-only loader checks its exact source anchors and reversibility.
+It applies changes in memory or to the invocation's generated C++ only, so
+Terminal29's shared source files and identity contracts are unchanged. Fold
+this temporary overlay into the shared producer only at a coordinated source
+profile update; do not add a second Win5 producer. This case does not certify
+Terminal29, the installed build or a physical Win5 device.
+
 ## Directed GPD expired ON and late same-Host wake
 
 Select only `wake-kept-source:GPD:expired-then-current` via the existing
@@ -292,3 +370,48 @@ default suite. Unexpected failures stop the batch; the remaining cases are
 recorded as not run. No managed prerequisite, cache, hardware, or release
 acceptance is implied. The 300-second compile cap, 90-second per-case cap and
 original behavior checks are unchanged.
+
+## Directed ROG PS reply after exit
+
+Select `--coordinator-case ps-exit-held-ownership-receipt` through the same
+`controller.coordinator-lifecycle` entry. Planning requires no binaries. Run
+with `--coordinator-managed-dll` from the SDK-free shared-power fixture build
+and `--coordinator-dotnet` for its pinned SDK. The managed entry must include
+the explicit held-ownership-reply port; an older manifest is not accepted.
+
+Only `ROG/ps-wake/exit-held-ownership-receipt` runs. It holds the actual Host
+response before the pipe write, raises the original controller exit fence, and
+then releases the response. The projected controller cleanup sequence runs
+after the read returns; this is not an App exit-thread concurrency test. The
+scope is local controller return, not physical visibility, game delivery, or
+other modules. It is not in the default suite or a release gate.
+
+Use `--coordinator-case ps-exit-held-ownership-receipt:pair` to require the
+same scenario and its negative control. The two executions share one native
+build, but use separate processes, pipe identities and evidence directories.
+The control skips only the two post-probe admission checks; it must reach
+the rebuild attempt and be refused by the locked check without spawning or
+recreating a target. Its raw result must remain `FAIL` with exactly the
+expected assertion. The directed selection can pass only when both outcomes
+match and the source identity checks also pass. Neither result is cached or
+part of the default or release suite.
+
+Each selected arm also binds its original Native and managed JSON by hash in
+the existing selection receipt. The managed record must match the copy read
+by Native and prove natural process exit, observation-handle closure and local
+resource settlement. Missing or crossed records fail the selection; the raw
+negative remains `FAIL` and this does not prove physical target return.
+
+## Directed failed HELLO recovery
+
+Select `--coordinator-case actual-classified-failed-start-off-on-recovery` with
+`--tests controller.coordinator-lifecycle`. It compiles the existing Native
+consumer and runs only the original failed HELLO case. The original checks
+require no fallback before 10 seconds of fixture clock, exactly one recovery,
+the original 30-second deadline, and one healthy final. No managed artifact or
+real device is involved. This selection is not cached or run by default.
+
+This explicit selector uses the producer's `--native-optimization Od` for
+functional regression; the default lifecycle set keeps `/O2`. `/Od` does not
+qualify the optimized product build, measure product performance, or replace
+the public prepared Native/managed suite.

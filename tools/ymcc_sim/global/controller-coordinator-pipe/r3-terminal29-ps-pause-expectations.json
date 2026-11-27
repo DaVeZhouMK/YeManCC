@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "kind": "EXACT_TERMINAL29_PS_POWER_PAUSE_EXPECTATION",
+  "baseline": "2afe29cc6995c8ddc343a189cfe33820d0b9166b831bddffab147d23638c7b03",
+  "expectations": {
+    "positive": {
+      "managedInputContract": "current105-terminal29-shared-input-power-v1",
+      "mutation": null,
+      "expectedExit": 0,
+      "expectedStatus": "PASS",
+      "cases": 118,
+      "uniqueNames": 116,
+      "checks": 7267,
+      "expectedOwnedChildren": 124,
+      "traceIdentitySha256": "8f2b7ce44a5d6e3fdbd569de3136aebed88825720bce1f1553c4561adb53c2e8",
+      "exactFailures": [],
+      "requiredOriginalPassingInstances": [],
+      "countsOrigin": "Fixed 118-case capture; only the power-during-PS-probe case enters same-generation continuation.",
+      "boundaries": {
+        "pre": {
+          "ordinal": 102,
+          "checks": 6649,
+          "lastCaseName": "OFF-LIFECYCLE/expired-OFF-after-expired-new-ON",
+          "msiModeDebt": false
+        },
+        "post": {
+          "ordinal": 118,
+          "checks": 7267,
+          "lastCaseName": "OFF-LIFECYCLE/MSI-return-unproven",
+          "msiModeDebt": true
+        }
+      },
+      "psPowerPauseContinuation": true
+    }
+  },
+  "reviewedNativeRawSha256": "8261d8b08317cd423c5b4ee5236c1f8a22c814f353041a91c192b97df3f028d9"
+}

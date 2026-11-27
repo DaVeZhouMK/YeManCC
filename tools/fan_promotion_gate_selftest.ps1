@@ -290,8 +290,8 @@ if ($Mode -eq 'PackageSource') {
         $compiledPins[$key.Value] = $value.Value.ToLowerInvariant()
       }
       if ($compiledPins.Count -lt 29) { throw "PackageSource readiness: compiled source pins are incomplete ($($compiledPins.Count), expected at least 29)." }
-      $componentBundleRelative = 'deps/fan-host-source/candidate-onex-f1-fan-aliases-20261124'
-      $componentBundleManifestSha256 = '88a501bbda40005f7584b35263b950559d3072f41c76bb665928e4389768798f'
+      $componentBundleRelative = 'deps/fan-host-source/candidate-gpd-winmax3-20261127'
+      $componentBundleManifestSha256 = '7ae28da84eef7d86696ff7328dd4862541b4817240b90c4cae5d062319650867'
       Copy-PackageSourceTree (Join-Path $ProjectRoot $componentBundleRelative) (Join-Path $baseline $componentBundleRelative)
       if ((Get-Sha256 (Join-Path $baseline ($componentBundleRelative + '/manifest.json'))).ToLowerInvariant() -cne $componentBundleManifestSha256) { throw 'PackageSource readiness: approved source bundle manifest differs.' }
       # Live-source controls are separate copies; the selected archive remains exact.

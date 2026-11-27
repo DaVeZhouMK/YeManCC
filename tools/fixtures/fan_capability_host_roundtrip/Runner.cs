@@ -1634,6 +1634,7 @@ internal static partial class FanCapabilityRoundtrip
                         "compiled-capability-backend-has-no-wpf-or-windows-sdk-reference");
                 }),
                 new("pinned-source", "source-terminals-curve-and-owners", () => PinnedFanSourceChecks.Run(Require)),
+                new("pinned-source", "gpd-win-max-3-dual-duty", () => PinnedFanSourceChecks.CheckMax3(Require)),
                 new("pinned-host", "source-host-and-outer-lifecycle", () => PinnedFanHostConsumerChecks.Run(Require,directory))
             };
             cases.AddRange(PinnedBankedWmiChecks.Cases(Require,directory)

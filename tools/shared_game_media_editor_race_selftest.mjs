@@ -2193,6 +2193,39 @@ try{
   check(rows.every(r=>r.result.top==='steam-add-notice-modal'&&!r.result.confirm&&r.result.message.includes('已加入 Steam')&&r.result.queued===0&&r.next.top==='confirm-modal'&&r.next.title==='第二项确认'),'Steam result was lost, duplicated or covered the next confirmation');
  });
 
+ await run('manual game removal asks whether to delete its Steam shortcut',async()=>{
+  const rows=await page.evaluate(async()=>{
+   closeEdit();if(silentRefreshInFlight)await silentRefreshInFlight;
+   const saved=structuredClone(snapshot),actual=invoke,results=[];
+   const directory='G:/ManualRemoval/Example',primary=directory+'/game.exe';
+   const flush=async()=>{for(let i=0;i<10;i++)await Promise.resolve();};
+   for(const variant of ['both','library','cancel','back','root changed','not joined','native']){
+    const game={gameDirectory:directory,directoryName:'Example',primaryExecutable:primary,contentType:'game',steamNative:variant==='native'};
+    snapshot={...structuredClone(saved),library:{games:[game]},config:{...saved.config,manualGameDirectories:[directory]},
+      steamPlan:{items:[{gameDirectory:directory,primaryExecutable:primary,status:variant==='not joined'?'ready-to-add':'already-in-steam'}]}};
+    const calls=[];
+    invoke=(command,args={},timeout=0)=>command==='removeGame'?(calls.push(structuredClone(args)),Promise.resolve(structuredClone(snapshot))):actual(command,args,timeout);
+    librarySidebarPage('manual',false);renderManualGameDirectories();
+    const trigger=$('#manual-game-list button');focusWorkspaceElement(trigger);trigger.click();
+    const shown=!$('#confirm-modal').classList.contains('hidden'),alternative=$('#confirm-alternative');
+    const offered=visibleFocusables($('#confirm-modal')).includes(alternative);
+    if(variant==='root changed')snapshot={...snapshot,dataRoot:'G:/ReplacementRemovalRoot'};
+    if(variant==='back'){controllerBackLastAt=0;routeWorkspaceAction('back');}
+    else if(variant==='cancel')$('#confirm-cancel').click();
+    else if(variant==='both'||variant==='root changed')alternative.click();
+    else $('#confirm-confirm').click();
+    await flush();results.push({variant,shown,offered,calls,focusReturned:document.activeElement===trigger});
+   }
+   invoke=actual;snapshot=saved;librarySidebarPage('library',false);return results;
+  });
+  saveMetrics.push({case:'manual-game-steam-removal',rows});
+  check(rows.every(({variant,shown,offered,calls,focusReturned})=>shown&&offered===!['not joined','native'].includes(variant)&&
+    (['cancel','back','root changed'].includes(variant)?calls.length===0&&(variant==='root changed'||focusReturned):
+      calls.length===1&&calls[0].gameDirectory==='G:/ManualRemoval/Example'&&(variant==='both'?
+        calls[0].removeSteamShortcut===true&&calls[0].expectedPrimaryExecutable==='G:/ManualRemoval/Example/game.exe':
+        Object.keys(calls[0]).length===1))),JSON.stringify(rows));
+ });
+
  await run('Steam result and dedicated confirmation dialogs keep one focus owner',async()=>{
   const rows=[];
   for(const mode of ['batch first','delete first','result first','batch accepted']){

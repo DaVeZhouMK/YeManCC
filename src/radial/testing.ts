@@ -4,17 +4,27 @@ import { getUiSetting, setUiSettings, uiSettingsLoaded } from '@/bridge/uiSettin
 import { invoke, isNativeRuntime } from '@/bridge/ipc';
 import { RADIAL_USER_AVAILABLE } from './availability';
 import { radialTestingEnabled } from './testingState';
-import { startRadialHost } from './host';
+import type { startRadialHost } from './host';
 
 let pending: Promise<void> = Promise.resolve();
+let startHost: typeof startRadialHost | undefined;
+let lifetime = 0;
 /** Serialize native admission with preference changes; stale enables never open UI. */
 export function syncRadialTestingPreference(): Promise<void> {
   if (!getUiSetting('radialTestingEnabled')) radialTestingEnabled.value = false;
+  const owner = lifetime;
   const next = pending.catch(() => {}).then(async () => {
+    if (owner !== lifetime) return;
     const enabled = RADIAL_USER_AVAILABLE && getUiSetting('radialTestingEnabled');
+    // Load the host before admitting native summons. Off never needs the host.
+    if (enabled && !startHost) {
+      startHost = (await import('./host')).startRadialHost;
+      if (owner !== lifetime || !getUiSetting('radialTestingEnabled')) return;
+    }
     if (isNativeRuntime) {
       const receipt = await invoke<{ok: boolean; enabled: boolean; reason?: string}>(
         'radial.testing.configure', {enabled}, {timeoutMs: 3000});
+      if (owner !== lifetime) return;
       if (!receipt?.ok || receipt.enabled !== enabled) {
         radialTestingEnabled.value = false;
         throw new Error(receipt?.reason || '轮盘测试通道未确认，请重试。');
@@ -32,7 +42,7 @@ export async function setRadialTestingPreference(enabled: boolean): Promise<void
 export function startRadialTestingHost(router: Router): {stop(): void} {
   let host: ReturnType<typeof startRadialHost> | null = null;
   const stopWatch = watch(radialTestingEnabled, enabled => {
-    if (enabled) host ??= startRadialHost(router);
+    if (enabled && startHost) host ??= startHost(router);
     else {
       host?.stop(); host = null;
       if (router.currentRoute.value.path === '/radial') void router.replace('/settings');
@@ -43,6 +53,7 @@ export function startRadialTestingHost(router: Router): {stop(): void} {
   window.addEventListener('ui-settings:changed', changed);
   if (uiSettingsLoaded()) changed();
   return {stop() {
+    ++lifetime;
     stopWatch(); host?.stop(); host = null;
     radialTestingEnabled.value = false;
     window.removeEventListener('ui-settings:loaded', changed);

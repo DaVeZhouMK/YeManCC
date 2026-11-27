@@ -18,10 +18,13 @@ internal static class PinnedFanHostConsumerChecks
         internal Action<ushort,byte>? BeforeWrite;
         internal bool IgnoreAutomatic {get;set;}
         private readonly ushort control;
-        internal Terminal(PinnedFanDescriptor source){control=source.ControlRegister;Values[control]=0;Values[source.DutyRegister]=0;}
+        private readonly ushort? secondary;
+        internal Terminal(PinnedFanDescriptor source){control=source.ControlRegister;secondary=source.SecondaryDutyRegister;Values[control]=0;Values[source.DutyRegister]=0;}
         public byte ReadByte(ushort register)=>IsReady?Values[register]:throw new IOException("closed terminal");
         public void WriteByte(ushort register,byte value)
-        {if(!IsReady)throw new IOException("closed terminal");Writes.Add((register,value));BeforeWrite?.Invoke(register,value);if(!(IgnoreAutomatic&&register==control&&value==0))Values[register]=value;}
+        {if(!IsReady)throw new IOException("closed terminal");Writes.Add((register,value));BeforeWrite?.Invoke(register,value);
+            if(IgnoreAutomatic&&value==0&&register==secondary)throw new IOException("second automatic command refused");
+            if(!(IgnoreAutomatic&&register==control&&value==0))Values[register]=value;}
         public void Dispose()=>IsReady=false;
     }
     private static void Wire(HostState snapshot,string directory,string name,Action<bool,string> check)
@@ -33,6 +36,9 @@ internal static class PinnedFanHostConsumerChecks
         File.WriteAllText(Path.Combine(directory,"source-wire-"+name+".json"),json.GetRawText());
     }
     private static FanNode[] Curve=>new[]{new FanNode(0,0),new FanNode(30,20),new FanNode(70,70),new FanNode(100,100)};
+    private static bool Returned(HostState state,PinnedFanDescriptor source)=>source.SecondaryDutyRegister.HasValue
+        ? !state.SourceFanAutomaticReturned&&state.OemReleaseActionKind=="proven-by-source-duty-zero-commands-and-terminal-close"
+        : state.SourceFanAutomaticReturned&&state.OemReleaseActionKind=="proven-by-source-auto-register-and-terminal-close";
     private static void Reject(Action action,Action<bool,string> check,string name)
     {bool refused=false;try{action();}catch(Exception error)when(error is FanApiException or InvalidOperationException){refused=true;}check(refused,name);}
     private static RealHcBackend Host(string authorization,bool allow=true,string? confirmation=Token)=>
@@ -71,7 +77,7 @@ internal static class PinnedFanHostConsumerChecks
                 var restore=typeof(FanHostEngine).GetMethod("RestoreHardware",flags)!;
                 check((bool)restore.Invoke(engine,new object[]{false,true,false,"source-fixture-fault-cleanup"})!,
                     "source-parent:original-restore-retires-current-source-"+source.DeviceId);var retired=engine.Snapshot();
-                check(retired.State=="AwaitingControl"&&retired.SourceFanClosed&&retired.SourceFanAutomaticReturned,
+                check(retired.State=="AwaitingControl"&&retired.SourceFanClosed&&Returned(retired,source),
                     "source-parent:recovered-source-is-retired-but-listener-not-yet-stopped-"+source.DeviceId);
                 var state=(HostState)typeof(FanHostEngine).GetField("state",flags)!.GetValue(engine)!;
                 state.UnknownState=true;
@@ -112,9 +118,9 @@ internal static class PinnedFanHostConsumerChecks
             var oldCallback=backend.CapturePinnedSourceTemperatureForSelfTest();
             engine.Disable(JsonSerializer.SerializeToElement(new{}));var retired=engine.Snapshot();
             Wire(retired,directory,"retired",check);
-            check(retired.SourceFanClosed&&retired.SourceFanAutomaticReturned&&!retired.SourceFanClosePending&&terminals[0].IsReady==false,"source-engine:disable-observes-source-auto-return-and-terminal-close");
+            check(retired.SourceFanClosed&&Returned(retired,source)&&!retired.SourceFanClosePending&&terminals[0].IsReady==false,"source-engine:disable-observes-source-auto-return-and-terminal-close");
             check(!retired.HcVirtualCloseReturned&&!retired.HcRestoreCallbackReturned&&!retired.HcDeviceManagerStopCompleted&&!retired.OemPhysicalOwnershipConfirmed,"source-engine:source-release-preserves-honest-hc-and-physical-axes");
-            check(retired.OemReleaseActionKind=="proven-by-source-auto-register-and-terminal-close"&&FanHostEngine.IsOemReleaseSafe(true,retired.OemReleaseActionKind),"source-engine:unique-source-release-kind-consumed-by-existing-authority");
+            check(Returned(retired,source)&&FanHostEngine.IsOemReleaseSafe(true,retired.OemReleaseActionKind),"source-engine:unique-source-release-kind-consumed-by-existing-authority");
             var nextLease=engine.AcquireControl();engine.Enable(EnableBody(nextLease));var successor=engine.Snapshot();
             check(terminals.Count==2&&successor.SourceFanGeneration>oldGen&&!successor.HardwareWritesObserved,"source-engine:explicit-reacquire-opens-new-generation-with-no-invented-history");
             var before=terminals[0].Writes.Count;oldCallback(100);
@@ -126,10 +132,10 @@ internal static class PinnedFanHostConsumerChecks
                 !backend.TryObserveReopenReceipt(binding,"source-fixture-host","cycle-A",oldGen,1,out _),"source-engine:foreign-host-cycle-and-stale-generation-refused");
             backend.DeliverPinnedSourceTemperatureForSelfTest(50);engine.Close();var closed=engine.Snapshot();
             Wire(closed,directory,"closed",check);
-            check(closed.State=="Stopped"&&closed.SourceFanClosed&&!closed.SourceFanClosePending&&closed.SourceFanAutomaticReturned,"source-engine:public-close-retires-real-source-owner");
+            check(closed.State=="Stopped"&&closed.SourceFanClosed&&!closed.SourceFanClosePending&&Returned(closed,source),"source-engine:public-close-retires-real-source-owner");
             check(LocalFanHostServer.ParentRecoveryIsSafeToFinalizeForSelfTest(closed),"source-engine:parent-finalizer-accepts-actual-return-plus-exact-source-close");
             closed.SourceFanClosed=false;check(!LocalFanHostServer.ParentRecoveryIsSafeToFinalizeForSelfTest(closed),"source-engine:parent-rejects-missing-source-close-despite-proven-release");
-            closed.SourceFanClosed=true;closed.SourceFanAutomaticReturned=false;
+            closed.SourceFanClosed=true;closed.SourceFanAutomaticReturned=!closed.SourceFanAutomaticReturned;
             check(!LocalFanHostServer.ParentRecoveryIsSafeToFinalizeForSelfTest(closed),"source-engine:parent-rejects-contradictory-source-return");
         }
         {
@@ -169,7 +175,7 @@ internal static class PinnedFanHostConsumerChecks
             var oldCallback=backend.CapturePinnedSourceTemperatureForSelfTest();var oldGeneration=engine.Snapshot().SourceFanGeneration;
             var body=JsonSerializer.SerializeToElement(new {leaseId=lease.LeaseId});
             engine.Restore(body);var restored=engine.Snapshot();Wire(restored,directory,"restored",check);
-            check(restored.SourceFanClosed&&restored.SourceFanAutomaticReturned&&!restored.SourceFanClosePending&&restored.Lease is null,
+            check(restored.SourceFanClosed&&Returned(restored,source)&&!restored.SourceFanClosePending&&restored.Lease is null,
                 "source-outer:actual-restore-retires-exact-owner-"+source.DeviceId);
             var writes=terminals[0].Writes.Count;engine.Release(body);var released=engine.Snapshot();Wire(released,directory,"released",check);
             check(released.State=="AwaitingControl"&&released.Lease is null&&terminals[0].Writes.Count==writes,
@@ -200,7 +206,7 @@ internal static class PinnedFanHostConsumerChecks
             {
                 server.SuspendForSelfTest(2).WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
                 var suspended=engine.Snapshot();Wire(suspended,directory,"suspended",check);
-                check(suspended.State=="Suspended"&&suspended.SourceFanClosed&&suspended.SourceFanAutomaticReturned&&!suspended.SourceFanClosePending,
+                check(suspended.State=="Suspended"&&suspended.SourceFanClosed&&Returned(suspended,source)&&!suspended.SourceFanClosePending,
                     "source-power:actual-serialized-suspend-retires-owner-"+source.DeviceId);
                 check(!suspended.HcVirtualCloseReturned&&!suspended.HcDeviceManagerStopCompleted&&!suspended.OemPhysicalOwnershipConfirmed,
                     "source-power:suspend-does-not-fake-hc-or-physical-"+source.DeviceId);
@@ -268,7 +274,7 @@ internal static class PinnedFanHostConsumerChecks
         JsonElement MaximumBody(FanLease held)=>JsonSerializer.SerializeToElement(new {
             leaseId=held.LeaseId,nodes=new[]{new{tempC=0,dutyPercent=100},new{tempC=40,dutyPercent=100},new{tempC=70,dutyPercent=100},new{tempC=100,dutyPercent=100}}});
         engine.Enable(MaximumBody(lease));var backend=engine.RealBackendForSelfTest!;
-        check(terminals.Count==1&&terminals[0].Writes.Count==2&&terminals[0].Writes.Last()==(source.DutyRegister,source.Maximum),
+        check(terminals.Count==1&&terminals[0].Writes.Count==2&&terminals[0].Writes.Last()==(source.SecondaryDutyRegister??source.DutyRegister,source.Maximum),
             "source-maximum:enable-submits-exact-max-register-without-temperature-"+source.DeviceId);
         check(engine.Snapshot().HardwareWritesEnabled&&!backend.TemperatureMonitorActive,
             "source-maximum:no-false-temperature-dependency-"+source.DeviceId);
@@ -283,7 +289,7 @@ internal static class PinnedFanHostConsumerChecks
             server.ResumeForSelfTest().WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
             var attempt=engine.Snapshot().PowerOperationAttempt;
             engine.WaitForAutomaticResumeAsync(5000,ResumeWaitBinding.Pinned(attempt)).WaitAsync(TimeSpan.FromSeconds(6)).GetAwaiter().GetResult();
-            check(engine.Snapshot().HardwareWritesEnabled&&terminals.Count==2&&terminals[1].Writes.Last()==(source.DutyRegister,source.Maximum)&&!backend.TemperatureMonitorActive,
+            check(engine.Snapshot().HardwareWritesEnabled&&terminals.Count==2&&terminals[1].Writes.Last()==(source.SecondaryDutyRegister??source.DutyRegister,source.Maximum)&&!backend.TemperatureMonitorActive,
                 "source-maximum:actual-resume-replays-max-without-temperature-"+source.DeviceId);
             var current=engine.AcquireControl();engine.Enable(EnableBody(current));
             check(backend.TemperatureMonitorActive,"source-maximum:lower-curve-restores-original-temperature-owner-"+source.DeviceId);
@@ -314,7 +320,9 @@ internal static class PinnedFanHostConsumerChecks
             check(terminal.Writes.Count==0,"source-host:no-invented-startup-temperature-write-"+source.DeviceId);
             host.DeliverPinnedSourceTemperatureForSelfTest(50);
             var expected=(byte)Math.Round(45d*source.Maximum/100d,MidpointRounding.ToEven);
-            check(terminal.Writes.Count==2&&terminal.Writes[0]==(source.ControlRegister,source.ControlOn)&&terminal.Writes[1]==(source.DutyRegister,expected),"source-host:real-hwinfo-callback-source-owner-duty-"+source.DeviceId);
+            check(terminal.Writes.Count==2&&(source.SecondaryDutyRegister is ushort other
+                ? terminal.Writes[0]==(source.DutyRegister,(byte)109)&&terminal.Writes[1]==(other,(byte)109)
+                : terminal.Writes[0]==(source.ControlRegister,source.ControlOn)&&terminal.Writes[1]==(source.DutyRegister,expected)),"source-host:real-hwinfo-callback-source-owner-duty-"+source.DeviceId);
             check(host.SourceWritesObserved&&host.FanDispatchProviderNameForSelfTest=="source-transport","source-host:source-writer-evidence-is-honest-"+source.DeviceId);
             var count=terminal.Writes.Count;host.DeliverPinnedSourceTemperatureForSelfTest(50);
             check(count==terminal.Writes.Count,"source-host:same-temperature-no-duplicate-write-"+source.DeviceId);
@@ -323,12 +331,12 @@ internal static class PinnedFanHostConsumerChecks
             host.DeliverPinnedSourceTemperatureForSelfTest(65,foreignMonitor:true);host.DeliverPinnedSourceTemperatureForSelfTest(65,sampledTick:Environment.TickCount64-60000);
             check(count==terminal.Writes.Count,"source-host:foreign-and-stale-monitor-sample-refused-"+source.DeviceId);
             host.DeliverPinnedSourceTemperatureForSelfTest(95);
-            check(terminal.Writes.Last()==(source.DutyRegister,source.Maximum),"source-host:source-trip-drives-max-register-"+source.DeviceId);
+            check(terminal.Writes.Last()==(source.SecondaryDutyRegister??source.DutyRegister,source.Maximum),"source-host:source-trip-drives-max-register-"+source.DeviceId);
             host.ApplyCurve(Curve);host.DeliverPinnedSourceTemperatureForSelfTest(85);
-            check(terminal.Writes.Last()==(source.DutyRegister,source.Maximum),"source-host:curve-edit-preserves-unexpired-thermal-latch-"+source.DeviceId);
+            check(terminal.Writes.Last()==(source.SecondaryDutyRegister??source.DutyRegister,source.Maximum),"source-host:curve-edit-preserves-unexpired-thermal-latch-"+source.DeviceId);
             var retiredCallback=host.CapturePinnedSourceTemperatureForSelfTest();
             host.BlockWritesForClose();host.Close();
-            check(host.SourceTransportCloseConfirmed&&host.SourceAutomaticReturnObserved&&!host.IsOpen&&!terminal.IsReady,"source-host:exact-return-and-terminal-close-"+source.DeviceId);
+            check(host.SourceTransportCloseConfirmed&&host.SourceReturnActionCompleted&&!host.IsOpen&&!terminal.IsReady,"source-host:exact-return-and-terminal-close-"+source.DeviceId);
             check(!host.HcVirtualCloseReturned&&!host.HcOpenInvocationStarted&&!host.HcOpenEventsInvoked&&!host.HcDeviceManagerStopCompleted,"source-host:source-close-never-fakes-hc-receipts-"+source.DeviceId);
             count=terminal.Writes.Count;retiredCallback(100);host.Close();
             check(count==terminal.Writes.Count,"source-host:late-callback-and-duplicate-close-no-write-"+source.DeviceId);

@@ -8,8 +8,12 @@ namespace ymcc::editorwidth {
 // Physical window pixels; editor widths never overwrite normal window settings.
 struct Session {
     std::string owner;
+    // Main HWND only. The detached surface computes its own normal layout.
     RECT normalBounds{};
+    RECT normalPlacement{};
+    UINT normalDpi = 0;
     bool addedThickFrame = false;
+    bool restorePending = false;
     double scale = 1.0;
     int baseWidth = 0;
     int maxWidth = 0;

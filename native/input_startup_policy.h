@@ -51,6 +51,11 @@ inline nlohmann::json startupGyroPresetParams(const std::string& preset, const n
     params.erase("gyroMode");
     params["motionMode"] = mode == "suppress" ? "on" : mode;
     params["motionTrigger"] = mode == "on" ? json(nullptr) : json(trigger.empty() ? "LT" : trigger);
+    if (preset == "steam") {
+        params["motionMode"] = "off";
+        params["motionTrigger"] = nullptr;
+        params["aimingSightsTrigger"] = nullptr;
+    }
     return params;
 }
 

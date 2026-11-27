@@ -53,6 +53,7 @@ static bool g_inputHostProcess=true,g_inputHostPrepared=true,g_inputHostNeutrali
 static bool exitFence=false,writerAllowed=true,knownMsi=false,msiEligible=true;
 static bool inputHostExitFenceRaised(){return exitFence;}static bool msiClawKnownBoardAuthority(){return knownMsi;}static bool msiDinputMainSourceEligible(){return msiEligible;}static bool msiControllerNeutralCleanupAllowed(bool neutral){return neutral&&knownMsi;}
 static bool logThrows=false;static std::vector<json> logs;static void appendNativeLifecycleLog(const char*,const json& row){if(logThrows)throw std::runtime_error("inert evidence failure");logs.push_back(row);}
+static bool frameLogDetail=false;static bool domainLogEnabled(const char*){return frameLogDetail;}
 
 // Controlled original fixture inputs project through one public Reader. No device/OS power read.
 namespace sp=ymcc::sleeppower;namespace ip=ymcc::inputHost::sharedPower;
@@ -327,6 +328,29 @@ int main(){
   run(prefix+"unbound-lifecycle-contract-preserved",[&]{const auto r=submit(nullptr,true,fast);require(r.accepted&&pipeWrites==1,"unbound lifecycle-neutral path preserves existing transport contract");});
   run(prefix+"stale-cleanup-does-not-fabricate-opening-neutral-evidence",[&]{freshNeutralReady=false;now=2000;const auto r=submit(&sample,false,fast);require(r.accepted&&r.neutral&&freshNeutralCalls==0,"full stale-source release bypasses opening wait without supplying fake physical-neutral samples");sample.readAttemptSequence++;sample.readStartedTick=sample.readCompletedTick=now;const auto fresh=submit(&sample,false,fast);require(!fresh.accepted&&freshNeutralCalls==1&&pipeWrites==1,"fresh live input still needs original physical-neutral admission");});
   run(prefix+"persistent-connect-rejection-is-event-bounded",[&]{const auto before=submit(&sample,false,fast);require(before.accepted,"normal frame establishes recovery logging baseline");const auto baselineLogs=logs.size();for(unsigned i=0;i<1000;++i){++sample.readAttemptSequence;afterAssemblyHook=[]{++g_inputHostVirtualIntentRevision;};const auto r=submit(&sample,false,fast);require(r.rejected&&!r.fault,"each changed intent still rejects before pipe");}require(logs.size()-baselineLogs<=1,"a normal assembly cannot emit a fake recovery before every persistent pre-write rejection");++sample.readAttemptSequence;const auto resumed=submit(&sample,false,fast);require(resumed.accepted&&logs.size()-baselineLogs<=2,"one actual accepted current frame emits at most one recovery transition");});
+  run(prefix+"read-repeat-retains-evidence-without-changing-submission",[&]{
+   const auto noteCount=[](const char* key,const char* value){return std::count_if(logs.begin(),logs.end(),[&](const json& log){return log.value(key,std::string{})==value;});};
+   require(submit(&sample,false,fast).accepted,"fresh baseline accepted");
+   for(unsigned i=0;i<12;++i){
+    const auto repeated=submit(&sample,false,fast);
+    require(repeated.accepted&&repeated.neutral,"repeated read still sends only the original neutral cleanup");
+    ++sample.readAttemptSequence;
+    const auto fresh=submit(&sample,false,fast);
+    require(fresh.accepted&&!fresh.neutral,"fresh read still reaches the same target");
+   }
+   require(noteCount("assemblyCause","canonical-read-already-consumed")==1&&
+    noteCount("readRepeatRecord","episode-start")==1&&noteCount("readRepeatRecord","first-recovery")==1,
+    "only first repeat and first valid recovery are built with detail off");
+   frameLogDetail=true;
+   submit(&sample,false,fast);++sample.readAttemptSequence;submit(&sample,false,fast);
+   frameLogDetail=false;
+   require(std::count_if(logs.begin(),logs.end(),[](const json& log){return log.value("readRepeatSample",false);})==2,
+    "detail switch admits the repeat and its subsequent ACK with explicit routing marker");
+   sample.readContextStable=false;submit(&sample,false,fast);
+   require(noteCount("assemblyCause","canonical-window-or-binding-retired")==1,"retired read window stays resident");
+   sample.readContextStable=true;sample.sharedPower.suspendSerial++;submit(&sample,false,fast);
+   require(noteCount("assemblyCause","shared-power-observation-retired")==1,"power observation retirement stays distinct");
+  });
   run(prefix+"evidence-failure-never-admits-stale-live-or-breaks-cleanup",[&]{logThrows=true;now=2000;const auto r=submit(&sample,false,fast);require(r.accepted&&r.neutral&&pipeWrites==1,"throwing log sink does not change actual neutralization/admission");});
   run(prefix+"true-transport-failure-stays-fault",[&]{connectFails=true;const auto r=submit(&sample,false,fast);require(!r.accepted&&!r.rejected&&r.fault&&failuresFromHost==1,"a genuine current-context transport failure is not hidden as a transient skip");});
  }
@@ -337,6 +361,35 @@ int main(){
  run("common-hid/persona-preserved",[]{sample.pad.wButtons=XINPUT_GAMEPAD_A;auto r=submit(&sample,false,false);require(r.accepted&&inputHostConfiguredPersona()=="steamdeck","source data does not change requested persona");});
 #endif
  caseSource="xinput";
+ run("diagnostic/read-repeat-bounded-counters-and-quiet-recurrence",[]{
+  using namespace ymcc::input::frameSubmission;
+  InputFrameSubmission frame;
+  g_inputHostEpoch=97;
+  frame.ticket={g_inputHostEpoch,1,0,false};frame.sample=inputHostFrameSubmissionSample(&sample);
+  frame.sourcePower=sample.sharedPower;frame.assemblyCause=AssemblyCause::ReadAlreadyConsumed;
+  const InputFrameSubmissionScope scope(&frame);
+  const auto repeat=[&]{inputHostFrameSubmissionNote(Verdict::SourceRetired,"before-frame-assembly",true);};
+  const auto recover=[&]{++frame.sample.window.readAttemptSequence;inputHostFrameSubmissionNote(Verdict::Allowed,"frame-accepted",false);};
+  repeat();recover();
+  for(unsigned i=1;i<=50000;++i){++now;repeat();recover();}
+  require(logs.size()==7,"50000 alternating pairs yield 1 start, 1 recovery and 5 summaries with detail off");
+  unsigned summaries=0;
+  for(const auto& row:logs)if(row.value("readRepeatRecord",std::string{})=="repeat-summary"){
+   require(row.value("readRepeatIntervalMs",0)==10000&&row.value("readRepeatRejections",0)==10000&&
+    row.value("readRepeatRecoveries",0)==(summaries?10000:9999),"summary covers the exact elapsed window until the reporting rejection");
+   ++summaries;
+  }
+  ++g_inputHostVirtualIntentRevision;frame.ticket.intent=1;repeat();recover();
+  require(logs.size()==9&&logs[7].value("readRepeatRecord",std::string{})=="episode-start"&&
+   logs[8].value("readRepeatRecord",std::string{})=="first-recovery","intent change preserves the new pair");
+  now+=1001;repeat();frame.ticket.neutral=true;recover();
+  require(logs.size()==11&&logs[9].value("readRepeatRecord",std::string{})=="episode-start"&&
+   logs[10].value("readRepeatRecord",std::string{})=="context-changed","quiet recurrence reopens; semantic neutral is not live recovery");
+  frame.ticket.neutral=false;repeat();
+  for(unsigned i=0;i<10;++i){now+=1000;repeat();}
+  require(logs.size()==13&&logs.back().value("readRepeatRejections",0)==10&&logs.back().value("readRepeatRecoveries",-1)==0,
+   "persistent rejection emits bounded counts without fabricating recovery");
+ });
  run("rog-compare/canonical-and-raw-controls-identical",[]{
   for(const std::string mode:{"prepared/","legacy/"})for(const std::string state:{"held","release"})
    require(pairedFrames.at(mode+"xinput/"+state)==pairedFrames.at(mode+"rog-hid-raw/"+state),"source provenance cannot change actual final frame controls");

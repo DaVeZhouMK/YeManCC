@@ -4,11 +4,14 @@ export function nativeLaunchTests(root,evidence,{noIoFixture,expectedFixtureSha2
  const out=path.join(evidence,'native-manual-launch');fs.mkdirSync(out,{recursive:true});
  const powershell=process.env.YMCC_SIM_POWERSHELL||'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
  assert.equal(path.resolve(powershell).toLowerCase(),path.resolve(fixture.powershell.path).toLowerCase(),"NOIO_POWERSHELL_PATH_CHANGED");assert.equal(hash(powershell),fixture.powershell.sha256,"NOIO_POWERSHELL_CHANGED");
+ // These independent JS checks do not need native outputs. Reject before compiling any role.
+ for(const file of ['steam_launch_admission_selftest.mjs','steam_linked_launch_selftest.mjs']){const run=spawnSync(process.execPath,[path.join(root,'tools',file),path.join(out,file+'.json')],{encoding:'utf8',windowsHide:true,timeout:15000,cwd:root});fs.writeFileSync(path.join(out,file+'.log'),(run.stdout||'')+(run.stderr||''));assert.equal(run.status,0,file+run.stderr);}
  const execute=(name,extra=[])=>{const directory=path.join(out,name);const run=spawnSync(powershell,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',fixture.selftestScript,'-Out',directory,'-SourceRoot',root,'-NoIoFixture',noIoFixture,'-ExpectedFixtureSha256',expectedFixtureSha256,...extra],{encoding:'utf8',windowsHide:true,timeout:45000,cwd:root});const log=(run.stdout||'')+(run.stderr||'');fs.writeFileSync(path.join(out,name+'.log'),log);return {directory,run,log};};
  const positive=execute('positive');assert.equal(positive.run.status,0,positive.log);const report=JSON.parse(positive.log.trim().split(/\r?\n/).at(-1));
  const core=fs.readFileSync(path.join(root,'native/steam_native_launch.h'),'utf8'),windows=fs.readFileSync(path.join(root,'native/steam_native_launch_windows.h'),'utf8');const negative=[];
  for(const [name,which,from,to,failure] of [
-  ['replayed-boot','core','if(state.bootConsumed){','if(false&&state.bootConsumed){','one boot start is consumed across helper and YMCC restart'],
+  // The executable stops at its first failed check; the consumed-logon overlay check now precedes the restart check.
+  ['replayed-boot','core','if(state.bootConsumed){','if(false&&state.bootConsumed){','consumed logon never repeats overlay preparation'],
   ['running-reopened','core','if(presence.steam>0){','if(false&&presence.steam>0){','running Steam has no startup args/addons/mode URI'],
   ['early-second-start','core','now-state.dispatchedAt<40000','now-state.dispatchedAt<20000','logon second request before 40s stays fenced across fresh consumer'],
   ['manual-timed-ban','core','if(origin!=Origin::Manual && state.dispatched &&','if(state.dispatched &&','failed manual primary and fallback do not impose a timed retry ban'],
@@ -20,7 +23,6 @@ export function nativeLaunchTests(root,evidence,{noIoFixture,expectedFixtureSha2
   const result=execute(name,[which==='core'?'-CoreSource':'-WindowsSource',file]);assert.notEqual(result.run.status,0,'semantic negative must fail '+name);
   const bytes=fs.readFileSync(path.join(result.directory,'result.log'));const detail=bytes[0]===0xff&&bytes[1]===0xfe?bytes.subarray(2).toString('utf16le'):bytes.toString('utf8');assert(detail.includes('FAIL '+failure),name+' must fail at its behavioral assertion, not compilation: '+detail);negative.push({name,detected:true,failure});
  }
- for(const file of ['steam_launch_admission_selftest.mjs','steam_linked_launch_selftest.mjs']){const run=spawnSync(process.execPath,[path.join(root,'tools',file),path.join(out,file+'.json')],{encoding:'utf8',windowsHide:true,timeout:15000,cwd:root});fs.writeFileSync(path.join(out,file+'.log'),(run.stdout||'')+(run.stderr||''));assert.equal(run.status,0,file+run.stderr);}
  const result={ok:true,positiveCases:report.passed,negative,noIo:{kind:"memory-Win32-terminals-with-exact-owned-child",fixtureFile:noIoFixture,fixtureSha256:expectedFixtureSha256,realUserTokenValidated:false,installedApplicationValidated:false},actualNativeCreatorInertChild:true,actualLedgerAndEarlystartOwnedFiles:true,actualSteamActions:0,installedSettingsWrites:0};fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2));return result;
 }
 if(process.argv.includes('--run')){const at=process.argv.indexOf('--evidence-dir'),root=process.cwd(),out=path.resolve(at<0?'G:/YeManCC-Work/Build/V/SteamNative21/consumer':process.argv[at+1]);fs.mkdirSync(out,{recursive:true});const {prepareNativeLaunchNoIoFixture}=await import('./ymcc_sim/global/decky-update-recovery/native-launch-noio/index.mjs');const binding=await prepareNativeLaunchNoIoFixture(root,out);console.log(JSON.stringify(nativeLaunchTests(root,out,binding),null,2));}

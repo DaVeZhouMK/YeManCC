@@ -1,4 +1,4 @@
-import {computed,readonly,shallowReactive} from 'vue';
+import {computed,readonly,shallowReactive,inject,onActivated,onDeactivated,onMounted,ref,watch,type InjectionKey,type Ref} from 'vue';
 import {invoke,on} from './ipc';
 import {probeUndervolt,setUndervolt,type UvProbe,type UvSetReceipt,type UvSetResult} from './cpuctl';
 
@@ -10,6 +10,7 @@ const state=shallowReactive({capability:null as UvProbe|null,ready:false,busy:fa
 export const undervoltState=readonly(state);
 export const undervoltAvailable=computed(()=>!state.excluded&&state.capability?.supported===true&&state.capability.available===true);
 export const undervoltLabel=computed(()=>!state.ready?'待确认':!undervoltAvailable.value?'不支持':state.enabled?'开启':'关闭');
+export const undervoltPresentationAllowed:InjectionKey<Readonly<Ref<boolean>>>=Symbol('undervoltPresentationAllowed');
 let initialized:Promise<void>|undefined,stopEvents:(()=>void)|undefined,noticeTimer:ReturnType<typeof setTimeout>|undefined;
 let operation=0,closed=false;
 let nativeTrial:NativeTrial|undefined,capabilityProbe:Promise<void>|undefined;
@@ -50,7 +51,7 @@ function sameDevice(saved:UndervoltPreference,p:UvProbe){
  return saved.vendor===p.vendor&&saved.unit===p.unit&&!!a&&!!b&&a.vendor===b.vendor&&a.family===b.family&&a.familyTag===b.familyTag&&
   a.cpuid?.family===b.cpuid?.family&&a.cpuid?.model===b.cpuid?.model&&validOffset(saved.value,p);
 }
-export function ensureUndervoltRuntime():Promise<void>{
+export function startUndervoltRuntime():Promise<void>{
  if(initialized)return initialized;
  closed=false;
  stopEvents=on<NativeTrial>('cpu.undervolt.state',accept);
@@ -59,6 +60,8 @@ export function ensureUndervoltRuntime():Promise<void>{
    const snapshot=await invoke<NativeTrial>('cpu.undervolt.state');if(closed)return;
    if(!accept(snapshot)&&!nativeTrial)throw Error('降压试用状态无效，请重试');
    if(state.excluded){state.ready=true;return;}
+   // Saved settings and resident trials still need startup recovery in the tray.
+   if(nativeTrial?.stage==='idle'&&!nativeTrial.pending&&!nativeTrial.saved)return;
    const p=await probeUndervolt();if(closed)return;state.capability=p;state.ready=true;
    const current=nativeTrial!;const saved=current.saved;
    // A renderer refresh must rejoin the native trial, not reapply an old value
@@ -78,6 +81,24 @@ export function ensureUndervoltRuntime():Promise<void>{
   }catch(error){if(!closed){state.ready=true;state.error=(error as Error).message;}}
   finally{if(!closed)state.busy=false;}
  })();return initialized;
+}
+async function ensureUndervoltRuntime():Promise<void>{
+ await startUndervoltRuntime();
+ if(closed||state.ready||state.excluded)return;
+ await refreshCapability();
+ if(!closed)state.ready=true;
+}
+export function useUndervoltPresentation(enabled:()=>boolean=()=>true):void{
+ const allowed=inject(undervoltPresentationAllowed,null);
+ const active=ref(false);
+ onMounted(()=>{active.value=true;});
+ onActivated(()=>{active.value=true;});
+ onDeactivated(()=>{active.value=false;});
+ const stop=watch(()=>active.value&&enabled()&&(allowed?.value??true),visible=>{
+  if(!visible)return;
+  stop();
+  void refreshUndervoltRuntime();
+ });
 }
 async function apply(enabled:boolean,value:number){
  if(closed)return;

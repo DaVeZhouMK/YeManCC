@@ -2,7 +2,7 @@
 // [AI:USER:GYRO] 开启→按当前全局预设使用体感；关闭→停止体感效果；预设修改保存到全局输入设置。
 // 体感开关与“虚拟手柄联动”是不同选择；未识别来源不能当作已开启，校准未确认不能当作已保存。
 // 切页不代表关闭，用户关闭后旧请求不能重新开启；输入来源/输出支持查总库与现有实现，不按设备名称猜测。
-import { migrateControllerPersona, type ControllerPersona } from '@/bridge/controllerPersona';
+import { CONTROLLER_PERSONA_OPTIONS, migrateControllerPersona, type ControllerPersona } from '@/bridge/controllerPersona';
 import GyroInputOutputPreview from '@/components/GyroInputOutputPreview.vue';
 import GameProfileRemoveDialog from '@/components/GameProfileRemoveDialog.vue';
 import { loadGameCustomConfig, removeGameCustomProfile, restorePerformanceScheduleIfConfigured, type GameCustomProfileTarget } from '@/bridge/performanceSchedule';
@@ -23,8 +23,10 @@ import { normalizeGyroTelemetry } from '@/bridge/inputContracts';
 import { invoke, on, setGyroTelemetryInterest } from '@/bridge/ipc';
 import { readGameInputEditor, onGameInputEditorChanged, type GameInputEditor } from '@/bridge/gameInputEditor';
 import {saveGyroEditorPatch} from '@/bridge/gyroPresetSave';
+import {gyroMotionParamsForPreset} from '@/bridge/gyroPresetModel';
 import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
 import { createGyroPresentationGate, gyroStickPreviewSample } from '@/bridge/gyroPresentation';
+import { acceptVirtualOutputRuntime, virtualOutputPresentation, type VirtualOutputRuntimeState } from '@/bridge/virtualOutputStatus';
 
 const simulationOpen = ref(false);
 const simulationSettings = ref<HTMLElement | null>(null);
@@ -143,10 +145,33 @@ const virtualPadLink = ref(true);
 // Temporary shortcut feedback is read-only: never feed it to the autosave watchers.
 const shortcutGyroEnabled = ref<boolean | null>(null);
 let offShortcutRuntime: (() => void) | null = null;
-function applyShortcutRuntime(state: { active?: boolean; gyroEnabled?: boolean } | null | undefined): void {
+let offVirtualOutput: (() => void) | null = null;
+const virtualOutputRuntime = ref<VirtualOutputRuntimeState | null>(null);
+// Read-only shortcut overrides must not trigger linkage autosaves or change the selected persona.
+type GyroShortcutRuntime = { active?: boolean; gyroEnabled?: boolean; persona?: string; virtualEnabled?: boolean };
+const shortcutVirtualTarget = ref<{ persona: ControllerPersona; enabled: boolean } | null>(null);
+function applyShortcutRuntime(state: GyroShortcutRuntime | null | undefined): void {
   if (typeof state?.active !== 'boolean') return;
+  const previous = shortcutVirtualTarget.value ?? { persona: virtualPersona.value, enabled: virtualPadEnabled.value };
   shortcutGyroEnabled.value = state.active && typeof state.gyroEnabled === 'boolean' ? state.gyroEnabled : null;
+  shortcutVirtualTarget.value = state.active && typeof state.persona === 'string' && typeof state.virtualEnabled === 'boolean'
+    ? { persona: migrateControllerPersona(state.persona), enabled: state.virtualEnabled } : null;
+  const next = shortcutVirtualTarget.value ?? { persona: virtualPersona.value, enabled: virtualPadEnabled.value };
+  if (previous.persona !== next.persona || previous.enabled !== next.enabled) virtualOutputRuntime.value = null;
 }
+const virtualControllerStatus = computed(() => {
+  if (!loaded.value) return { text: '虚拟手柄-待确认', tone: 'pending', detail: '正在读取虚拟手柄状态。' };
+  const persona = shortcutVirtualTarget.value?.persona ?? virtualPersona.value;
+  const requested = shortcutVirtualTarget.value?.enabled ?? virtualPadEnabled.value;
+  if (!requested || persona === 'disabled')
+    return { text: '请到控制器开启虚拟手柄', tone: 'off', detail: '请到控制器开启虚拟手柄' };
+  // Use the controller page's native admission/fault rules; linkage or saved intent is not proof of success.
+  const observed = virtualOutputPresentation(virtualOutputRuntime.value, requested, persona);
+  const name = CONTROLLER_PERSONA_OPTIONS.find(option => option.value === persona)?.label || '';
+  const state = observed.tone === 'on' ? '已开启' : observed.tone === 'warning' ? '故障'
+    : observed.text.replace(/^虚拟手柄-/, '');
+  return { ...observed, text: `${name}虚拟手柄-${state}` };
+});
 const gyroPowerState = computed<GyroPowerState>(() => {
   if (shortcutGyroEnabled.value !== null) return shortcutGyroEnabled.value ? 'on' : 'off';
   if (enabled.value) return 'on';
@@ -167,9 +192,11 @@ function applyVirtualPadLink(): void {
   if (next) outputMode.value = 'virtual-stick';
 }
 function applyVirtualPad(target: { persona?: unknown; buttonMappingEnabled?: unknown } | null | undefined): void {
-  const persona = String(target?.persona || 'disabled');
-  virtualPersona.value = migrateControllerPersona(persona);
-  virtualPadEnabled.value = target?.buttonMappingEnabled === true && virtualPersona.value !== 'disabled';
+  const persona = migrateControllerPersona(target?.persona);
+  const requested = target?.buttonMappingEnabled === true && persona !== 'disabled';
+  if (persona !== virtualPersona.value || requested !== virtualPadEnabled.value) virtualOutputRuntime.value = null;
+  virtualPersona.value = persona;
+  virtualPadEnabled.value = requested;
 }
 const presetStore = ref<Record<string, Record<string, unknown> | null>>({
   fps: null, racing: null, custom: null, steam: null,
@@ -502,7 +529,7 @@ function number(value: unknown, fallback: number): number {
 // 落盘 gyroMotion.presets[预设]；applyPresetParams 反向写回 refs（含敏感度/
 // 曲线档位反推）。enabled/provider/calibrationId/outputMode 为全局项，不入预设。
 function capturePresetParams(): Record<string, unknown> {
-  return {
+  const params = {
     motionMode: motionMode.value,
     motionTrigger: motionTrigger.value,
     outputStick: outputStick.value,
@@ -531,6 +558,7 @@ function capturePresetParams(): Record<string, unknown> {
     responseCurvePoints: null,
     autoCalibrate: autoCalibrate.value,
   };
+  return activePreset.value === 'steam' ? gyroMotionParamsForPreset('steam', { steam: params }) : params;
 }
 function applyPresetParams(p: Record<string, unknown> | null | undefined): void {
   if (!p) return;
@@ -598,8 +626,9 @@ function applyPreset(raw: string | number): void {
   antiDeadzone.value = 20;
   if (next === 'steam') {
     // 用户裁决（2026-09-29）：Steam 预设输入方式默认「本地」(local-space)。
-    motionMode.value = 'on';
+    motionMode.value = 'off';
     motionTrigger.value = '';
+    aimingSightsTrigger.value = '';
     motionInput.value = 'local-space';
   } else if (next === 'fps') {
     // FPS 默认权重倍率 1.3（2026-11-04）；已有预设记忆由原加载分支保留。
@@ -665,6 +694,12 @@ function markCustom(): void {
 // 2026-10-04 用户裁决：触发方式为「按住触发/按住抑制/切换」时必须有触发键，
 // 默认 LT 兜底（禁止留空防呆）；「常开」无需触发键。
 function ensureMotionTrigger(): void {
+  if (activePreset.value === 'steam') {
+    motionMode.value = 'off';
+    motionTrigger.value = '';
+    aimingSightsTrigger.value = '';
+    return;
+  }
   if (motionMode.value !== 'on' && motionTrigger.value.trim() === '') {
     motionTrigger.value = 'LT';
   }
@@ -786,8 +821,8 @@ async function load(): Promise<void> {
   // 用户裁决（2026-09-30）：无数据时默认预设为 FPS（fps 是缺省档）。
   const presetRaw = asGyroPreset(motion.preset);
   const activeRaw = asGyroPreset(motion.activePreset);
-  preset.value = presetRaw ?? activeRaw ?? 'fps';
-  activePreset.value = activeRaw ?? preset.value;
+  activePreset.value = activeRaw ?? presetRaw ?? 'fps';
+  preset.value = activePreset.value;
   outputStick.value = motion.outputStick === 'left' ? 'left' : 'right';
   outputAxis.value = motion.outputAxis === 'x' ? 'x' : 'xy';
   steeringMaxAngle.value = number(motion.steeringMaxAngle, 30);
@@ -810,7 +845,7 @@ async function load(): Promise<void> {
       const stored = p as Record<string, unknown>;
       if (typeof stored.autoCalibrate !== 'boolean') stored.autoCalibrate = true;
       delete stored.gyroMode;
-      presetStore.value[key] = stored;
+      presetStore.value[key] = key === 'steam' ? gyroMotionParamsForPreset('steam', { steam: stored }) : stored;
     } else {
       presetStore.value[key] = null;
     }
@@ -840,7 +875,7 @@ async function load(): Promise<void> {
   await nextTick();
   if (generation === loadGeneration) loaded.value = true;
   try {
-    const runtime = await invoke<{ active?: boolean; gyroEnabled?: boolean }>('input.shortcutRuntime.get', {});
+    const runtime = await invoke<GyroShortcutRuntime>('input.shortcutRuntime.get', {});
     if (generation === loadGeneration) applyShortcutRuntime(runtime);
   } catch { /* Older hosts have no temporary switches. */ }
 }
@@ -899,7 +934,7 @@ function applyDefaultParamsForPreset(kind: 'fps' | 'racing' | 'steam' | 'custom'
     motionInput.value = 'joystick-steering';
   } else if (kind === 'steam') {
     // 用户裁决（2026-09-29）：Steam 预设输入方式默认「本地」(local-space)。
-    motionMode.value = 'on';
+    motionMode.value = 'off';
     motionTrigger.value = '';
     motionInput.value = 'local-space';
   }
@@ -950,7 +985,7 @@ async function saveNow(): Promise<void> {
       // 仍为纯 JSON，不影响任何既有字段。
       const cloned = structuredClone(toRaw(p));
       delete cloned.gyroMode;
-      presetsOut[key] = cloned;
+      presetsOut[key] = key === 'steam' ? gyroMotionParamsForPreset('steam', { steam: cloned }) : cloned;
     }
     const outputTarget = { gyroEnabled: enabled.value };
     const saveOwner = inputEditor.value!;
@@ -967,8 +1002,8 @@ async function saveNow(): Promise<void> {
         steeringAxis: steeringAxis.value,
         // 用户裁决（2026-09-14）：UI「按住抑制」落盘为 native mode='on'+触发键
         // （HC MotionMode.On=!pressed 即按住抑制）；「常开」落盘 mode='on'+空键。
-        motionMode: motionMode.value === 'suppress' ? 'on' : motionMode.value,
-        motionTrigger: motionMode.value === 'on'
+        motionMode: activePreset.value === 'steam' ? 'off' : motionMode.value === 'suppress' ? 'on' : motionMode.value,
+        motionTrigger: activePreset.value === 'steam' || motionMode.value === 'on'
           ? null
           : (motionTrigger.value.trim() || null),
         gyroMultiplier: gyroMultiplier.value,
@@ -994,7 +1029,7 @@ async function saveNow(): Promise<void> {
         steeringPower: steeringPower.value,
         steeringDeadzone: steeringDeadzone.value,
         aimingSightsMultiplier: aimingSightsMultiplier.value,
-        aimingSightsTrigger: aimingSightsTrigger.value.trim() || null,
+        aimingSightsTrigger: activePreset.value === 'steam' ? null : aimingSightsTrigger.value.trim() || null,
         // 曲线响应点已从 UI 移除：responseCurvePoints 始终 null（线性恒等），
         // 敏感曲线由下方曲线预设 Dropdown 写入（6）。
         responseCurvePoints: null,
@@ -1047,6 +1082,9 @@ watch([
 watch(virtualPadOn, () => { applyVirtualPadLink(); });
 onMounted(() => {
   offShortcutRuntime = on('input.shortcutRuntime', applyShortcutRuntime);
+  offVirtualOutput = on<{ virtualOutput?: VirtualOutputRuntimeState }>('gamepad.state', state => {
+    virtualOutputRuntime.value = acceptVirtualOutputRuntime(virtualOutputRuntime.value, state.virtualOutput ?? null);
+  });
   gyroPresentation.setVisible(isUiVisible());
   gyroPresentation.setActive(true);
   stopGyroVisibility = onUiVisibilityChange(({ visible }) => {
@@ -1074,6 +1112,7 @@ onMounted(() => {
   void load().catch((error) => { status.value = `读取失败：${(error as Error).message}`; });
 });
 onActivated(() => {
+  virtualOutputRuntime.value = null;
   setGyroTelemetryInterest(telemetry, true);
   gyroPresentation.setActive(true);
   if (busy.value || saveRequested || saveTimer) return;
@@ -1101,6 +1140,7 @@ onBeforeUnmount(() => {
   if (offCalibResult) offCalibResult();
   if (offCalibStatus) offCalibStatus();
   offShortcutRuntime?.();
+  offVirtualOutput?.();
   window.removeEventListener('input:motion-telemetry', telemetry);
   window.removeEventListener('pointerdown', onGyroPreviewPointerDown, { capture: true } as EventListenerOptions);
   window.removeEventListener('pointerup', onGyroPreviewPointerUp, { capture: true } as EventListenerOptions);
@@ -1158,7 +1198,11 @@ async function detectMotionSources(): Promise<void> {
   <IntegratedPage title="陀螺仪" hide-heading>
   <Teleport :to="simulationSettings || 'body'" :disabled="!simulationSettings">
   <div ref="gyroSettingsRoot" class="page gyro-integrated-page" :data-gp-scope="simulationOpen ? undefined : 'gyro-page'" :data-gp-spatial="simulationOpen ? undefined : 'nearest'">
-    <header v-if="!simulationOpen" class="gyro-page-heading"><h1>陀螺仪</h1><button type="button" class="gyro-simulation-open" data-gp-row="-2" data-gp-col="1" @click="simulationOpen=true"><InlineIcon name="play"/>模拟陀螺仪</button></header>
+    <header v-if="!simulationOpen" class="gyro-page-heading">
+      <h1>陀螺仪</h1>
+      <span class="gyro-virtual-status" :class="virtualControllerStatus.tone" :title="virtualControllerStatus.detail" role="status" aria-live="polite" aria-atomic="true"><i aria-hidden="true"/><span>{{virtualControllerStatus.text}}</span></span>
+      <button type="button" class="gyro-simulation-open" data-gp-row="-2" data-gp-col="1" @click="simulationOpen=true"><InlineIcon name="play"/>模拟陀螺仪</button>
+    </header>
     <GameProfileModeBanner v-if="editingGame" :game-name="editingGame"><template #actions><button class="gyro-profile-exit" data-gyro-profile-exit data-gp-row="-1" data-gp-col="2" :disabled="controlsLocked" @click="requestProfileRemoval">退出专属</button></template></GameProfileModeBanner>
     <section class="card gyro-overview-card" aria-label="陀螺仪状态与预设">
       <div class="field-stack">
@@ -1226,18 +1270,18 @@ async function detectMotionSources(): Promise<void> {
       </div>
         </div>
         <p v-else class="steam-preset-hint">请在 Steam 内设置触发方式，支持 SteamDeck 和 PS5 虚拟手柄</p>
-        <div class="field-stack">
-        <div class="field-grid" :class="{ 'one-col': preset === 'steam' }">
+        <div v-if="preset !== 'steam'" class="field-stack">
+        <div class="field-grid">
           <label class="field">
             <span>输入方式</span>
             <Dropdown v-model="motionInput" :options="motionInputOptions" :disabled="controlsLocked" show-selected-sub :gp-row="5" :gp-col="0" @change="markCustom" />
           </label>
-          <div v-if="preset !== 'steam'" class="field">
+          <div class="field">
             <span>速度模式</span>
             <SegButton v-model="velocityMode" :options="velocityModeOptions" full :disabled="controlsLocked" :gp-row="5" :gp-col-start="1" @update:model-value="markCustom" />
           </div>
         </div>
-        <Slider v-if="preset !== 'steam' && velocityMode === 'velocity'" v-model="velocityScale" label="变速倍率" :min="0.1" :max="5" :step="0.1" :value-text="velocityScale.toFixed(1)" :disabled="controlsLocked" :gp-row="6" :gp-col="0" @update:model-value="markCustom" />
+        <Slider v-if="velocityMode === 'velocity'" v-model="velocityScale" label="变速倍率" :min="0.1" :max="5" :step="0.1" :value-text="velocityScale.toFixed(1)" :disabled="controlsLocked" :gp-row="6" :gp-col="0" @update:model-value="markCustom" />
 
         <template v-if="motionInput === 'joystick-steering'">
           <div class="modifier-title">赛车倾斜</div>
@@ -1253,7 +1297,7 @@ async function detectMotionSources(): Promise<void> {
         <div class="field-stack">
           <div v-if="preset !== 'steam'" class="field"><span>输出到</span><SegButton v-model="outputStick" :options="stickOptions" full :disabled="controlsLocked" :gp-row="12" @update:model-value="markCustom" /></div>
           <p v-else class="gyro-steam-output">Steam 体感输出</p>
-        <Slider v-model="gyroWeight" label="陀螺仪权重【倍率】" :min="1" :max="3" :step="0.1" :value-text="gyroWeight.toFixed(1)" :disabled="controlsLocked" :gp-row="8" :gp-col="0" @update:model-value="markCustom" />
+        <Slider v-if="preset !== 'steam'" v-model="gyroWeight" label="陀螺仪权重【倍率】" :min="1" :max="3" :step="0.1" :value-text="gyroWeight.toFixed(1)" :disabled="controlsLocked" :gp-row="8" :gp-col="0" @update:model-value="markCustom" />
         </div>
       </div>
     </section>
@@ -1289,6 +1333,7 @@ async function detectMotionSources(): Promise<void> {
           </button>
           <p v-if="sourceProbeMessage" class="calib-result" role="status" aria-live="polite">{{ sourceProbeMessage }}</p>
         </div>
+        <template v-if="preset !== 'steam'">
         <div class="inner">
           <Slider :model-value="motionSensitivityX" label="灵敏度" :min="0.5" :max="2" :step="0.1" :value-text="motionSensitivityX.toFixed(1)" :disabled="controlsLocked" :gp-row="18" :gp-col="0" @update:model-value="onSensitivityLevel" />
         </div>
@@ -1334,6 +1379,7 @@ async function detectMotionSources(): Promise<void> {
           <span class="row-label">输出形状</span>
           <Dropdown v-model="outputShape" :options="outputShapeOptions" width="104px" :disabled="controlsLocked" :gp-row="27" :gp-col="0" @change="markCustom" />
         </div>
+        </template>
         <button type="button" class="reset-preset-btn" :disabled="controlsLocked" data-gp-row="28" data-gp-col="0" @click="resetGyroDefaults">重置此预设</button>
       </div>
     </section>
@@ -1341,7 +1387,7 @@ async function detectMotionSources(): Promise<void> {
   </div>
 
   </Teleport>
-  <GyroSimulationWindow v-if="simulationOpen" :motion="simulationMotion" :connected="gyroConnected" :enabled="enabled" :admitted="simulationAdmitted" @settings-host="element=>simulationSettings=element" @close="closeSimulation" />
+  <GyroSimulationWindow v-if="simulationOpen" :motion="simulationMotion" :connected="gyroConnected" :enabled="enabled" :admitted="preset !== 'steam' && simulationAdmitted" @settings-host="element=>simulationSettings=element" @close="closeSimulation" />
   <GameProfileRemoveDialog v-if="removal" :game-name="removal.gameName" :busy="removalBusy" :error="removalError" @cancel="cancelProfileRemoval" @confirm="confirmProfileRemoval" />
   </IntegratedPage>
 </template>
@@ -1541,9 +1587,13 @@ async function detectMotionSources(): Promise<void> {
 <style>
 .gyro-integrated-page .integrated-calib-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin:0;padding:0;border:0;background:transparent}.gyro-integrated-page .integrated-calib-row .calib-static{display:flex;flex-direction:column;align-items:stretch;gap:6px}.gyro-integrated-page .integrated-calib-row .calib-auto{min-width:0}.gyro-integrated-page .integrated-calib-row .row-label{font-size:12px;color:var(--text-dim)}.gyro-integrated-page .integrated-calib-row .calib-btn{min-height:36px;font-size:13px}.gyro-integrated-page .integrated-calib-row .calib-auto .toggle-row{min-height:36px!important;padding:0!important;gap:5px}.gyro-integrated-page .integrated-calib-row .calib-auto .toggle-label{font-size:13px}.gyro-integrated-page .gyro-power-row{gap:8px}.gyro-integrated-page .gyro-power-btn{font-size:13px;padding:8px 6px;line-height:1.4;min-height:42px}.gyro-integrated-page .gyro-status-preview{margin-bottom:12px}
 
-/* The overview has one heading, two equal actions and one aligned preset row. */
+/* The heading status is read-only and does not add a gamepad navigation stop. */
 .gyro-page-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0;padding:3px 1px 2px}
-.gyro-page-heading h1{font-size:20px;line-height:1.3;margin:0;font-weight:650}
+.gyro-page-heading h1{font-size:20px;line-height:1.3;margin:0;font-weight:650;flex:0 0 auto}
+.gyro-virtual-status{display:flex;align-items:center;gap:6px;flex:1 1 auto;min-width:0;font-size:13px;line-height:1.4;color:var(--text-dim);white-space:nowrap}
+.gyro-virtual-status>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.gyro-virtual-status i{width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:currentColor}
+.gyro-virtual-status.on{color:var(--accent)}.gyro-virtual-status.warning{color:var(--danger)}
 .gyro-page-heading .gyro-simulation-open{display:flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:6px 12px;border:1px solid var(--accent-border);border-radius:8px;font:inherit;font-size:14px;color:var(--accent);background:var(--accent-surface);white-space:nowrap;cursor:pointer}
 .gyro-overview-card>.field-stack{gap:12px}
 .gyro-integrated-page .gyro-power-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}

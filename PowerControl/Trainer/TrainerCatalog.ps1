@@ -69,12 +69,8 @@ function Get-FlingCatalogRows([string]$DatabasePath, [string]$LibraryRoot) {
     return $result
 }
 function Update-TrainerPublicCatalog($Context, [string]$LibraryRoot, [string]$DatabasePath) {
-    # Inherit GCM changes first; this step only reads its files and creates our snapshots.
-    $imports = @{}
-    foreach ($name in @('translations.json','fling_main.json','fling_archive.json','gcm_trainers.json')) { $imports[$name] = @(Get-GcmCatalogRows $DatabasePath $name).Count }
     $statePath = Join-Path $LibraryRoot 'ymcc-data-state.json'
     $catalogPath = Join-Path $LibraryRoot 'ymcc-fling-public.json'
-    $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     $state = @{schema=1;attempts=@();nextCheckAt=0L;lastSuccessAt=0L;etag=''}
     if ([IO.File]::Exists($statePath)) {
         $saved = Read-TrainerJson $statePath
@@ -95,6 +91,13 @@ function Update-TrainerPublicCatalog($Context, [string]$LibraryRoot, [string]$Da
     $oldCatalog = $null
     try { $oldCatalog = Read-TrainerJson $catalogPath } catch { if($_.Exception.Data['ymccTrainerJson'] -ne 'corrupt'){throw} }
     $hasCatalog = $oldCatalog -and (Get-TrainerProperty $oldCatalog 'schema' 0) -eq 1 -and (Test-GcmCatalogRows @(Get-TrainerProperty $oldCatalog 'rows') 'fling_main.json')
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $imports = @{}
+    if ([long]$state.nextCheckAt -le $now) {
+        # Game preparation still reads the current GCM files when needed.
+        foreach ($name in @('translations.json','fling_main.json','fling_archive.json','gcm_trainers.json')) { $imports[$name] = @(Get-GcmCatalogRows $DatabasePath $name).Count }
+        $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    }
     if ([long]$state.nextCheckAt -gt $now) {
         return @{updated=$false;available=[bool]$hasCatalog;nextCheckAt=$state.nextCheckAt;imports=$imports;reason='cooldown'}
     }

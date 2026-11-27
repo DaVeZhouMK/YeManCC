@@ -52,12 +52,21 @@ class Surface {
     std::array<UINT32,16> contacts_{};std::array<bool,16> occupied_{};
     winrt::Windows::UI::Composition::Desktop::DesktopWindowTarget target_{nullptr};
     winrt::Windows::UI::Composition::SpriteVisual visual_{nullptr};
+    SIZE visualSize_{};
     winrt::Windows::UI::Core::CoreIndependentInputSourceController controller_{nullptr};
     winrt::Windows::UI::Core::CoreIndependentInputSource source_{nullptr};
     std::array<winrt::event_token,4> tokens_{};
     std::shared_ptr<InputChannel> inputChannel_;std::shared_ptr<InputChannel::Input> independent_;
     bool controlled()const noexcept {return independent_?independent_->ready.load()&&independent_->admitted.load()&&inputChannel_&&inputChannel_->healthy():(bool)controller_;}
     bool transparent()const {return independent_?controlled():controller_.IsTransparentForUncontrolledInput();}
+    bool childGeometryMatches(SIZE size) const noexcept {
+        RECT bounds{};
+        if(!GetWindowRect(child_,&bounds))return false;
+        POINT corners[]{{bounds.left,bounds.top},{bounds.right,bounds.bottom}};
+        SetLastError(ERROR_SUCCESS);
+        if(!MapWindowPoints(nullptr,root_,corners,2)&&GetLastError()!=ERROR_SUCCESS)return false;
+        return corners[0].x==0&&corners[0].y==0&&corners[1].x==size.cx&&corners[1].y==size.cy;
+    }
     // Retain the failing operation through close/rebind. These are fixed labels,
     // observed only by the owner on its existing state/terminal receipts.
     const char* lastFailureStage_="none";
@@ -113,17 +122,18 @@ class Surface {
         }catch(const winrt::hresult_error& e){error=e.code();}catch(...){error=E_FAIL;}
     }
     bool uploadZero(SIZE size) noexcept {
-        HDC screen=GetDC(nullptr);if(!screen)return false;HDC memory=CreateCompatibleDC(screen);
+        HDC memory=CreateCompatibleDC(nullptr);
         BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=size.cx;info.bmiHeader.biHeight=-size.cy;
         info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;info.bmiHeader.biCompression=BI_RGB;void* pixels=nullptr;
-        HBITMAP bitmap=memory?CreateDIBSection(screen,&info,DIB_RGB_COLORS,&pixels,nullptr,0):nullptr;bool ok=false;
+        HBITMAP bitmap=memory?CreateDIBSection(memory,&info,DIB_RGB_COLORS,&pixels,nullptr,0):nullptr;bool ok=false;
         if(bitmap&&pixels){const auto previous=SelectObject(memory,bitmap);// Alpha zero is mouse-pass-through. The bounded monitor window
             // uses the lowest nonzero alpha to receive ordinary HWND mouse
             // messages while Touch/Pen stay on their independent source.
             std::fill_n((DWORD*)pixels,(size_t)size.cx*size.cy,windowMouse_?0x01000000u:0u);
-            RECT rect{};GetWindowRect(root_,&rect);POINT position{rect.left,rect.top},origin{};BLENDFUNCTION blend{AC_SRC_OVER,0,255,AC_SRC_ALPHA};
-            ok=UpdateLayeredWindow(root_,screen,&position,&size,memory,&origin,0,&blend,ULW_ALPHA)!=FALSE;SelectObject(memory,previous);}
-        if(bitmap)DeleteObject(bitmap);if(memory)DeleteDC(memory);ReleaseDC(nullptr,screen);
+            // These black pixels need no palette mapping, and the owner sets position.
+            POINT origin{};BLENDFUNCTION blend{AC_SRC_OVER,0,255,AC_SRC_ALPHA};
+            ok=UpdateLayeredWindow(root_,nullptr,nullptr,&size,memory,&origin,0,&blend,ULW_ALPHA)!=FALSE;SelectObject(memory,previous);}
+        if(bitmap)DeleteObject(bitmap);if(memory)DeleteDC(memory);
         if(ok){uploaded_=true;uploadedSize_=size;++uploads;}return ok;
     }
 public:
@@ -242,7 +252,9 @@ public:
             auto interop=runtime.compositor.as<ABI::Windows::UI::Composition::Desktop::ICompositorDesktopInterop>();
             winrt::check_hresult(interop->CreateDesktopWindowTarget(child_,TRUE,(ABI::Windows::UI::Composition::Desktop::IDesktopWindowTarget**)winrt::put_abi(target_)));
             stage="attach-composition-visual";
-            visual_=runtime.compositor.CreateSpriteVisual();visual_.Size({(float)rect.right,(float)rect.bottom});visual_.Brush(runtime.compositor.CreateColorBrush({0,0,0,0}));target_.Root(visual_);
+            visual_=runtime.compositor.CreateSpriteVisual();
+            applyOwnedVisualSize(visual_,{rect.right,rect.bottom},visualSize_,true);
+            visual_.Brush(runtime.compositor.CreateColorBrush({0,0,0,0}));target_.Root(visual_);
             stage="attach-input-controller";
             controller_=winrt::Windows::UI::Core::CoreIndependentInputSourceController::CreateForVisual(visual_);
             controlMouse_=controlMouse&&!windowMouse_;
@@ -275,13 +287,17 @@ public:
         const char* stage="sync-geometry";
         try {RECT rect{};if(!GetClientRect(root_,&rect))winrt::throw_last_error();SIZE size{rect.right,rect.bottom};
             if(size.cx<=0||size.cy<=0||size.cx>16384||size.cy>16384)winrt::throw_hresult(E_INVALIDARG);
-            if(!SetWindowPos(child_,nullptr,0,0,size.cx,size.cy,SWP_NOZORDER|SWP_NOACTIVATE))winrt::throw_last_error();stage="sync-composition-visual";if(visual_)visual_.Size({(float)size.cx,(float)size.cy});
+             // Attach creates the child at the target geometry. Verify its live
+             // bounds so a displaced child still takes the normal repair path.
+             if((force||!childGeometryMatches(size))&&
+                !SetWindowPos(child_,nullptr,0,0,size.cx,size.cy,SWP_NOZORDER|SWP_NOACTIVATE))winrt::throw_last_error();
+            stage="sync-composition-visual";if(visual_)applyOwnedVisualSize(visual_,size,visualSize_,force);
             // Bind/geometry work for the independent channel is queued on its
             // dispatcher. Drain that channel before publishing alpha-zero input,
             // not a fixed Sleep and not a periodic/general Win32 message pump.
             const auto generation=generation_;const HWND root=root_;
             stage="sync-input-dispatch";
-            if(independent_){stage="sync-independent-input-channel";if(!inputChannel_->sync(independent_,error,size))winrt::throw_hresult(error);}
+            if(independent_){stage="sync-independent-input-channel";if(!inputChannel_->sync(independent_,error,size,force))winrt::throw_hresult(error);}
             else{auto channel=source_;auto dispatcher=channel.Dispatcher();
             stage="sync-input-process-events";
             dispatcher.ProcessEvents(winrt::Windows::UI::Core::CoreProcessEventsOption::ProcessAllIfPresent);}
@@ -348,7 +364,7 @@ public:
         try {if(quiesced_&&source_&&source_.HasCapture())source_.ReleasePointerCapture();}catch(...){error=E_FAIL;terminalCloseFailed_=true;}
         try {if(controller_)controller_.Close();}catch(...){error=E_FAIL;if(quiesced_)terminalCloseFailed_=true;}
         try {if(target_)target_.Close();}catch(...){error=E_FAIL;if(quiesced_)terminalCloseFailed_=true;}
-        source_=nullptr;controller_=nullptr;visual_=nullptr;target_=nullptr;tokens_={};occupied_={};
+        source_=nullptr;controller_=nullptr;visual_=nullptr;visualSize_={};target_=nullptr;tokens_={};occupied_={};
         if(child_&&IsWindow(child_))DestroyWindow(child_);child_=nullptr;
         if(root_&&layered_&&IsWindow(root_)){SetWindowLongPtrW(root_,GWL_EXSTYLE,oldStyle_);SetWindowPos(root_,nullptr,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED);}
         root_=nullptr;thread_=0;controlMouse_=windowMouse_=false;layered_=false;uploaded_=false;policyBusy_=false;quiesced_=false;closing_=false;uploadedSize_={};sink_=nullptr;context_=nullptr;

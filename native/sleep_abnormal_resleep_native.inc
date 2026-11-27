@@ -38,7 +38,8 @@ static void sgAbnormalStop(const char* reason) {
     const auto origin=g_sgAbnormalOrigin.load(std::memory_order_acquire);
     const auto humanIntent=g_sgAbnormalHumanIntent.load(std::memory_order_acquire);
     const bool had=origin!=0;
-    const auto evidence=sgAbnormalEvidenceSummary(g_sgAbnormalEpisode,sgNowFileTime());
+    const auto episode=g_sgAbnormalEpisode;
+    const auto stoppedAt=sgNowFileTime();
     const char* cause=reason;
     if(had&&g_sgLastPowerButtonWakeEventFileTime.load(std::memory_order_acquire)>=humanIntent)cause="power-button-wake";
     else if(had&&g_sgAbnormalSuccessOrigin.load(std::memory_order_acquire)==origin)cause="windows-effective-low-power";
@@ -57,9 +58,11 @@ static void sgAbnormalStop(const char* reason) {
     }
     g_sgAbnormalEpisode.cancel();g_sgAbnormalQuality=-1;g_sgAbnormalOwnedRetry=false;
     g_sgAbnormalStopRequested.store(false,std::memory_order_release);
-    if(had)sgRecordFact("abnormal-sleep-finished",{{"reason",cause},{"trigger",reason},{"origin",sgFormatFactFileTime(origin)},{"originalHumanIntent",sgFormatFactFileTime(humanIntent)},
-        {"evidence",evidence},{"sourceClosed",sourceClosed},{"healthyEventId",g_sgAbnormalSuccessOrigin.load()==origin?g_sgAbnormalSuccessEventId.load():0},
-        {"healthyEventTime",sgFormatFactFileTime(g_sgAbnormalSuccessOrigin.load()==origin?g_sgAbnormalSuccessFileTime.load():0)},{"evidenceEventsSinceLog",g_sgAbnormalEvidenceEvents},{"qualityChangesSinceLog",g_sgAbnormalEvidenceChanges}});
+    if(had)try {
+        sgRecordFact("abnormal-sleep-finished",{{"reason",cause},{"trigger",reason},{"origin",sgFormatFactFileTime(origin)},{"originalHumanIntent",sgFormatFactFileTime(humanIntent)},
+            {"evidence",sgAbnormalEvidenceSummary(episode,stoppedAt)},{"sourceClosed",sourceClosed},{"healthyEventId",g_sgAbnormalSuccessOrigin.load()==origin?g_sgAbnormalSuccessEventId.load():0},
+            {"healthyEventTime",sgFormatFactFileTime(g_sgAbnormalSuccessOrigin.load()==origin?g_sgAbnormalSuccessFileTime.load():0)},{"evidenceEventsSinceLog",g_sgAbnormalEvidenceEvents},{"qualityChangesSinceLog",g_sgAbnormalEvidenceChanges}});
+    } catch(...) { /* The episode is retired even if its diagnostic fails. */ }
 }
 static void sgAbnormalStopAsync() {
     g_sgAbnormalStopRequested.store(true,std::memory_order_release);

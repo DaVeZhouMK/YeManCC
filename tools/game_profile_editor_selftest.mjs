@@ -73,7 +73,8 @@ const autofloat={
 const snapshots=evaluate('src/bridge/settingsSnapshot.ts',{vue:require('vue')});
 const schedule=evaluate('src/bridge/performanceSchedule.ts',{
   './settingsSnapshot':snapshots,
-  './bootModeGlobalPreferences':{captureBootPreferenceWrite(){throw Error('Boot preference writes are outside this profile-input fixture')}},
+  './powerLifecycleState':evaluate('src/bridge/powerLifecycleState.ts',{'./ipc':{invoke:async()=>({phase:'ready',known:true,hardwareWritesAllowed:true,generation:1}),on:()=>()=>{}}}),
+  './bootModeGlobalPreferences':evaluate('src/bridge/bootModeGlobalPreferences.ts',{'./inputConfigHash':evaluate('src/bridge/inputConfigHash.ts'),'./settingsBaseline':evaluate('src/bridge/settingsBaseline.ts',{'../../PowerControl/settings-baseline.json':JSON.parse(fs.readFileSync('PowerControl/settings-baseline.json','utf8'))})}),
   './controllerPersona':personas,
   './performanceControls':models,'./powerSource':{powerSourceMode:source},'./gameCorePolicy':{detectGameCorePolicy:async()=>({detected:true,heterogeneous:true,smtAvailable:true}),applyGameCorePolicy:async(t,m,h)=>{writes.push({kind:'smt',pid:t.pid,h});return {ok:true,applied:true}}},
   './gamePolicyTarget':target,'./api':{powerLifecycle:{get:async()=>({phase:'ready',hardwareWritesAllowed:true})},fs:{exists:async p=>files.has(p),readTextFile:async p=>files.get(p),writeTextFileAtomic:async(p,v)=>{if(failFileWrites&&p===sourcePath)throw Error("disk full");files.set(p,v)},writeTextFile:async(p,v)=>{files.set(p,v)}}},

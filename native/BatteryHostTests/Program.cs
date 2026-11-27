@@ -130,6 +130,29 @@ internal static class Program
         if(selectedCase is not null&&!string.Equals(name,selectedCase,StringComparison.Ordinal))return;
         test();count++;Console.WriteLine("PASS "+name);
     }
+    static void WithBatteryLog(Action<Func<JsonElement[]>> run)
+    {
+        var directory=Directory.CreateTempSubdirectory("ymcc-battery-read-");
+        try
+        {
+            TraceLog.Configure(directory.FullName);
+            var path=Path.Combine(directory.FullName,"battery-charge-host.log");
+            run(()=>File.ReadLines(path).Select(line=>JsonSerializer.Deserialize<JsonElement>(line)).ToArray());
+        }
+        finally
+        {
+            var log=Path.Combine(directory.FullName,"battery-charge-host.log");
+            File.Delete(log);
+            File.Delete(log+".1");
+            directory.Delete();
+        }
+    }
+    static Snapshot LogBatteryRequest(Controller controller,string op)
+    {
+        var result=YeManBatteryHost.Program.DispatchBattery(controller,JsonSerializer.SerializeToElement(new {op}));
+        TraceLog.Result(op,result);
+        return result;
+    }
     sealed class PackedFacts
     {
         internal ulong Value;
@@ -169,7 +192,7 @@ internal static class Program
         public void Write(int value,Reading before)=>inner.Write(value,before);
         public void Dispose(){}
     }
-    static void SharedSystemPowerBoundaries()
+    static void SharedSystemPowerBoundaries(string? resumeCase=null)
     {
         Check(System.Runtime.InteropServices.Marshal.SizeOf<SharedSystemPowerV1>()==48,"shared power ABI size");
         Check(System.Runtime.InteropServices.Marshal.OffsetOf<SharedSystemPowerV1>(nameof(SharedSystemPowerV1.SuspendSerial)).ToInt32()==40,"shared power serial offset");
@@ -200,6 +223,58 @@ internal static class Program
             var first=PowerCall(runtime,"get",systemPointer:address);Check(first.GetProperty("ok").GetBoolean());Drain();
             Check(PowerCall(runtime,"set",fence:first.GetProperty("fence").GetString(),target:80).GetProperty("ok").GetBoolean());
             int writes=rig.Device.Writes;Check(rig.Device.Raw==0x55);
+            if(resumeCase is not null)
+            {
+                current.Phase=1;current.Flags=1;current.SuspendSerial++;current.PublicationRevision++;
+                runtime.NotifySystemPower();Drain();
+                Check(rig.Device.Raw==0xaa&&rig.Device.Writes==writes+1,"old policy did not return its owned pause");
+                Check(!rig.Store.Data.ContainsKey(Controller.RecoveryFile),"old pause still has recovery debt");
+                writes=rig.Device.Writes;int readsBeforeResume=rig.Device.Reads;
+                string settings=rig.Store.Data[Controller.SettingsFile];
+                bool finalRead=resumeCase=="resume-preflight-final-read";
+                if(finalRead)provider.AfterRead=()=>rig.Device.FailRead=true;
+                else rig.Device.FailRead=true;
+                int readsInAttempt=finalRead?2:1;
+                current.Phase=0;current.Flags=3;current.PublicationRevision++;
+                runtime.NotifySystemPower();Drain();
+                Check(rig.Device.Reads==readsBeforeResume+readsInAttempt&&rig.Device.Writes==writes,"resume did not end in a zero-action read fault");
+                Check(!rig.Store.Data.ContainsKey(Controller.RecoveryFile)&&rig.Store.Data[Controller.SettingsFile]==settings,"failed read changed ownership or settings");
+                runtime.NotifySystemPower();runtime.NotifySystemPower();Drain();
+                Check(rig.Device.Reads==readsBeforeResume+readsInAttempt,"duplicate public Ready consumed the existing retry budget");
+                bool policyDisabled=resumeCase=="resume-preflight-user-off";
+                if(policyDisabled)
+                {
+                    rig.Device.FailRead=false;
+                    Check(PowerCall(runtime,"release").GetProperty("ok").GetBoolean(),"current user release failed while a read retry was pending");
+                    tick!();runtime.NotifySystemPower();Drain();
+                    Check(rig.Device.Raw==0xaa&&rig.Device.Writes==writes&&!rig.Store.Data.ContainsKey(Controller.RecoveryFile)&&
+                        rig.Store.Load<Preference>(Controller.SettingsFile)?.Managed==false,"pending retry replayed a released policy");
+                }
+                else if(resumeCase=="resume-preflight-read-budget")
+                {
+                    tick!();tick!();tick!();
+                    Check(rig.Device.Reads==readsBeforeResume+3&&rig.Device.Writes==writes,"transport retry did not keep the original three attempts");
+                    rig.Device.FailRead=false;
+                    tick!();runtime.NotifySystemPower();Drain();
+                    Check(rig.Device.Reads==readsBeforeResume+3&&rig.Device.Writes==writes,"exhausted attempt was replayed by an ordinary tick or duplicate Ready");
+                    var refreshed=PowerCall(runtime,"get");
+                    Check(refreshed.GetProperty("ok").GetBoolean()&&PowerCall(runtime,"set",fence:refreshed.GetProperty("fence").GetString(),target:80).GetProperty("ok").GetBoolean(),"expired automatic budget blocked a new manual request");
+                }
+                else
+                {
+                    rig.Device.FailRead=false;
+                    tick!();
+                    Check(rig.Device.Raw==0x55&&rig.Device.Writes==writes+1,"saved limit did not recover when its wake preflight read failed and the device then returned");
+                    runtime.NotifySystemPower();Drain();tick!();
+                    Check(rig.Device.Writes==writes+1,"recovered policy wrote twice after duplicate Ready");
+                }
+                if(!policyDisabled)Check(rig.Device.Raw==0x55&&rig.Store.Data[Controller.SettingsFile]==settings,"current software policy was not restored");
+                Check(runtime.SystemPowerWorkOutstanding==0&&runtime.SystemPowerWorkRunning==0&&pending.Count==0,"resume work was left queued");
+                var cleanup=PowerCall(runtime,"shutdown");
+                Check(cleanup.GetProperty("cleanupCompleted").GetBoolean()&&owners==ownerCloses&&timerCloses==1&&eventCloses==1,"shutdown left an owner, timer or event registration");
+                Check(rig.Device.Raw==0xaa&&!rig.Store.Data.ContainsKey(Controller.RecoveryFile),"shutdown did not return the exact software pause");
+                return;
+            }
             // Both notifications collapse before the worker runs; serial still requires return before restart.
             current.Phase=1;current.Flags=1;current.SuspendSerial++;current.PublicationRevision++;runtime.NotifySystemPower();
             current.Phase=0;current.Flags=3;current.PublicationRevision++;runtime.NotifySystemPower();
@@ -421,6 +496,11 @@ internal static class Program
 
     static void Main(string[] args)
     {
+        if(args.Length==4&&args[0]=="--case"&&args[1]=="in process controller uses shared native power and seals callback on shutdown"&&args[2]=="--part"&&
+           args[3] is "resume-preflight-read-recovery" or "resume-preflight-read-budget" or "resume-preflight-final-read" or "resume-preflight-user-off"){
+            Test(args[1],()=>SharedSystemPowerBoundaries(args[3]));
+            Console.WriteLine($"Selected case part={args[3]}; groups={count}; assertions={assertions}; realHardwareCalls=0.");return;
+        }
         if(args.Length==4&&args[0]=="--case"&&args[1]=="in process controller uses shared native power and seals callback on shutdown"&&args[2]=="--part"&&(args[3]=="notification-sequence"||args[3]=="notification-sequence-missing")){
             bool onlyMissing=args[3]=="notification-sequence-missing";Test(args[1],()=>SharedNotificationSequenceBoundaries(onlyMissing));
             Console.WriteLine($"Selected case count={count}.");Console.WriteLine($"Selected case assertions={assertions}.");
@@ -963,6 +1043,43 @@ internal static class Program
             foreach(var bad in new object[]{false,1u}){try{MsiPacket.CheckReturn(bad);throw new Exception("failed WMI status accepted");}catch(IOException){}}
             var f=new MsiApFixture{ReturnValue=false};using var p=new MsiApProvider(f);try{p.Read();throw new Exception("Boolean rejection accepted");}catch(IOException){}Check(f.Writes==0);
         });
+        Test("unsupported charge get records one admission result",()=>WithBatteryLog(readRows=>{
+            var id=new Identity("GPD","G1618-05","G1618-05","AMD RYZEN AI MAX+ 395 w/ Radeon 8060S","2.20",2,20);
+            int opens=0;bool current=true;
+            var c=new Controller(id,new MemoryStore(),_=>{opens++;throw new IOException("unexpected device open");},()=> (true,true,75),requestCurrent:()=>current);
+            var first=LogBatteryRequest(c,"get");
+            for(int attempt=0;attempt<200;attempt++)Check(LogBatteryRequest(c,"get")==first);
+            var rows=readRows();
+            Check(rows.Length==1&&rows[0].GetProperty("event").GetString()=="request-result","unsupported get wrote a second diagnostic row");
+            var detail=rows[0].GetProperty("detail");
+            Check(detail.GetProperty("readDisposition").GetString()=="no-charge-route"&&!detail.GetProperty("providerOpened").GetBoolean());
+            Check(!first.Ok&&!first.Supported&&first.Reason==Policy.Unavailable(id)&&opens==0);
+            Check(!JsonSerializer.SerializeToElement(first,Policy.Json).TryGetProperty("noChargeRouteForGet",out _));
+            current=false;
+            Check(LogBatteryRequest(c,"get").Reason=="BOOT_CHARGE_REQUEST_EXPIRED");
+            rows=readRows();
+            Check(rows.Length==3&&rows[1].GetProperty("event").GetString()=="controller-read-error"&&!rows[2].GetProperty("detail").TryGetProperty("readDisposition",out _)&&opens==0);
+        }));
+        Test("charge get dedup survives manual refresh and preserves recovery",()=>WithBatteryLog(readRows=>{
+            var rig=new Rig();var c=rig.Controller;
+            Check(LogBatteryRequest(c,"get").Ok);
+            Check(LogBatteryRequest(c,"refresh").Ok);
+            Check(LogBatteryRequest(c,"get").Ok);
+            Check(LogBatteryRequest(c,"refresh").Ok);
+            Check(LogBatteryRequest(c,"get").Ok);
+            var rows=readRows();
+            Check(rows.Select(row=>row.GetProperty("detail").GetProperty("operation").GetString()).SequenceEqual(new[]{"get","refresh","refresh"}),
+                "manual refresh evicted the unchanged get result");
+            rig.Device.FailRead=true;
+            Check(!LogBatteryRequest(c,"get").Ok);
+            rows=readRows();
+            Check(rows.Length==5&&rows[3].GetProperty("event").GetString()=="controller-read-error"&&
+                rows[3].GetProperty("detail").GetProperty("message").GetString()=="mock read failed");
+            rig.Device.FailRead=false;
+            Check(LogBatteryRequest(c,"get").Ok&&LogBatteryRequest(c,"get").Ok&&rig.Device.Writes==0);
+            rows=readRows();
+            Check(rows.Length==6&&rows[5].GetProperty("detail").GetProperty("ok").GetBoolean());
+        }));
         Test("Win5 field identity never inherits Mini charging even when a battery is present",()=>{
             var id=new Identity("GPD","G1618-05","G1618-05","AMD RYZEN AI MAX+ 395 w/ Radeon 8060S","2.20",2,20);
             foreach(var present in new[]{false,true}){

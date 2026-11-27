@@ -13,7 +13,8 @@ ROOT=Path(__file__).resolve().parents[1]
 FIX=ROOT/'tools/fixtures/input_host_native_exit_parent'
 DEFAULT_SCENARIOS=('healthy-ordinary','unprotected-uncooperative','protected-primary-pipe','capture-nonproducer-debt','capture-worker-retained','capture-timer-retained','capture-generation-mismatch','capture-stop-exception','busy-host-budget','permanent-close-budget','busy-pipe-independent-force')
 SHUTDOWN_ORDER_SCENARIOS=('shutdown-rejected-readback','shutdown-late-retire-control')
-SCENARIOS=DEFAULT_SCENARIOS+('coordinator-observer-close',)+SHUTDOWN_ORDER_SCENARIOS
+EXIT_INFLIGHT_SCENARIOS=('exit-inflight-recovery','exit-inflight-no-fence-control')
+SCENARIOS=DEFAULT_SCENARIOS+('coordinator-observer-close',)+SHUTDOWN_ORDER_SCENARIOS+EXIT_INFLIGHT_SCENARIOS
 PROCESS=ROOT/'tools/input_host_process_retirement_selftest.py'
 FIXED_BUILD_FILES=('tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json',
                    'tools/ymcc_sim/global/controller-host-exit/tool-profile.json','tools/input_host_exit_build_inputs.py')
@@ -32,7 +33,7 @@ def load_fixed_native_build(snapshot,inputs,run):
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
     return module.FixedNativeBuild(source,run)
 def function(text,name,*,masked=None):
-    return process.block(text,r'^static[^\n;{}]*\b'+name+r'\s*\([^;{}]*\)\s*(?:noexcept\s*)?\{',masked=masked)
+    return process.block(text,r'^(?:\[\[maybe_unused\]\] )?static[^\n;{}]*\b'+name+r'\s*\([^;{}]*\)\s*(?:noexcept\s*)?\{',masked=masked)
 def declaration(text,name):
     matches=list(re.finditer(r'^static[^\n;{}]*\b'+name+r'\b[^\n;]*;',text,re.M))
     need(len(matches)==1,'Actual unique global '+name)
@@ -48,6 +49,7 @@ def main_fragment_continuity(bound_main,current_main,bindings):
         else:
             if masked is None:masked=helper.mask_cpp(text)
             if bound.get('bindingKind')=='type':current=process.block(text,r'^struct '+re.escape(bound['text'].split()[1])+r'\b[^\n{]*\{',masked=masked)
+            elif bound.get('bindingKind')=='enum':current=process.block(text,r'^enum class '+re.escape(bound['typeName'])+r'\s*:[^\n{]+\{',masked=masked)
             elif bound.get('bindingKind')=='template':current=process.block(text,r'^template\s*<\s*(?:class|typename)\s+Build\s*>\s*static void '+name+r'\(',masked=masked)
             else:current=function(text,name,masked=masked)
         continuity[name]={'boundSha256':bound['sha256'],'currentSha256':current['sha256'],'identical':bound['text']==current['text']}
@@ -141,6 +143,10 @@ def main():
     args=parser.parse_args()
     observerOnly=args.scenarios==['coordinator-observer-close']
     shutdownOrder=any(name in SHUTDOWN_ORDER_SCENARIOS for name in args.scenarios)
+    exitInflight=any(name in EXIT_INFLIGHT_SCENARIOS for name in args.scenarios)
+    need(not exitInflight or (tuple(args.scenarios)==EXIT_INFLIGHT_SCENARIOS and args.fixed_native_build and
+      not args.build_only and not args.exit_owner_reference and not args.coordinator_observer_reference),
+      'Exit in-flight requires the exact positive/control pair on a fixed native build')
     need(not shutdownOrder or not args.build_only and not args.exit_owner_reference and not args.coordinator_observer_reference and
       set(args.scenarios)==set((*SHUTDOWN_ORDER_SCENARIOS,'healthy-ordinary','unprotected-uncooperative')) and len(args.scenarios)==4,
       'Shutdown ordering requires the exact original/declined/late control set')
@@ -155,7 +161,7 @@ def main():
     files=[Path(__file__).resolve(),PROCESS,process.HELPER,*sorted(FIX.glob('*')),
       ROOT/'tools/fixtures/input_host_process_retirement/environment.hpp',ROOT/'tools/fixtures/input_host_process_retirement/suite.cpp.in',
       *[ROOT/'native'/name for name in ('main.cpp','input_host_process_retirement.h','virtual_controller_stop_runtime.h','virtual_controller_runtime_contract.h','virtual_start_protection.h','input_capture_completion.h','exit_cleanup_wait.h','input_host_exit_retirement.h','input_host_exit_owner_runtime.h','input_host_pipe_transport.h','input_host_diagnostic_dispatch.h','virtual_target_return_record.h','virtual_target_return_runtime.h',
-        'auto_close_wait.h','log_snapshot_state.h','input_host_shared_power.h','sleep_power_observation.h','sleep_power_revocation.h','sleep_power_state.h','virtual_recovery_intent.h','game_input_override.h','virtual_controller_queued_start_runtime.h','screen_touchpads.h')],ROOT/'deps/json/json.hpp']
+        'auto_close_wait.h','log_snapshot_state.h','input_host_shared_power.h','sleep_power_dispatch.h','sleep_power_observation.h','sleep_power_revocation.h','sleep_power_state.h','virtual_recovery_intent.h','game_input_override.h','virtual_controller_queued_start_runtime.h','screen_touchpads.h')],ROOT/'deps/json/json.hpp']
     files.extend([ROOT/'tools/input_pipe_retirement_memory_selftest.cpp',ROOT/'tools/input_pipe_test_allocation_fault.h'])
     files.append(ROOT/'tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc')
     if args.coordinator_observer_reference:files.append(args.coordinator_observer_reference.resolve())
@@ -203,10 +209,30 @@ def main():
         exitNames=('g_hwnd','g_summonQuit','g_autoCloseThread','g_exitRequested','g_exitReadyPosted','g_exitCode','g_exitCleanupThread','g_exitCleanupCompleted','g_exitCleanupStage',
           'g_exitBeginTick','g_exitCleanupWorkerFailureReported','g_recoveryExitEvent','g_captureExitReleased','g_inputHostExitFence','g_captureExitProducerReturned','g_captureExitProducerGeneration','g_inputCaptureStop','g_captureGeneration','g_captureMmTimerRetired')
         hostNames=(*hostNames,'g_inputHostCompactFrameRequest')
-        extraNames=('g_autoCloseWait','g_inputHostInputPowerCache','g_inputHostRecoveryIntent','g_hidHidePhysicalIdentityMx','g_xinputReconfirmPhysicalRoot',
+        extraNames=('g_powerLifecycle','g_sharedPowerSuspendSerial','g_autoCloseWait','g_inputHostInputPowerCache','g_inputHostRecoveryIntent','g_hidHidePhysicalIdentityMx','g_xinputReconfirmPhysicalRoot',
            'g_inputHostQuarantineBusLogState','g_inputHostQuarantineLifecycleLogState','g_inputHostQuarantineHeldLogState','g_inputHostKeptTupleWakeProof')
+        queueTypes=[]
+        if exitInflight:
+            masked=helper.mask_cpp(mainText)
+            for name in ('MsiNativeForegroundReadyWork','InputHostLifecycleWork','InputHostLateHidePublication'):
+                binding=process.block(mainText,r'^struct '+name+r'\s*\{',masked=masked)
+                bindings['fixture.'+name]={'file':'native/main.cpp','bindingKind':'type',**binding}
+                queueTypes.append(binding['text']+';')
+            extraNames+=('g_inputHostLifecycleWorkMx','g_inputHostLifecycleWorkRequested','g_inputHostLifecycleWorkQueue',
+              'g_inputHostExitFenceRefusals','g_inputHostExitFenceRefusalRows','kInputHostExitFenceRefusalRowMax')
+            for name in ('beginAsyncExit','inputHostRaiseExitFence','inputHostLifecycleWorkIsCleanup','inputHostExitFenceBlocks',
+                         'inputHostExitFenceLogRefusal','inputHostQueueLifecycleWork','inputHostQueueLifecycleWorkInternal',
+                         'inputHostSleepRepairWork','inputHostSameForegroundReady'):
+                bindings[name]={'file':'native/main.cpp',**function(mainText,name,masked=masked)}
         for name in hostNames+exitNames+extraNames:bindings['global.'+name]={'file':'native/main.cpp',**declaration(mainText,name)}
         targetReturnText=inputs[ROOT/'native/virtual_target_return_runtime.h'].decode('utf-8-sig')
+        maskedMain=helper.mask_cpp(mainText)
+        powerType=process.block(mainText,r'^enum class PowerLifecycle\s*:[^\n{]+\{',masked=maskedMain)
+        bindings['fixture.powerLifecycleType']={'file':'native/main.cpp','bindingKind':'enum','typeName':'PowerLifecycle',**powerType}
+        powerFunctions=('currentPowerGeneration','captureSharedPowerLifecycle','sharedPowerLifecycleCurrent')
+        for name in powerFunctions:bindings[name]={'file':'native/main.cpp',**function(mainText,name,masked=maskedMain)}
+        returnPower=process.block(targetReturnText,r'^struct InputHostRuntimeReturnPower\s*\{')
+        bindings['inputHostRuntimeReturnPower']={'file':'native/virtual_target_return_runtime.h','bindingKind':'type',**returnPower}
         targetState=process.block(targetReturnText,r'^struct State\s*\{')
         need('std::vector<ymcc::targetReturn::Origin> proven;' in targetState['text'],'Actual current-proof collection type changed')
         bindings['inputHostTargetReturnCurrentProofPendingLocked']={'file':'native/virtual_target_return_runtime.h',**function(targetReturnText,'inputHostTargetReturnCurrentProofPendingLocked')}
@@ -225,6 +251,10 @@ def main():
         oldNeed='static void need(bool value,const char* message){if(!value)throw std::runtime_error(message);}'
         need(env.count(oldNeed)==1,'Existing need assertion leaf')
         env=env.replace(oldNeed,'static std::atomic<unsigned> fixtureAssertionCount{0};\nstatic void need(bool value,const char* message){++fixtureAssertionCount;if(!value)throw std::runtime_error(message);}')
+        if exitInflight:
+            oldQueue='static bool inputHostQueueLifecycleWork(const char*){++ports.queued;return true;}'
+            need(env.count(oldQueue)==1,'Existing lifecycle queue port')
+            env=env.replace(oldQueue,'static bool inputHostQueueLifecycleWork(const char*);')
         (envDir/'environment.hpp').write_bytes(env.encode())
         leafText=inputs[ROOT/'tools/input_pipe_retirement_memory_selftest.cpp'].decode('utf-8-sig')
         marker='using json=nlohmann::json;'
@@ -263,6 +293,21 @@ def main():
         production+='\n#include "input_host_exit_owner_runtime.h"\n'
         production+='\n'.join(bindings[name]['text'] for name in ('postExitReadyOnce','exitCleanupThreadProc','tryStartExitCleanupWorker','inputCaptureBeginExitOwner','inputCaptureEnsureExitOwner'))
         template=inputs[FIX/'suite.cpp.in'].decode('utf-8-sig')
+        watchdog=''
+        if exitInflight:
+            rows=re.findall(r'^#define EXIT_CLEANUP_WATCHDOG_(?:TIMER_ID|MS)\b[^\r\n]+',mainText,re.M)
+            need(len(rows)==2,'Unique exit watchdog definitions');watchdog='\n'.join(rows)
+            begin=bindings['beginAsyncExit']['text'];anchor='    inputHostRaiseExitFence(trigger);'
+            need(begin.count(anchor)==1,'Unique exit entry fence call')
+            control=begin.replace('static void beginAsyncExit(','static void fixtureBeginAsyncExitWithoutFence(',1).replace(anchor,'',1)
+            queue=('inputHostLifecycleWorkIsCleanup','inputHostExitFenceBlocks','inputHostExitFenceLogRefusal',
+                   'inputHostSleepRepairWork','inputHostSameForegroundReady','inputHostQueueLifecycleWorkInternal',
+                   'inputHostQueueLifecycleWork','inputHostRaiseExitFence')
+            production+='\n'+'\n'.join(bindings[name]['text'] for name in queue)+'\n'+begin+'\n'+control
+            template='#define YMCC_EXIT_INFLIGHT 1\n'+template
+            receipt['exitInflightScope']={'explicitOnly':True,'actualBeginSha256':sha(begin.encode()),'controlBeginSha256':sha(control.encode()),
+              'controlOmission':'inputHostRaiseExitFence(trigger)','pipeCompletion':'actual transport Runtime with existing controlled memory Win32 leaves',
+              'managedHostOrRecoveryDispatchExecuted':False}
         if shutdownOrder:
             stop=bindings['inputHostStopLocked']['text'];late=late_retirement_control(stop)
             actual=stop.replace('static void inputHostStopLocked(','static void fixtureStopLockedCurrent(',1)
@@ -276,9 +321,9 @@ static void inputHostStopLocked(const char* reason){
             template='#define YMCC_EXIT_SHUTDOWN_ORDER 1\n'+template
             receipt['shutdownOrderingScope']={'port':'application rejection only; no real wire failure','explicitOnly':True,
               'actualStopSha256':sha(stop.encode()),'lateRetireVariantSha256':sha(late.encode()),'lateRetireExpectedQueries':1,'peerEofAcceptance':False}
-        for marker,value in [('@@VISIBILITY_TYPE@@',bindings['fixture.visibilitySnapshotType']['text']+';' if shutdownOrder else ''),('@@VISIBILITY_FUNCTIONS@@',visibility)]:
+        for marker,value in [('@@VISIBILITY_TYPE@@',bindings['fixture.visibilitySnapshotType']['text']+';' if shutdownOrder else ''),('@@VISIBILITY_FUNCTIONS@@',visibility),('@@EXIT_INFLIGHT_WATCHDOG@@',watchdog)]:
             need(template.count(marker)==1,'Fixture marker '+marker);template=template.replace(marker,value)
-        for marker,value in [('@@EXIT_GLOBALS@@','\n'.join([*(bindings['global.'+name]['text'] for name in exitNames),quarantineType['text']+';',wakeType['text']+';',*(bindings['global.'+name]['text'] for name in extraNames)])),('@@TRANSPORT_REASON@@',transportReason['text']+';'),('@@PRODUCTION@@',production),('@@PRIVATE_CHILD@@',child),('@@COORDINATOR_OBSERVER_CONSUMER@@',observer['text'])]:
+        for marker,value in [('@@EXIT_GLOBALS@@','\n'.join([powerType['text']+';',*(bindings['global.'+name]['text'] for name in exitNames),quarantineType['text']+';',wakeType['text']+';',*queueTypes,*(bindings['global.'+name]['text'] for name in extraNames)])),('@@RETURN_POWER@@','\n'.join([*(bindings[name]['text'] for name in powerFunctions),returnPower['text']+';'])),('@@TRANSPORT_REASON@@',transportReason['text']+';'),('@@PRODUCTION@@',production),('@@PRIVATE_CHILD@@',child),('@@COORDINATOR_OBSERVER_CONSUMER@@',observer['text'])]:
             need(template.count(marker)==1,'Fixture marker '+marker);template=template.replace(marker,value)
         fixture=out/'fixture.cpp';fixture.write_bytes(template.encode())
         save(out/'source-bindings.json',bindings)
@@ -290,7 +335,7 @@ static void inputHostStopLocked(const char* reason){
             generated={envDir/name for name in ('environment.hpp','actual_pipe_leaves.hpp','actual_host_handle_globals.hpp')}
             local_pins.update({p:sha(p.read_bytes()) for p in generated})
             local_pins[source/'native/input_host_exit_owner_runtime.h']=sha(inputs[ownerPath])
-            required_local=generated|{source/'native/input_host_exit_owner_runtime.h',source/'deps/json/json.hpp'}
+            required_local=generated|{source/'native/input_host_exit_owner_runtime.h',source/'native/sleep_power_dispatch.h',source/'deps/json/json.hpp'}
         else:
             compiler,envVars=helper.compiler_environment(out)
             receipt['compiler']={'path':str(compiler),'sha256':sha(compiler.read_bytes()),'vcvarsSha256':sha(helper.VCVARS.read_bytes()),'windowsSDKVersion':envVars.get('WindowsSDKVersion')}
@@ -327,6 +372,12 @@ static void inputHostStopLocked(const char* reason){
                 need(ran.stdout.strip(),'No scenario output: '+scenario)
                 result=json.loads(ran.stdout);save(target/(scenario+'-result.json'),result)
                 need(ran.returncode==0 and result['scopedLocalOwnerPass'] is True,'Actual local-owner regression failed: '+scenario+' '+str(target))
+                if exitInflight:
+                    observation=result['exitInflight']
+                    control=scenario==EXIT_INFLIGHT_SCENARIOS[1]
+                    need(result['scenario']==scenario and observation['originalEntryPolicyAccepted'] is not control and observation['expectedOmissionRejected'] is control
+                        and observation['completionAfterEntry'] is True and observation['activePrivateChildProcessesBeforeClose']==0,
+                        'Exit in-flight policy and independent resource proof required: '+scenario)
                 if managed:
                     handoff=result.get('managedRetainedOwnerHandoff',{})
                     need(handoff.get('nativeOriginalExitOwnerExecuted') is True and handoff.get('sameOwnedProcessAndPrimary') is True and handoff.get('fixtureGateOpenedBeforeRetirement') is False and handoff.get('forcedOnce') is True and handoff.get('jobActiveProcessesBeforeClose')==0,'Actual managed-to-native owner return proof required')
@@ -360,6 +411,9 @@ static void inputHostStopLocked(const char* reason){
         if shutdownOrder:
             receipt['status']='ACTUAL_NATIVE_EXIT_SHUTDOWN_ORDER_DIRECTED_SCOPED_PASS'
             receipt['scope']='Explicit four-case selection. Actual Stop and visibility selector with in-memory request and CLI ports. Same-build late-retirement negative. Real private process/primary and local runtime-handle return; no peer EOF, installed Host, device or full exit acceptance.'
+        if exitInflight:
+            receipt['status']='ACTUAL_NATIVE_EXIT_INFLIGHT_QUEUE_DIRECTED_SCOPED_PASS'
+            receipt['scope']='Actual beginAsyncExit, lifecycle queue/fence, exit worker and private process/primary/pipe ownership. In-flight completion uses controlled pipe API leaves. The control omits the entry fence and must admit stale work before safe restoration. No managed Host, device, or whole application exit acceptance.'
     except Exception as exc:
         receipt['error']=str(exc);save(out/'RESULT.json',receipt);raise
     save(out/'RESULT.json',receipt)

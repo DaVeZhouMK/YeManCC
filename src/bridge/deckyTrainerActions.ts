@@ -15,7 +15,7 @@ export function trainerMirrorSource(trainer: InstalledGameTrainer | null): strin
 export function createTrainerMirrorActions(deps: {
   allowed: () => boolean; game: () => DetectedGame | null; label: (game: DetectedGame) => string;
   ready: (name: string, path: string) => InstalledGameTrainer | null;
-  power: () => Promise<PowerLifecycleState>; busy: () => boolean; invalidate: () => void;
+  power: (context: RelayMutationContext) => Promise<PowerLifecycleState>; busy: () => boolean; invalidate: () => void;
   launch: (game: DetectedGame, isTargetCurrent: () => Promise<boolean>) => Promise<unknown>;
 }) {
   let ended = false;
@@ -46,7 +46,7 @@ export function createTrainerMirrorActions(deps: {
       const isTargetCurrent = async () => {
         try {
           checkpoint();
-          const power = await deps.power();
+          const power = await deps.power(context);
           checkpoint();
           return power.generation === context.generation && power.phase === 'ready' && power.hardwareWritesAllowed === true;
         } catch { return false; }

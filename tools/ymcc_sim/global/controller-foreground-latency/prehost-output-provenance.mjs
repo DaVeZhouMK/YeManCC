@@ -5,8 +5,18 @@ import assert from 'node:assert/strict';
 
 const hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 
+export function assertPreHostBatchSelection(batch,expectedSelections,directedWin5){
+    if(directedWin5)assert.deepEqual(expectedSelections,['win5-return-exit2'],'Exact directed Win5 selection required');
+    else assert(Array.isArray(expectedSelections)&&expectedSelections.length===9&&new Set(expectedSelections).size===9&&!expectedSelections.includes('win5-return-exit2'),'Exact original nine selections required');
+    assert(batch.passed&&batch.error===null&&batch.notRun.length===0&&batch.incompleteStartedCases.length===0,'Incomplete pre-Host batch');
+    assert.deepEqual(batch.selectedCases,expectedSelections,'Pre-Host selected cases differ');
+    assert.deepEqual(batch.startedCases,expectedSelections,'Pre-Host started cases differ');
+    assert.deepEqual(batch.cases.map(row=>row.selection),expectedSelections,'Pre-Host case rows differ');
+}
+
 // BEGIN_PREHOST_OUTPUT_PROVENANCE
-function collectPreHostOutputProvenance(workspaceParent,workspaceRoot,buildRoot,snapshotManifest,batch,expectedSelections,{requireBuildDetails=false,expectedProvenance}={}){
+function collectPreHostOutputProvenance(workspaceParent,workspaceRoot,buildRoot,snapshotManifest,batch,expectedSelections,{requireBuildDetails=false,expectedProvenance,directedWin5=false}={}){
+    assertPreHostBatchSelection(batch,expectedSelections,directedWin5);
     const key=file=>path.resolve(file).toLowerCase();
     const inside=(parent,file)=>{const rel=path.relative(parent,file);return rel!==''&&!path.isAbsolute(rel)&&rel!=='..'&&!rel.startsWith('..'+path.sep);};
     const parent=fs.realpathSync(workspaceParent),workspace=fs.realpathSync(workspaceRoot),build=fs.realpathSync(buildRoot);
@@ -33,11 +43,6 @@ function collectPreHostOutputProvenance(workspaceParent,workspaceRoot,buildRoot,
         'module-package.json','prehost-writer/result.json'])add(path.join(build,name));
     if(requireBuildDetails)for(const name of ['build-environment.json','link-search.log','link-observed-libraries.json'])add(path.join(build,name));
     assert.equal(fs.readFileSync(path.join(build,'module-package.json'),'utf8'),'{}','Pre-Host private module gate changed');
-    assert(batch.passed&&batch.error===null&&batch.notRun.length===0&&batch.incompleteStartedCases.length===0,'Incomplete pre-Host batch');
-    assert(Array.isArray(expectedSelections)&&expectedSelections.length===9&&new Set(expectedSelections).size===9,'Exact original nine selections required');
-    assert.deepEqual(batch.selectedCases,expectedSelections,'Pre-Host selected cases differ');
-    assert.deepEqual(batch.startedCases,expectedSelections,'Pre-Host started cases differ');
-    assert.deepEqual(batch.cases.map(row=>row.selection),expectedSelections,'Pre-Host case rows differ');
     assert(/^[a-f0-9]{64}$/.test(batch.executableSha256),'Pre-Host executable pin missing');
     assert.equal(files.get(key(path.join(build,'msi-foreground-native-regression.exe'))).sha256,batch.executableSha256,'Pre-Host executable changed');
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(build,'prehost-writer/result.json'),'utf8')),batch,'Pre-Host batch differs from original raw');

@@ -17,7 +17,7 @@ parser.add_argument('--source', type=Path, default=Path('native/main.cpp'))
 parser.add_argument('--output', type=Path, default=Path('../../Build/Validation/SleepGamePause-20260929'))
 parser.add_argument('--prepare-only',action='store_true',help='Retain exact generated sources and compile recipe without executing')
 parser.add_argument('--cancel-boundary-only', action='store_true', help='Only complete original cancellation and process-loop boundaries')
-parser.add_argument('--cancel-boundary-case', default=None, help='Optional exact gate-current/deep-current/partial-return subset')
+parser.add_argument('--cancel-boundary-case', default=None, help='Optional exact cancellation subset, including kernel-wake-redelivery')
 parser.add_argument('--returned-pause-only',action='store_true',help='Only exact returned-resume to original worker continuation cases')
 parser.add_argument('--returned-pause-bottom-only',action='store_true',help='Same returned continuation cases with complete original suspend helper')
 parser.add_argument('--returned-pause-case',default=None,help='Exact one original continuation scenario')
@@ -154,11 +154,21 @@ namespace ymcc::inputHost::sharedPower { class Scope; }
 #include "json.hpp"
 using json = nlohmann::json;
 using DWORD = unsigned long; using ULONGLONG = unsigned long long;
-using HANDLE = void*; using WPARAM = unsigned long long;
+using HANDLE = void*; using WPARAM = unsigned long long; using LPARAM = intptr_t; using HWND = int;
 constexpr int WM_POWER_RESUME_READY=8;
 unsigned long long g_resumeWatchdogGeneration=0;
 std::vector<unsigned long long> readyMessages;
-bool PostMessageW(int,int,WPARAM generation,int){readyMessages.push_back(generation);return true;}
+std::vector<std::pair<WPARAM,LPARAM>> readyPostAttempts;
+unsigned refusedReadyPosts=0,readyOwnerSignals=0;
+bool readyOwnerEventAvailable=true;
+bool PostMessageW(HWND,int message,WPARAM generation,LPARAM ticket){
+ if(message==WM_POWER_RESUME_READY){
+  readyPostAttempts.emplace_back(generation,ticket);
+  if(refusedReadyPosts){--refusedReadyPosts;return false;}
+ }
+ readyMessages.push_back(generation);return true;
+}
+void SendMessageW(HWND,int,WPARAM,LPARAM){assert(false && "unselected window replay");}
 constexpr bool FALSE = false;
 constexpr int PROCESS_SUSPEND_RESUME = 1, PROCESS_QUERY_LIMITED_INFORMATION = 2;
 constexpr DWORD GENERIC_READ=0x80000000ul, FILE_SHARE_READ=1, FILE_SHARE_WRITE=2, FILE_SHARE_DELETE=4;
@@ -202,6 +212,7 @@ std::atomic<ULONGLONG> g_sgLastKernel506EventFileTime{0},g_sgLastKernel507EventF
 std::atomic<ymcc::sleeprequest::Mode> g_sgAutomaticSleepTarget{ymcc::sleeprequest::Mode::None};
 struct {SgRetryKind kind=SgRetryKind::None;ULONGLONG dispatchFileTime=0;} g_sgInternalSleepRequest;
 std::atomic<ULONGLONG> g_powerGeneration{7}, g_resumeReadyGeneration{0}, g_sgPauseWorkCompletedGeneration{0};
+std::atomic<ULONGLONG> g_gamepadUiWakeSuspendSerial{0},g_gamepadUiWakeGeneration{0};
 std::atomic<ULONGLONG> g_sgLastPowerButtonSleepIntentFileTime{0},g_sgLatestSleepEntryFileTime{0},g_sgOriginalPowerButtonWakeFileTime{0};
 ymcc::sleeppower::CancellationReady g_sgCancellationReady;
 // Existing portable test has no ingress producer; the optional cancellation
@@ -216,7 +227,7 @@ struct CancelDispatchPort {CancelReceiptPort resume;CancelReceiptPort latestSlee
 #else
  return resume;
 #endif
-}bool pendingSuspend()const{return false;}ULONGLONG observedSleepBoundarySequence()const{return 0;}} g_sleepPowerDispatch;
+}bool pendingSuspend()const{return false;}ULONGLONG observedSleepBoundarySequence()const{return 0;}ULONGLONG observedSequence()const{return latestResumeBoundary().sequence;}bool signalOwnerWake(){++readyOwnerSignals;return readyOwnerEventAvailable;}} g_sleepPowerDispatch;
 ULONGLONG sgNowFileTime(){return 1000000000ULL;}
 std::atomic<bool> g_sgInSuspend{false}, g_sgGameActuallySuspended{false}, g_sgSleepCycleActive{true};
 std::atomic<bool> g_inputReady{true}, g_inputHostPowerAdmissionRevoked{false}, g_wakeHoldPhysicalUnhide{false};
@@ -264,6 +275,7 @@ ThreadState pauseThreadState{true,3,3};
 ThreadState queryThreads(DWORD pid){
  assert(pid==100);++pauseThreadQueries;
  if(pauseThreadProbeHook)pauseThreadProbeHook();
+ if(!pauseDetailLogging)return {true,3,freezeDepth==0?0U:3U};
  return pauseThreadState;
 }
 }
@@ -343,7 +355,7 @@ namespace fspath {
   }
   return path==SG_SLEEP_LEASE_DIR+L"\\100.txt"&&markerExists;
  }
- void remove(const std::wstring& path,std::error_code&){assert(path==SG_SLEEP_LEASE_DIR+L"\\100.txt");markerExists=false;}
+ bool remove(const std::wstring& path,std::error_code&){assert(path==SG_SLEEP_LEASE_DIR+L"\\100.txt");return std::exchange(markerExists,false);}
 }
 SgResumeResult sgResumeMarkedDirectoryUnlocked(const std::wstring& dir,bool){assert(dir==SG_SLEEP_LEASE_DIR); if(markerExists && !resumeFails){markerExists=false;freezeDepth=0;}return {};}
 std::function<void()> pauseFinalHook;
@@ -386,7 +398,7 @@ void fanHostScheduleEmergencySuspend(const char*,ULONGLONG,ULONGLONG=0){}
 void sleepRecoveryAutoCancelPreparedSuspend(){}
 bool sgPowerButtonSleepConfigured(){return true;}
 bool sgHibernateAvailable(){return true;}
-void sgQueueWork(SgWork work,ULONGLONG gen,ULONGLONG=0){queue.emplace_back(work,gen);}
+void sgQueueWork(SgWork work,ULONGLONG gen,ULONGLONG=0,const SgWorkItem* =nullptr){queue.emplace_back(work,gen);}
 void sgMarkSleepTrigger(){g_sgTask.generation=currentPowerGeneration();g_sgRepairEligible=g_guardEnabled&&g_sgSleepIntentArmed;g_sgSleepCycleActive=g_sgRepairEligible;g_sgGameActuallySuspended=false;g_sgSleepIntentArmed=false;}
 void sgClearUserStandby(const char*){++abortCalls;}
 void inputHostRequestPowerRearm(ULONGLONG,const char*){}
@@ -396,7 +408,6 @@ void sgObserveUnattributedSleepRetryFailure(const char*,int,ULONGLONG){}
 void sgStartSleepRetry(SgRetryKind kind,const char*){g_sgTask.retryKind=kind;g_sgRetryInProgress=true;}
 '''
 names = ['initialPowerGeneration','hardwareWriteAllowed','beginHardwareWriteLease','endHardwareWriteLease',
-         'powerLifecycleMatches','publishPowerResumeReady','reconcilePowerResumeReady',
          'sgShouldKeepInputDuringStandby','sgVirtualWriterAllowedNow',
          'sgReadResumeMarkerChecked','sgResumeMarkerDefinitelyStale',
          'sgResumeSleepTargetUnlocked','sgResumeSleepTarget','sgRecordManualGameControlReceipt','sgRecordSleepPauseReceipt','sgPauseSleepTarget',
@@ -409,11 +420,29 @@ current_power_support=Path(__file__).parent/'fixtures/sleep_non_user_wake/pause_
 preamble+=runpy.run_path(str(current_power_support))['bind'](globals())
 returned_source=(args.source.resolve().parent/'sleep_returned_pause_native.inc').read_text(encoding='utf-8-sig')
 preamble,returned_functions=runpy.run_path(str(Path(__file__).parent/'fixtures/sleep_non_user_wake/retained_delivery.py'))['bind_pause'](globals(),returned_source)
-functions=returned_functions+'\n'+'\n\n'.join(function(name) for name in names)
+ready_lifecycle=source[source.index('static bool powerLifecycleMatches('):source.index('static void closeHardwareWriteGate(')]
+functions=returned_functions+'\n'+ready_lifecycle+'\n'+'\n\n'.join(function(name) for name in names)
 drain_functions = function('sgDrainProcessSuspendCount')
 if re.search(r'static bool sgDrainProcessSuspendCountIfCurrent\(',source):
     drain_functions = 'template<class Current>\n' + function('sgDrainProcessSuspendCountIfCurrent') + '\n' + drain_functions
 functions = drain_functions + '\n' + functions
+strict_header=(args.source.resolve().parent/'wake_game_recovery.h').read_text(encoding='utf-8-sig')
+if 'sgConfirmStrictWakeLeaseResume(' in strict_header:
+    accepted=[]
+    for pattern in (r'^using SgWakeAcceptedKey = [^;]+;$',r'^struct SgWakeAcceptedMarker \{[^\n]+\};$',
+                    r'^static std::map<[^;]+> g_sgWakeAcceptedMarkers;$',r'^static constexpr size_t kSgWakeAcceptedMarkerLimit = [^;]+;$'):
+        match=re.findall(pattern,strict_header,re.M);assert len(match)==1,pattern
+        accepted.extend(match)
+    origin='native/wake_game_recovery.h'
+    helpers='\n'.join(accepted)+'\nstatic bool sgReadResumeMarkerChecked(const std::wstring&,std::string&);\n'
+    helpers+='static void sgNotifyWork();\nstatic bool sgWakeGameRecoveryHasWork();\nstatic bool sgCanceledSleepRecoveryEntryCurrent(const SgWakeRecoveryEntry&);\n'
+    if 'confirmationOriginalWakeFileTime' in strict_header:
+        helpers+='static bool sgCanceledSleepRecoveryBoundaryCurrent(const SgWakeRecoveryEntry&);\n'
+    helpers+=function('sgWakeAcceptedMarkerMatches',strict_header,origin)+'\n'
+    helpers+='template<class Current>\n'+function('sgWakeReserveAcceptedMarkerRoom',strict_header,origin)+'\n'
+    helpers+='\n'.join(function(name,strict_header,origin) for name in
+        ('sgForgetAcceptedWakeMarker','sgConfirmStrictWakeLeaseResume','sgGameWakeBoundaryChanged','sgQueueStrictWakeConfirmationUnlocked'))+'\n'
+    functions=functions.replace(drain_functions+'\n',drain_functions+'\n'+helpers,1)
 # These added contexts execute only memory state. The OEM production scheduler
 # remains outside this PID fixture; the port records generation/reason/order.
 pure_context = r'''
@@ -461,9 +490,11 @@ static bool sgPrepareWakeRecoveryForSleep(unsigned long long,
 
 checks = r'''
 void reset(){
- g_powerLifecycle=PowerLifecycle::Suspending;g_powerGeneration=7;g_resumeReadyGeneration=0;
+ g_powerLifecycle=PowerLifecycle::Suspending;g_powerGeneration=7;clearPowerResumeReady();
  g_exitRequested=false;g_sgWakeRecoveryPending=false;g_sgWakeRecovery={};
+ __RESET_STRICT_WAKE__
  g_hardwareWriteGate=true;g_hardwareWriteInFlight=0;g_aiFanMockSession.isolated=false;g_resumeWatchdogGeneration=0;readyMessages.clear();
+ readyPostAttempts.clear();refusedReadyPosts=readyOwnerSignals=0;readyOwnerEventAvailable=true;g_powerResumeReadyRedelivery=0;
  g_sensorSuspendCallbackActive=false;g_sgLastKernel506EventFileTime=0;g_sgLastKernel507EventFileTime=0;g_sgInternalSleepRequest={};g_sgAutomaticSleepTarget=ymcc::sleeprequest::Mode::None;
  g_sgTask={};g_sgInSuspend=false;g_sgGameActuallySuspended=false;g_sgSleepCycleActive=true;
  g_inputReady=true;g_inputHostPowerAdmissionRevoked=false;g_wakeHoldPhysicalUnhide=false;
@@ -513,12 +544,12 @@ int main(){
  pass("same lease cannot increment the suspend count twice");
  for(bool paused:{false,true}){
   reset();g_sgModernStandbyActive=false;if(paused)freeze();
-  sgBeginModernStandbyIntent();assert(currentPowerGeneration()==7&&abortCalls==0&&queue.empty());
+  sgBeginModernStandbyIntent(sgNowFileTime());assert(currentPowerGeneration()==7&&abortCalls==0&&queue.empty());
   if(!paused)freeze();assert(suspendCalls==1&&freezeDepth==1);
  }
  pass("PBT then 506 joins original generation before or after pause worker");
  reset();g_sgModernStandbyActive=false;g_powerLifecycle=PowerLifecycle::Ready;
- sgBeginModernStandbyIntent();assert(currentPowerGeneration()==8&&queue.size()==1);freeze();sgBeginModernStandbyIntent();
+ sgBeginModernStandbyIntent(sgNowFileTime());assert(currentPowerGeneration()==8&&queue.size()==1);freeze();sgBeginModernStandbyIntent(sgNowFileTime());
  assert(suspendCalls==1&&queue.size()==1&&abortCalls==0);
  pass("506 first and duplicate 506 queue one pause transaction");
  reset();manualLease=true;assert(!sgPauseSleepTarget(7).frozen&&suspendCalls==0&&manualLease);
@@ -570,20 +601,45 @@ int main(){
  // A completed worker may republish after a lost Ready message; old
  // generations and genuine sleep never receive an admission signal.
  reset();g_powerLifecycle=PowerLifecycle::Resuming;g_resumeReadyGeneration=7;
- publishPowerResumeReady(7);publishPowerResumeReady(7);assert(readyMessages.size()==2&&readyMessages.back()==7);
- publishPowerResumeReady(6);assert(readyMessages.size()==2);
+ const auto publishReady=[](ULONGLONG generation){publishPowerResumeReady(generation,capturePowerResumeBoundary());};
+ publishReady(7);publishReady(7);assert(readyMessages.size()==2&&readyMessages.back()==7);
+ publishReady(6);assert(readyMessages.size()==2);
  for(auto phase:{PowerLifecycle::Suspending,PowerLifecycle::Suspended,PowerLifecycle::Ready}){
-  g_powerLifecycle=phase;publishPowerResumeReady(7);assert(readyMessages.size()==2);
+  g_powerLifecycle=phase;publishReady(7);assert(readyMessages.size()==2);
  }
- g_powerGeneration=8;g_powerLifecycle=PowerLifecycle::Resuming;g_resumeReadyGeneration=0;publishPowerResumeReady(7);assert(readyMessages.size()==2&&g_resumeReadyGeneration==0);
- publishPowerResumeReady(8);assert(readyMessages.size()==3&&readyMessages.back()==8&&g_resumeReadyGeneration==8);
+ g_powerGeneration=8;g_powerLifecycle=PowerLifecycle::Resuming;clearPowerResumeReady();publishReady(7);assert(readyMessages.size()==2&&g_resumeReadyGeneration==0);
+ publishReady(8);assert(readyMessages.size()==3&&readyMessages.back()==8&&g_resumeReadyGeneration==8);
  reset();g_powerLifecycle=PowerLifecycle::Resuming;g_resumeWatchdogGeneration=7;
  reconcilePowerResumeReady(7);assert(readyMessages.empty()); // Timeout alone proves nothing.
- g_resumeReadyGeneration=7;g_sgRetryInProgress=true;g_sgTask.retryKind=SgRetryKind::EntryFailure;
+ assert(recordPowerResumeReady(7,capturePowerResumeBoundary(),true));g_sgRetryInProgress=true;g_sgTask.retryKind=SgRetryKind::EntryFailure;
  reconcilePowerResumeReady(7);assert(readyMessages.empty()); // Do not cancel a re-sleep owner.
  g_sgRetryInProgress=false;g_sgTask.retryKind=SgRetryKind::None;
  reconcilePowerResumeReady(7);assert(readyMessages.size()==1&&readyMessages.back()==7);
  g_powerGeneration=8;reconcilePowerResumeReady(7);reconcilePowerResumeReady(8);assert(readyMessages.size()==1);
+ reset();g_powerLifecycle=PowerLifecycle::Resuming;g_hardwareWriteGate=false;
+ readyOwnerEventAvailable=false;refusedReadyPosts=1;
+ publishReady(7);
+ assert(readyPostAttempts.size()==2&&readyMessages.size()==1&&readyPostAttempts[0]==readyPostAttempts[1]);
+ const auto deliveredTicket=static_cast<uint64_t>(readyPostAttempts.back().second);
+ assert(deliveredTicket&&readyOwnerSignals==1&&readPowerResumeReady(7,deliveredTicket).worker&&!hardwareWriteAllowed());
+ pass("unavailable owner event reposts the exact worker Ready without opening the gate");
+ readyPostAttempts.clear();readyMessages.clear();refusedReadyPosts=2;
+ publishReady(7);
+ assert(readyPostAttempts.size()==1&&readyMessages.empty()&&g_powerResumeReadyRedelivery==deliveredTicket);
+ ++g_sharedPowerSuspendSerial;
+ assert(!readPowerResumeReady(7,deliveredTicket).worker&&!hardwareWriteAllowed());
+ readyPostAttempts.clear();refusedReadyPosts=2;
+ publishReady(7);
+ assert(readyPostAttempts.size()==2&&readyPostAttempts[0]==readyPostAttempts[1]&&readyMessages.empty());
+ const auto successorTicket=static_cast<uint64_t>(readyPostAttempts.back().second);
+ assert(successorTicket>deliveredTicket&&g_powerResumeReadyRedelivery==successorTicket);
+ readyPostAttempts.clear();refusedReadyPosts=1;publishReady(7);
+ assert(readyPostAttempts.size()==1&&readyMessages.empty()&&!hardwareWriteAllowed());
+ pass("failed worker Ready retry parks debt and a new suspend scope renews exactly one attempt");
+ reset();g_powerLifecycle=PowerLifecycle::Resuming;g_hardwareWriteGate=false;refusedReadyPosts=1;
+ publishReady(7);
+ assert(readyOwnerSignals==1&&readyPostAttempts.size()==1&&readyMessages.empty()&&g_powerResumeReadyRedelivery!=0);
+ pass("healthy owner event still takes precedence over the window retry");
  nowTick=10000;const auto previousProcessGeneration=initialPowerGeneration()+5;
  nowTick=20000;assert(initialPowerGeneration()>previousProcessGeneration&&initialPowerGeneration()>0);
  pass("Kernel-Power 507 user evidence releases held lease after input Ready");
@@ -626,6 +682,7 @@ int main(){
  std::cout<<"native sleep-game pause selftest: "<<passed<<" groups PASS (actual extracted functions; OS/input boundaries mocked)\n";
 }
 '''
+checks=checks.replace('__RESET_STRICT_WAKE__','g_sgWakeAcceptedMarkers.clear();' if 'sgConfirmStrictWakeLeaseResume(' in strict_header else '')
 preamble=preamble.replace('enum class YmccFamily { Unknown, Handheld };',family_enum)
 preamble=preamble.replace('YmccFamily::Handheld','YmccFamily::AsusRogAllyX')
 checks=checks.replace('YmccFamily::Handheld','YmccFamily::AsusRogAllyX')
@@ -649,7 +706,79 @@ functions += '\nvoid runProductionSuspendPause(ULONGLONG generation,const SgWork
 hibernate_dispatch = section('            } else if (item.kind == SgWork::WakeHibernate) {',
                              '            } else if (item.kind == SgWork::WakeSuspend) {')
 hibernate_dispatch = hibernate_dispatch[hibernate_dispatch.index('{')+1:]
-functions += '\nvoid runProductionHibernateWake(ULONGLONG generation){\nstruct { ULONGLONG generation; } item{generation};\nfor(unsigned once=0;once<1;++once){\n' + hibernate_dispatch + '\n}}\n'
+wake_item='struct { ULONGLONG generation; } item{generation};'
+has_s4_witness='ULONGLONG wakeOriginal107=0;' in source
+if has_s4_witness:
+    wake_item='SgWorkItem item{SgWork::WakeHibernate,generation};item.wakeSleepSequence=g_sleepPowerDispatch.observedSleepBoundarySequence();item.wakeSuspendSerial=g_sharedPowerSuspendSerial.load();item.wakeOriginal107=originalWake;'
+elif 'item.wakeBoundaryMatches' in hibernate_dispatch:
+    wake_item='SgWorkItem item{SgWork::WakeHibernate,generation};item.wakeSleepSequence=g_sleepPowerDispatch.observedSleepBoundarySequence();item.wakeSuspendSerial=g_sharedPowerSuspendSerial.load();'
+functions += '\nvoid runProductionHibernateWake(ULONGLONG generation,[[maybe_unused]] ULONGLONG originalWake=200){\n'+wake_item+'\nfor(unsigned once=0;once<1;++once){\n' + hibernate_dispatch + '\n}}\n'
+if has_s4_witness:
+    checks=checks.replace(' std::cout<<"native sleep-game pause selftest:',r'''
+ for(bool newer:{true,false}){
+  reset();freeze();g_powerGeneration=8;g_powerLifecycle=PowerLifecycle::Resuming;
+  const auto observedSequence=g_sleepPowerDispatch.observedSleepBoundarySequence();
+  const auto suspendSerial=g_sharedPowerSuspendSerial.load();
+  g_sgLatestSleepEntryFileTime=100;
+  resumeOpenHook=[newer]{g_sgLatestSleepEntryFileTime=newer?300:150;};
+  runProductionHibernateWake(8,200);
+  assert(g_sleepPowerDispatch.observedSleepBoundarySequence()==observedSequence&&g_sharedPowerSuspendSerial.load()==suspendSerial);
+  if(newer){
+   assert(resumeCalls==0&&ntResumeAttempts==0&&freezeDepth==1&&markerExists&&g_sgSleepTarget.markerOwned);
+   resumeOpenHook={};runProductionHibernateWake(8,400);
+  }
+  assert(resumeCalls==1&&freezeDepth==0&&!markerExists&&!g_sgSleepTarget.markerOwned);
+  g_sgLatestSleepEntryFileTime=0;
+ }
+ for(bool retained:{false,true}){
+  reset();freeze();g_powerGeneration=8;g_powerLifecycle=PowerLifecycle::Resuming;
+  SgWorkItem older{SgWork::WakeHibernate,8};
+  older.wakeSleepSequence=g_sleepPowerDispatch.observedSleepBoundarySequence();
+  older.wakeSuspendSerial=g_sharedPowerSuspendSerial.load();
+  older.wakeOriginal107=200;
+  auto later=older;later.wakeOriginal107=400;
+  g_sgWorkQ={};g_sgRetainedWorkDelivery={};
+  if(retained)assert(sgRetainWorkDeliveryLocked(older,false));
+  else assert(sgAppendWorkDeliveryLocked(older,false));
+  g_sgLatestSleepEntryFileTime=300;
+  assert(!sgWorkDeliveryAlreadyQueuedLocked(later,false));
+  if(retained)assert(sgRetainWorkDeliveryLocked(later,false));
+  else assert(sgAppendWorkDeliveryLocked(later,false));
+  assert(sgWorkDeliveryAlreadyQueuedLocked(later,false));
+  SgWorkItem selected{};
+  if(!retained){
+   assert(sgTakeWorkDeliveryLocked(selected)&&selected.wakeOriginal107==200);
+   runProductionHibernateWake(8,selected.wakeOriginal107);
+   assert(ntResumeAttempts==0&&freezeDepth==1&&markerExists);
+  }
+  assert(sgTakeWorkDeliveryLocked(selected)&&selected.wakeOriginal107==400);
+  runProductionHibernateWake(8,selected.wakeOriginal107);
+  assert(resumeCalls==1&&freezeDepth==0&&!markerExists);
+  assert(!sgTakeWorkDeliveryLocked(selected));
+  g_sgLatestSleepEntryFileTime=0;
+ }
+ pass("post-open Kernel 506 supersedes only older S4 work; later valid S4 still returns the original game");
+ std::cout<<"native sleep-game pause selftest:''')
+if 'confirmationOriginalWakeFileTime' in strict_header:
+    checks=checks.replace(' std::cout<<"native sleep-game pause selftest:',r'''
+ reset();freeze();g_powerGeneration=8;g_powerLifecycle=PowerLifecycle::Resuming;
+ {
+  const auto sequence=g_sleepPowerDispatch.observedSleepBoundarySequence();
+  const auto serial=g_sharedPowerSuspendSerial.load();
+  std::string originalMarker;
+  assert(sgReadResumeMarkerChecked(SG_SLEEP_LEASE_DIR+L"\\100.txt",originalMarker));
+  const auto owner=g_sgSleepTarget;
+  g_sgWakeAcceptedMarkers.emplace(SgWakeAcceptedKey{SG_SLEEP_LEASE_DIR,100},SgWakeAcceptedMarker{owner.processCreated,originalMarker});
+  sgQueueStrictWakeConfirmationUnlocked(owner,8,sequence,serial,originalMarker,200);
+  assert(g_sgWakeRecovery.entries.size()==1&&sgCanceledSleepRecoveryEntryCurrent(g_sgWakeRecovery.entries.front()));
+  g_sgLatestSleepEntryFileTime=300;
+  assert(!sgCanceledSleepRecoveryEntryCurrent(g_sgWakeRecovery.entries.front())&&markerExists&&g_sgWakeAcceptedMarkers.size()==1);
+  sgQueueStrictWakeConfirmationUnlocked(owner,8,sequence,serial,originalMarker,400);
+  assert(g_sgWakeRecovery.entries.size()==2&&sgCanceledSleepRecoveryEntryCurrent(g_sgWakeRecovery.entries.back())&&markerExists&&ntResumeAttempts==0);
+  g_sgLatestSleepEntryFileTime=0;
+ }
+ pass("a newer Kernel 506 revokes an old strict confirmation without consuming the retained witness or blocking its successor");
+ std::cout<<"native sleep-game pause selftest:''')
 checks=checks.replace(' std::cout<<"native sleep-game pause selftest:',r'''
  reset();freeze();g_powerGeneration=8;g_sgTask={};g_sgInSuspend=false;g_sgGameActuallySuspended=false;g_sgSleepCycleActive=false;g_powerLifecycle=PowerLifecycle::Resuming;
  runProductionHibernateWake(8);
@@ -756,13 +885,12 @@ checks=checks.replace(' std::cout<<"native sleep-game pause selftest:',r'''
  pass("cancel closes the exact extracted pure suspend episode");
  reset();g_fanPhysicalWake.recordSleep(7,100);g_fanPhysicalWake.recordSleep(7,200);
  const auto fanGeneration=currentFanPowerGeneration();assert(fanGeneration!=currentPowerGeneration());
+ const auto beforeCancelPublications=pausePublicationCalls;
  sgAbortSleepIntent("fan-generation-context", 0);
- // Both actual Ready notifications are required exactly once, with separate
- // Fan and shared-power generations; an unrelated event cannot hide a duplicate.
- assert(currentPowerGeneration()==7&&emittedEvents.size()==2);
- assert(emittedEvents[0].first=="fan.resume-ready"&&emittedEvents[0].second.at("generation").get<unsigned long long>()==fanGeneration&&emittedEvents[0].second.at("source")=="sleep-intent-canceled");
- assert(emittedEvents[1].first=="gameMedia.resume-ready"&&emittedEvents[1].second.at("generation").get<unsigned long long>()==7&&emittedEvents[1].second.at("source")=="sleep-intent-canceled");
- pass("cancel emits the actual pure fan generation without a second shared transaction");
+ // Cancellation publishes public power; the public Fan consumer owns its own notice.
+ assert(currentPowerGeneration()==7&&currentFanPowerGeneration()==fanGeneration&&pausePublicationCalls==beforeCancelPublications+1&&emittedEvents.size()==1);
+ assert(emittedEvents[0].first=="gameMedia.resume-ready"&&emittedEvents[0].second.at("generation").get<unsigned long long>()==7&&emittedEvents[0].second.at("source")=="sleep-intent-canceled");
+ pass("cancel delivers public power once and does not emit a direct Fan notice");
  reset();sgHandheldResumeInputOnWake("oem-memory-port");
  assert(oemWakePortCalls.size()==1&&oemWakePortCalls[0].generation==7&&oemWakePortCalls[0].reason=="oem-memory-port"&&oemWakePortCalls[0].sensorsBefore==0&&sensorCalls==1&&resumeCalls==0);
  pass("input wake supplies generation and reason to counted OEM boundary before sensors");
@@ -927,7 +1055,7 @@ auto fnNtSuspend=&pauseActualNtPort;
 
 if args.ordinary_pause_only:
     # Execute the actual queue and Steam fan-out; replace only its three sinks.
-    fake='void sgQueueWork(SgWork work,ULONGLONG gen,ULONGLONG=0){queue.emplace_back(work,gen);}'
+    fake='void sgQueueWork(SgWork work,ULONGLONG gen,ULONGLONG=0,const SgWorkItem* =nullptr){queue.emplace_back(work,gen);}'
     assert preamble.count(fake)==1
     ports=r"""
 static SgWorkItem g_sgLastQueuedGameWake{};
@@ -941,7 +1069,7 @@ namespace SleepRecoveryAuto {
 static void captureReady(ULONGLONG){++ordinarySteamReadyCalls;if(ordinarySteamFault==2)throw std::bad_alloc();}
 }
 static void steamOriginalRecoverySuspend(ULONGLONG){++ordinarySteamOriginalCalls;if(ordinarySteamFault==3)throw std::bad_alloc();}
-static void sgQueueWork(SgWork,unsigned long long,ULONGLONG=0);
+static void sgQueueWork(SgWork,unsigned long long,ULONGLONG=0,const SgWorkItem* =nullptr);
 """
     preamble=preamble.replace(fake,ports)
     steam_auto=args.source.parent/'sleep_recovery_auto.h'

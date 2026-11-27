@@ -6,7 +6,7 @@ namespace ymcc::media::downloads {
 // Consumer only. The caller owns one public SourceLease until its entire
 // request and owned child drain; acquiring fresh metadata cannot renew it.
 template<class Lease>
-inline bool readShortcutCurrentSource(const Json& target,const std::shared_ptr<Lease>& source,Json* observation=nullptr){
+inline bool readShortcutCurrentSource(const Json& target,const std::shared_ptr<Lease>& source,Json* observation=nullptr,const fs::path& dataRoot={}){
   DWORD account=0;bool accountKnown=false;
   const auto reject=[&](const char* reason){
     if(observation){*observation={{"reason",reason},{"observedAt",now()},{"activeAccountKnown",accountKnown}};
@@ -31,7 +31,7 @@ inline bool readShortcutCurrentSource(const Json& target,const std::shared_ptr<L
   if(std::to_string(account)!=stringField(target,"steamAccount"))return reject("active-account-mismatch");
   try{
     const auto file=fs::path(wide(facts.root))/L"userdata"/std::to_wstring(account)/L"config"/L"shortcuts.vdf";
-    const auto row=shortcutIdentity(file,stringField(target,"shortcutAppId"));
+    const auto row=shortcutIdentity(file,stringField(target,"shortcutAppId"),dataRoot,std::to_string(account));
     // A read that races with revocation is Unknown, including an apparently
     // absent/changed row. It must not consume a game's identity failure budget.
     requireSource();
@@ -81,13 +81,13 @@ struct IdentityPorts {
   // Retain the parent's exact lease through owned child/Job resource return.
   // Appended after the existing aggregate fields for custom-provider callers.
   std::shared_ptr<ymcc::steaminfo::SourceLeaseV2> source;
-  void requireCurrent(const Json& target) const {
+  void requireCurrent(const Json& target,const fs::path& dataRoot={}) const {
     Json detail;
     // Custom providers keep their original one-call interface without a source.
     // The default always consumes this same lease, never the source-less entry.
     if(source&&!source->current())throw std::runtime_error("media-steam-facts-unavailable");
     const auto original=current.target<bool(*)(const Json&)>();
-    const bool accepted=original&&*original==shortcutCurrent?readShortcutCurrentSource(target,source,&detail):current(target);
+    const bool accepted=original&&*original==shortcutCurrent?readShortcutCurrentSource(target,source,&detail,dataRoot):current(target);
     // A source revoked during even an early account mismatch remains Unknown.
     if(source&&!source->current())throw std::runtime_error("media-steam-facts-unavailable");
     if(accepted)return;
@@ -135,12 +135,12 @@ inline bool identityNetworkUnavailable(const fs::path& output,const std::string&
 inline Json identifyShortcut(const fs::path& root,const Json& target,const IdentityPorts& ports,const std::function<void()>& heartbeat){
   // Declared before the cleanup owners: borrowed handles outlive their teardown.
   const auto source=ports.source;
-  heartbeat();ports.requireCurrent(target);
+  heartbeat();ports.requireCurrent(target,root);
   Store store(root);const auto exe=stringField(target,"executable");bool storageUnavailable=false;auto cached=store.identity(exe,&storageUnavailable);
   // Reuse the same confirmed launcher/primary projection as the inventory.
   // Known exact-cache IO failure keeps its original no-helper refusal.
   if(!cached.value("verified",false)&&!storageUnavailable)cached=store.shortcutWallpaperIdentity(exe);
-  if(cached.value("verified",false)){ports.requireCurrent(target);return cached;}
+  if(cached.value("verified",false)){ports.requireCurrent(target,root);return cached;}
   // Reuse the existing cache read: known IO denial cannot benefit from a helper.
   if(storageUnavailable)throw std::runtime_error("media-storage-unavailable");
   const auto helper=(ports.appRoot.empty()?identityAppRoot():ports.appRoot)/L"SteamArtworkLab.exe";
@@ -190,7 +190,7 @@ inline Json identifyShortcut(const fs::path& root,const Json& target,const Ident
       requireSource();
       if(state==WAIT_OBJECT_0+4)state=WAIT_OBJECT_0;
     }
-    heartbeat();if(state==WAIT_OBJECT_0||GetTickCount64()-membershipAt>=5000){membershipAt=GetTickCount64();ports.requireCurrent(target);}
+    heartbeat();if(state==WAIT_OBJECT_0||GetTickCount64()-membershipAt>=5000){membershipAt=GetTickCount64();ports.requireCurrent(target,root);}
     if(state==WAIT_OBJECT_0)break;if(state!=WAIT_TIMEOUT)throw std::runtime_error("media-identity-launch-failed");
     if(GetTickCount64()-tick>=ports.timeoutMs)throw std::runtime_error("media-identity-timeout");
   }
@@ -207,7 +207,7 @@ inline Json identifyShortcut(const fs::path& root,const Json& target,const Ident
     const bool link=it->is_symlink(ec);if(ec)break;if(link)continue;
     const bool regular=it->is_regular_file(ec);if(ec)break;
     if(!regular||it->path().filename()!=L"manifest.json")continue;
-    ++manifests;heartbeat();ports.requireCurrent(target);
+    ++manifests;heartbeat();ports.requireCurrent(target,root);
     cached=store.rememberIdentity(exe,output/it->path().lexically_relative(scanRoot),started);if(cached.value("verified",false))return cached;
     // A valid lookup is not an identity rejection when its cache cannot be
     // read or committed. Reuse storage backoff without spending identity debt.

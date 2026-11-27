@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
+import {Worker,isMainThread,parentPort,workerData} from 'node:worker_threads';
 
 export const SNAPSHOT_SCHEMA=1;
 export const SNAPSHOT_METADATA='.ymcc-source-snapshot';
@@ -58,7 +59,11 @@ function noReparse(file){
  let cursor=path.resolve(file);
  for(;;){
   let st;try{st=fs.lstatSync(cursor);}catch(error){if(error.code!=='ENOENT')throw error;}
-  if(st){need(!st.isSymbolicLink(),'SNAPSHOT_REPARSE_PATH',{path:cursor});need(key(fs.realpathSync(cursor))===key(cursor),'SNAPSHOT_REPARSE_RESOLUTION',{path:cursor});}
+  if(st){
+   need(!st.isSymbolicLink(),'SNAPSHOT_REPARSE_PATH',{path:cursor});
+   const resolved=process.platform==='win32'?fs.realpathSync.native(cursor):fs.realpathSync(cursor);
+   need(key(resolved)===key(cursor),'SNAPSHOT_REPARSE_RESOLUTION',{path:cursor});
+  }
   const parent=path.dirname(cursor);if(parent===cursor)break;cursor=parent;
  }
 }
@@ -71,16 +76,31 @@ function member(root,rel){relative(rel);const file=path.resolve(root,...rel.spli
 // File index, size and nanosecond times still bind the path to the descriptor.
 const fileState=stat=>[...(process.platform==='win32'?[]:[stat.dev]),stat.ino,stat.size,stat.mtimeNs,stat.ctimeNs].map(String).join(':');
 /** The descriptor's bytes, rather than a VCS version or selected functions, are hashed. */
-function readHash(file,maxBytes=Number.MAX_SAFE_INTEGER,scratchBuffer){
- noReparse(file);const initial=fs.lstatSync(file,{bigint:true});need(initial.isFile(),'SNAPSHOT_REGULAR_FILE_REQUIRED',{path:file});need(initial.size<=BigInt(maxBytes),'SNAPSHOT_FILE_SIZE_LIMIT',{path:file});
+function readPathState(file,walkedMember){
+ if(!walkedMember)noReparse(file);
+ const current=fs.lstatSync(file,{bigint:true});
+ if(walkedMember){
+  need(!current.isSymbolicLink(),'SNAPSHOT_REPARSE_PATH',{path:file});
+  need(key(fs.realpathSync.native(file))===key(file),'SNAPSHOT_REPARSE_RESOLUTION',{path:file});
+ }
+ return current;
+}
+function readHash(file,maxBytes=Number.MAX_SAFE_INTEGER,scratchBuffer,walkedMember=false,keepBytes=false){
+ const initial=readPathState(file,walkedMember);
+ need(initial.isFile(),keepBytes?'SNAPSHOT_MANIFEST_SIZE_OR_TYPE':'SNAPSHOT_REGULAR_FILE_REQUIRED',{path:file});
+ need(initial.size<=BigInt(maxBytes),keepBytes?'SNAPSHOT_MANIFEST_SIZE_OR_TYPE':'SNAPSHOT_FILE_SIZE_LIMIT',{path:file});
  const fd=fs.openSync(file,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW??0));
  try{
   const before=fs.fstatSync(fd,{bigint:true});need(before.isFile()&&fileState(initial)===fileState(before),'SNAPSHOT_FILE_CHANGED_DURING_READ',{path:file});
+  const bytes=keepBytes?Buffer.allocUnsafe(Number(before.size)):null;
   const hash=createHash('sha256'),buffer=scratchBuffer??Buffer.allocUnsafe(1024*1024);let size=0,read;
-  while((read=fs.readSync(fd,buffer,0,Math.min(buffer.length,maxBytes-size+1),null))>0){hash.update(buffer.subarray(0,read));size+=read;need(Number.isSafeInteger(size)&&size<=maxBytes,'SNAPSHOT_FILE_SIZE_LIMIT');}
-  const after=fs.fstatSync(fd,{bigint:true});noReparse(file);const current=fs.lstatSync(file,{bigint:true});
+  while((read=fs.readSync(fd,buffer,0,Math.min(buffer.length,maxBytes-size+1),null))>0){
+   if(bytes){need(size+read<=bytes.length,'SNAPSHOT_FILE_CHANGED_DURING_READ',{path:file});buffer.copy(bytes,size,0,read);}
+   hash.update(buffer.subarray(0,read));size+=read;need(Number.isSafeInteger(size)&&size<=maxBytes,'SNAPSHOT_FILE_SIZE_LIMIT');
+  }
+  const after=fs.fstatSync(fd,{bigint:true}),current=readPathState(file,walkedMember);
   need(fileState(before)===fileState(after)&&fileState(after)===fileState(current)&&BigInt(size)===after.size,'SNAPSHOT_FILE_CHANGED_DURING_READ',{path:file});
-  return {size,sha256:hash.digest('hex')};
+  return {size,sha256:hash.digest('hex'),...(bytes?{bytes}:{})};
  }finally{fs.closeSync(fd);}
 }
 /** This one reviewed release has a manifest authority, not a general JSON exception.
@@ -122,10 +142,15 @@ function exclusion(rel,isDirectory,parentHasProject,projectContext,release){
 }
 /** Enumerate only included content. Excluded directories are recorded as roots,
  * not traversed; their bytes are never claimed as frozen or current. */
-function inventory(root,{snapshot=false,captureRoot=null,onCaptured=()=>{}}={}){
+function inventory(root,{snapshot=false,captureRoot=null,onCaptured=()=>{},guardedRead=false}={}){
  directory(root);const release=staticReleaseMembers(root),files=[],directories=[],excluded=[];
+ const scratchBuffer=guardedRead?Buffer.allocUnsafe(1024*1024):undefined;
  function walk(dir,prefix,ancestorHasProject=false){
-  noReparse(dir);const names=fs.readdirSync(dir).sort(),parentHasProject=names.some(n=>/\.(?:csproj|fsproj|vbproj)$/i.test(n)),projectContext=ancestorHasProject||parentHasProject;
+  // Check ancestors at each directory boundary and the full resolved file path
+  // before and after reading each descriptor.
+  noReparse(dir);const dirBefore=guardedRead?fs.lstatSync(dir,{bigint:true}):null;
+  if(dirBefore)need(dirBefore.isDirectory()&&!dirBefore.isSymbolicLink(),'SNAPSHOT_DIRECTORY_REQUIRED',{path:dir});
+  const names=fs.readdirSync(dir).sort(),parentHasProject=names.some(n=>/\.(?:csproj|fsproj|vbproj)$/i.test(n)),projectContext=ancestorHasProject||parentHasProject;
   for(const name of names){
    const rel=prefix?prefix+'/'+name:name,file=path.join(dir,name);relative(rel);
    const st=fs.lstatSync(file);
@@ -135,13 +160,17 @@ function inventory(root,{snapshot=false,captureRoot=null,onCaptured=()=>{}}={}){
    if(!prefix&&SNAPSHOT_POLICY.opaqueExcludedRootLinks.includes(name.toLowerCase())&&st.isSymbolicLink()){
     excluded.push({path:rel,type:'directory',rule:'node-dependencies',reason:EXCLUSION_REASONS.get('node-dependencies')});continue;
    }
-   noReparse(file);need(!st.isSymbolicLink(),'SNAPSHOT_REPARSE_PATH',{path:rel});
+   if(!guardedRead||!st.isFile())noReparse(file);need(!st.isSymbolicLink(),'SNAPSHOT_REPARSE_PATH',{path:rel});
    if(!prefix&&name.toLowerCase()===SNAPSHOT_METADATA){need(snapshot,'SNAPSHOT_SOURCE_METADATA_COLLISION',{path:rel});need(st.isDirectory(),'SNAPSHOT_METADATA_DIRECTORY_REQUIRED');continue;}
    if(rel===STEAM_APPEARANCE_RELEASE.assetRoot||rel.startsWith(STEAM_APPEARANCE_RELEASE.assetRoot+'/'))need(st.isDirectory()?release.directories.has(rel):release.files.has(rel),'SNAPSHOT_STATIC_RELEASE_UNDECLARED_RESOURCE',{path:rel});
    const reason=exclusion(rel,st.isDirectory(),parentHasProject,projectContext,release);
-   if(reason){excluded.push({path:rel,type:st.isDirectory()?'directory':'file',rule:reason,reason:EXCLUSION_REASONS.get(reason)});continue;}
+   if(reason){if(guardedRead&&st.isFile())noReparse(file);excluded.push({path:rel,type:st.isDirectory()?'directory':'file',rule:reason,reason:EXCLUSION_REASONS.get(reason)});continue;}
    if(st.isDirectory()){directories.push(rel);walk(file,rel,projectContext);}
-   else{need(st.isFile(),'SNAPSHOT_SPECIAL_FILE_REJECTED',{path:rel});need(files.length<MAX_FILES,'SNAPSHOT_FILE_COUNT_LIMIT');if(captureRoot)onCaptured({phase:'before-capture-file',path:rel});const expected=release.files.get(rel);if(expected)need(st.size===expected.size,'SNAPSHOT_STATIC_RELEASE_BYTES_DIFFER',{path:rel});const identity=captureRoot?captureOneAtRead(root,captureRoot,rel,expected?.size):readHash(file,expected?.size);if(expected)need(same(identity,expected),'SNAPSHOT_STATIC_RELEASE_HASH_DIFFER',{path:rel});files.push({path:rel,...identity});if(captureRoot)onCaptured({phase:'after-capture-file',path:rel});}
+   else{need(st.isFile(),'SNAPSHOT_SPECIAL_FILE_REJECTED',{path:rel});need(files.length<MAX_FILES,'SNAPSHOT_FILE_COUNT_LIMIT');if(captureRoot)onCaptured({phase:'before-capture-file',path:rel});const expected=release.files.get(rel);if(expected)need(st.size===expected.size,'SNAPSHOT_STATIC_RELEASE_BYTES_DIFFER',{path:rel});const identity=captureRoot?captureOneAtRead(root,captureRoot,rel,expected?.size):readHash(file,expected?.size,scratchBuffer,guardedRead);if(expected)need(same(identity,expected),'SNAPSHOT_STATIC_RELEASE_HASH_DIFFER',{path:rel});files.push({path:rel,...identity});if(captureRoot)onCaptured({phase:'after-capture-file',path:rel});}
+  }
+  if(dirBefore){
+   noReparse(dir);const after=fs.lstatSync(dir,{bigint:true});
+   need(after.isDirectory()&&!after.isSymbolicLink()&&dirBefore.dev===after.dev&&dirBefore.ino===after.ino,'SNAPSHOT_DIRECTORY_CHANGED_DURING_READ',{path:dir});
   }
  }
  walk(root,'');
@@ -211,11 +240,11 @@ function captureOneAtRead(sourceRoot,snapshotRoot,rel,maxBytes=Number.MAX_SAFE_I
   to=fs.openSync(target,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL,Number(state.mode&0o777n));
   const h=createHash('sha256');buffer=Buffer.allocUnsafe(1024*1024);let size=0,n;
   while((n=fs.readSync(from,buffer,0,Math.min(buffer.length,maxBytes-size+1),null))>0){h.update(buffer.subarray(0,n));size+=n;need(Number.isSafeInteger(size)&&size<=maxBytes,'SNAPSHOT_FILE_SIZE_LIMIT');let offset=0;while(offset<n){const written=fs.writeSync(to,buffer,offset,n-offset);need(written>0,'SNAPSHOT_WRITE_INCOMPLETE',{path:rel});offset+=written;}}
-  fs.fsyncSync(to);noReparse(source);noReparse(target);
+  fs.fsyncSync(to);noReparse(source);
   need(fileState(state)===fileState(fs.fstatSync(from,{bigint:true}))&&fileState(state)===fileState(fs.lstatSync(source,{bigint:true}))&&BigInt(size)===state.size,'SNAPSHOT_FILE_CHANGED_DURING_CAPTURE',{path:rel});
   streamIdentity={size,sha256:h.digest('hex')};
  }finally{if(to!==undefined)fs.closeSync(to);fs.closeSync(from);}
- // Source hashing is finished; reuse only this file's scratch storage for an independent destination read.
+ // The independent destination read checks the full path both before and after hashing.
  const copied=readHash(target,Number.MAX_SAFE_INTEGER,buffer);need(same(copied,streamIdentity),'SNAPSHOT_COPIED_BYTES_DIFFER',{path:rel});return copied;
 }
 /** A callback is diagnostic/test instrumentation only. The CLI supplies none.
@@ -246,8 +275,9 @@ export function createSourceSnapshot({repoRoot,outDir,onProgress=()=>{}}={}){
  * strict. Every byte is saved from the same descriptor that was hashed, then the
  * entire tree is independently verified. No atomic cross-file time is claimed;
  * source-after drift remains an original FAIL and cannot approve current source. */
-export function createCapturedSourceSnapshot({repoRoot,outDir,onProgress=()=>{}}={}){
+export function createCapturedSourceSnapshot({repoRoot,outDir,onProgress=()=>{},guardedReadback=false}={}){
  need(typeof onProgress==='function','SNAPSHOT_PROGRESS_CALLBACK_INVALID');
+ need(typeof guardedReadback==='boolean','SNAPSHOT_GUARDED_READBACK_INVALID');
  const bound=roots(repoRoot,outDir,{fresh:true}),{sourceRoot,snapshotRoot}=bound;
  fs.mkdirSync(snapshotRoot);fs.mkdirSync(path.join(snapshotRoot,SNAPSHOT_METADATA));
  const manifest={schemaVersion:SNAPSHOT_SCHEMA,kind:'ymcc-fixed-source-snapshot',captureMode:'same-descriptor-capture',atomicSourceTreeClaimed:false,status:'CREATING',...bound,sourceWorkspaceRoot:path.resolve(sourceRoot,'../../..'),snapshotWorkspaceRoot:path.resolve(snapshotRoot,'../../..'),startedAt:new Date().toISOString(),policy:SNAPSHOT_POLICY,metadataDirectory:SNAPSHOT_METADATA,files:[],directories:[],excluded:[],main:{path:'native/main.cpp',before:null,snapshot:null,sourceAfter:null},isCurrent:false,currentAsOf:null,requiresFinalCurrentComparison:true,snapshotPassApprovesChangedSource:false,copyVerifiedFiles:0,executionPerformed:false,installationPayloadFrozen:false};
@@ -257,17 +287,24 @@ export function createCapturedSourceSnapshot({repoRoot,outDir,onProgress=()=>{}}
   manifest.files=before.files;manifest.directories=before.directories;manifest.excluded=before.excluded;manifest.main.before=before.main;
   manifest.sourceBefore=writeJson(snapshotRoot,SNAPSHOT_METADATA+'/source-before.json',before);writeJson(snapshotRoot,SNAPSHOT_MANIFEST,manifest);
   onProgress({phase:'source-before',sourceRoot,snapshotRoot,fileCount:before.fileCount});
-  for(const dir of before.directories){const target=member(snapshotRoot,dir);noReparse(path.dirname(target));if(!exists(target))fs.mkdirSync(target);else directory(target);}
+  for(const dir of before.directories){
+   const target=member(snapshotRoot,dir);noReparse(target);
+   if(!exists(target))fs.mkdirSync(target);
+   else{const st=fs.lstatSync(target);need(st.isDirectory()&&!st.isSymbolicLink(),'SNAPSHOT_DIRECTORY_REQUIRED',{path:target});}
+  }
   onProgress({phase:'copy-complete',sourceRoot,snapshotRoot});
-  const copied=inventory(snapshotRoot,{snapshot:true});manifest.snapshotAfter=writeJson(snapshotRoot,SNAPSHOT_METADATA+'/snapshot-after.json',copied);manifest.main.snapshot=copied.main;manifest.snapshotDiff=diff(before,copied);
+  // Use the verifier's guarded descriptor reader without changing either inventory's scope or order.
+  const copied=inventory(snapshotRoot,{snapshot:true,guardedRead:guardedReadback});manifest.snapshotAfter=writeJson(snapshotRoot,SNAPSHOT_METADATA+'/snapshot-after.json',copied);manifest.main.snapshot=copied.main;manifest.snapshotDiff=diff(before,copied);
   onProgress({phase:'before-source-after',sourceRoot,snapshotRoot});
-  const after=inventory(sourceRoot);manifest.sourceAfter=writeJson(snapshotRoot,SNAPSHOT_METADATA+'/source-after.json',after);manifest.main.sourceAfter=after.main;manifest.sourceDiff=diff(before,after);
+  const after=inventory(sourceRoot,{guardedRead:guardedReadback});manifest.sourceAfter=writeJson(snapshotRoot,SNAPSHOT_METADATA+'/source-after.json',after);manifest.main.sourceAfter=after.main;manifest.sourceDiff=diff(before,after);
   need(manifest.copyVerifiedFiles===before.files.length&&manifest.snapshotDiff.equal&&manifest.sourceDiff.equal,'SNAPSHOT_SOURCE_OR_COPY_DRIFT');
   manifest.status='PASS';manifest.isCurrent=true;manifest.currentAsOf=new Date().toISOString();
  }catch(error){manifest.status='FAIL';manifest.isCurrent=false;manifest.failure={code:error.code??'SNAPSHOT_OPERATION_FAILED',message:String(error.message).slice(0,500),details:error.details??null};}
  manifest.finishedAt=new Date().toISOString();writeJson(snapshotRoot,SNAPSHOT_MANIFEST,manifest);return {manifestFile,...manifest};
 }
-function readJson(file){noReparse(file);const st=fs.lstatSync(file);need(st.isFile()&&st.size<=MAX_MANIFEST_BYTES,'SNAPSHOT_MANIFEST_SIZE_OR_TYPE');return JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));}
+// Parse only the bytes read and hashed together from the bounded descriptor.
+function readMetadata(file){return readHash(file,MAX_MANIFEST_BYTES,undefined,false,true);}
+function parseMetadata({bytes}){return JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/,''));}
 function validateInventory(value){
  need(value&&Array.isArray(value.files)&&value.files.length<=MAX_FILES&&Array.isArray(value.directories),'SNAPSHOT_INVENTORY_INVALID');const seen=new Set();
  for(const row of value.files){relative(row?.path);need(!seen.has(row.path)&&Number.isSafeInteger(row.size)&&row.size>=0&&/^[a-f0-9]{64}$/.test(row.sha256),'SNAPSHOT_INVENTORY_ROW_INVALID');need(!row.path.toLowerCase().startsWith(SNAPSHOT_METADATA+'/'),'SNAPSHOT_INVENTORY_METADATA_COLLISION');seen.add(row.path);}
@@ -276,19 +313,19 @@ function validateInventory(value){
  return value;
 }
 function readReference(snapshotRoot,ref,name){
- need(ref&&ref.path===SNAPSHOT_METADATA+'/'+name&&Number.isSafeInteger(ref.size)&&/^[a-f0-9]{64}$/.test(ref.sha256),'SNAPSHOT_EVIDENCE_REFERENCE_INVALID');const file=member(snapshotRoot,ref.path),actual=readHash(file);need(actual.size===ref.size&&actual.sha256===ref.sha256,'SNAPSHOT_EVIDENCE_HASH_CHANGED');return validateInventory(readJson(file));
+ need(ref&&ref.path===SNAPSHOT_METADATA+'/'+name&&Number.isSafeInteger(ref.size)&&/^[a-f0-9]{64}$/.test(ref.sha256),'SNAPSHOT_EVIDENCE_REFERENCE_INVALID');const file=member(snapshotRoot,ref.path),actual=readMetadata(file);need(actual.size===ref.size&&actual.sha256===ref.sha256,'SNAPSHOT_EVIDENCE_HASH_CHANGED');return validateInventory(parseMetadata(actual));
 }
 /** Read-only current comparison: full main and every included byte/path matter.
  * Snapshot PASS is never a waiver for a changed current source tree. */
 export function compareSourceSnapshot({manifestFile,repoRoot}={}){
- const file=absolute(manifestFile);noReparse(file);const manifest=readJson(file);
+ const file=absolute(manifestFile),identity=readMetadata(file),manifest=parseMetadata(identity);
  need(manifest?.schemaVersion===SNAPSHOT_SCHEMA&&manifest.kind==='ymcc-fixed-source-snapshot'&&manifest.status==='PASS'&&manifest.isCurrent===true&&manifest.requiresFinalCurrentComparison===true&&manifest.snapshotPassApprovesChangedSource===false&&manifest.executionPerformed===false&&manifest.installationPayloadFrozen===false,'SNAPSHOT_SUCCESSFUL_MANIFEST_REQUIRED');
  need(same(manifest.policy,SNAPSHOT_POLICY)&&manifest.metadataDirectory===SNAPSHOT_METADATA,'SNAPSHOT_EXCLUSION_POLICY_DIFFERS');
  const bound=roots(repoRoot,manifest.snapshotRoot);need(key(bound.sourceRoot)===key(absolute(manifest.sourceRoot))&&key(file)===key(path.join(bound.snapshotRoot,...SNAPSHOT_MANIFEST.split('/'))),'SNAPSHOT_MANIFEST_ROOT_DIFFERS');
  need(manifest.sourceWorkspaceRoot===path.resolve(bound.sourceRoot,'../../..')&&manifest.snapshotWorkspaceRoot===path.resolve(bound.snapshotRoot,'../../..'),'SNAPSHOT_WORKSPACE_IDENTITY_DIFFERS');
  const before=readReference(bound.snapshotRoot,manifest.sourceBefore,'source-before.json'),savedAfter=readReference(bound.snapshotRoot,manifest.sourceAfter,'source-after.json'),savedSnapshot=readReference(bound.snapshotRoot,manifest.snapshotAfter,'snapshot-after.json');
  need(diff(before,savedAfter).equal&&diff(before,savedSnapshot).equal&&same(manifest.files,before.files)&&same(manifest.directories,before.directories)&&same(manifest.excluded,before.excluded)&&same(manifest.main,{path:'native/main.cpp',before:before.main,snapshot:savedSnapshot.main,sourceAfter:savedAfter.main})&&manifest.copyVerifiedFiles===before.files.length,'SNAPSHOT_CAPTURE_IDENTITY_DIFFERS');
- const result={schemaVersion:SNAPSHOT_SCHEMA,kind:'ymcc-source-snapshot-current-comparison',status:'FAIL',isCurrent:false,...bound,manifestFile:file,manifestSha256:readHash(file).sha256,comparedAt:new Date().toISOString(),requiresFinalCurrentComparison:true,snapshotPassApprovesChangedSource:false,executionPerformed:false,installationPayloadFrozen:false};
+ const result={schemaVersion:SNAPSHOT_SCHEMA,kind:'ymcc-source-snapshot-current-comparison',status:'FAIL',isCurrent:false,...bound,manifestFile:file,manifestSha256:identity.sha256,comparedAt:new Date().toISOString(),requiresFinalCurrentComparison:true,snapshotPassApprovesChangedSource:false,executionPerformed:false,installationPayloadFrozen:false};
  try{
   const first=inventory(bound.sourceRoot),snapshot=inventory(bound.snapshotRoot,{snapshot:true}),last=inventory(bound.sourceRoot);
   result.sourceDiff=diff(before,last);result.snapshotDiff=diff(before,snapshot);result.comparisonSourceDrift=diff(first,last);result.main={path:'native/main.cpp',captured:before.main,snapshot:snapshot.main,current:last.main};
@@ -300,10 +337,31 @@ export function compareSourceSnapshot({manifestFile,repoRoot}={}){
 /** Read-only version provenance. An unchanged full copy may be tested even when
  * primary moved after capture. The original creation FAIL is never rewritten;
  * this proves captured bytes only, with strict independent whole-source current comparison. */
-export function verifyCapturedSourceSnapshot({manifestFile,repoRoot,expectedManifestSha256}={}){
- const file=absolute(manifestFile);noReparse(file);const identity=readHash(file);
+export function verifyCapturedSourceSnapshot(options){return verifyCapturedSource(options,false);}
+
+export async function verifyCapturedSourceSnapshotParallel(options){return verifyCapturedSource(options,true);}
+
+const PRIMARY_INVENTORY_WORKER='ymcc-snapshot-primary-inventory-v1';
+function firstPrimaryInventory(root){
+ return new Promise(resolve=>{
+  let worker;
+  try{worker=new Worker(new URL(import.meta.url),{execArgv:[],workerData:{kind:PRIMARY_INVENTORY_WORKER,root}});}
+  catch(error){resolve({error});return;}
+  let reply;
+  worker.once('message',message=>{reply=message;});
+  worker.once('error',error=>{reply={error};});
+  worker.once('exit',code=>resolve(reply&&(code===0||reply.error)?reply:{error:Error('snapshot primary inventory worker exit '+code)}));
+ });
+}
+if(!isMainThread&&workerData?.kind===PRIMARY_INVENTORY_WORKER){
+ try{parentPort.postMessage({value:inventory(workerData.root,{guardedRead:true})});}
+ catch(error){parentPort.postMessage({error:{code:error.code,message:error.message,details:error.details}});}
+}
+
+function verifyCapturedSource({manifestFile,repoRoot,expectedManifestSha256}={},parallel){
+ const file=absolute(manifestFile),identity=readMetadata(file);
  need(/^[a-f0-9]{64}$/.test(expectedManifestSha256??'')&&identity.sha256===expectedManifestSha256,'SNAPSHOT_EXPECTED_MANIFEST_SHA_REQUIRED');
- const manifest=readJson(file),historical=manifest?.status==='FAIL'&&manifest.failure?.code==='SNAPSHOT_SOURCE_OR_COPY_DRIFT';
+ const manifest=parseMetadata(identity),historical=manifest?.status==='FAIL'&&manifest.failure?.code==='SNAPSHOT_SOURCE_OR_COPY_DRIFT';
  need(manifest.captureMode===undefined||manifest.captureMode==='same-descriptor-capture'&&manifest.atomicSourceTreeClaimed===false,'SNAPSHOT_CAPTURE_MODE_INVALID');
  need(manifest?.schemaVersion===SNAPSHOT_SCHEMA&&manifest.kind==='ymcc-fixed-source-snapshot'&&(manifest.status==='PASS'||historical)&&manifest.requiresFinalCurrentComparison===true&&manifest.snapshotPassApprovesChangedSource===false&&manifest.executionPerformed===false&&manifest.installationPayloadFrozen===false,'SNAPSHOT_COMPLETE_CAPTURE_MANIFEST_REQUIRED');
  need(same(manifest.policy,SNAPSHOT_POLICY)&&manifest.metadataDirectory===SNAPSHOT_METADATA,'SNAPSHOT_EXCLUSION_POLICY_DIFFERS');
@@ -313,11 +371,21 @@ export function verifyCapturedSourceSnapshot({manifestFile,repoRoot,expectedMani
  const capturedDiff=diff(before,savedSnapshot),createdSourceDiff=diff(before,savedAfter);
  need(capturedDiff.equal&&same(manifest.snapshotDiff,capturedDiff)&&same(manifest.sourceDiff,createdSourceDiff)&&same(manifest.files,before.files)&&same(manifest.directories,before.directories)&&same(manifest.excluded,before.excluded)&&same(manifest.main,{path:'native/main.cpp',before:before.main,snapshot:savedSnapshot.main,sourceAfter:savedAfter.main})&&manifest.copyVerifiedFiles===before.files.length,'SNAPSHOT_CAPTURE_IDENTITY_DIFFERS');
  need(manifest.status==='PASS'?manifest.isCurrent===true&&createdSourceDiff.equal:manifest.isCurrent===false&&!createdSourceDiff.equal,'SNAPSHOT_CREATION_OUTCOME_INCONSISTENT');
- const copied=inventory(bound.snapshotRoot,{snapshot:true}),snapshotDiff=diff(before,copied);need(snapshotDiff.equal&&same(copied.main,before.main),'SNAPSHOT_CAPTURED_VERSION_CHANGED');
- const result={schemaVersion:SNAPSHOT_SCHEMA,kind:'ymcc-captured-source-version-verification',status:'FROZEN_SOURCE_VERIFIED',snapshotIntegrityVerified:true,creationStatus:manifest.status,creationFailure:manifest.failure??null,createdPrimaryMatched:createdSourceDiff.equal,isCurrent:false,sourceApprovalGranted:false,...bound,manifestFile:file,manifestSha256:identity.sha256,verifiedAt:new Date().toISOString(),fileCount:before.files.length,copyVerifiedFiles:manifest.copyVerifiedFiles,main:{captured:before.main,snapshot:copied.main,current:null},snapshotDiff,createdSourceDiff,requiresFinalCurrentComparison:true,snapshotPassApprovesChangedSource:false,executionPerformed:false,installationPayloadFrozen:false};
- try{
-  const first=inventory(bound.sourceRoot),last=inventory(bound.sourceRoot);result.sourceDiff=diff(before,last);result.comparisonSourceDrift=diff(first,last);result.main.current=last.main;result.isCurrent=result.sourceDiff.equal&&result.comparisonSourceDrift.equal;
- }catch(error){result.currentComparisonFailure={code:error.code??'SNAPSHOT_CURRENT_COMPARISON_FAILED',message:String(error.message).slice(0,500),details:error.details??null};}
- need(readHash(file).sha256===identity.sha256,'SNAPSHOT_MANIFEST_CHANGED_DURING_VERIFICATION');
- return result;
+ const snapshot=()=>inventory(bound.snapshotRoot,{snapshot:true,guardedRead:true});
+ const primary=()=>inventory(bound.sourceRoot,{guardedRead:true});
+ function finish(copied,firstPrimary){
+  const snapshotDiff=diff(before,copied);need(snapshotDiff.equal&&same(copied.main,before.main),'SNAPSHOT_CAPTURED_VERSION_CHANGED');
+  const result={schemaVersion:SNAPSHOT_SCHEMA,kind:'ymcc-captured-source-version-verification',status:'FROZEN_SOURCE_VERIFIED',snapshotIntegrityVerified:true,creationStatus:manifest.status,creationFailure:manifest.failure??null,createdPrimaryMatched:createdSourceDiff.equal,isCurrent:false,sourceApprovalGranted:false,...bound,manifestFile:file,manifestSha256:identity.sha256,verifiedAt:new Date().toISOString(),fileCount:before.files.length,copyVerifiedFiles:manifest.copyVerifiedFiles,main:{captured:before.main,snapshot:copied.main,current:null},snapshotDiff,createdSourceDiff,requiresFinalCurrentComparison:true,snapshotPassApprovesChangedSource:false,executionPerformed:false,installationPayloadFrozen:false};
+  try{
+   const first=firstPrimary(),last=primary();result.sourceDiff=diff(before,last);result.comparisonSourceDrift=diff(first,last);result.main.current=last.main;result.isCurrent=result.sourceDiff.equal&&result.comparisonSourceDrift.equal;
+  }catch(error){result.currentComparisonFailure={code:error.code??'SNAPSHOT_CURRENT_COMPARISON_FAILED',message:String(error.message).slice(0,500),details:error.details??null};}
+  need(readHash(file,MAX_MANIFEST_BYTES).sha256===identity.sha256,'SNAPSHOT_MANIFEST_CHANGED_DURING_VERIFICATION');
+  return result;
+ }
+ if(!parallel)return finish(snapshot(),primary);
+ // Both initial reads must settle before the last primary read or any return.
+ const first=firstPrimaryInventory(bound.sourceRoot);
+ let copied;
+ try{copied=snapshot();}catch(error){return first.then(()=>{throw error;});}
+ return first.then(reply=>finish(copied,()=>{if(reply.error)throw reply.error;return reply.value;}));
 }

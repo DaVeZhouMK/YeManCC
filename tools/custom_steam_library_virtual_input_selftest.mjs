@@ -91,7 +91,7 @@ assert(child.includes('if (parentInputModeEnabled()) {') && /g_launchOptions\.in
   'Parent integration must not start a second child XInput poller');
 const propertiesStart = source.indexOf('static constexpr wchar_t kCustomSteamLibraryInputOwnerProperty[]');
 const propertiesEnd = source.indexOf('static ULONG_PTR customSteamLibraryWindowProperty(', propertiesStart);
-const radialHelpers='#include "radial_input_isolation.h"\n'+['g_radialUiOwnsInput','g_radialReturning','g_radialInputIsolation','g_radialInputIsolationSourceRevision','g_radialInputIsolationHostEpoch'].map(declaration).join('\n')+'\n'+block('static bool radialInputIsolationBindingCurrent() {')+'\n'+['radialInputIsolationInvalidate','radialInputIsolationOwnership','radialInputIsolationObserve'].map(name=>block('static void '+name+'(')).join('\n')+'\n'+block('static bool radialHasInputOwner() {');
+const radialHelpers='#include "radial_input_isolation.h"\n'+['g_radialUiOwnsInput','g_radialReturning','g_radialInputIsolation','g_radialInputIsolationSourceRevision','g_radialInputIsolationHostEpoch','g_radialInputIsolationSuspendSerial'].map(declaration).join('\n')+'\n'+block('static bool radialInputIsolationBindingCurrent() {')+'\n'+['radialInputIsolationInvalidate','radialInputIsolationOwnership','radialInputIsolationObserve'].map(name=>block('static void '+name+'(')).join('\n')+'\n'+block('static bool radialHasInputOwner() {');
 const windowHelpers = [
   'static bool focusMainWindowIsForeground(', 'static bool refocusWebView(', 'static HWND customSteamLibraryWindow(',
   'static ULONG_PTR customSteamLibraryWindowProperty(', 'static bool customSteamLibraryProcessMatches(',

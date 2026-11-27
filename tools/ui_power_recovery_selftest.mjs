@@ -26,7 +26,7 @@ for(let i=2;i<process.argv.length;i++){
 }
 assert(!trainerSequenceCase||trainerSequenceOnly,'Trainer sequence case requires its scope');
 assert(!trainerSequenceOnly||!uiOnly&&!hardeningOnly&&!readyAdmissionOnly&&!diagnosticsOnly,'Selections are mutually exclusive');
-assert(trainerSequenceCase===null||['scope','read-newer','read-missing','held-launch','held-recovery','cycles'].includes(trainerSequenceCase),'Unknown trainer notification case');
+assert(trainerSequenceCase===null||['scope','read-newer','read-missing','read-suspended','read-merged-ready','held-launch','held-recovery','cycles','reentrant'].includes(trainerSequenceCase),'Unknown trainer notification case');
 assert(!notificationScopeOnly||!trainerSequenceOnly&&!uiOnly&&!hardeningOnly&&!readyAdmissionOnly&&!diagnosticsOnly,'Selections are mutually exclusive');
 const {build:sourceBuild,receipt}=observeUiPowerBuilds(root);let publicGraphSerial=0;
 const build=async options=>{
@@ -87,7 +87,7 @@ if(hardeningOnly||readyAdmissionOnly){
   await runTrainerPowerHardeningCases({test});
   const expectRejected=async(name,run,expected)=>{let error;try{await run();}catch(e){error=e;}assert.equal(error?.code,'ERR_ASSERTION',name+' must fail a behavioral assertion');assert.match(error.message,expected);negatives.push({name,rejected:true,assertion:error.message});console.log('EXPECTED_REJECTION '+name);};
   const source=fs.readFileSync(path.join(root,'src/bridge/powerLifecycleState.ts'),'utf8');
-  const needle="if(admitted&&(!event||freshFact)){";assert(source.includes(needle));
+  const needle="if(admitted&&(!event||freshFact||settlesScopedRead)){";assert(source.includes(needle));
   await expectRejected('settle nonReady reconciliation demand as Ready',()=>runSharedPowerCases({root,build,selection:'hardening',powerSource:source.replace(needle,'if(!event||freshFact){'),test:async(_name,fn)=>fn()}),/known nonReady must retain exactly one retry/);
   const trainer=fs.readFileSync(path.join(root,'src/bridge/trainerLifecycle.ts'),'utf8');
   const guard='if (recoveryPending) return; // Only this recovery\'s fresh read may resume trainer work.';assert(trainer.includes(guard));
@@ -118,10 +118,10 @@ async function fixture(native=true){
   if(this.fail){if(typeof this.fail==='number')this.fail--;else this.fail=false;throw Error('inert read failure');}
   const value=structuredClone(this.state);if(this.hold){this.hold=false;return new Promise(resolve=>queue.push(()=>resolve(value)));}return value;
  }};
- const ipc={invoke(command,args,options){assert.equal(command,'power.lifecycle','UI cannot issue hardware/wake/control commands');assert.equal(options.timeoutMs,3000);calls.push(command);return port.read();},
+ const ipc={invoke(command,args,options){assert.equal(command,'power.lifecycle','UI cannot issue hardware/wake/control commands');assert.equal(options.timeoutMs,3000);assert(options.signal instanceof AbortSignal,'the singleton must pass the read cancellation to IPC');calls.push(command);return port.read();},
   on(name,listener){const row={name,fn:event=>listener(event.detail)};handlers.add(row);window.addEventListener('ipc:'+name,row.fn);return()=>{handlers.delete(row);window.removeEventListener('ipc:'+name,row.fn);};}};
  const module={exports:{}};
- const context=vm.createContext({window,document,CustomEvent,console,module,exports:module.exports,queueMicrotask,Promise,structuredClone,__uiNative:ipc,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout});
+ const context=vm.createContext({window,document,CustomEvent,console,module,exports:module.exports,queueMicrotask,Promise,structuredClone,AbortController,__uiNative:ipc,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout});
  vm.runInContext(compiled,context);const life=module.exports;
  const reader=native?life.startUiPowerReconciliation(()=>{legacyReaderCalls++;throw Error('obsolete reader must not run');}):null;
  const event=async(name,generation)=>{window.dispatchEvent(new CustomEvent(name,{detail:generation===undefined?{}:{generation}}));await flush();};

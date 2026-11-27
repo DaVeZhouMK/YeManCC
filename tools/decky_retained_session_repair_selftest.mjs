@@ -834,10 +834,31 @@ ${exitLeaf}
   for(int n=0;n<5;++n){arm();currentSession.account=0;mode["deckyAccountWatchAvailable"]=true;mode["observedAccount"]=9u;
    if(n==0)mode["deckyAccountWatchAvailable"]=false;if(n==1)mode.erase("observedAccount");if(n==2)mode["observedAccount"]=0u;if(n==3)mode["observedAccount"]="9";if(n==4)mode["observedAccount"]=4294967296ull;
    AutomaticRepair a;ManualRepair r;escalate(a,r);need(gentle==0&&cleanupDispatches==0&&reservations==0&&a.nextTimeout(now)==0xfffffffful,"uncorroborated offline identity spent recovery allowance");}});
- check("registry account and verified current UI conflict park instead of accumulating failures",[&]{
-  arm();mode["observedAccount"]=10u;mode["deckyAccountWatchAvailable"]=true;AutomaticRepair a;ManualRepair r;escalate(a,r);
-  need(gentle==0&&cleanupDispatches==0&&reservations==0,"account transition accumulated cleanup failures under stale registry identity");
-  currentSession.account=10;now+=30000;a.observe(r,deps);need(gentle==1&&a.snapshot(now).value("gentleAttempts",0u)==1,"verified converged account did not restart its gentle episode");});
+ check("registry conflict accepts only verified current UI and preserves its own recovery grace",[&]{
+  for(unsigned variant=0;variant<3;++variant){arm();mode["observedAccount"]=10u;
+   if(variant==0)mode["deckyAccountWatchAvailable"]=false;
+   if(variant==1)mode["pid"]=currentSession.pid+1;
+   if(variant==2)mode["birth"]=std::to_string(currentSession.created+1);
+   AutomaticRepair denied;ManualRepair repair;escalate(denied,repair);
+   need(gentle==0&&cleanupDispatches==0&&reservations==0&&denied.nextTimeout(now)==0xfffffffful,
+    "unverified conflicting account started recovery or spent its allowance");}
+  arm();AutomaticRepair a;ManualRepair r;a.observe(r,deps);now+=30000;a.observe(r,deps);
+  need(gentle==2&&cleanupDispatches==0&&reservations==0,"old account debt control did not reach both gentle steps");
+  mode["observedAccount"]=10u;now+=30000;a.observe(r,deps);
+  const auto selected=ymcc::deckysession::resolve(currentSession,mode);
+  need(selected.fromUi&&selected.value==10u&&currentSession.account!=10u,"stale registry displaced exact current UI proof");
+  need(gentle==3&&a.snapshot(now).value("gentleAttempts",0u)==1&&a.nextTimeout(now)==30000&&cleanupDispatches==0&&reservations==0,
+   "verified UI account inherited stale registry debt or lost its first grace");
+  currentSession.account=10;now+=29999;a.observe(r,deps);
+  need(gentle==3&&a.nextTimeout(now)==1&&cleanupDispatches==0&&reservations==0,"registry convergence reset or shortened the same-account grace");
+  ++now;a.observe(r,deps);
+  need(gentle==4&&a.snapshot(now).value("gentleAttempts",0u)==2&&a.nextTimeout(now)==30000&&cleanupDispatches==0&&reservations==0,
+   "converged account did not preserve its second full grace");
+  now+=29999;a.observe(r,deps);need(cleanupDispatches==0&&reservations==0,"final cleanup ran before the verified account's second grace ended");
+  ++now;a.observe(r,deps);
+  need(cleanupDispatches==1&&reservations==1&&cleanupActions.back().at("action").at("expectedAccount")==10u,
+   "final cleanup did not reserve and dispatch once for the verified account");
+  now+=30000;a.observe(r,deps);need(cleanupDispatches==1&&reservations==1,"same-Steam cleanup allowance was reused");});
  check("effective-account switch cannot replenish an already spent same-Steam final fuse",[&]{
   arm();AutomaticRepair a;ManualRepair r;escalate(a,r);need(cleanupDispatches==1&&reservations==1,"same-Steam spent-fuse control missing");
   currentSession.account=0;mode["observedAccount"]=10u;mode["deckyAccountWatchAvailable"]=true;escalate(a,r);
@@ -2448,7 +2469,8 @@ ${exitLeaf}
  const env=Object.fromEntries(Object.entries(process.env).map(([k,v])=>[k.toUpperCase(),v]));Object.assign(env,{PATH:path.dirname(tools.compiler)+';'+process.env.SystemRoot+'/System32',INCLUDE:tools.include.join(';'),LIB:tools.lib.join(';'),CL:'',_CL_:'',LINK:'',_LINK_:''});
  const sdkSupplemental=[];for(const name of ['ws2tcpip.h','iphlpapi.h','iphlpapi.lib']){const dirs=name.endsWith('.h')?tools.include:tools.lib;const file=dirs.map(d=>path.join(d,name)).find(p=>fs.existsSync(p));assert(file,'Actual IP Helper SDK input missing '+name);sdkSupplemental.push({path:file,sha256:sha(fs.readFileSync(file)),bytes:fs.statSync(file).size});}
  fs.writeFileSync(path.join(out,'backend-sdk-supplemental-inputs.json'),JSON.stringify({rows:sdkSupplemental,scope:'Known actual added SDK header/import library pinned before/after compile. Original tool declaration remains independently validated; exact whole SDK/include closure is not claimed.'},null,2)+'\n');
- const exe=path.join(out,'steam.exe'),buildStartedAtUtc=new Date().toISOString(),buildStart=performance.now();const build=spawnSync(tools.compiler,['/nologo','/std:c++20','/utf-8','/EHsc','/MT','/O2','/DNOMINMAX','/DUNICODE','/D_UNICODE','/I'+frozen,'/I'+path.join(root,'deps/json'),cpp,'/sourceDependencies',path.join(out,'source-dependencies.json'),'/Fo'+path.join(out,'retained-repair.obj'),'/Fe'+exe,'/link','advapi32.lib','user32.lib','shell32.lib','winhttp.lib','iphlpapi.lib','ws2_32.lib','bcrypt.lib','/verbose:lib'],{cwd:out,env,encoding:'utf8',windowsHide:true,timeout:60000});const buildElapsedMs=performance.now()-buildStart,buildEndedAtUtc=new Date().toISOString();fs.writeFileSync(path.join(out,'compile.log'),(build.stdout||'')+(build.stderr||'')+(build.error?.stack??''));fs.writeFileSync(path.join(out,'compile-process.json'),JSON.stringify({compiler:compilerPin,toolInputCount:declaration.artifactInputs.length,startedAtUtc:buildStartedAtUtc,endedAtUtc:buildEndedAtUtc,elapsedMs:buildElapsedMs,pid:build.pid??null,exitCode:build.status,signal:build.signal,error:build.error?.message??null,timeoutMs:60000},null,2)+'\n');assert.equal(build.status,0,'Native manual recovery compile failed: '+(build.error?.message??'')+(build.stdout??'')+(build.stderr??''));
+ // The generated single translation unit exceeds the standard COFF section limit.
+ const exe=path.join(out,'steam.exe'),buildStartedAtUtc=new Date().toISOString(),buildStart=performance.now();const build=spawnSync(tools.compiler,['/nologo','/std:c++20','/utf-8','/EHsc','/MT','/O2','/bigobj','/DNOMINMAX','/DUNICODE','/D_UNICODE','/I'+frozen,'/I'+path.join(root,'deps/json'),cpp,'/sourceDependencies',path.join(out,'source-dependencies.json'),'/Fo'+path.join(out,'retained-repair.obj'),'/Fe'+exe,'/link','advapi32.lib','user32.lib','shell32.lib','winhttp.lib','iphlpapi.lib','ws2_32.lib','bcrypt.lib','/verbose:lib'],{cwd:out,env,encoding:'utf8',windowsHide:true,timeout:60000});const buildElapsedMs=performance.now()-buildStart,buildEndedAtUtc=new Date().toISOString();fs.writeFileSync(path.join(out,'compile.log'),(build.stdout||'')+(build.stderr||'')+(build.error?.stack??''));fs.writeFileSync(path.join(out,'compile-process.json'),JSON.stringify({compiler:compilerPin,toolInputCount:declaration.artifactInputs.length,startedAtUtc:buildStartedAtUtc,endedAtUtc:buildEndedAtUtc,elapsedMs:buildElapsedMs,pid:build.pid??null,exitCode:build.status,signal:build.signal,error:build.error?.message??null,timeoutMs:60000},null,2)+'\n');assert.equal(build.status,0,'Native manual recovery compile failed: '+(build.error?.message??'')+(build.stdout??'')+(build.stderr??''));
  for(const row of sdkSupplemental)assert.equal(sha(fs.readFileSync(row.path)),row.sha256,'IP Helper SDK input changed during compile');
  // Whole-suite collection envelope: two real4s boundary cases plus backend/cleanup work measured9.992s.
  // Per-case recovery/stop assertions and the outer shared deadline are unchanged.
